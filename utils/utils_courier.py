@@ -65,10 +65,17 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
         for col in track_cols:
             df_post[col] = normalize_tracking(df_post[col])
 
-        # ── 부피 값 숫자만 추출
-        df_post["부피"] = (df_post["부피"].astype(str)
-                             .str.extract(r"(\d+\.?\d*)")[0]
-                             .astype(float))
+        # ── 부피 숫자 추출 로직 보강 ─────────────────────────────
+        #   ① 숫자·소수점 이외 문자 제거 → "80cm" → "80"
+        #   ② 첫 번째 정수/소수 패턴 추출 → r"(\d+(?:\.\d+)?)"
+        #   ③ float → round → int
+        df_post["부피"] = (
+            df_post["부피"].astype(str)
+            .str.replace(r"[^0-9.]", "", regex=True)           # 숫자·. 만 남김
+            .str.extract(r"(\d+(?:\.\d+)?)")[0]
+            .astype(float, errors="ignore")
+        )
+
         df_post["부피"] = df_post["부피"].fillna(0).round(0).astype(int)
 
         # ── 3️⃣  두 컬럼 조합으로 중복 제거 + 4️⃣ 로그 출력 ────────────────
