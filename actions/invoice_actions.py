@@ -94,73 +94,10 @@ def add_basic_shipping(df_items: pd.DataFrame,
 # 2. 구간별 택배요금
 # -----------------------------------------------------------
 def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, int]:
-    with get_connection() as con:
-        # ─────────────────────────────────────────────
-        # rate_type 정규화 (공백 제거, 대소문자 무시)
-        #   • None / '', 'STD', 'STANDARD', '기본', '표준' → '표준'
-        #   • 'A' / 'a'                                   → 'A'
-        #   • 이외 입력값                                 → '표준'
-        # ─────────────────────────────────────────────
-        raw = con.execute(
-            "SELECT rate_type FROM vendors WHERE vendor=?", (vendor,)
-        ).fetchone()
-        raw_val = raw[0] if raw else None
+    # ▶ 새 구현은 utils.utils_courier 버전을 호출하여 중복을 방지한다.
+    from utils.utils_courier import add_courier_fee_by_zone as _impl
 
-        _val = (raw_val or "").strip()           # None → '' 후 strip
-        _up  = _val.upper()                       # 대소문자 무시용
-
-        if _up in ("", "STD", "STANDARD") or _val in ("기본", "표준"):
-            rate = "표준"
-        elif _up == "A":
-            rate = "A"
-        else:
-            rate = "표준"
-
-        alias = pd.read_sql(
-            "SELECT alias FROM alias_vendor_v WHERE vendor=?",
-            con, params=(vendor,))
-        names = [vendor] + alias["alias"].astype(str).str.strip().tolist()
-
-        df_post = pd.read_sql(
-            f"SELECT 부피 FROM kpost_in WHERE TRIM(발송인명) IN ({','.join('?'*len(names))}) "
-            "AND 접수일자 BETWEEN ? AND ?", con, params=(*names, d_from, d_to))
-        if df_post.empty:
-            return {}
-
-        # ── 부피 값 숫자 추출 ("50cm", "75.5" 등 → 50, 75.5)
-        df_post["부피"] = (df_post["부피"].astype(str)
-                               .str.extract(r"(\d+\.?\d*)")[0]
-                               .astype(float))
-        df_post["부피"] = df_post["부피"].fillna(0)
-        # cm → int 처리
-        df_post["부피"] = df_post["부피"].round(0).astype(int)
-
-        track_cols = [c for c in TRACK_COLS if c in df_post.columns]
-        for col in track_cols:
-            df_post[col] = normalize_tracking(df_post[col])
-
-        df_post = df_post.drop_duplicates(
-            subset=["송장번호","TrackingNo"], keep="first"
-        )
-
-        df_zone_raw = pd.read_sql(
-             "SELECT * FROM shipping_zone WHERE 요금제=?", con, params=(rate,)
-         )
-        df_zone_raw[["len_min_cm","len_max_cm"]] = df_zone_raw[["len_min_cm","len_max_cm"]].apply(pd.to_numeric, errors="coerce")
-        df_zone = df_zone_raw.sort_values("len_min_cm").reset_index(drop=True)
-
-    zone_cnt: Dict[str, int] = {}
-    remaining = df_post.copy()
-    for _, z in df_zone.iterrows():
-        cond = (remaining["부피"] >= z["len_min_cm"]) & (remaining["부피"] <= z["len_max_cm"])
-        cnt = int(cond.sum())
-        remaining = remaining[~cond]  # 중복 방지
-        if cnt:
-            st.session_state["items"].append(
-                {"항목": f"택배요금 ({z['구간']})",
-                 "수량": cnt, "단가": z["요금"], "금액": cnt * z["요금"]})
-            zone_cnt[z["구간"]] = cnt
-    return zone_cnt
+    return _impl(vendor, d_from, d_to)
 
 
 # ─────────────────────────────────────────────
