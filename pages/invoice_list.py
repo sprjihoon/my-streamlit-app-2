@@ -119,7 +119,8 @@ if sta_sel:
 # ──────────────────────────────────────
 # 4-bis. 목록 표시 + 선택(내장) + 전체 선택 체크박스
 # ──────────────────────────────────────
-select_all = st.checkbox("✅ 전체 선택", key="inv_select_all")
+st.markdown("---")
+col_del1, col_del2 = st.columns(2)
 
 # 보기용 DataFrame (편집 불필요→dataframe 사용)
 view_df = df.loc[mask].set_index('invoice_id').copy()
@@ -142,22 +143,59 @@ try:
 except AttributeError:
     selected_pos = []
 
-selected_ids: List[int] = view_df.index.tolist() if select_all else [view_df.index[i] for i in selected_pos]
+selected_ids: List[int] = [view_df.index[i] for i in selected_pos]
 
-if st.button("🗑 선택 삭제", disabled=not selected_ids):
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        for iid in selected_ids:
-            cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
-            cur.execute("DELETE FROM invoices WHERE invoice_id=?", (iid,))
-        con.commit()
-    st.cache_data.clear()  # 캐시 삭제 → 목록 즉시 반영
-    st.success(f"🗑 {len(selected_ids)}건 삭제 완료")
-    st.rerun()
+with col_del1:
+    if st.button("🗑️ 선택 항목 삭제", disabled=not selected_ids, use_container_width=True):
+        with sqlite3.connect(DB_PATH) as con:
+            cur = con.cursor()
+            for iid in selected_ids:
+                cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
+                cur.execute("DELETE FROM invoices WHERE invoice_id=?", (iid,))
+            con.commit()
+        st.cache_data.clear()
+        st.success(f"🗑️ 선택된 {len(selected_ids)}건 삭제 완료")
+        st.rerun()
+
+with col_del2:
+    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", use_container_width=True):
+        st.session_state["confirm_delete_all"] = True
+
+if st.session_state.get("confirm_delete_all"):
+    st.warning(f"**경고**: 현재 필터링된 **{len(view_df)}** 건의 인보이스를 정말로 모두 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
+    c1, c2 = st.columns(2)
+    if c1.button("예, 전체 삭제를 실행합니다", type="primary"):
+        all_filtered_ids = view_df.index.tolist()
+        with sqlite3.connect(DB_PATH) as con:
+            cur = con.cursor()
+            for iid in all_filtered_ids:
+                cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
+                cur.execute("DELETE FROM invoices WHERE invoice_id=?", (iid,))
+            con.commit()
+        
+        st.cache_data.clear()
+        del st.session_state["confirm_delete_all"]
+        st.success(f"🗑️ 필터링된 {len(all_filtered_ids)}건 전체 삭제 완료")
+        st.rerun()
+
+    if c2.button("아니요, 취소합니다"):
+        del st.session_state["confirm_delete_all"]
+        st.rerun()
+
+st.markdown("---")
 
 # ──────────────────────────────────────
 # 6. 상세 보기 / 수정 / 확정 / 개별 XLSX
 # ──────────────────────────────────────
+if not selected_ids:
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.cursor()
+        for iid in selected_ids:
+            # ... (기존 삭제 로직은 위 버튼 핸들러로 이동)
+        con.commit()
+    st.success(f"🗑 {len(selected_ids)}건 삭제 완료")
+    st.rerun()
+
 if not view_df.empty:
     inv_sel = st.selectbox("🔍 상세 조회할 Invoice", view_df.index, format_func=lambda x: f"#{x}")
     if st.button("🔎 상세 보기"):
