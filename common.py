@@ -37,29 +37,13 @@ DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 @contextmanager
 def get_connection():
-    """
-    Streamlit Secrets에 저장된 정보를 사용하여 Turso DB에 연결합니다.
-    Secrets가 없으면 로컬 'billing.db'에 fallback합니다.
-    """
-    db_url = st.secrets.get("TURSO_DB_URL")
-    db_token = st.secrets.get("TURSO_DB_AUTH_TOKEN")
-
-    if db_url and db_token:
-        # Turso 클라우드 DB 연결
-        try:
-            with libsql_client.create_client(url=db_url, auth_token=db_token) as client:
-                yield client
-        except Exception as e:
-            st.error(f"🚨 Turso DB 연결 실패: {e}")
-            raise
-    else:
-        # 로컬 DB 파일로 fallback (개발/테스트용)
-        try:
-            con = sqlite3.connect("billing_local.db")
-            yield con
-        finally:
-            if 'con' in locals() and con:
-                con.close()
+    """로컬 'billing.db' 파일에 직접 연결합니다."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        yield con
+    finally:
+        if 'con' in locals() and con:
+            con.close()
 
 # ─────────────────────────────────────
 # 2. 컬럼 보강 유틸

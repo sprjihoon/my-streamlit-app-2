@@ -1,4 +1,4 @@
 pandas
 streamlit
 xlsxwriter
-libsql-client 
+openpyxl 
