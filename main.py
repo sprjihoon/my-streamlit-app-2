@@ -40,3 +40,21 @@ c2.metric("업로드된 파일", "—")
 c3.metric("생성된 청구서", "—")
 
 st.info("좌측 메뉴에서 페이지를 선택하면 해당 기능 화면으로 이동합니다.")
+
+try:
+    from restore_mapping_data import restore_data
+    
+    st.warning("🚨 업체 매핑 데이터가 유실된 경우에만 아래 버튼을 누르세요.")
+    if st.button("🔄 업체 매핑 데이터 복원하기"):
+        with st.spinner("데이터를 복원하는 중입니다..."):
+            restore_data()
+        st.info("복원이 완료되었습니다. 이 메시지는 페이지 새로고침 후 사라집니다.")
+
+except ImportError:
+    st.info("복원 스크립트가 없습니다. 모든 데이터가 정상입니다.")
+
+st.markdown("---")
+
+# 나머지 메인 페이지 내용
+st.header("메인 페이지")
+st.write("왼쪽 메뉴에서 원하는 페이지를 선택하세요.")
