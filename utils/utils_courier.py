@@ -1,4 +1,10 @@
-import sqlite3
+# ─────────────────────────────────────
+# utils/utils_courier.py
+#   • 송장번호 컬럼 정규화 (과학적 표기 → 숫자)
+#   • 복합키 중복 제거
+# ─────────────────────────────────────
+
+import sqlite3, re
 import pandas as pd
 import streamlit as st
 from common import get_connection
@@ -48,12 +54,28 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
             return
 
         # ── 1️⃣·2️⃣  송장/등기 번호 컬럼 → 문자열 & 정규화 ─────────────────
+        # 1️⃣·2️⃣  ─────────────────────────────────────────────
         track_cols = [c for c in ("등기번호","송장번호","운송장번호","TrackingNo","tracking_no") if c in df_post.columns]
+
+        def _normalize(v: pd.Series) -> pd.Series:
+            """문자열 강제 + 과학표기 등 숫자만 추출"""
+            def _one(x):
+                if pd.isna(x):
+                    return ""
+                s = str(x).strip()
+                # 과학적 표기 또는 소수점 포함 → float→int 변환으로 정확도 확보
+                try:
+                    if re.search(r"[eE]", s) or "." in s:
+                        s = str(int(float(s)))
+                except Exception:
+                    pass
+                # 숫자만 남기기
+                s = re.sub(r"[^0-9]", "", s)
+                return s
+            return v.apply(_one)
+
         for col in track_cols:
-            df_post[col] = (df_post[col]
-                             .astype(str)                         # dtype 통일
-                             .str.replace(r"[^0-9]", "", regex=True)  # 숫자만 남김 (E, 점, 공백 제거)
-                             .str.strip())
+            df_post[col] = _normalize(df_post[col])
 
         # ── 부피 값 숫자만 추출
         df_post["부피"] = (df_post["부피"].astype(str)
@@ -62,21 +84,20 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
         df_post["부피"] = df_post["부피"].fillna(0).round(0).astype(int)
 
         # ── 3️⃣  두 컬럼 조합으로 중복 제거 + 4️⃣ 로그 출력 ────────────────
+        # 3️⃣  중복 제거 (두 컬럼 모두 같을 때만)
         before = len(df_post)
 
-        def _blankish(series: pd.Series) -> pd.Series:
-            s = series.fillna("").str.strip().str.upper()
-            return s.isin(["", "0", "-", "NA", "N/A", "NONE", "NULL", "NAN"])
+        # drop_duplicates 는 NaN 과 "" 값을 다르게 취급하므로 빈 값 통일
+        for c in ("송장번호", "TrackingNo"):
+            if c in df_post.columns:
+                df_post[c] = df_post[c].fillna("")
 
-        key_cols = [c for c in ("송장번호", "TrackingNo") if c in df_post.columns]
+        if {"송장번호", "TrackingNo"}.issubset(df_post.columns):
+            df_post = df_post.drop_duplicates(subset=["송장번호", "TrackingNo"], keep="first")
+        elif "송장번호" in df_post.columns:
+            df_post = df_post.drop_duplicates(subset=["송장번호"], keep="first")
 
-        if key_cols:
-            valid_mask = ~(_blankish(df_post[key_cols[0]]) & _blankish(df_post[key_cols[1]]) if len(key_cols)==2 else _blankish(df_post[key_cols[0]]))
-            dedup_part = df_post[valid_mask].drop_duplicates(subset=key_cols, keep="first")
-            keep_part  = df_post[~valid_mask]
-            df_post = pd.concat([dedup_part, keep_part], ignore_index=True)
-
-        print(f"🔁 중복제거: {before} → {len(df_post)}")
+        print(f"🔁 중복제거: {before} → {len(df_post)} (removed {before-len(df_post)})")
 
         # ④ shipping_zone 테이블에서 해당 요금제 구간 불러오기
         df_zone = pd.read_sql("SELECT * FROM shipping_zone WHERE 요금제 = ?", con, params=(rate_type,))
@@ -84,8 +105,8 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
         df_zone = df_zone.sort_values("len_min_cm").reset_index(drop=True)
 
         # ⑤ 구간 매핑 및 수량 집계
-        size_counts = {}
         remaining = df_post.copy()
+        size_counts = {}
         for _, row in df_zone.iterrows():
             min_len = row["len_min_cm"]
             max_len = row["len_max_cm"]
@@ -108,3 +129,8 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
                 "단가": unit,
                 "금액": qty * unit
             })
+
+        # 4️⃣  로그: 부피 80㎝ 행 유지 여부 & 집계 결과
+        vol80 = df_post[df_post["부피"] == 80].shape[0]
+        print(f"📝 부피 80cm 행 수: {vol80}")
+        print("📊 size_counts:", {k: v["count"] for k, v in size_counts.items()})
