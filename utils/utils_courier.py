@@ -44,8 +44,11 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
         if df_post.empty or "부피" not in df_post.columns:
             return
 
-        # 부피값이 없거나 숫자가 아닌 경우 0으로 간주(극소 구간)
-        df_post["부피"] = pd.to_numeric(df_post["부피"], errors="coerce").fillna(0)
+        # ── 부피 값 숫자만 추출
+        df_post["부피"] = (df_post["부피"].astype(str)
+                             .str.extract(r"(\d+\.?\d*)")[0]
+                             .astype(float))
+        df_post["부피"] = df_post["부피"].fillna(0).round(0).astype(int)
 
         # 중복 송장 제거 → shipping_stats와 동일 기준
         for key_col in ("등기번호", "송장번호", "운송장번호", "TrackingNo", "tracking_no"):

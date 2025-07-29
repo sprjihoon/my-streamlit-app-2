@@ -114,7 +114,14 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         if df_post.empty:
             return {}
 
-        df_post["부피"] = pd.to_numeric(df_post["부피"], errors="coerce").fillna(0)
+        # ── 부피 값 숫자 추출 ("50cm", "75.5" 등 → 50, 75.5)
+        df_post["부피"] = (df_post["부피"].astype(str)
+                               .str.extract(r"(\d+\.?\d*)")[0]
+                               .astype(float))
+        df_post["부피"] = df_post["부피"].fillna(0)
+        # cm → int 처리
+        df_post["부피"] = df_post["부피"].round(0).astype(int)
+
         df_zone = (pd.read_sql(
              "SELECT * FROM shipping_zone WHERE 요금제=?", con, params=(rate,)
          ).sort_values("len_min_cm")
