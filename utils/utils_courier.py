@@ -58,9 +58,8 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
 
         # ④ shipping_zone 테이블에서 해당 요금제 구간 불러오기
         df_zone = pd.read_sql("SELECT * FROM shipping_zone WHERE 요금제 = ?", con, params=(rate_type,))
-        df_zone = df_zone.sort_values("len_min_cm")
-        df_zone = df_zone.reset_index(drop=True)  # 🐞 Fix index so boundary check works
         df_zone[["len_min_cm","len_max_cm"]] = df_zone[["len_min_cm","len_max_cm"]].apply(pd.to_numeric, errors="coerce")
+        df_zone = df_zone.sort_values("len_min_cm").reset_index(drop=True)
 
         # ⑤ 구간 매핑 및 수량 집계
         size_counts = {}

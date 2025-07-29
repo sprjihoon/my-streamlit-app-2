@@ -122,11 +122,11 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         # cm → int 처리
         df_post["부피"] = df_post["부피"].round(0).astype(int)
 
-        df_zone = (pd.read_sql(
+        df_zone_raw = pd.read_sql(
              "SELECT * FROM shipping_zone WHERE 요금제=?", con, params=(rate,)
-         ).sort_values("len_min_cm")
-        ).reset_index(drop=True)
-        df_zone[["len_min_cm","len_max_cm"]] = df_zone[["len_min_cm","len_max_cm"]].apply(pd.to_numeric, errors="coerce")
+         )
+        df_zone_raw[["len_min_cm","len_max_cm"]] = df_zone_raw[["len_min_cm","len_max_cm"]].apply(pd.to_numeric, errors="coerce")
+        df_zone = df_zone_raw.sort_values("len_min_cm").reset_index(drop=True)
 
     zone_cnt: Dict[str, int] = {}
     remaining = df_post.copy()
