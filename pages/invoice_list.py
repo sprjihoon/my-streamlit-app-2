@@ -221,26 +221,41 @@ selected_ids: List[int] = [view_df.index[i] for i in selected_pos]
 # 삭제 버튼들
 # ──────────────────────────────────────
 col_del1, col_del2 = st.columns(2)
+
 with col_del1:
     if st.button("🗑️ 선택 항목 삭제", disabled=not selected_ids, use_container_width=True):
+        st.session_state["confirm_delete_selected"] = True
+
+with col_del2:
+    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", use_container_width=True):
+        st.session_state["confirm_delete_all"] = True
+
+# --- 선택 항목 삭제 확인 ---
+if st.session_state.get("confirm_delete_selected"):
+    st.warning(f"**경고**: 선택된 **{len(selected_ids)}** 건의 인보이스를 정말로 삭제하시겠습니까?")
+    c1, c2, _ = st.columns([1, 1, 3])
+    if c1.button("예, 선택 항목을 삭제합니다", type="primary"):
         with sqlite3.connect(DB_PATH) as con:
             cur = con.cursor()
             for iid in selected_ids:
                 cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
                 cur.execute("DELETE FROM invoices WHERE invoice_id=?", (iid,))
             con.commit()
+        
         st.cache_data.clear()
+        del st.session_state["confirm_delete_selected"]
         st.success(f"🗑️ 선택된 {len(selected_ids)}건 삭제 완료")
         st.rerun()
 
-with col_del2:
-    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", use_container_width=True):
-        st.session_state["confirm_delete_all"] = True
+    if c2.button("아니요, 취소"):
+        del st.session_state["confirm_delete_selected"]
+        st.rerun()
 
+# --- 필터된 전체 삭제 확인 ---
 if st.session_state.get("confirm_delete_all"):
     st.warning(f"**경고**: 현재 필터링된 **{len(view_df)}** 건의 인보이스를 정말로 모두 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")
-    c1, c2 = st.columns(2)
-    if c1.button("예, 전체 삭제를 실행합니다", type="primary"):
+    c1_all, c2_all = st.columns(2)
+    if c1_all.button("예, 전체 삭제를 실행합니다", type="primary"):
         all_filtered_ids = view_df.index.tolist()
         with sqlite3.connect(DB_PATH) as con:
             cur = con.cursor()
@@ -254,7 +269,7 @@ if st.session_state.get("confirm_delete_all"):
         st.success(f"🗑️ 필터링된 {len(all_filtered_ids)}건 전체 삭제 완료")
         st.rerun()
 
-    if c2.button("아니요, 취소합니다"):
+    if c2_all.button("아니요, 취소합니다"):
         del st.session_state["confirm_delete_all"]
         st.rerun()
 
