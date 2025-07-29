@@ -3,12 +3,13 @@
 # • 인보이스 계산에 필요한 모든 액션
 # • Python 3.12  / Streamlit 1.44
 # -----------------------------------------------------------
-import sqlite3, datetime
+import sqlite3, datetime, zoneinfo
 from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
 from common import get_connection
+from utils.clean import TRACK_COLS, normalize_tracking
 
 # ─────────────────────────
 # 작업일지 컬럼 상수
@@ -134,6 +135,14 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         # cm → int 처리
         df_post["부피"] = df_post["부피"].round(0).astype(int)
 
+        track_cols = [c for c in TRACK_COLS if c in df_post.columns]
+        for col in track_cols:
+            df_post[col] = normalize_tracking(df_post[col])
+
+        df_post = df_post.drop_duplicates(
+            subset=["송장번호","TrackingNo"], keep="first"
+        )
+
         df_zone_raw = pd.read_sql(
              "SELECT * FROM shipping_zone WHERE 요금제=?", con, params=(rate,)
          )
@@ -184,7 +193,8 @@ def create_and_finalize_invoice(vendor_id: int,
 
         # ── invoices 헤더 INSERT ──
         # 현지 시각(서버 로컬타임)으로 created_at 저장
-        created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tz = zoneinfo.ZoneInfo("Asia/Seoul")
+        created_at = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
 
         cur.execute(
             "INSERT INTO invoices "

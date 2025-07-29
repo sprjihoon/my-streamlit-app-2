@@ -78,10 +78,15 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
             if c in df_post.columns:
                 df_post[c] = df_post[c].fillna("")
 
+        # 두 키 모두 공백이면 중복 판단 대상 제외
         if {"송장번호", "TrackingNo"}.issubset(df_post.columns):
-            df_post = df_post.drop_duplicates(subset=["송장번호", "TrackingNo"], keep="first")
+            has_key = ~((df_post["송장번호"] == "") & (df_post["TrackingNo"] == ""))
+            dedup = df_post[has_key].drop_duplicates(subset=["송장번호", "TrackingNo"], keep="first")
+            df_post = pd.concat([dedup, df_post[~has_key]], ignore_index=True)
         elif "송장번호" in df_post.columns:
-            df_post = df_post.drop_duplicates(subset=["송장번호"], keep="first")
+            has_key = df_post["송장번호"] != ""
+            dedup = df_post[has_key].drop_duplicates(subset=["송장번호"], keep="first")
+            df_post = pd.concat([dedup, df_post[~has_key]], ignore_index=True)
 
         if DEBUG_MODE:
             st.write(f"🔁 중복제거: {before} → {len(df_post)}")
