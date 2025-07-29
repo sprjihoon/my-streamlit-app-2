@@ -65,13 +65,18 @@ def add_basic_shipping(df_items: pd.DataFrame,
                         (df_raw[date_col] <= pd.to_datetime(d_to))]
 
         # ───────────────────────────────────────
-        # NEW ⚙️  중복 출고 행 제거
+        # NEW ⚙️  중복 출고 행 제거 (송장번호가 있을 때만)
         #   • 동일 송장번호(Tracking No) 로 여러 번 업로드된 경우를 방지
-        #   • 기본 키 후보: "송장번호", 없으면 "운송장번호" · "트래킹번호" 등
+        #   • 빈 값(결번) 은 서로 다른 건이므로 그대로 유지
         # ───────────────────────────────────────
         for key_col in ("송장번호", "운송장번호", "TrackingNo", "tracking_no"):
             if key_col in df_raw.columns:
-                df_raw = df_raw.drop_duplicates(subset=[key_col])
+                val_str = df_raw[key_col].astype(str).str.strip().str.upper()
+                blankish = val_str.isin(["", "0", "-", "NA", "N/A", "NONE", "NULL", "NAN"])
+                has_val = ~blankish
+                dedup = df_raw[has_val].drop_duplicates(subset=[key_col])
+                keep  = df_raw[~has_val]
+                df_raw = pd.concat([dedup, keep], ignore_index=True)
                 break  # 첫 번째로 발견된 키 컬럼으로 dedup 완료
 
         alias = pd.read_sql(

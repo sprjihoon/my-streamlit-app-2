@@ -53,10 +53,16 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
                              .astype(float))
         df_post["부피"] = df_post["부피"].fillna(0).round(0).astype(int)
 
-        # 중복 송장 제거 → shipping_stats와 동일 기준
+        # ── 중복 송장 제거 (단, 번호가 실제로 존재할 때만) ──
         for key_col in ("등기번호", "송장번호", "운송장번호", "TrackingNo", "tracking_no"):
             if key_col in df_post.columns:
-                df_post = df_post.drop_duplicates(subset=[key_col])
+                # 의미 없는 값(공백·0·-·NA 등)을 제외하고 중복 제거
+                val_str = df_post[key_col].astype(str).str.strip().str.upper()
+                blankish = val_str.isin(["", "0", "-", "NA", "N/A", "NONE", "NULL", "NAN"])
+                has_val = ~blankish
+                dedup_part = df_post[has_val].drop_duplicates(subset=[key_col])
+                keep_part  = df_post[~has_val]
+                df_post = pd.concat([dedup_part, keep_part], ignore_index=True)
                 break
 
         # ④ shipping_zone 테이블에서 해당 요금제 구간 불러오기
