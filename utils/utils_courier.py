@@ -13,15 +13,18 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
         cur = con.cursor()
         cur.execute("SELECT rate_type FROM vendors WHERE vendor = ?", (vendor,))
         row = cur.fetchone()
-        rate_type = row[0] if row else "STD"
-        rate_map = {
-            None: "표준",
-            "": "표준",
-            "STD": "표준",
-            "STANDARD": "표준",
-            "기본": "표준",
-        }
-        rate_type = rate_map.get(rate_type, rate_type)
+
+        # ─ rate_type 정규화 ────────────────────────────
+        raw_val = row[0] if row else None
+        _val = (raw_val or "").strip()
+        _up  = _val.upper()
+
+        if _up in ("", "STD", "STANDARD") or _val in ("기본", "표준"):
+            rate_type = "표준"
+        elif _up == "A":
+            rate_type = "A"
+        else:
+            rate_type = "표준"
 
         # ② 별칭 목록 불러오기 (file_type = 'kpost_in')
         alias_df = pd.read_sql(

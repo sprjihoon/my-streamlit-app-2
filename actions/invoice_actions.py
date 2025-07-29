@@ -89,19 +89,26 @@ def add_basic_shipping(df_items: pd.DataFrame,
 # -----------------------------------------------------------
 def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, int]:
     with get_connection() as con:
-        rate = con.execute(
-            "SELECT COALESCE(rate_type,'STD') FROM vendors WHERE vendor=?",
-            (vendor,)).fetchone()[0]
+        # ─────────────────────────────────────────────
+        # rate_type 정규화 (공백 제거, 대소문자 무시)
+        #   • None / '', 'STD', 'STANDARD', '기본', '표준' → '표준'
+        #   • 'A' / 'a'                                   → 'A'
+        #   • 이외 입력값                                 → '표준'
+        # ─────────────────────────────────────────────
+        raw = con.execute(
+            "SELECT rate_type FROM vendors WHERE vendor=?", (vendor,)
+        ).fetchone()
+        raw_val = raw[0] if raw else None
 
-        # rate_type DB 값(STD,A,B,표준,…) → shipping_zone 요금제 코드 매핑
-        rate_map = {
-            None: "표준",
-            "": "표준",
-            "STD": "표준",
-            "STANDARD": "표준",
-            "기본": "표준",
-        }
-        rate = rate_map.get(rate, rate)
+        _val = (raw_val or "").strip()           # None → '' 후 strip
+        _up  = _val.upper()                       # 대소문자 무시용
+
+        if _up in ("", "STD", "STANDARD") or _val in ("기본", "표준"):
+            rate = "표준"
+        elif _up == "A":
+            rate = "A"
+        else:
+            rate = "표준"
 
         alias = pd.read_sql(
             "SELECT alias FROM alias_vendor_v WHERE vendor=?",
