@@ -122,22 +122,30 @@ def load_invoices() -> pd.DataFrame:
                     vendor_schema = con.execute("PRAGMA table_info(vendors)").fetchall()
                     vendor_cols = [row[1] for row in vendor_schema]
                     
-                    if "vendor" in vendor_cols:
-                        vendor_query = "SELECT vendor"
-                        if "name" in vendor_cols:
-                            vendor_query += ", COALESCE(name, vendor) as display_name"
-                        else:
-                            vendor_query += ", vendor as display_name"
-                        vendor_query += " FROM vendors"
+                    # 매핑에 필요한 컬럼이 있는지 확인 (vendor_id와 name 또는 vendor)
+                    if "vendor_id" in vendor_cols and ("name" in vendor_cols or "vendor" in vendor_cols):
+                        
+                        display_name_col = "COALESCE(name, vendor)" if "name" in vendor_cols else "vendor"
+                        vendor_query = f"SELECT vendor_id, {display_name_col} as display_name FROM vendors"
                         
                         vendor_map = pd.read_sql(vendor_query, con)
-                        vendor_dict = dict(zip(vendor_map["vendor"], vendor_map["display_name"]))
+                        vendor_map.dropna(subset=['vendor_id', 'display_name'], inplace=True)
                         
-                        # 매핑 적용
-                        df["업체"] = df["vendor_id"].astype(str).map(vendor_dict).fillna(df["vendor_id"])
+                        # 키 타입을 숫자로 통일
+                        vendor_map['vendor_id'] = pd.to_numeric(vendor_map['vendor_id'], errors='coerce')
+                        vendor_map.dropna(subset=['vendor_id'], inplace=True)
                         
+                        # 중복된 vendor_id가 있을 경우 마지막 값으로 맵 생성
+                        vendor_dict = dict(zip(vendor_map["vendor_id"], vendor_map["display_name"]))
+
+                        # df의 vendor_id도 숫자로 변환하여 매핑 준비
+                        df_vendor_id_numeric = pd.to_numeric(df['vendor_id'], errors='coerce')
+                        
+                        # 매핑 적용: 매핑 실패 시 기존 '업체' 컬럼 값(ID) 유지
+                        df["업체"] = df_vendor_id_numeric.map(vendor_dict).fillna(df["업체"])
+
                 except Exception as vendor_error:
-                    # 업체명 매핑 실패해도 원본 데이터는 유지
+                    # 업체명 매핑 실패해도 원본 데이터(ID)는 유지
                     pass
             
             # 7. 누락된 컬럼 추가 (UI 호환성을 위해)
