@@ -151,6 +151,7 @@ if st.button("🗑 선택 삭제", disabled=not selected_ids):
             cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
             cur.execute("DELETE FROM invoices WHERE invoice_id=?", (iid,))
         con.commit()
+    st.cache_data.clear()  # 캐시 삭제 → 목록 즉시 반영
     st.success(f"🗑 {len(selected_ids)}건 삭제 완료")
     st.rerun()
 
