@@ -136,10 +136,21 @@ refresh_alias_vendor_cache()  # ★ 새 업로드 반영
 st.cache_data.clear()
 a_cache = load_alias_cache()
 
-def uniq(tbl:str,col:str,ft:str)->List[str]:
-    with get_connection() as con:
-        df=pd.read_sql(f"SELECT DISTINCT [{col}] AS v FROM {tbl}",con)
-    df=df[~df.v.isin(a_cache[a_cache.file_type==ft].alias)]
+def uniq(tbl: str, col: str, ft: str) -> List[str]:
+    """Return distinct values from given table/column that are not already in alias cache.
+
+    If the source table or column is missing, show a warning instead of raising,
+    so the Streamlit app continues to run.
+    """
+    try:
+        with get_connection() as con:
+            df = pd.read_sql(f"SELECT DISTINCT [{col}] AS v FROM {tbl}", con)
+    except Exception as e:
+        # Gracefully degrade when schema is incomplete on server
+        st.warning(f"{ft} 원본({tbl}.{col}) 읽기 실패 → {e}")
+        return []
+
+    df = df[~df.v.isin(a_cache[a_cache.file_type == ft].alias)]
     return sorted(x for x in df.v.dropna().astype(str).str.strip() if x)
 
 opt = {ft: uniq(tbl,col,ft) for tbl,col,ft in SRC_TABLES}
