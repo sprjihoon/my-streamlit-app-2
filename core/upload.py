@@ -84,9 +84,23 @@ def ingest(file, table: TableName) -> None:
                        (file_hash,)).fetchone():
             raise ValueError("⚠️ 이미 동일한 파일을 업로드했습니다.")
 
-    # 3) 저장 + DataFrame
+    # 3) 저장 + DataFrame ------------------------------------------------
+    from utils.clean import TRACK_COLS, normalize_tracking  # local import to avoid cycle
+
     path, fname = _save_file_to_disk(file)
-    df = pd.read_excel(path)
+
+    read_kwargs = {}
+    if table == "kpost_in":
+        # 1️⃣ 지정 컬럼 str dtype 강제
+        read_kwargs["dtype"] = {col: "string" for col in TRACK_COLS}
+
+    df = pd.read_excel(path, **read_kwargs)
+
+    # 2️⃣ 송장번호 정규화
+    if table == "kpost_in":
+        for col in TRACK_COLS:
+            if col in df.columns:
+                df[col] = normalize_tracking(df[col])
 
     # 4) 시간 포함 열 → 날짜 전용
     if table in TIME_TABLES:
