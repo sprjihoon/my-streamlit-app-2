@@ -99,7 +99,7 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         names = [vendor] + alias["alias"].tolist()
 
         df_post = pd.read_sql(
-            f"SELECT 부피 FROM kpost_in WHERE 발송인명 IN ({','.join('?'*len(names))}) "
+            f"SELECT 부피 FROM kpost_in WHERE TRIM(발송인명) IN ({','.join('?'*len(names))}) "
             "AND 접수일자 BETWEEN ? AND ?", con, params=(*names, d_from, d_to))
         if df_post.empty:
             return {}
