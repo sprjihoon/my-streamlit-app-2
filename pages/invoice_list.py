@@ -187,15 +187,6 @@ st.markdown("---")
 # ──────────────────────────────────────
 # 6. 상세 보기 / 수정 / 확정 / 개별 XLSX
 # ──────────────────────────────────────
-if not selected_ids:
-    with sqlite3.connect(DB_PATH) as con:
-        cur = con.cursor()
-        for iid in selected_ids:
-            # ... (기존 삭제 로직은 위 버튼 핸들러로 이동)
-        con.commit()
-    st.success(f"🗑 {len(selected_ids)}건 삭제 완료")
-    st.rerun()
-
 if not view_df.empty:
     inv_sel = st.selectbox("🔍 상세 조회할 Invoice", view_df.index, format_func=lambda x: f"#{x}")
     if st.button("🔎 상세 보기"):
