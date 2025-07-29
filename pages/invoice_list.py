@@ -67,21 +67,89 @@ def _post_numeric(df: pd.DataFrame) -> pd.DataFrame:
 # ──────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=60)
 def load_invoices() -> pd.DataFrame:
-    sql = """
-        SELECT i.invoice_id,
-               v.vendor AS 업체,
-               i.vendor_id,
-               i.period_from,
-               i.period_to,
-               i.created_at,
-               IFNULL(i.status,'미확정') AS status,
-               i.total_amount
-          FROM invoices i
-     LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
-         ORDER BY i.invoice_id DESC
-    """
-    with sqlite3.connect(DB_PATH) as con:
-        return pd.read_sql(sql, con)
+    """안전한 인보이스 목록 로드 - 스키마 문제에 강건함"""
+    empty_df = pd.DataFrame(columns=["invoice_id", "업체", "vendor_id", "period_from", "period_to", "created_at", "status", "total_amount"])
+    
+    try:
+        with sqlite3.connect(DB_PATH) as con:
+            # 1. 테이블 존재 여부 확인
+            tables_result = con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            tables = [row[0] for row in tables_result]
+            
+            if "invoices" not in tables:
+                st.info("📭 인보이스 테이블이 없습니다. 인보이스를 생성해주세요.")
+                return empty_df
+            
+            # 2. invoices 테이블 스키마 확인
+            schema_result = con.execute("PRAGMA table_info(invoices)").fetchall()
+            invoice_columns = [row[1] for row in schema_result]
+            
+            # 3. 필수 컬럼 확인 및 안전한 쿼리 구성
+            required_cols = ["invoice_id"]
+            available_cols = []
+            
+            for col in ["invoice_id", "vendor_id", "period_from", "period_to", "created_at", "status", "total_amount"]:
+                if col in invoice_columns:
+                    available_cols.append(col)
+            
+            if not available_cols:
+                st.error("❌ invoices 테이블에 필요한 컬럼이 없습니다.")
+                return empty_df
+            
+            # 4. 동적 쿼리 생성
+            select_parts = []
+            for col in available_cols:
+                if col == "vendor_id":
+                    select_parts.append(f"{col} AS 업체, {col}")
+                elif col == "status":
+                    select_parts.append(f"IFNULL({col},'미확정') AS {col}")
+                else:
+                    select_parts.append(col)
+            
+            safe_sql = f"""
+                SELECT {', '.join(select_parts)}
+                FROM invoices
+                ORDER BY {available_cols[0]} DESC
+            """
+            
+            # 5. 데이터 로드
+            df = pd.read_sql(safe_sql, con)
+            
+            # 6. 업체명 매핑 시도 (실패해도 계속 진행)
+            if "vendors" in tables and "vendor_id" in df.columns:
+                try:
+                    # vendors 테이블 스키마 확인
+                    vendor_schema = con.execute("PRAGMA table_info(vendors)").fetchall()
+                    vendor_cols = [row[1] for row in vendor_schema]
+                    
+                    if "vendor" in vendor_cols:
+                        vendor_query = "SELECT vendor"
+                        if "name" in vendor_cols:
+                            vendor_query += ", COALESCE(name, vendor) as display_name"
+                        else:
+                            vendor_query += ", vendor as display_name"
+                        vendor_query += " FROM vendors"
+                        
+                        vendor_map = pd.read_sql(vendor_query, con)
+                        vendor_dict = dict(zip(vendor_map["vendor"], vendor_map["display_name"]))
+                        
+                        # 매핑 적용
+                        df["업체"] = df["vendor_id"].astype(str).map(vendor_dict).fillna(df["vendor_id"])
+                        
+                except Exception as vendor_error:
+                    # 업체명 매핑 실패해도 원본 데이터는 유지
+                    pass
+            
+            # 7. 누락된 컬럼 추가 (UI 호환성을 위해)
+            for col in empty_df.columns:
+                if col not in df.columns:
+                    df[col] = ""
+            
+            return df[empty_df.columns]  # 컬럼 순서 맞춤
+            
+    except Exception as e:
+        st.error(f"❌ 인보이스 로드 중 오류: {str(e)[:100]}...")
+        return empty_df
 
 # ──────────────────────────────────────
 # 3. 강제 새로고침

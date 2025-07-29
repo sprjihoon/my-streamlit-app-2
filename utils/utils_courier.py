@@ -12,7 +12,7 @@ from utils.clean import TRACK_COLS, normalize_tracking
 from typing import Dict
 
 # 개발용 플래그
-DEBUG_MODE = False  # 디버그 완료
+DEBUG_MODE = True  # 디버그 완료
 
 def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, int]:
     """
@@ -20,10 +20,25 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
     shipping_zone 요금표 적용하여 구간별 택배요금 항목을 session_state["items"]에 추가.
     """
     with get_connection() as con:
+        # 필수 테이블 존재 확인
+        tables = [row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        required_tables = ["vendors", "kpost_in", "shipping_zone"]
+        missing_tables = [t for t in required_tables if t not in tables]
+        
+        if missing_tables:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: 필요한 테이블 누락 - {missing_tables}")
+            return {}
+        
         # ① 공급처의 rate_type 확인
         cur = con.cursor()
-        cur.execute("SELECT rate_type FROM vendors WHERE vendor = ?", (vendor,))
-        row = cur.fetchone()
+        try:
+            cur.execute("SELECT rate_type FROM vendors WHERE vendor = ?", (vendor,))
+            row = cur.fetchone()
+        except Exception as e:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: vendors 테이블 조회 실패 - {e}")
+            return {}
 
         # ─ rate_type 정규화 ────────────────────────────
         raw_val = row[0] if row else None
@@ -38,26 +53,55 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
             rate_type = "표준"
 
         # ② 별칭 목록 불러오기 (file_type = 'kpost_in')
-        alias_df = pd.read_sql(
-            "SELECT alias FROM alias_vendor_v WHERE vendor = ?",
-            con, params=(vendor,)
-        )
+        try:
+            # aliases 테이블 존재 확인
+            if "aliases" in tables:
+                alias_df = pd.read_sql(
+                    "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'kpost_in'",
+                    con, params=(vendor,)
+                )
+            else:
+                # aliases 테이블이 없으면 빈 DataFrame
+                alias_df = pd.DataFrame(columns=["alias"])
+        except Exception as e:
+            if DEBUG_MODE:
+                print(f"⚠️ {vendor}: aliases 조회 실패, 공급처명만 사용 - {e}")
+            alias_df = pd.DataFrame(columns=["alias"])
+        
         name_list = [vendor] + alias_df["alias"].astype(str).str.strip().tolist()
 
+        if DEBUG_MODE:
+            print(f"\n=== {vendor} 별칭 매칭 ===")
+            print(f"기본 공급처명: {vendor}")
+            print(f"별칭 목록: {alias_df['alias'].tolist() if not alias_df.empty else '없음'}")
+            print(f"최종 검색 리스트: {name_list}")
+
         # ③ kpost_in 에서 부피 + 송장번호 계열 데이터 추출
-        # 모든 컬럼(*) 조회 → 일부 테이블에 특정 송장번호 컬럼이 없더라도 오류 없이 로드
-        df_post = pd.read_sql(
-            f"""
-            SELECT *
-              FROM kpost_in
-             WHERE TRIM(발송인명) IN ({','.join('?' * len(name_list))})
-               AND DATE(접수일자) BETWEEN ? AND ?
-            """,
-            con, params=(*name_list, d_from, d_to)
-        )
+        try:
+            df_post = pd.read_sql(
+                f"""
+                SELECT *
+                  FROM kpost_in
+                 WHERE TRIM(발송인명) IN ({','.join('?' * len(name_list))})
+                   AND DATE(접수일자) BETWEEN ? AND ?
+                """,
+                con, params=(*name_list, d_from, d_to)
+            )
+        except Exception as e:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: kpost_in 조회 실패 - {e}")
+            return {}
+
+        if DEBUG_MODE:
+            print(f"kpost_in 조회 결과: {len(df_post)}건")
+            if not df_post.empty and "발송인명" in df_post.columns:
+                발송인_counts = df_post["발송인명"].value_counts()
+                print(f"발송인명별 건수: {발송인_counts.head(10).to_dict()}")
 
         # ── 필수 컬럼/행 체크 ──
         if df_post.empty or "부피" not in df_post.columns:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: 데이터 없음 또는 부피 컬럼 없음")
             return {}
 
         # ── 1️⃣·2️⃣  송장/등기 번호 컬럼 → 문자열 & 정규화 ─────────────────
@@ -100,6 +144,13 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
 
         if DEBUG_MODE:
             print(f"중복 제거: {before} → {len(df_post)} 행")
+            # 부피 분석
+            volume_counts = df_post["부피"].value_counts().head(10)
+            print(f"상위 부피값: {volume_counts.to_dict()}")
+            # 특정 구간 확인
+            cond_80 = (df_post["부피"] == 80).sum()
+            cond_mid = ((df_post["부피"] >= 71) & (df_post["부피"] <= 100)).sum()
+            print(f"부피 80cm: {cond_80}건, 71-100cm 구간: {cond_mid}건")
 
         # ④ shipping_zone 테이블에서 해당 요금제 구간 불러오기
         df_zone = pd.read_sql("SELECT * FROM shipping_zone WHERE 요금제 = ?", con, params=(rate_type,))
@@ -135,6 +186,10 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
             )
 
         # 기존 디버그 출력은 위에서 통합
+        if DEBUG_MODE:
+            final_counts = {k: v.get("count", 0) for k, v in size_counts.items()}
+            print(f"최종 size_counts: {final_counts}")
+            print("=" * 50)
 
         # 함수 결과: 각 구간별 수량 딕셔너리 반환
         return {k: v.get("count", 0) for k, v in size_counts.items()}
