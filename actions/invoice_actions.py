@@ -3,7 +3,7 @@
 # • 인보이스 계산에 필요한 모든 액션
 # • Python 3.12  / Streamlit 1.44
 # -----------------------------------------------------------
-import sqlite3
+import sqlite3, datetime
 from typing import Dict, List
 
 import pandas as pd
@@ -183,12 +183,14 @@ def create_and_finalize_invoice(vendor_id: int,
         cur = con.cursor()
 
         # ── invoices 헤더 INSERT ──
+        # 현지 시각(서버 로컬타임)으로 created_at 저장
+        created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         cur.execute(
             "INSERT INTO invoices "
-            "(vendor_id, period_from, period_to, "
-            " created_at, total_amount, status) "
-            "VALUES ( ?, ?, ?, CURRENT_TIMESTAMP, ?, '확정')",
-            (vendor_id, period_from, period_to, total)
+            "(vendor_id, period_from, period_to, created_at, total_amount, status) "
+            "VALUES ( ?, ?, ?, ?, ?, '확정')",
+            (vendor_id, period_from, period_to, created_at, total)
         )
         iid = cur.lastrowid
 
