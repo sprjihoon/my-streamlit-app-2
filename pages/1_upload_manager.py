@@ -100,6 +100,14 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
                 col.dataframe(df_up.head().astype(str), height=150, use_container_width=True)
                 col.markdown("📌 **업로드된 엑셀 컬럼:**")
                 col.write(list(df_up.columns))
+                # ⬇️ 원본 파일 다운로드 버튼
+                col.download_button(
+                    label="⬇️ 원본 파일 다운로드",
+                    data=upl.getvalue(),
+                    file_name=upl.name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_{tbl}"
+                )
 
                 if col.button("✅ 신규 데이터 저장", key=f"save_{tbl}"):
                     try:
