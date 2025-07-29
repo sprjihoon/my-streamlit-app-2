@@ -104,7 +104,7 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         if df_post.empty:
             return {}
 
-        df_post["부피"] = pd.to_numeric(df_post["부피"], errors="coerce").dropna()
+        df_post["부피"] = pd.to_numeric(df_post["부피"], errors="coerce").fillna(0)
         df_zone = pd.read_sql(
             "SELECT * FROM shipping_zone WHERE 요금제=?", con, params=(rate,)
         ).sort_values("len_min_cm")
@@ -282,7 +282,7 @@ def add_return_courier_fee(vendor, d_from, d_to):
         if df.empty:
             return
         df["우편물부피"] = pd.to_numeric(df["우편물부피"],
-                                       errors="coerce").dropna()
+                                       errors="coerce").fillna(0)
         zone = (pd.read_sql(
                     "SELECT * FROM shipping_zone WHERE 요금제=?", con,
                     params=(rate,))
