@@ -134,3 +134,6 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
                     "📊 size_counts": {k: v["count"] for k, v in size_counts.items()},
                 }
             )
+
+        # 함수 결과: 각 구간별 수량 딕셔너리 반환
+        return {k: v["count"] for k, v in size_counts.items()}
