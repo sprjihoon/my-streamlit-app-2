@@ -93,6 +93,16 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
             "SELECT COALESCE(rate_type,'STD') FROM vendors WHERE vendor=?",
             (vendor,)).fetchone()[0]
 
+        # rate_type DB 값(STD,A,B,표준,…) → shipping_zone 요금제 코드 매핑
+        rate_map = {
+            None: "표준",
+            "": "표준",
+            "STD": "표준",
+            "STANDARD": "표준",
+            "기본": "표준",
+        }
+        rate = rate_map.get(rate, rate)
+
         alias = pd.read_sql(
             "SELECT alias FROM aliases WHERE vendor=? AND file_type='kpost_in'",
             con, params=(vendor,))
