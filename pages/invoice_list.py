@@ -125,7 +125,6 @@ if sta_sel:
 # 4-bis. 목록 표시 + 선택(내장) + 전체 선택 체크박스
 # ──────────────────────────────────────
 st.markdown("---")
-col_del1, col_del2 = st.columns(2)
 
 # 보기용 DataFrame (편집 불필요→dataframe 사용)
 view_df = df.loc[mask].set_index('invoice_id').copy()
@@ -150,6 +149,10 @@ except AttributeError:
 
 selected_ids: List[int] = [view_df.index[i] for i in selected_pos]
 
+# ──────────────────────────────────────
+# 삭제 버튼들
+# ──────────────────────────────────────
+col_del1, col_del2 = st.columns(2)
 with col_del1:
     if st.button("🗑️ 선택 항목 삭제", disabled=not selected_ids, use_container_width=True):
         with sqlite3.connect(DB_PATH) as con:
