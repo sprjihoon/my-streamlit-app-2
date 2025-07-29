@@ -75,7 +75,7 @@ def add_basic_shipping(df_items: pd.DataFrame,
                 break  # 첫 번째로 발견된 키 컬럼으로 dedup 완료
 
         alias = pd.read_sql(
-            "SELECT alias FROM alias_vendor_v WHERE vendor=?",
+            "SELECT alias FROM aliases WHERE vendor=? AND file_type='shipping_stats'",
             con, params=(vendor,))
         df = df_raw[df_raw["공급처"].str.strip()
                      .isin([vendor] + alias["alias"].astype(str).str.strip().tolist())]
