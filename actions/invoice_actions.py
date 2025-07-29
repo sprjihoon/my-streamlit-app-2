@@ -9,7 +9,7 @@ from typing import Dict, List
 import pandas as pd
 import streamlit as st
 from common import get_connection
-from utils.clean import TRACK_COLS, normalize_tracking
+from utils.clean import TRACK_COLS, clean_invoice_id
 
 # ─────────────────────────
 # 작업일지 컬럼 상수
