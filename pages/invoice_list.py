@@ -1,8 +1,5 @@
-# pages/invoice_list.py – 인보이스 관리 페이지 (LEFT JOIN + 전체 기능 완결)
-# -----------------------------------------------------------
-# * LEFT JOIN 으로 누락 인보이스까지 표시
-# * 필터·삭제·상세 수정·개별/전체 XLSX 다운로드 모두 지원
-# * Pylance 오류·미완성 부분 제거 → 완전 실행 가능
+from __future__ import annotations
+
 import sys
 import os
 
