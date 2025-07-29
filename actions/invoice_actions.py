@@ -121,13 +121,11 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         ).reset_index(drop=True)
 
     zone_cnt: Dict[str, int] = {}
-    for i, z in df_zone.iterrows():
-        # 마지막 구간만 상한 포함, 나머지는 상한 미포함(<)
-        if i < len(df_zone) - 1:
-            cond = (df_post["부피"] >= z["len_min_cm"]) & (df_post["부피"] < z["len_max_cm"])
-        else:
-            cond = df_post["부피"] >= z["len_min_cm"]
-        cnt = int(df_post[cond].shape[0])
+    remaining = df_post.copy()
+    for _, z in df_zone.iterrows():
+        cond = (remaining["부피"] >= z["len_min_cm"]) & (remaining["부피"] <= z["len_max_cm"])
+        cnt = int(cond.sum())
+        remaining = remaining[~cond]  # 중복 방지
         if cnt:
             st.session_state["items"].append(
                 {"항목": f"택배요금 ({z['구간']})",
