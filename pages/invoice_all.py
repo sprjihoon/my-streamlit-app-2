@@ -15,6 +15,11 @@ import os
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+# --- 디버깅: sys.path 내용 확인 ---
+print("--- DEBUG: sys.path after modification ---")
+import pprint
+pprint.pprint(sys.path)
+print("-----------------------------------------")
 # ------------------------------------
 
 import time
