@@ -190,7 +190,8 @@ else:
 
 # 업체·상태 필터
 col1, col2 = st.columns(2)
-ven_sel = col1.multiselect("업체", sorted(df['업체'].dropna().unique()))
+# .astype(str) 추가하여 TypeError 방지
+ven_sel = col1.multiselect("업체", sorted(df['업체'].dropna().astype(str).unique()))
 sta_sel = col2.multiselect("상태", sorted(df['status'].unique()))
 if ven_sel:
     mask &= df['업체'].isin(ven_sel)
