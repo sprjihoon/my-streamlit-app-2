@@ -3,6 +3,8 @@ import sqlite3
 from pathlib import Path
 from typing import Dict
 import time
+import io
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -126,6 +128,26 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
                         col.error(f"❌ 저장 중 오류: {e}")
         except Exception as e:
             col.error(f"읽기 실패: {e}")
+
+    # 📥 현 테이블 Excel 다운로드 버튼
+    with sqlite3.connect(db_path) as con:
+        try:
+            df_tbl = pd.read_sql(f"SELECT * FROM {tbl}", con)
+        except Exception:
+            df_tbl = pd.DataFrame()
+
+    if not df_tbl.empty:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            df_tbl.to_excel(writer, index=False, sheet_name=tbl)
+        buffer.seek(0)
+        col.download_button(
+            label="⬇️ 현재 데이터 다운로드",
+            data=buffer.getvalue(),
+            file_name=f"{tbl}_{date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_table_{tbl}"
+        )
 
     if col.button("🗑 테이블 삭제 (백업)", key=f"del_{tbl}"):
         delete_table_with_backup(tbl)
