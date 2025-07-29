@@ -39,6 +39,22 @@ c1.metric("오늘 날짜", date.today().isoformat())
 c2.metric("업로드된 파일", "—")
 c3.metric("생성된 청구서", "—")
 
+try:
+    from migrate_to_turso import migrate_data
+    
+    st.warning("⚠️ 로컬 데이터를 클라우드로 이전할 때만 이 버튼을 누르세요. **단 한 번만 실행해야 합니다!**")
+    if st.button("🚀 로컬 DB 데이터를 Turso 클라우드로 이전하기"):
+        migrate_data()
+    st.markdown("---")
+
+except ImportError:
+    # 마이그레이션 스크립트가 없으면 아무것도 표시하지 않음
+    pass
+
+# 기존 페이지 내용
+st.image("assets/logo.png", width=200)
+st.title(" 통합 정산 관리 시스템")
+st.markdown("---")
 st.info("좌측 메뉴에서 페이지를 선택하면 해당 기능 화면으로 이동합니다.")
 
 try:

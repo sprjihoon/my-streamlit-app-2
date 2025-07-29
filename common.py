@@ -1,6 +1,15 @@
 from __future__ import annotations
 import sqlite3, textwrap, datetime as dt, pathlib, contextlib
 import pandas as pd
+import os
+import sqlite3
+import streamlit as st
+import pandas as pd
+from contextlib import contextmanager
+import libsql_client
+import textwrap
+from datetime import date
+import datetime as dt
 
 """
 common.py – 전역 유틸 / DB 연결 / 스키마 보강
@@ -23,11 +32,34 @@ DB_PATH  = pathlib.Path("billing.db")
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 # ─────────────────────────────────────
-# 1. DB 연결
+# 1. DB 연결 (Turso 클라우드 DB)
 # ─────────────────────────────────────
 
-def get_connection() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+@contextmanager
+def get_connection():
+    """
+    Streamlit Secrets에 저장된 정보를 사용하여 Turso DB에 연결합니다.
+    Secrets가 없으면 로컬 'billing.db'에 fallback합니다.
+    """
+    db_url = st.secrets.get("TURSO_DB_URL")
+    db_token = st.secrets.get("TURSO_DB_AUTH_TOKEN")
+
+    if db_url and db_token:
+        # Turso 클라우드 DB 연결
+        try:
+            with libsql_client.create_client(url=db_url, auth_token=db_token) as client:
+                yield client
+        except Exception as e:
+            st.error(f"🚨 Turso DB 연결 실패: {e}")
+            raise
+    else:
+        # 로컬 DB 파일로 fallback (개발/테스트용)
+        try:
+            con = sqlite3.connect("billing_local.db")
+            yield con
+        finally:
+            if 'con' in locals() and con:
+                con.close()
 
 # ─────────────────────────────────────
 # 2. 컬럼 보강 유틸
