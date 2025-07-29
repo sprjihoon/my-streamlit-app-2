@@ -3,6 +3,14 @@
 # * LEFT JOIN 으로 누락 인보이스까지 표시
 # * 필터·삭제·상세 수정·개별/전체 XLSX 다운로드 모두 지원
 # * Pylance 오류·미완성 부분 제거 → 완전 실행 가능
+import sys
+import os
+
+# --- 프로젝트 루트를 sys.path에 추가 ---
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+# ------------------------------------
 
 import sqlite3
 import io

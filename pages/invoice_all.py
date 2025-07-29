@@ -6,6 +6,15 @@
 • DB 경로 불일치, 캐시 미무효화, 미‑commit 등 자주‑발생 버그 패치
 • NEW: "수취인명" 컬럼 누락 시도 graceful‑skip (add_return_pickup_fee)
 """
+import sys
+import os
+
+# --- 프로젝트 루트를 sys.path에 추가 ---
+# Streamlit Cloud 등에서 'pages' 폴더 내 스크립트 실행 시 모듈을 찾지 못하는 문제 해결
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+# ------------------------------------
 
 from __future__ import annotations
 import time
