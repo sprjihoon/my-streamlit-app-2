@@ -104,9 +104,9 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         rate = rate_map.get(rate, rate)
 
         alias = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor=? AND file_type='kpost_in'",
+            "SELECT alias FROM alias_vendor_v WHERE vendor=?",
             con, params=(vendor,))
-        names = [vendor] + alias["alias"].tolist()
+        names = [vendor] + alias["alias"].astype(str).str.strip().tolist()
 
         df_post = pd.read_sql(
             f"SELECT 부피 FROM kpost_in WHERE TRIM(발송인명) IN ({','.join('?'*len(names))}) "
@@ -126,6 +126,7 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
              "SELECT * FROM shipping_zone WHERE 요금제=?", con, params=(rate,)
          ).sort_values("len_min_cm")
         ).reset_index(drop=True)
+        df_zone[["len_min_cm","len_max_cm"]] = df_zone[["len_min_cm","len_max_cm"]].apply(pd.to_numeric, errors="coerce")
 
     zone_cnt: Dict[str, int] = {}
     remaining = df_post.copy()
