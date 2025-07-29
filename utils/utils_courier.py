@@ -11,7 +11,7 @@ from common import get_connection
 from utils.clean import TRACK_COLS, normalize_tracking
 
 # 개발용 플래그
-DEBUG_MODE = True
+DEBUG_MODE = True  # 터미널 디버깅을 위해 True로 유지
 
 def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
     """
@@ -50,7 +50,7 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
             SELECT *
               FROM kpost_in
              WHERE TRIM(발송인명) IN ({','.join('?' * len(name_list))})
-               AND 접수일자 BETWEEN ? AND ?
+               AND DATE(접수일자) BETWEEN ? AND ?
             """,
             con, params=(*name_list, d_from, d_to)
         )
@@ -97,50 +97,54 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> None:
             dedup = df_post[has_key].drop_duplicates(subset=["송장번호"], keep="first")
             df_post = pd.concat([dedup, df_post[~has_key]], ignore_index=True)
 
+        print(f"\n[DEBUG] 중복 제거 전: {before} 행")
         if DEBUG_MODE:
-            st.write(f"🔁 중복제거: {before} → {len(df_post)}")
+            print(f"[DEBUG] 중복 제거 후: {len(df_post)} 행")
 
         # ④ shipping_zone 테이블에서 해당 요금제 구간 불러오기
         df_zone = pd.read_sql("SELECT * FROM shipping_zone WHERE 요금제 = ?", con, params=(rate_type,))
         df_zone[["len_min_cm","len_max_cm"]] = df_zone[["len_min_cm","len_max_cm"]].apply(pd.to_numeric, errors="coerce")
         df_zone = df_zone.sort_values("len_min_cm").reset_index(drop=True)
 
+        if DEBUG_MODE:
+            print("\n[DEBUG] 부피(cm) 값 분포 (상위 10개):")
+            print(df_post['부피'].value_counts().head(10))
+            if 80 in df_post['부피'].values:
+                print("✅ 부피 80cm 데이터가 존재합니다.")
+            else:
+                print("❌ 부피 80cm 데이터가 누락되었습니다.")
+
         # ⑤ 구간 매핑 및 수량 집계
         remaining = df_post.copy()
         size_counts = {}
         for _, row in df_zone.iterrows():
-            min_len = row["len_min_cm"]
-            max_len = row["len_max_cm"]
             label = row["구간"]
-            fee = row["요금"]
-
+            min_len, max_len = row["len_min_cm"], row["len_max_cm"]
             cond = (remaining["부피"] >= min_len) & (remaining["부피"] <= max_len)
             count = int(cond.sum())
-            remaining = remaining[~cond]
+
+            if DEBUG_MODE and count > 0:
+                print(f"  - 구간 '{label}' ({min_len}~{max_len}cm): {count} 건")
+
             if count > 0:
-                size_counts[label] = {"count": count, "fee": fee}
+                size_counts[label] = {"count": count, "fee": row["요금"]}
+                remaining = remaining[~cond]  # 중복 방지
+
+        if not size_counts:
+            print("[DEBUG] 매핑된 구간이 하나도 없습니다.")
 
         # ⑥ session_state["items"]에 추가
         for label, info in size_counts.items():
-            qty = info["count"]
-            unit = info["fee"]
-            st.session_state["items"].append({
-                "항목": f"택배요금 ({label})",
-                "수량": qty,
-                "단가": unit,
-                "금액": qty * unit
-            })
-
-        if DEBUG_MODE:
-            vol80 = df_post[df_post["부피"] == 80].shape[0]
-            cond_mid = ((df_post["부피"] >= 71) & (df_post["부피"] <= 100)).sum()
-            st.write(
+            st.session_state["items"].append(
                 {
-                    "📝 80cm": vol80,
-                    "📝 71~100cm": cond_mid,
-                    "📊 size_counts": {k: v["count"] for k, v in size_counts.items()},
+                    "항목": f"택배요금 ({label})",
+                    "수량": info["count"],
+                    "단가": info["fee"],
+                    "금액": info["count"] * info["fee"],
                 }
             )
+
+        # 기존 디버그 출력은 위에서 통합
 
         # 함수 결과: 각 구간별 수량 딕셔너리 반환
         return {k: v["count"] for k, v in size_counts.items()}
