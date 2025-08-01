@@ -130,10 +130,32 @@ row_v = df_vendors[df_vendors.vendor == sel_vendor].iloc[0]
 df_alias_v = df_alias[df_alias.vendor == sel_vendor]
 
 def get_options_and_defaults(file_type: str) -> (List[str], List[str]):
-    """multiselect 에 필요한 옵션과 기본값을 반환합니다."""
+    """multiselect 에 필요한 옵션과 기본값을 반환합니다.
+    
+    현재 공급처에 매핑된 별칭 + 아직 매핑되지 않은 별칭만 선택 가능합니다.
+    다른 공급처에 이미 매핑된 별칭들은 제외됩니다.
+    """
+    # 현재 공급처에 매핑된 별칭들
     default_aliases = df_alias_v[df_alias_v.file_type == file_type].alias.tolist()
+    
+    # 원본 데이터의 모든 별칭들
     source_aliases = all_source_aliases.get(file_type, [])
-    options = sorted(list(set(default_aliases + source_aliases)))
+    
+    # 다른 공급처에 이미 매핑된 별칭들 제외
+    with get_connection() as con:
+        try:
+            other_mapped = pd.read_sql(
+                "SELECT DISTINCT alias FROM aliases WHERE file_type = ? AND vendor != ?", 
+                con, params=[file_type, sel_vendor]
+            )
+            other_mapped_list = other_mapped.alias.tolist() if not other_mapped.empty else []
+        except Exception:
+            other_mapped_list = []
+    
+    # 사용 가능한 옵션 = 현재 매핑된 별칭들 + (원본 별칭들 - 다른 공급처 매핑된 별칭들)
+    available_source = [alias for alias in source_aliases if alias not in other_mapped_list]
+    options = sorted(list(set(default_aliases + available_source)))
+    
     return options, default_aliases
 
 # 파일 타입별로 multiselect 생성 (매핑 매니저와 동일한 스타일)
@@ -171,6 +193,14 @@ save_col, del_col = st.columns(2)
 # 6. 저장
 # ─────────────────────────────────────
 if save_col.button("💾 변경 사항 저장"):
+    # 저장하기 전 선택된 값들 확인
+    st.write("🔍 **저장할 데이터 확인:**")
+    st.write(f"- 입고전표: {inb}")
+    st.write(f"- 배송통계: {ship}")  
+    st.write(f"- 우체국접수: {kpin}")
+    st.write(f"- 우체국반품: {ktrt}")
+    st.write(f"- 작업일지: {wl}")
+    
     try:
         with get_connection() as con:
             con.execute(
@@ -189,8 +219,32 @@ if save_col.button("💾 변경 사항 저장"):
             _ins("kpost_in", kpin)
             _ins("kpost_ret", ktrt)
             _ins("work_log", wl)
+            
+            # ✅ 중요: 트랜잭션 커밋
+            con.commit()
+            
+        # 저장 후 실제 데이터 확인
+        with get_connection() as check_con:
+            saved_aliases = check_con.execute(
+                "SELECT file_type, COUNT(*) as cnt FROM aliases WHERE vendor=? GROUP BY file_type", 
+                (sel_vendor,)
+            ).fetchall()
+            
+            alias_counts = {row[0]: row[1] for row in saved_aliases}
+            
         st.cache_data.clear()
-        st.success("저장 완료!")
+        st.success("✅ 저장 완료!")
+        
+        # 저장된 별칭 개수 표시
+        st.info(f"""
+        📊 **저장된 별칭 개수:**
+        - 입고전표: {alias_counts.get('inbound_slip', 0)}개
+        - 배송통계: {alias_counts.get('shipping_stats', 0)}개  
+        - 우체국접수: {alias_counts.get('kpost_in', 0)}개
+        - 우체국반품: {alias_counts.get('kpost_ret', 0)}개
+        - 작업일지: {alias_counts.get('work_log', 0)}개
+        """)
+        
         st.rerun()
     except Exception as e:
         st.error(f"❌ 업데이트 실패: {e}")

@@ -145,21 +145,35 @@ st.cache_data.clear()
 a_cache = load_alias_cache()
 
 def uniq(tbl: str, col: str, ft: str) -> List[str]:
-    """Return distinct values from given table/column that are not already in alias cache.
-
-    If the source table or column is missing, show a warning instead of raising,
-    so the Streamlit app continues to run.
+    """현재 매핑되지 않은 별칭만 반환합니다.
+    
+    이미 다른 공급처에 매핑된 별칭들은 제외하고,
+    아직 매핑되지 않은 별칭들만 선택 옵션으로 제공합니다.
     """
     try:
         with get_connection() as con:
+            # 1) 원본 테이블에서 모든 고유 값 가져오기
             df = pd.read_sql(f"SELECT DISTINCT [{col}] AS v FROM {tbl}", con)
+            
+            # 2) 현재 매핑된 별칭들 가져오기 (aliases 테이블에서 직접)
+            mapped_aliases = pd.read_sql(
+                "SELECT DISTINCT alias FROM aliases WHERE file_type = ?", 
+                con, params=[ft]
+            )
+            
     except Exception as e:
         # Gracefully degrade when schema is incomplete on server
         st.warning(f"{ft} 원본({tbl}.{col}) 읽기 실패 → {e}")
         return []
 
-    df = df[~df.v.isin(a_cache[a_cache.file_type == ft].alias)]
-    return sorted(x for x in df.v.dropna().astype(str).str.strip() if x)
+    # 3) 매핑되지 않은 별칭만 필터링
+    if not mapped_aliases.empty:
+        df = df[~df.v.isin(mapped_aliases.alias)]
+    
+    # 4) 정리된 리스트 반환
+    result = sorted(x for x in df.v.dropna().astype(str).str.strip() if x and x != "")
+    
+    return result
 
 opt = {ft: uniq(tbl,col,ft) for tbl,col,ft in SRC_TABLES}
 

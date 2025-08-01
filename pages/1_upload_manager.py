@@ -129,25 +129,45 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
         except Exception as e:
             col.error(f"읽기 실패: {e}")
 
-    # 📥 현 테이블 Excel 다운로드 버튼
-    with sqlite3.connect(db_path) as con:
-        try:
-            df_tbl = pd.read_sql(f"SELECT * FROM {tbl}", con)
-        except Exception:
-            df_tbl = pd.DataFrame()
-
-    if not df_tbl.empty:
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            df_tbl.to_excel(writer, index=False, sheet_name=tbl)
-        buffer.seek(0)
-        col.download_button(
-            label="⬇️ 현재 데이터 다운로드",
-            data=buffer.getvalue(),
-            file_name=f"{tbl}_{date.today()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_table_{tbl}"
-        )
+    # 📥 현 테이블 다운로드 버튼 (데이터 존재 여부만 확인)
+    @st.cache_data(ttl=30)  # 30초 캐시
+    def check_table_exists(table_name):
+        with sqlite3.connect(db_path) as con:
+            try:
+                result = con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", 
+                    (table_name,)
+                ).fetchone()
+                if result:
+                    count = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                    return count > 0, count
+                return False, 0
+            except Exception:
+                return False, 0
+    
+    has_data, row_count = check_table_exists(tbl)
+    
+    if has_data:
+        # 실제 다운로드는 버튼 클릭 시에만 실행
+        if col.button(f"⬇️ 현재 데이터 다운로드 ({row_count:,}건)", key=f"dl_prep_{tbl}"):
+            with st.spinner("Excel 파일 생성 중..."):
+                with sqlite3.connect(db_path) as con:
+                    df_tbl = pd.read_sql(f"SELECT * FROM {tbl}", con)
+                
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    df_tbl.to_excel(writer, index=False, sheet_name=tbl)
+                buffer.seek(0)
+                
+                col.download_button(
+                    label="📁 Excel 파일 다운로드",
+                    data=buffer.getvalue(),
+                    file_name=f"{tbl}_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_table_{tbl}"
+                )
+    else:
+        col.info("데이터가 없습니다.")
 
     if col.button("🗑 테이블 삭제 (백업)", key=f"del_{tbl}"):
         delete_table_with_backup(tbl)
@@ -155,21 +175,31 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
         safe_rerun()
 
 # ─────────────────────────────────────
-# DB 상태 요약
+# DB 상태 요약 (캐시 적용)
 # ─────────────────────────────────────
 
-st.divider()
-st.subheader("📊 DB 테이블 현황")
-status_rows = []
-with sqlite3.connect(db_path) as con:
-    for tbl, meta in TARGETS.items():
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
-        ).fetchone()
-        if exists:
-            cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
-        else:
-            cnt = "(없음)"
-        status_rows.append({"테이블": meta["label"], "행 수": cnt})
+@st.cache_data(ttl=60)  # 1분 캐시
+def get_db_status():
+    status_rows = []
+    with sqlite3.connect(db_path) as con:
+        for tbl, meta in TARGETS.items():
+            exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
+            ).fetchone()
+            if exists:
+                cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+            else:
+                cnt = "(없음)"
+            status_rows.append({"테이블": meta["label"], "행 수": cnt})
+    return pd.DataFrame(status_rows).set_index("테이블")
 
-st.table(pd.DataFrame(status_rows).set_index("테이블"))
+st.divider()
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("📊 DB 테이블 현황")
+with col2:
+    if st.button("🔄 새로고침", key="refresh_db_status"):
+        st.cache_data.clear()
+        st.rerun()
+
+st.table(get_db_status())
