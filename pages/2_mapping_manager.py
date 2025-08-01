@@ -26,6 +26,18 @@ try:
     st.set_page_config(page_title="업체 매핑 관리", layout="wide")
 except Exception:
     pass
+
+# 저장 완료 후 매핑된 공급업체 페이지로 리다이렉트
+if st.session_state.get('redirect_to_mapped', False):
+    st.session_state.redirect_to_mapped = False
+    try:
+        st.switch_page("pages/3_mapped_suppliers.py")
+    except AttributeError:
+        # st.switch_page가 없는 경우 사용자에게 수동 이동 안내
+        st.success("✅ 저장이 완료되었습니다!")
+        st.info("📋 좌측 사이드바에서 '매핑된 공급업체' 페이지로 이동하여 확인해주세요.")
+        st.stop()
+
 st.title("🔗 공급처 매핑 관리 (vendors / aliases)")
 
 # ─────────────────────────────────────
@@ -220,35 +232,50 @@ if st.button("💾 공급처 저장/업데이트"):
             _ins("kpost_ret",alias_kprt)
             _ins("work_log",alias_wl)
 
+        # 저장 완료 상태 설정
+        st.session_state.save_completed = True
+        st.session_state.redirect_to_mapped = True
+        
         refresh_alias_vendor_cache()
         st.cache_data.clear()
-        st.success("✅ 저장 완료")
+        st.success("✅ 저장 완료!")
+        
+        # 매핑된 공급업체 페이지로 이동 안내
+        st.info("📋 매핑된 공급업체 페이지에서 확인할 수 있습니다.")
+        
+        # 페이지 새로고침으로 리다이렉트 로직 실행
         st.rerun()
+        
     except Exception as e:
         st.error(f"❌ 저장 실패: {e}")
 
-
 # ─────────────────────────────────────
-# 9. 미매칭 alias 표시
+# 9. 미매칭 alias 표시 (저장 완료 후에는 숨김)
 # ─────────────────────────────────────
-st.divider()
-st.subheader("📁 실제 데이터 기준 미매칭 Alias")
-df_unmatch = find_unmatched_aliases()
+# 저장 버튼이 눌렸는지 확인하는 상태 관리
+if 'save_completed' not in st.session_state:
+    st.session_state.save_completed = False
 
-if df_unmatch.empty:
-    st.success("모든 업로드 데이터가 정상 매핑되었습니다 🎉")
-else:
-    st.write("### 🔢 파일별 미매칭 개수",
-             df_unmatch.groupby("file_type")["alias"].count()
-                        .rename("건수").to_frame().T)
-    st.warning(f"⚠️ 미매칭 alias {len(df_unmatch):,}건 발견")
-    st.dataframe(df_unmatch.reset_index(drop=True), use_container_width=True, height=300)
-    st.download_button("⬇️ CSV 다운로드",
-                       df_unmatch.to_csv(index=False).encode("utf-8-sig"),
-                       "unmatched_alias.csv",
-                       mime="text/csv")
+# 저장이 완료되지 않았을 때만 미매칭 정보 표시
+if not st.session_state.save_completed:
+    st.divider()
+    st.subheader("📁 실제 데이터 기준 미매칭 Alias")
+    df_unmatch = find_unmatched_aliases()
 
-if st.button("♻️ 캐시 재생성 후 새로고침"):
-    refresh_alias_vendor_cache()
-    st.cache_data.clear()
-    st.rerun()
+    if df_unmatch.empty:
+        st.success("모든 업로드 데이터가 정상 매핑되었습니다 🎉")
+    else:
+        st.write("### 🔢 파일별 미매칭 개수",
+                 df_unmatch.groupby("file_type")["alias"].count()
+                            .rename("건수").to_frame().T)
+        st.warning(f"⚠️ 미매칭 alias {len(df_unmatch):,}건 발견")
+        st.dataframe(df_unmatch.reset_index(drop=True), use_container_width=True, height=300)
+        st.download_button("⬇️ CSV 다운로드",
+                           df_unmatch.to_csv(index=False).encode("utf-8-sig"),
+                           "unmatched_alias.csv",
+                           mime="text/csv")
+
+    if st.button("♻️ 캐시 재생성 후 새로고침"):
+        refresh_alias_vendor_cache()
+        st.cache_data.clear()
+        st.rerun()
