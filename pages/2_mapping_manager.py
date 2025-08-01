@@ -27,16 +27,12 @@ try:
 except Exception:
     pass
 
-# 저장 완료 후 매핑된 공급업체 페이지로 리다이렉트
-if st.session_state.get('redirect_to_mapped', False):
-    st.session_state.redirect_to_mapped = False
-    try:
-        st.switch_page("pages/3_mapped_suppliers.py")
-    except AttributeError:
-        # st.switch_page가 없는 경우 사용자에게 수동 이동 안내
-        st.success("✅ 저장이 완료되었습니다!")
-        st.info("📋 좌측 사이드바에서 '매핑된 공급업체' 페이지로 이동하여 확인해주세요.")
-        st.stop()
+# 저장 완료 후 안내 메시지 표시
+if st.session_state.get('save_completed', False):
+    st.success("✅ 이전에 저장이 완료되었습니다!")
+    st.info("📋 좌측 사이드바에서 '📋 공급처 매핑 리스트' 페이지로 이동하여 확인해주세요.")
+    # 상태 초기화
+    st.session_state.save_completed = False
 
 st.title("🔗 공급처 매핑 관리 (vendors / aliases)")
 
@@ -206,20 +202,33 @@ if st.button("💾 공급처 저장/업데이트"):
 
     try:
         with get_connection() as con:
-            # PK 중복 체크
-            is_new = not con.execute("SELECT 1 FROM vendors WHERE vendor=?", (vendor,)).fetchone()
-            if not is_new:
-                st.warning(f"⚠️ 이미 존재하는 공급처(PK)입니다: {vendor}")
-                st.stop()
+            # 존재 여부 체크
+            existing = con.execute("SELECT 1 FROM vendors WHERE vendor=?", (vendor,)).fetchone()
             
-            con.execute("""
-                INSERT INTO vendors(
-                    vendor,name,rate_type,sku_group,
-                    barcode_f,custbox_f,void_f,pp_bag_f,
-                    video_out_f,video_ret_f
-                ) VALUES(?,?,?,?,?,?,?,?,?,?)
-            """,(vendor,name.strip(),rate_type,sku_group,
-                 barcode_f,custbox_f,void_f,pp_bag_f,video_out_f,video_ret_f))
+            if existing:
+                # 업데이트
+                con.execute("""
+                    UPDATE vendors SET 
+                        name=?, rate_type=?, sku_group=?,
+                        barcode_f=?, custbox_f=?, void_f=?, pp_bag_f=?,
+                        video_out_f=?, video_ret_f=?
+                    WHERE vendor=?
+                """, (name.strip(), rate_type, sku_group,
+                      barcode_f, custbox_f, void_f, pp_bag_f,
+                      video_out_f, video_ret_f, vendor))
+                action = "업데이트"
+            else:
+                # 새로 삽입
+                con.execute("""
+                    INSERT INTO vendors(
+                        vendor,name,rate_type,sku_group,
+                        barcode_f,custbox_f,void_f,pp_bag_f,
+                        video_out_f,video_ret_f
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                """, (vendor, name.strip(), rate_type, sku_group,
+                      barcode_f, custbox_f, void_f, pp_bag_f,
+                      video_out_f, video_ret_f))
+                action = "신규 등록"
             
             # 별칭 저장
             con.execute("DELETE FROM aliases WHERE vendor=?", (vendor,))
@@ -231,20 +240,31 @@ if st.button("💾 공급처 저장/업데이트"):
             _ins("kpost_in",alias_kpin)
             _ins("kpost_ret",alias_kprt)
             _ins("work_log",alias_wl)
+            
+            # ✅ 중요: 트랜잭션 커밋
+            con.commit()
 
         # 저장 완료 상태 설정
         st.session_state.save_completed = True
-        st.session_state.redirect_to_mapped = True
         
         refresh_alias_vendor_cache()
         st.cache_data.clear()
         st.success("✅ 저장 완료!")
         
-        # 매핑된 공급업체 페이지로 이동 안내
-        st.info("📋 매핑된 공급업체 페이지에서 확인할 수 있습니다.")
+        # 저장된 데이터 확인해서 보여주기
+        with get_connection() as check_con:
+            vendor_check = check_con.execute("SELECT * FROM vendors WHERE vendor=?", (vendor,)).fetchone()
+            alias_check = check_con.execute("SELECT COUNT(*) FROM aliases WHERE vendor=?", (vendor,)).fetchone()[0]
         
-        # 페이지 새로고침으로 리다이렉트 로직 실행
-        st.rerun()
+        if vendor_check:
+            st.success(f"✅ 공급처 '{vendor}' {action} 완료! (별칭 {alias_check}개)")
+            st.info("📋 좌측 사이드바에서 '📋 공급처 매핑 리스트' 페이지로 이동하여 확인해주세요.")
+        else:
+            st.error("❌ 저장 확인 실패 - 다시 시도해주세요.")
+        
+        # 성공한 경우 폼 초기화를 위한 rerun
+        if vendor_check:
+            st.rerun()
         
     except Exception as e:
         st.error(f"❌ 저장 실패: {e}")
