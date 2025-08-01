@@ -129,60 +129,31 @@ if not sel_vendor:
 row_v = df_vendors[df_vendors.vendor == sel_vendor].iloc[0]
 df_alias_v = df_alias[df_alias.vendor == sel_vendor]
 
-# ─────────────────────────────────────
-# 5-1. 별칭 편집 UI 개선
-# ─────────────────────────────────────
-st.subheader("🏷️ 별칭 관리")
+def get_options_and_defaults(file_type: str) -> (List[str], List[str]):
+    """multiselect 에 필요한 옵션과 기본값을 반환합니다."""
+    default_aliases = df_alias_v[df_alias_v.file_type == file_type].alias.tolist()
+    source_aliases = all_source_aliases.get(file_type, [])
+    options = sorted(list(set(default_aliases + source_aliases)))
+    return options, default_aliases
 
-def create_alias_editor(file_type: str, display_name: str):
-    """사용자 친화적인 별칭 편집기를 생성합니다."""
-    current_aliases = df_alias_v[df_alias_v.file_type == file_type].alias.tolist()
-    available_aliases = all_source_aliases.get(file_type, [])
-    
-    # 현재 설정된 별칭들을 제거한 사용 가능한 별칭 목록
-    unassigned_aliases = [a for a in available_aliases if a not in current_aliases]
-    
-    st.write(f"**{display_name}**")
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.write("✅ **현재 설정된 별칭:**")
-        if current_aliases:
-            # 현재 별칭들을 제거할 수 있는 체크박스로 표시
-            aliases_to_remove = []
-            for alias in current_aliases:
-                if st.checkbox(f"🗑️ {alias}", key=f"remove_{file_type}_{alias}"):
-                    aliases_to_remove.append(alias)
-            # 제거할 별칭들을 제외한 나머지
-            remaining_aliases = [a for a in current_aliases if a not in aliases_to_remove]
-        else:
-            st.info("설정된 별칭이 없습니다.")
-            remaining_aliases = []
-    
-    with col2:
-        st.write("➕ **추가 가능한 별칭:**")
-        if unassigned_aliases:
-            # 추가할 별칭들을 선택할 수 있는 체크박스
-            aliases_to_add = []
-            for alias in unassigned_aliases:
-                if st.checkbox(f"➕ {alias}", key=f"add_{file_type}_{alias}"):
-                    aliases_to_add.append(alias)
-            # 최종 별칭 목록
-            final_aliases = remaining_aliases + aliases_to_add
-        else:
-            st.info("추가할 수 있는 별칭이 없습니다.")
-            final_aliases = remaining_aliases
-    
-    st.divider()
-    return final_aliases
+# 파일 타입별로 multiselect 생성 (매핑 매니저와 동일한 스타일)
+c1, c2 = st.columns(2)
+c3, c4 = st.columns(2) 
+c5, _ = st.columns(2)
 
-# 각 파일 타입별로 별칭 편집기 생성
-inb  = create_alias_editor("inbound_slip", "📦 입고전표")
-ship = create_alias_editor("shipping_stats", "🚚 배송통계")
-kpin = create_alias_editor("kpost_in", "📮 우체국접수")
-ktrt = create_alias_editor("kpost_ret", "📫 우체국반품")
-wl   = create_alias_editor("work_log", "📝 작업일지")
+inb_opts, inb_defs = get_options_and_defaults("inbound_slip")
+ship_opts, ship_defs = get_options_and_defaults("shipping_stats")
+kpin_opts, kpin_defs = get_options_and_defaults("kpost_in")
+ktrt_opts, ktrt_defs = get_options_and_defaults("kpost_ret")
+wl_opts, wl_defs = get_options_and_defaults("work_log")
+
+inb  = c1.multiselect("입고전표 별칭", inb_opts, default=inb_defs)
+ship = c2.multiselect("배송통계 별칭", ship_opts, default=ship_defs)
+kpin = c3.multiselect("우체국접수 별칭", kpin_opts, default=kpin_defs)
+ktrt = c4.multiselect("우체국반품 별칭", ktrt_opts, default=ktrt_defs)
+wl   = c5.multiselect("작업일지 별칭", wl_opts, default=wl_defs)
+
+st.divider()
 
 l, r = st.columns(2)
 rate_type   = l.selectbox("요금타입", ["A", "STD"], index=["A", "STD"].index(row_v.rate_type or "A"))
