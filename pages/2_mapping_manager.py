@@ -159,7 +159,8 @@ opt = {ft: uniq(tbl,col,ft) for tbl,col,ft in SRC_TABLES}
 # 7. 신규 업체 등록 폼
 # ─────────────────────────────────────
 st.subheader("🆕 신규 공급처 등록")
-vendor = st.text_input("공급처명 (표준)")
+vendor_pk = st.text_input("공급처명 (PK)", help="DB에 저장될 고유 키 (수정불가)")
+name      = st.text_input("공급처명 (표준)")
 
 c1,c2 = st.columns(2); c3,c4 = st.columns(2); c5,_ = st.columns(2)
 alias_inb  = c1.multiselect("입고전표 별칭",     opt["inbound_slip"])
@@ -183,26 +184,32 @@ video_ret_f = l.selectbox("반품영상촬영", ["YES","NO"])
 # 8. 저장
 # ─────────────────────────────────────
 if st.button("💾 공급처 저장/업데이트"):
-    if not vendor.strip():
-        st.warning("⚠️ 공급처명을 입력하세요.")
+    vendor = vendor_pk.strip()
+    if not vendor:
+        st.warning("⚠️ 공급처명(PK)를 입력하세요.")
+        st.stop()
+    if not name.strip():
+        st.warning("⚠️ 공급처명(표준)을 입력하세요.")
         st.stop()
 
     try:
         with get_connection() as con:
+            # PK 중복 체크
+            is_new = not con.execute("SELECT 1 FROM vendors WHERE vendor=?", (vendor,)).fetchone()
+            if not is_new:
+                st.warning(f"⚠️ 이미 존재하는 공급처(PK)입니다: {vendor}")
+                st.stop()
+            
             con.execute("""
                 INSERT INTO vendors(
                     vendor,name,rate_type,sku_group,
                     barcode_f,custbox_f,void_f,pp_bag_f,
                     video_out_f,video_ret_f
                 ) VALUES(?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(vendor) DO UPDATE SET
-                    name=excluded.name, rate_type=excluded.rate_type,
-                    sku_group=excluded.sku_group,
-                    barcode_f=excluded.barcode_f, custbox_f=excluded.custbox_f,
-                    void_f=excluded.void_f, pp_bag_f=excluded.pp_bag_f,
-                    video_out_f=excluded.video_out_f, video_ret_f=excluded.video_ret_f;
-            """,(vendor,vendor,rate_type,sku_group,
+            """,(vendor,name.strip(),rate_type,sku_group,
                  barcode_f,custbox_f,void_f,pp_bag_f,video_out_f,video_ret_f))
+            
+            # 별칭 저장
             con.execute("DELETE FROM aliases WHERE vendor=?", (vendor,))
             def _ins(ft,lst): 
                 for a in lst:
@@ -212,6 +219,7 @@ if st.button("💾 공급처 저장/업데이트"):
             _ins("kpost_in",alias_kpin)
             _ins("kpost_ret",alias_kprt)
             _ins("work_log",alias_wl)
+
         refresh_alias_vendor_cache()
         st.cache_data.clear()
         st.success("✅ 저장 완료")

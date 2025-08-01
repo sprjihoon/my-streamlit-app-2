@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 from common import get_connection
+from typing import List
 
 """
 pages/3_mapped_suppliers.py – 매핑된 공급처(서플라이어) 리스트 관리
@@ -8,6 +9,7 @@ pages/3_mapped_suppliers.py – 매핑된 공급처(서플라이어) 리스트 �
 * vendors & aliases 테이블을 읽어 매핑 현황을 확인·수정·삭제
 * vendors 테이블에 vendor 컬럼이 없을 경우 버전 호환 방식으로 자동 생성
 * FLAG_COLS 는 2_mapping_manager.py 와 동일 플래그 사용
+* 별칭(alias) 편집 UI 를 multiselect 로 개선
 """
 
 # ─────────────────────────────────────
@@ -34,6 +36,14 @@ FLAG_COLS = [
 FILE_TYPES = [
     "inbound_slip", "shipping_stats", "kpost_in", "kpost_ret", "work_log",
 ]
+SRC_TABLES = [
+    ("inbound_slip","공급처",    "inbound_slip"),
+    ("shipping_stats","공급처",  "shipping_stats"),
+    ("kpost_in","발송인명",      "kpost_in"),
+    ("kpost_ret","수취인명",     "kpost_ret"),
+    ("work_log","업체명",        "work_log"),
+]
+
 
 # ─────────────────────────────────────
 # 2. Streamlit 초기화
@@ -57,10 +67,37 @@ def load_all():
             df_v[col] = "NO"
     return df_v, df_a
 
+@st.cache_data(ttl=15)
+def get_all_aliases_from_source():
+    """원본 테이블에서 모든 alias 목록을 가져옵니다."""
+    all_aliases = {}
+    with get_connection() as con:
+        for tbl, col, ft in SRC_TABLES:
+            try:
+                # 테이블 및 컬럼 존재 여부 확인
+                tables = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", con)
+                if tbl not in tables['name'].values:
+                    all_aliases[ft] = []
+                    continue
+                
+                cols_in_tbl = [c[1] for c in con.execute(f"PRAGMA table_info({tbl});")]
+                if col not in cols_in_tbl:
+                    all_aliases[ft] = []
+                    continue
+
+                df = pd.read_sql(f"SELECT DISTINCT [{col}] as alias FROM {tbl}", con)
+                aliases = [str(x).strip() for x in df.alias.dropna() if str(x).strip()]
+                all_aliases[ft] = sorted(list(set(aliases)))
+            except Exception:
+                 all_aliases[ft] = []
+    return all_aliases
+
 df_vendors, df_alias = load_all()
 if df_vendors.empty:
     st.info("등록된 공급처가 없습니다. 매핑 매니저에서 먼저 추가하세요.")
     st.stop()
+    
+all_source_aliases = get_all_aliases_from_source()
 
 # ─────────────────────────────────────
 # 4. 검색 & 메인 리스트
@@ -90,15 +127,27 @@ if not sel_vendor:
     st.stop()
 
 row_v = df_vendors[df_vendors.vendor == sel_vendor].iloc[0]
-
 df_alias_v = df_alias[df_alias.vendor == sel_vendor]
-alias_dict = {ft: ", ".join(df_alias_v[df_alias_v.file_type == ft].alias) for ft in FILE_TYPES}
 
-inb  = st.text_area("입고전표 별칭", alias_dict["inbound_slip"])
-ship = st.text_area("배송통계 별칭", alias_dict["shipping_stats"])
-kpin = st.text_area("우체국접수 별칭", alias_dict["kpost_in"])
-ktrt = st.text_area("우체국반품 별칭", alias_dict["kpost_ret"])
-wl   = st.text_area("작업일지 별칭", alias_dict["work_log"])
+def get_options_and_defaults(file_type: str) -> (List[str], List[str]):
+    """multiselect 에 필요한 옵션과 기본값을 반환합니다."""
+    default_aliases = df_alias_v[df_alias_v.file_type == file_type].alias.tolist()
+    source_aliases = all_source_aliases.get(file_type, [])
+    options = sorted(list(set(default_aliases + source_aliases)))
+    return options, default_aliases
+
+# 파일 타입별로 multiselect 생성
+inb_opts, inb_defs = get_options_and_defaults("inbound_slip")
+ship_opts, ship_defs = get_options_and_defaults("shipping_stats")
+kpin_opts, kpin_defs = get_options_and_defaults("kpost_in")
+ktrt_opts, ktrt_defs = get_options_and_defaults("kpost_ret")
+wl_opts, wl_defs = get_options_and_defaults("work_log")
+
+inb  = st.multiselect("입고전표 별칭", inb_opts, default=inb_defs)
+ship = st.multiselect("배송통계 별칭", ship_opts, default=ship_defs)
+kpin = st.multiselect("우체국접수 별칭", kpin_opts, default=kpin_defs)
+ktrt = st.multiselect("우체국반품 별칭", ktrt_opts, default=ktrt_defs)
+wl   = st.multiselect("작업일지 별칭", wl_opts, default=wl_defs)
 
 l, r = st.columns(2)
 rate_type   = l.selectbox("요금타입", ["A", "STD"], index=["A", "STD"].index(row_v.rate_type or "A"))
@@ -126,8 +175,8 @@ if save_col.button("💾 변경 사항 저장"):
                 ),
             )
             con.execute("DELETE FROM aliases WHERE vendor=?", (sel_vendor,))
-            def _ins(ft, txt):
-                for a in [v.strip() for v in txt.split(',') if v.strip()]:
+            def _ins(ft: str, lst: List[str]):
+                for a in lst:
                     con.execute("INSERT INTO aliases VALUES (?,?,?)", (a, sel_vendor, ft))
             _ins("inbound_slip", inb)
             _ins("shipping_stats", ship)
@@ -144,13 +193,13 @@ if save_col.button("💾 변경 사항 저장"):
 # 7. 삭제
 # ─────────────────────────────────────
 if del_col.button("🗑 공급처 삭제", type="secondary"):
-    if st.radio("정말 삭제할까요?", ["취소", "삭제"], horizontal=True) == "삭제":
-        try:
+    try:
+        if st.radio("정말 삭제할까요?", ["취소", "삭제"], horizontal=True, index=0) == "삭제":
             with get_connection() as con:
                 con.execute("DELETE FROM vendors WHERE vendor=?", (sel_vendor,))
                 con.execute("DELETE FROM aliases WHERE vendor=?", (sel_vendor,))
             st.cache_data.clear()
             st.success("삭제 완료")
             st.rerun()
-        except Exception as e:
-            st.error(f"❌ 삭제 실패: {e}")
+    except Exception as e:
+        st.error(f"❌ 삭제 실패: {e}")
