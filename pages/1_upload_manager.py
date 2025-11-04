@@ -84,7 +84,25 @@ def delete_table_with_backup(table: str):
             st.error(f"삭제 실패: {e}")
 
 # ─────────────────────────────────────
-# 업로드 UI
+# 캐시된 테이블 존재 확인 함수
+# ─────────────────────────────────────
+@st.cache_data(ttl=30)
+def check_table_exists(table_name):
+    with sqlite3.connect(db_path) as con:
+        try:
+            result = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", 
+                (table_name,)
+            ).fetchone()
+            if result:
+                count = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                return count > 0, count
+            return False, 0
+        except Exception:
+            return False, 0
+
+# ─────────────────────────────────────
+# 업로드 UI (최적화)
 # ─────────────────────────────────────
 
 cols = st.columns(len(TARGETS))
@@ -99,17 +117,13 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
             if df_up.empty:
                 col.warning("빈 파일입니다.")
             else:
-                col.dataframe(df_up.head().astype(str), height=150, use_container_width=True)
-                col.markdown("📌 **업로드된 엑셀 컬럼:**")
-                col.write(list(df_up.columns))
-                # ⬇️ 원본 파일 다운로드 버튼
-                col.download_button(
-                    label="⬇️ 원본 파일 다운로드",
-                    data=upl.getvalue(),
-                    file_name=upl.name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_{tbl}"
-                )
+                # 간략한 정보만 표시 (성능 개선)
+                col.info(f"📊 {len(df_up):,}행 × {len(df_up.columns)}컬럼")
+                
+                # 상세 보기는 expander로
+                with col.expander("📋 상세 미리보기"):
+                    st.dataframe(df_up.head(3).astype(str), width='stretch')
+                    st.caption(f"컬럼: {', '.join(df_up.columns[:5])}{'...' if len(df_up.columns) > 5 else ''}")
 
                 if col.button("✅ 신규 데이터 저장", key=f"save_{tbl}"):
                     try:
@@ -119,9 +133,9 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
                             elapsed = time.time() - t0
 
                         if added == 0:
-                            col.warning(f"⚠️ 새로운 데이터가 없습니다. (처리시간: {elapsed:.2f}s)")
+                            col.warning(f"⚠️ 새로운 데이터가 없습니다. ({elapsed:.2f}s)")
                         else:
-                            col.success(f"{added:,}건 추가 저장 완료! (전체 {total:,}건, {elapsed:.2f}초)")
+                            col.success(f"✅ {added:,}건 추가! (전체 {total:,}건, {elapsed:.2f}s)")
                         time.sleep(MESSAGE_DELAY)
                         safe_rerun()
                     except Exception as e:
@@ -129,28 +143,12 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
         except Exception as e:
             col.error(f"읽기 실패: {e}")
 
-    # 📥 현 테이블 다운로드 버튼 (데이터 존재 여부만 확인)
-    @st.cache_data(ttl=30)  # 30초 캐시
-    def check_table_exists(table_name):
-        with sqlite3.connect(db_path) as con:
-            try:
-                result = con.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", 
-                    (table_name,)
-                ).fetchone()
-                if result:
-                    count = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-                    return count > 0, count
-                return False, 0
-            except Exception:
-                return False, 0
-    
+    # 📥 현 테이블 다운로드 버튼 (캐시 사용)
     has_data, row_count = check_table_exists(tbl)
     
     if has_data:
-        # 실제 다운로드는 버튼 클릭 시에만 실행
-        if col.button(f"⬇️ 현재 데이터 다운로드 ({row_count:,}건)", key=f"dl_prep_{tbl}"):
-            with st.spinner("Excel 파일 생성 중..."):
+        if col.button(f"⬇️ 다운로드 ({row_count:,}건)", key=f"dl_prep_{tbl}"):
+            with st.spinner("Excel 생성 중..."):
                 with sqlite3.connect(db_path) as con:
                     df_tbl = pd.read_sql(f"SELECT * FROM {tbl}", con)
                 
@@ -160,16 +158,16 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
                 buffer.seek(0)
                 
                 col.download_button(
-                    label="📁 Excel 파일 다운로드",
+                    label="📁 다운로드",
                     data=buffer.getvalue(),
                     file_name=f"{tbl}_{date.today()}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_table_{tbl}"
                 )
     else:
-        col.info("데이터가 없습니다.")
+        col.caption("데이터 없음")
 
-    if col.button("🗑 테이블 삭제 (백업)", key=f"del_{tbl}"):
+    if col.button("🗑 삭제", key=f"del_{tbl}"):
         delete_table_with_backup(tbl)
         time.sleep(MESSAGE_DELAY)
         safe_rerun()

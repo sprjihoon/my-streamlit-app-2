@@ -30,7 +30,7 @@ with get_connection() as con:
 # ─────────────────────────────────────
 SKU_OPTS  = ["≤100", "≤300", "≤500", "≤1,000", "≤2,000", ">2,000"]
 FLAG_COLS = [
-    "barcode_f", "custbox_f", "void_f", "pp_bag_f",
+    "barcode_f", "custbox_f", "void_f", "pp_bag_f", "mailer_f",
     "video_out_f", "video_ret_f",
 ]
 FILE_TYPES = [
@@ -52,7 +52,7 @@ try:
     st.set_page_config(page_title="매핑 리스트", layout="wide")
 except Exception:
     pass
-st.title("📋 공급처 매핑 리스트")
+st.title("📋 거래처 매핑 리스트")
 
 # ─────────────────────────────────────
 # 3. 데이터 로드 (캐시 15초)
@@ -102,7 +102,29 @@ all_source_aliases = get_all_aliases_from_source()
 # ─────────────────────────────────────
 # 4. 검색 & 메인 리스트
 # ─────────────────────────────────────
-kw = st.text_input("검색어(공급처/별칭)").strip().lower()
+# 검색 및 필터
+col1, col2, col3 = st.columns([2, 1, 1])
+
+with col1:
+    kw = st.text_input("🔍 검색어 (거래처/별칭)", placeholder="검색...").strip().lower()
+
+with col2:
+    filter_mode = st.selectbox("📊 상태", ["활성만", "비활성만", "전체"], index=0)
+
+with col3:
+    # 통계 메트릭
+    total_vendors = len(df_vendors)
+    active_cnt = len(df_vendors[df_vendors.get('active', 'YES') == 'YES'])
+    inactive_cnt = len(df_vendors[df_vendors.get('active', 'YES') == 'NO'])
+    
+    if filter_mode == "활성만":
+        st.metric("표시 중", f"{active_cnt}개", delta="활성", delta_color="normal")
+    elif filter_mode == "비활성만":
+        st.metric("표시 중", f"{inactive_cnt}개", delta="비활성", delta_color="off")
+    else:
+        st.metric("표시 중", f"{total_vendors}개", delta="전체", delta_color="normal")
+
+# 검색 필터
 if kw:
     matched = df_alias[df_alias.alias.str.lower().str.contains(kw)].vendor.unique()
     df_disp = df_vendors[
@@ -111,18 +133,112 @@ if kw:
 else:
     df_disp = df_vendors.copy()
 
+# 활성 상태 필터 적용
+if filter_mode == "활성만":
+    df_disp = df_disp[df_disp.get('active', 'YES') == 'YES']
+elif filter_mode == "비활성만":
+    df_disp = df_disp[df_disp.get('active', 'YES') == 'NO']
+
+st.markdown("---")
+
 main_cols = [
-    "vendor", "rate_type", "sku_group",
-    "barcode_f", "custbox_f", "void_f", "pp_bag_f",
+    "vendor", "active", "rate_type", "sku_group",
+    "barcode_f", "custbox_f", "void_f", "pp_bag_f", "mailer_f",
     "video_out_f", "video_ret_f",
 ]
 
-st.dataframe(df_disp[main_cols], use_container_width=True, height=400)
+st.dataframe(df_disp[main_cols], width='stretch', height=400)
+
+# ─────────────────────────────────────
+# 4-bis. 미매칭 alias 통계
+# ─────────────────────────────────────
+st.markdown("---")
+st.subheader("📊 미매칭 Alias 통계")
+
+def get_unmatched_stats():
+    """파일별 미매칭 alias 개수 반환"""
+    parts = []
+    with get_connection() as con:
+        for tbl, col, ft in SRC_TABLES:
+            # 테이블 존재 확인
+            if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tbl,)).fetchone():
+                continue
+            # 컬럼 존재 확인
+            cols = [c[1] for c in con.execute(f"PRAGMA table_info({tbl});")]
+            if col not in cols:
+                continue
+            
+            parts.append(
+                f"SELECT DISTINCT {col} AS alias, '{ft}' AS file_type FROM {tbl} "
+                f"WHERE {col} IS NOT NULL AND TRIM({col}) != ''"
+            )
+        
+        if not parts:
+            return pd.DataFrame(columns=["file_type", "미매칭_건수"])
+        
+        # 전체 alias 가져오기
+        all_aliases_query = " UNION ".join(parts)
+        df_all = pd.read_sql(all_aliases_query, con)
+        
+        # aliases 테이블의 매핑된 alias 가져오기
+        df_mapped = pd.read_sql("SELECT alias, file_type FROM aliases", con)
+        
+        # 미매칭 찾기
+        df_merged = df_all.merge(
+            df_mapped,
+            on=['alias', 'file_type'],
+            how='left',
+            indicator=True
+        )
+        
+        df_unmatched = df_merged[df_merged['_merge'] == 'left_only']
+        
+        # 파일별 집계
+        if df_unmatched.empty:
+            return pd.DataFrame(columns=["file_type", "미매칭_건수"])
+        
+        stats = df_unmatched.groupby('file_type').size().reset_index(name='미매칭_건수')
+        return stats
+
+try:
+    df_unmatch_stats = get_unmatched_stats()
+    
+    if df_unmatch_stats.empty:
+        st.success("✅ 모든 데이터가 정상 매핑되었습니다!")
+    else:
+        # 파일 타입 한글명 매핑
+        file_type_names = {
+            "inbound_slip": "입고전표",
+            "shipping_stats": "배송통계",
+            "kpost_in": "우체국접수",
+            "kpost_ret": "우체국반품",
+            "work_log": "작업일지"
+        }
+        
+        df_unmatch_stats['파일명'] = df_unmatch_stats['file_type'].map(file_type_names)
+        
+        col1, col2 = st.columns([2, 3])
+        
+        with col1:
+            st.metric("총 미매칭 건수", f"{df_unmatch_stats['미매칭_건수'].sum():,}건")
+        
+        with col2:
+            st.dataframe(
+                df_unmatch_stats[['파일명', '미매칭_건수']].rename(columns={'미매칭_건수': '건수'}),
+                width='stretch',
+                hide_index=True
+            )
+        
+        st.info("💡 **매핑 관리** 페이지에서 미매칭 alias를 추가할 수 있습니다.")
+except Exception as e:
+    st.error(f"미매칭 통계 오류: {e}")
+
+st.markdown("---")
 
 # ─────────────────────────────────────
 # 5. 상세 편집 영역
 # ─────────────────────────────────────
-sel_vendor = st.selectbox("✏️ 수정/삭제할 공급처", [""] + df_vendors.vendor.tolist())
+sel_vendor = st.selectbox("✏️ 수정/삭제할 거래처", [""] + df_vendors.vendor.tolist())
 if not sel_vendor:
     st.stop()
 
@@ -178,12 +294,14 @@ wl   = c5.multiselect("작업일지 별칭", wl_opts, default=wl_defs)
 st.divider()
 
 l, r = st.columns(2)
+active      = l.selectbox("🟢 활성 상태", ["YES", "NO"], index=["YES", "NO"].index(row_v.get("active") or "YES"), help="계약 종료 시 NO로 설정")
 rate_type   = l.selectbox("요금타입", ["A", "STD"], index=["A", "STD"].index(row_v.rate_type or "A"))
 sku_group   = r.selectbox("SKU 구간", SKU_OPTS, index=SKU_OPTS.index(row_v.sku_group or SKU_OPTS[0]))
 barcode_f   = l.selectbox("바코드 부착", ["YES", "NO"], index=["YES", "NO"].index(row_v.barcode_f or "NO"))
 custbox_f   = l.selectbox("박스", ["YES", "NO"], index=["YES", "NO"].index(row_v.custbox_f or "NO"))
 void_f      = r.selectbox("완충재", ["YES", "NO"], index=["YES", "NO"].index(row_v.void_f or "NO"))
 pp_bag_f    = r.selectbox("PP 봉투", ["YES", "NO"], index=["YES", "NO"].index(row_v.pp_bag_f or "NO"))
+mailer_f    = r.selectbox("📦 택배 봉투 (극소/소/중)", ["YES", "NO"], index=["YES", "NO"].index(row_v.get("mailer_f") or "NO"))
 video_out_f = l.selectbox("출고영상촬영", ["YES", "NO"], index=["YES", "NO"].index(row_v.video_out_f or "NO"))
 video_ret_f = l.selectbox("반품영상촬영", ["YES", "NO"], index=["YES", "NO"].index(row_v.video_ret_f or "NO"))
 
@@ -204,10 +322,10 @@ if save_col.button("💾 변경 사항 저장"):
     try:
         with get_connection() as con:
             con.execute(
-                """UPDATE vendors SET rate_type=?, sku_group=?, barcode_f=?, custbox_f=?, void_f=?, pp_bag_f=?, video_out_f=?, video_ret_f=? WHERE vendor=?""",
+                """UPDATE vendors SET active=?, rate_type=?, sku_group=?, barcode_f=?, custbox_f=?, void_f=?, pp_bag_f=?, mailer_f=?, video_out_f=?, video_ret_f=? WHERE vendor=?""",
                 (
-                    rate_type, sku_group, barcode_f, custbox_f,
-                    void_f, pp_bag_f, video_out_f, video_ret_f, sel_vendor,
+                    active, rate_type, sku_group, barcode_f, custbox_f,
+                    void_f, pp_bag_f, mailer_f, video_out_f, video_ret_f, sel_vendor,
                 ),
             )
             con.execute("DELETE FROM aliases WHERE vendor=?", (sel_vendor,))

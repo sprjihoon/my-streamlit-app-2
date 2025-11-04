@@ -17,7 +17,7 @@ pages/2_mapping_manager.py – 공급처 매핑 매니저 (vendors / aliases)
 # 0. 상수
 # ─────────────────────────────────────
 SKU_OPTS  = ["≤100","≤300","≤500","≤1,000","≤2,000",">2,000"]
-FLAG_COLS = ["barcode_f","custbox_f","void_f","pp_bag_f","video_out_f","video_ret_f"]
+FLAG_COLS = ["barcode_f","custbox_f","void_f","pp_bag_f","mailer_f","video_out_f","video_ret_f"]
 
 # ─────────────────────────────────────
 # 1. Streamlit 설정
@@ -34,7 +34,7 @@ if st.session_state.get('save_completed', False):
     # 상태 초기화
     st.session_state.save_completed = False
 
-st.title("🔗 공급처 매핑 관리 (vendors / aliases)")
+st.title("🔗 거래처 매핑 관리 (vendors / aliases)")
 
 # ─────────────────────────────────────
 # 2. 유틸
@@ -193,11 +193,13 @@ alias_wl   = c5.multiselect("작업일지 별칭",     opt["work_log"])
 
 st.divider()
 l,r = st.columns(2)
+active      = l.selectbox("🟢 활성 상태", ["YES","NO"], help="계약 종료 시 NO로 설정")
 rate_type   = l.selectbox("요금타입", ["A","STD"])
 barcode_f   = l.selectbox("바코드 부착", ["YES","NO"])
 custbox_f   = l.selectbox("박스", ["YES","NO"])
 void_f      = r.selectbox("완충재", ["YES","NO"])
 pp_bag_f    = r.selectbox("PP 봉투", ["YES","NO"])
+mailer_f    = r.selectbox("📦 택배 봉투 (극소/소/중)", ["YES","NO"])
 sku_group   = r.selectbox("대표 SKU 구간", SKU_OPTS)
 video_out_f = l.selectbox("출고영상촬영", ["YES","NO"])
 video_ret_f = l.selectbox("반품영상촬영", ["YES","NO"])
@@ -205,13 +207,13 @@ video_ret_f = l.selectbox("반품영상촬영", ["YES","NO"])
 # ─────────────────────────────────────
 # 8. 저장
 # ─────────────────────────────────────
-if st.button("💾 공급처 저장/업데이트"):
+if st.button("💾 거래처 저장/업데이트"):
     vendor = vendor_pk.strip()
     if not vendor:
-        st.warning("⚠️ 공급처명(PK)를 입력하세요.")
+        st.warning("⚠️ 거래처명(PK)를 입력하세요.")
         st.stop()
     if not name.strip():
-        st.warning("⚠️ 공급처명(표준)을 입력하세요.")
+        st.warning("⚠️ 거래처명(표준)을 입력하세요.")
         st.stop()
 
     try:
@@ -223,24 +225,24 @@ if st.button("💾 공급처 저장/업데이트"):
                 # 업데이트
                 con.execute("""
                     UPDATE vendors SET 
-                        name=?, rate_type=?, sku_group=?,
-                        barcode_f=?, custbox_f=?, void_f=?, pp_bag_f=?,
+                        name=?, rate_type=?, sku_group=?, active=?,
+                        barcode_f=?, custbox_f=?, void_f=?, pp_bag_f=?, mailer_f=?,
                         video_out_f=?, video_ret_f=?
                     WHERE vendor=?
-                """, (name.strip(), rate_type, sku_group,
-                      barcode_f, custbox_f, void_f, pp_bag_f,
+                """, (name.strip(), rate_type, sku_group, active,
+                      barcode_f, custbox_f, void_f, pp_bag_f, mailer_f,
                       video_out_f, video_ret_f, vendor))
                 action = "업데이트"
             else:
                 # 새로 삽입
                 con.execute("""
                     INSERT INTO vendors(
-                        vendor,name,rate_type,sku_group,
-                        barcode_f,custbox_f,void_f,pp_bag_f,
+                        vendor,name,rate_type,sku_group,active,
+                        barcode_f,custbox_f,void_f,pp_bag_f,mailer_f,
                         video_out_f,video_ret_f
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?)
-                """, (vendor, name.strip(), rate_type, sku_group,
-                      barcode_f, custbox_f, void_f, pp_bag_f,
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (vendor, name.strip(), rate_type, sku_group, active,
+                      barcode_f, custbox_f, void_f, pp_bag_f, mailer_f,
                       video_out_f, video_ret_f))
                 action = "신규 등록"
             
@@ -303,7 +305,7 @@ if not st.session_state.save_completed:
                  df_unmatch.groupby("file_type")["alias"].count()
                             .rename("건수").to_frame().T)
         st.warning(f"⚠️ 미매칭 alias {len(df_unmatch):,}건 발견")
-        st.dataframe(df_unmatch.reset_index(drop=True), use_container_width=True, height=300)
+        st.dataframe(df_unmatch.reset_index(drop=True), width='stretch', height=300)
         st.download_button("⬇️ CSV 다운로드",
                            df_unmatch.to_csv(index=False).encode("utf-8-sig"),
                            "unmatched_alias.csv",

@@ -15,12 +15,6 @@ import os
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-# --- 디버깅: sys.path 내용 확인 ---
-print("--- DEBUG: sys.path after modification ---")
-import pprint
-pprint.pprint(sys.path)
-print("-----------------------------------------")
-# ------------------------------------
 
 import time
 from datetime import date, datetime
@@ -46,7 +40,7 @@ from common import get_connection
 # 0. 페이지 설정
 # ─────────────────────────────────────
 st.set_page_config(page_title="📊 인보이스 일괄 계산기", layout="wide")
-st.title("📊 전체 공급처 인보이스 자동 계산")
+st.title("📊 전체 거래처 인보이스 자동 계산")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -60,13 +54,36 @@ with col2:
 @st.cache_data(show_spinner=False)
 def load_vendors() -> pd.DataFrame:
     with get_connection() as con:
-        return pd.read_sql("SELECT vendor_id, vendor FROM vendors ORDER BY vendor", con)
+        return pd.read_sql("SELECT vendor_id, vendor, active FROM vendors ORDER BY vendor", con)
 
 df_vendors = load_vendors()
-vendor_id_map = dict(zip(df_vendors.vendor, df_vendors.vendor_id))
-all_vendors: List[str] = df_vendors.vendor.tolist()
 
-selected_vendors = st.multiselect("✅ 계산할 공급처 (비우면 전체)", all_vendors, default=all_vendors)
+# 통계 및 필터
+total_count = len(df_vendors)
+active_count = len(df_vendors[df_vendors['active'] == 'YES'])
+inactive_count = len(df_vendors[df_vendors['active'] == 'NO'])
+
+col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+with col1:
+    st.metric("전체 거래처", f"{total_count}개")
+with col2:
+    st.metric("🟢 활성", f"{active_count}개")
+with col3:
+    st.metric("⚪ 비활성", f"{inactive_count}개")
+with col4:
+    show_mode = st.selectbox("표시 옵션", ["활성만", "비활성만", "전체"], index=0, label_visibility="collapsed")
+
+if show_mode == "활성만":
+    df_vendors_filtered = df_vendors[df_vendors['active'] == 'YES'].copy()
+elif show_mode == "비활성만":
+    df_vendors_filtered = df_vendors[df_vendors['active'] == 'NO'].copy()
+else:
+    df_vendors_filtered = df_vendors.copy()
+
+vendor_id_map = dict(zip(df_vendors_filtered.vendor, df_vendors_filtered.vendor_id))
+all_vendors: List[str] = df_vendors_filtered.vendor.tolist()
+
+selected_vendors = st.multiselect("✅ 계산할 거래처 (비우면 전체)", all_vendors, default=all_vendors)
 
 # ─────────────────────────────────────
 # 2. 인보이스 일괄 계산·확정
@@ -75,13 +92,29 @@ if st.button("🚀 인보이스 일괄 생성 시작", type="primary"):
 
     total_cnt = len(selected_vendors)
     if total_cnt == 0:
-        st.warning("⚠️ 선택된 공급처가 없습니다.")
+        st.warning("⚠️ 선택된 거래처가 없습니다.")
         st.stop()
 
+    # 중지 플래그 초기화
+    st.session_state["stop_invoice_generation"] = False
+    
     progress = st.progress(0.0, text="대기 중…")
     log: List[Tuple[str, str]] = []
+    
+    # 중지 버튼 컨테이너
+    stop_btn_container = st.empty()
 
     for idx, vendor in enumerate(selected_vendors, start=1):
+        # 중지 버튼 표시
+        with stop_btn_container.container():
+            if st.button("⏹️ 계산 중지", key=f"stop_btn_{idx}", type="secondary"):
+                st.session_state["stop_invoice_generation"] = True
+        
+        # 중지 체크
+        if st.session_state.get("stop_invoice_generation", False):
+            log.append(("중지됨", f"⚠️ 사용자가 {idx-1}/{total_cnt} 완료 후 중지"))
+            break
+        
         step_start = time.time()
         progress.progress((idx - 1) / total_cnt, text=f"🔄 {vendor} 처리 중 … ({idx}/{total_cnt})")
         try:
@@ -154,10 +187,20 @@ if st.button("🚀 인보이스 일괄 생성 시작", type="primary"):
 
         progress.progress(idx / total_cnt)
 
+    # 중지 버튼 제거
+    stop_btn_container.empty()
+    
     st.cache_data.clear()
     progress.empty()
-    st.success("✅ 인보이스 일괄 계산·확정 완료")
-    st.dataframe(pd.DataFrame(log, columns=["공급처", "결과"]), use_container_width=True)
+    
+    # 완료 메시지
+    if st.session_state.get("stop_invoice_generation", False):
+        st.warning(f"⚠️ 인보이스 계산이 중지되었습니다. ({idx-1}/{total_cnt} 완료)")
+        st.session_state["stop_invoice_generation"] = False
+    else:
+        st.success("✅ 인보이스 일괄 계산·확정 완료")
+    
+    st.dataframe(pd.DataFrame(log, columns=["거래처", "결과"]), width='stretch')
 
     with get_connection() as con:
         df_recent = pd.read_sql(

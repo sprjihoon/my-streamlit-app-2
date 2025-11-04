@@ -120,7 +120,7 @@ st.subheader(f"✏️ {TABLES[selected_table]} 수정")
 edit_df = st.data_editor(
     view_df,
     num_rows="dynamic",
-    use_container_width=True,
+    width='stretch',
     key=f"edit_{selected_table}",
 )
 

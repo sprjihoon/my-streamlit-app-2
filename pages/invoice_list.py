@@ -175,10 +175,10 @@ if df.empty:
     st.info("인보이스가 없습니다.")
     st.stop()
 
-df['period_from'] = pd.to_datetime(df['period_from']).dt.date
+df['period_from'] = pd.to_datetime(df['period_from'], format='ISO8601', errors='coerce').dt.date
 
 # 기간(년‑월) 필터
-ym_opts = sorted(pd.to_datetime(df['period_from']).dt.strftime('%Y-%m').unique())
+ym_opts = sorted(pd.to_datetime(df['period_from'], format='ISO8601', errors='coerce').dt.strftime('%Y-%m').unique())
 ym_opts.insert(0, '전체')  # '전체' 옵션 추가
 def_ym = ym_opts[-1] if '전체' not in ym_opts[-1] else ym_opts[1]
 sel_ym = st.selectbox("기간 (YYYY-MM)", ym_opts, index=ym_opts.index(def_ym))
@@ -208,56 +208,113 @@ view_df = df.loc[mask].set_index('invoice_id').copy()
 
 st.markdown(f"📋 {len(view_df)}건 / 기간 {sel_ym} / 총 합계 ₩{int(view_df['total_amount'].sum()):,}")
 
-# Streamlit 1.35+ built-in row selection
-event = st.dataframe(
-    view_df,
-    use_container_width=True,
-    hide_index=False,
-    on_select="rerun",
-    selection_mode="multi-row",
-    key="inv_table"
-)
-
-# 선택된 인보이스 ID 추출 (positional index → actual invoice_id)
-try:
-    selected_pos = event.selection.rows  # type: ignore[attr-defined]
-except AttributeError:
-    selected_pos = []
-
-selected_ids: List[int] = [view_df.index[i] for i in selected_pos]
-
 # ──────────────────────────────────────
-# 삭제 버튼들
+# 선택 방식: 체크박스
 # ──────────────────────────────────────
-col_del1, col_del2 = st.columns(2)
+st.markdown("### 📝 인보이스 목록")
 
-with col_del1:
-    if st.button("🗑️ 선택 항목 삭제", disabled=not selected_ids, use_container_width=True):
+# session_state에 선택 항목 초기화
+if "selected_invoice_ids" not in st.session_state:
+    st.session_state["selected_invoice_ids"] = []
+
+# 전체 선택 체크박스
+st.markdown("#### 선택 옵션")
+select_all = st.checkbox("전체 선택", key="select_all_invoices")
+
+# 전체 선택 상태 확인 (모든 항목이 선택되어 있는지)
+all_selected = len(view_df) > 0 and set(view_df.index.tolist()).issubset(set(st.session_state.get("selected_invoice_ids", [])))
+
+# 전체 선택/해제 처리
+if select_all and not all_selected:
+    # 전체 선택으로 변경
+    st.session_state["selected_invoice_ids"] = list(set(st.session_state.get("selected_invoice_ids", []) + view_df.index.tolist()))
+    st.rerun()
+elif not select_all and all_selected:
+    # 전체 해제로 변경
+    current_ids = set(st.session_state.get("selected_invoice_ids", []))
+    view_ids = set(view_df.index.tolist())
+    st.session_state["selected_invoice_ids"] = list(current_ids - view_ids)
+    st.rerun()
+
+# 개별 선택을 위한 체크박스 추가된 데이터 표시
+st.markdown("---")
+for idx, (invoice_id, row) in enumerate(view_df.iterrows()):
+    is_selected = invoice_id in st.session_state.get("selected_invoice_ids", [])
+    
+    # 한 줄로 표시
+    cols = st.columns([0.3, 0.5, 1.5, 1.5, 1, 0.7])
+    
+    with cols[0]:
+        checked = st.checkbox(
+            "", 
+            value=is_selected, 
+            key=f"check_{invoice_id}", 
+            label_visibility="collapsed"
+        )
+        
+        # 체크 상태 변경 시 업데이트 후 즉시 rerun
+        if checked != is_selected:
+            if checked:
+                st.session_state["selected_invoice_ids"].append(invoice_id)
+            else:
+                st.session_state["selected_invoice_ids"].remove(invoice_id)
+            st.rerun()
+    
+    with cols[1]:
+        st.write(f"**#{invoice_id}**")
+    with cols[2]:
+        st.write(row.get('업체', ''))
+    with cols[3]:
+        st.write(f"{row.get('period_from', '')} ~ {row.get('period_to', '')}")
+    with cols[4]:
+        st.write(f"₩{int(row.get('total_amount', 0)):,}")
+    with cols[5]:
+        st.write(f"`{row.get('status', 'draft')}`")
+
+selected_ids = st.session_state.get("selected_invoice_ids", [])
+
+# 삭제 버튼들 (체크박스 아래에 배치)
+st.markdown("---")
+col_btn1, col_btn2 = st.columns(2)
+
+with col_btn1:
+    selected_count = len(st.session_state.get("selected_invoice_ids", []))
+    if st.button(f"🗑️ 선택 항목 삭제 ({selected_count}건)", 
+                 disabled=selected_count == 0, 
+                 width='stretch', 
+                 key="btn_delete_selected"):
         st.session_state["confirm_delete_selected"] = True
 
-with col_del2:
-    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", use_container_width=True):
+with col_btn2:
+    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", width='stretch', key="btn_delete_all"):
         st.session_state["confirm_delete_all"] = True
 
 # --- 선택 항목 삭제 확인 ---
 if st.session_state.get("confirm_delete_selected"):
-    st.warning(f"**경고**: 선택된 **{len(selected_ids)}** 건의 인보이스를 정말로 삭제하시겠습니까?")
+    # session_state에서 선택된 항목 복구
+    ids_to_delete = st.session_state.get("selected_invoice_ids", selected_ids)
+    
+    st.warning(f"**경고**: 선택된 **{len(ids_to_delete)}** 건의 인보이스를 정말로 삭제하시겠습니까?")
     c1, c2, _ = st.columns([1, 1, 3])
     if c1.button("예, 선택 항목을 삭제합니다", type="primary"):
         with sqlite3.connect(DB_PATH) as con:
             cur = con.cursor()
-            for iid in selected_ids:
+            for iid in ids_to_delete:
                 cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (iid,))
                 cur.execute("DELETE FROM invoices WHERE invoice_id=?", (iid,))
             con.commit()
         
         st.cache_data.clear()
         del st.session_state["confirm_delete_selected"]
-        st.success(f"🗑️ 선택된 {len(selected_ids)}건 삭제 완료")
+        if "selected_invoice_ids" in st.session_state:
+            del st.session_state["selected_invoice_ids"]
+        st.success(f"🗑️ 선택된 {len(ids_to_delete)}건 삭제 완료")
         st.rerun()
 
     if c2.button("아니요, 취소"):
         del st.session_state["confirm_delete_selected"]
+        if "selected_invoice_ids" in st.session_state:
+            del st.session_state["selected_invoice_ids"]
         st.rerun()
 
 # --- 필터된 전체 삭제 확인 ---

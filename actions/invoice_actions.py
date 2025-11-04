@@ -302,19 +302,47 @@ def add_box_fee_by_zone(item_list: List[dict],
                         vendor: str,
                         zone_counts: Dict[str, int]) -> None:
     """
+    박스/봉투 자동 매칭
+    
+    ★ 새 로직 (우선순위 1):
+    • mailer_f = YES
+        극소 → 택배 봉투(소형) ₩70
+        소/중 → 택배 봉투(대형) ₩170
+        대형/특대/특특대 → 해당 사이즈 박스
+    
+    ★ 레거시 로직 (우선순위 2, 하위 호환):
     • pp_bag_f = YES and custbox_f = YES
-        극소·소 → 택배 봉투(소형), 중 → 택배 봉투(대형)
-    • 그 외: 각 구간에 맞는 박스
+        극소 → 택배 봉투(소형)
+        소/중 → 택배 봉투(대형)
+        대형/특대 → 해당 박스
+    
+    ★ 기본:
+    • 각 구간에 맞는 박스
     """
 
     # 1) 공급처 플래그
     with get_connection() as con:
         con.row_factory = sqlite3.Row
         row = con.execute(
-            "SELECT pp_bag_f, custbox_f FROM vendors WHERE vendor=?",
+            "SELECT pp_bag_f, custbox_f, mailer_f FROM vendors WHERE vendor=?",
             (vendor,)).fetchone()
-        use_mailer = (row and row["pp_bag_f"] == "YES"
-                      and row["custbox_f"] == "YES")
+        
+        # 새 로직: mailer_f 우선 확인
+        if row:
+            # sqlite3.Row에서 안전하게 값 추출
+            mailer_f_val = row["mailer_f"] if "mailer_f" in row.keys() else None
+            pp_bag_f_val = row["pp_bag_f"]
+            custbox_f_val = row["custbox_f"]
+            
+            if mailer_f_val == "YES":
+                use_mailer = True
+            # 레거시 로직: pp_bag_f AND custbox_f (하위 호환)
+            elif pp_bag_f_val == "YES" and custbox_f_val == "YES":
+                use_mailer = True
+            else:
+                use_mailer = False
+        else:
+            use_mailer = False
 
         # 2) 단가 테이블
         rates = (pd.read_sql(
@@ -324,25 +352,40 @@ def add_box_fee_by_zone(item_list: List[dict],
 
     # 3) 포장재 선택
     def pick(size: str, want_mailer: bool):
+        if want_mailer:
+            # 택배봉투 사용 (극소, 소, 중만)
+            if size == "극소":
+                # 극소: 택배 봉투(소형)
+                if "극소" in rates.index:
+                    df_search = (rates.loc[["극소"]]
+                                if isinstance(rates.loc["극소"], pd.Series)
+                                else rates.loc["극소"])
+                    df_m = df_search[df_search["항목"].str.contains("택배 봉투", na=False) &
+                                    df_search["항목"].str.contains("소형", na=False)]
+                    if not df_m.empty:
+                        return df_m.iloc[0]
+            
+            elif size in ("소", "중"):
+                # 소/중: 택배 봉투(대형)
+                # '중' size_code에서 택배 봉투(대형) 찾기
+                if "중" in rates.index:
+                    df_search = (rates.loc[["중"]]
+                                if isinstance(rates.loc["중"], pd.Series)
+                                else rates.loc["중"])
+                    df_m = df_search[df_search["항목"].str.contains("택배 봉투", na=False) &
+                                    df_search["항목"].str.contains("대형", na=False)]
+                    if not df_m.empty:
+                        return df_m.iloc[0]
+            
+            # 대형/특대/특특대: 아래에서 박스 선택
+        
+        # 박스 찾기 (택배봉투를 못 찾았거나, 대형/특대인 경우)
         if size not in rates.index:
             return None
         df_sel = (rates.loc[[size]]
                   if isinstance(rates.loc[size], pd.Series)
                   else rates.loc[size])
-
-        if want_mailer:
-            if size in ("극소", "소"):
-                df_m = df_sel[df_sel["항목"].str.contains("택배 봉투") &
-                               df_sel["항목"].str.contains("소형")]
-                if not df_m.empty:
-                    return df_m.iloc[0]
-            if size == "중":
-                df_m = df_sel[df_sel["항목"].str.contains("택배 봉투") &
-                               df_sel["항목"].str.contains("대형")]
-                if not df_m.empty:
-                    return df_m.iloc[0]
-
-        df_b = df_sel[df_sel["항목"].str.contains("박스")]
+        df_b = df_sel[df_sel["항목"].str.contains("박스", na=False)]
         return df_b.iloc[0] if not df_b.empty else None
 
     # 4) 항목 추가

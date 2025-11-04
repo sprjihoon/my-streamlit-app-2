@@ -1,0 +1,17 @@
+[server]
+enableCORS = false
+enableXsrfProtection = false
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[client]
+showErrorDetails = true
+
+[logger]
+level = "info"
+
+[deprecation]
+showfileUploaderEncoding = false
+
