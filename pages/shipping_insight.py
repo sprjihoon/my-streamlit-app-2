@@ -793,7 +793,7 @@ with tab5:
                 st.markdown("---")
                 st.markdown("#### 📊 일별 출고 통계")
                 
-                col_avg1, col_avg2, col_avg3, col_avg4 = st.columns(4)
+                col_avg1, col_avg2, col_avg3, col_avg4, col_avg5 = st.columns(5)
                 
                 with col_avg1:
                     daily_avg = daily_stats['총출고수량'].mean()
@@ -805,11 +805,19 @@ with tab5:
                 
                 with col_avg3:
                     daily_max = daily_stats['총출고수량'].max()
-                    st.metric("일 최대 출고량", f"{int(daily_max):,}개")
+                    daily_max_date = daily_stats.loc[daily_stats['총출고수량'].idxmax(), '날짜']
+                    st.metric("일 최대 출고량", f"{int(daily_max):,}개", 
+                             delta=f"{daily_max_date}")
                 
                 with col_avg4:
                     daily_min = daily_stats['총출고수량'].min()
                     st.metric("일 최소 출고량", f"{int(daily_min):,}개")
+                
+                with col_avg5:
+                    daily_max_orders = daily_stats['주문건수'].max()
+                    daily_max_orders_date = daily_stats.loc[daily_stats['주문건수'].idxmax(), '날짜']
+                    st.metric("일 최대 택배건수", f"{int(daily_max_orders):,}건", 
+                             delta=f"{daily_max_orders_date}")
                 
                 # 출고량 구간별 일수
                 st.markdown("##### 📊 출고량 구간별 일수")
