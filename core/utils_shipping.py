@@ -7,6 +7,9 @@ def shipping_stats(vendor: str, d_from: date, d_to: date, date_col: str = None) 
         # 1) 배송통계 원본
         df = pd.read_sql("SELECT * FROM shipping_stats", con)
         df.columns = [c.strip() for c in df.columns]
+        # count 컬럼이 있다면 제거 (PyArrow 에러 방지)
+        if "count" in df.columns:
+            df = df.drop(columns=["count"])
 
         # ────────── 날짜 컬럼 자동 감지 ──────────
         if not date_col:

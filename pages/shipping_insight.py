@@ -11,6 +11,23 @@ import pandas as pd
 import sqlite3
 from datetime import datetime
 
+# 차트용 (PyArrow 우회: 이미지로 렌더링)
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.font_manager as fm
+    # 한글 폰트 설정 (Windows: 맑은 고딕, Mac: AppleGothic, Linux: NanumGothic)
+    import platform
+    system_name = platform.system()
+    if system_name == 'Windows':
+        plt.rc('font', family='Malgun Gothic')
+    elif system_name == 'Darwin':
+        plt.rc('font', family='AppleGothic')
+    else:
+        plt.rc('font', family='NanumGothic')
+    plt.rcParams['axes.unicode_minus'] = False # 마이너스 기호 깨짐 방지
+except ImportError:  # 환경에 없을 수도 있음
+    plt = None
+
 st.set_page_config(page_title="📊 데이터 인사이트", layout="wide")
 st.title("📊 전체 데이터 인사이트")
 
@@ -94,6 +111,8 @@ with col1:
     st.metric("총 주문 건수", f"{total_orders:,}건")
 
 with col2:
+    # 문자열 연결 방지를 위해 숫자로 변환
+    df[col_qty] = pd.to_numeric(df[col_qty], errors='coerce').fillna(0)
     total_qty = int(df[col_qty].sum())
     st.metric("총 출고 수량", f"{total_qty:,}개")
 
@@ -103,6 +122,8 @@ with col3:
 
 with col4:
     if col_amount and col_amount in df.columns:
+        # 문자열 연결 방지를 위해 숫자로 변환
+        df[col_amount] = pd.to_numeric(df[col_amount], errors='coerce').fillna(0)
         total_amount = int(df[col_amount].sum())
         st.metric("총 정산액", f"₩{total_amount:,}")
     else:
@@ -141,14 +162,31 @@ with tab1:
     col_chart, col_table = st.columns([2, 1])
     
     with col_chart:
-        st.bar_chart(top_products.set_index('상품명')['총판매수량'], height=400)
+        if plt is not None:
+            # PyArrow를 완전히 우회: Matplotlib으로 이미지 렌더링
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.bar(top_products['상품명'].astype(str), top_products['총판매수량'])
+            ax.set_xlabel("상품명")
+            ax.set_ylabel("총판매수량")
+            ax.set_title("가장 많이 팔린 상품 TOP 20")
+            plt.xticks(rotation=60, ha="right")
+            plt.tight_layout()
+            st.pyplot(fig, use_container_width=True)
+        else:
+            # matplotlib이 없을 때는 표만 표시
+            st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
+            df_disp = top_products[['순위', '상품명', '총판매수량']].copy()
+            st.markdown(
+                df_disp.to_html(index=False, escape=False, classes="dataframe"),
+                unsafe_allow_html=True,
+            )
     
     with col_table:
-        st.dataframe(
-            top_products[['순위', '상품명', '총판매수량']],
-            width='stretch',
-            height=400,
-            hide_index=True
+        # PyArrow 우회: 인기 상품 표도 HTML로 렌더링
+        df_table = top_products[['순위', '상품명', '총판매수량']].copy()
+        st.markdown(
+            df_table.to_html(index=False, escape=False, classes="dataframe"),
+            unsafe_allow_html=True,
         )
     
     st.download_button(
@@ -176,14 +214,25 @@ with tab2:
     col_chart, col_table = st.columns([2, 1])
     
     with col_chart:
-        st.bar_chart(vendor_stats.set_index('거래처')['총출고수량'], height=400)
+        # PyArrow/Altair 우회: Matplotlib으로 이미지 렌더링
+        if plt is not None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.bar(vendor_stats['거래처'].astype(str), vendor_stats['총출고수량'])
+            ax.set_xlabel("거래처")
+            ax.set_ylabel("총출고수량")
+            ax.set_title("가장 많이 출고된 거래처 TOP 20")
+            plt.xticks(rotation=60, ha="right")
+            plt.tight_layout()
+            st.pyplot(fig, use_container_width=True)
+        else:
+            st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
     
     with col_table:
-        st.dataframe(
-            vendor_stats[['순위', '거래처', '총출고수량', '주문건수', '평균수량/건']],
-            width='stretch',
-            height=400,
-            hide_index=True
+        # PyArrow 우회: HTML 테이블로 표시
+        df_vendor_table = vendor_stats[['순위', '거래처', '총출고수량', '주문건수', '평균수량/건']].copy()
+        st.markdown(
+            df_vendor_table.to_html(index=False, escape=False, classes="dataframe"),
+            unsafe_allow_html=True,
         )
     
     st.download_button(
@@ -221,22 +270,42 @@ with tab3:
         
         with col_chart:
             st.markdown("##### 총매출 TOP 20")
-            st.bar_chart(revenue_stats.set_index('거래처')['총매출'], height=300)
+            # PyArrow/Altair 우회: Matplotlib 바 차트
+            if plt is not None:
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.bar(revenue_stats['거래처'].astype(str), revenue_stats['총매출'])
+                ax.set_xlabel("거래처")
+                ax.set_ylabel("총매출")
+                ax.set_title("총매출 TOP 20")
+                plt.xticks(rotation=60, ha="right")
+                plt.tight_layout()
+                st.pyplot(fig, use_container_width=True)
+            else:
+                st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
             
             st.markdown("##### 평균 객단가 TOP 20")
             top_avg = revenue_stats.sort_values('객단가', ascending=False).head(20)
-            st.bar_chart(top_avg.set_index('거래처')['객단가'], height=300)
+            if plt is not None:
+                fig2, ax2 = plt.subplots(figsize=(10, 5))
+                ax2.bar(top_avg['거래처'].astype(str), top_avg['객단가'])
+                ax2.set_xlabel("거래처")
+                ax2.set_ylabel("객단가")
+                ax2.set_title("평균 객단가 TOP 20")
+                plt.xticks(rotation=60, ha="right")
+                plt.tight_layout()
+                st.pyplot(fig2, use_container_width=True)
+            else:
+                st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
         
         with col_table:
             st.markdown("##### 📊 상세 데이터")
-            st.dataframe(
-                revenue_stats[['순위', '거래처', '총매출_표시', '주문건수', '객단가_표시']].rename(columns={
-                    '총매출_표시': '총매출',
-                    '객단가_표시': '평균 객단가'
-                }),
-                width='stretch',
-                height=620,
-                hide_index=True
+            df_rev_table = revenue_stats[['순위', '거래처', '총매출_표시', '주문건수', '객단가_표시']].rename(columns={
+                '총매출_표시': '총매출',
+                '객단가_표시': '평균 객단가'
+            }).copy()
+            st.markdown(
+                df_rev_table.to_html(index=False, escape=False, classes="dataframe"),
+                unsafe_allow_html=True,
             )
         
         st.download_button(
@@ -354,24 +423,36 @@ with tab4:
                 st.markdown("#### 💰 총매출 TOP 20")
                 
                 top_revenue = df_our_revenue.head(20).copy()
+                # 숫자로 변환 (에러 방지)
+                top_revenue['총매출'] = pd.to_numeric(top_revenue['총매출'], errors='coerce').fillna(0)
+                top_revenue['평균객단가'] = pd.to_numeric(top_revenue['평균객단가'], errors='coerce').fillna(0)
+                
                 top_revenue['총매출_표시'] = top_revenue['총매출'].apply(lambda x: f"₩{int(x):,}")
                 top_revenue['객단가_표시'] = top_revenue['평균객단가'].apply(lambda x: f"₩{int(x):,}")
                 
                 col_c1, col_c2 = st.columns([2, 1])
                 
                 with col_c1:
-                    st.bar_chart(top_revenue.set_index('거래처')['총매출'], height=400)
+                    if plt is not None:
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        ax.bar(top_revenue['거래처'].astype(str), top_revenue['총매출'])
+                        ax.set_xlabel("거래처")
+                        ax.set_ylabel("총매출")
+                        ax.set_title("총매출 TOP 20 (우리 매출)")
+                        plt.xticks(rotation=60, ha="right")
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                 
                 with col_c2:
-                    st.dataframe(
-                        top_revenue[['순위', '거래처', '총주문건수', '총매출_표시', '객단가_표시']].rename(columns={
-                            '총매출_표시': '총매출',
-                            '객단가_표시': '평균객단가'
-                        }),
-                        width='stretch',
-                        height=400,
-                        hide_index=True
-                    )
+                    # PyArrow 에러 방지를 위해 HTML 테이블로 표시
+                    display_df = top_revenue[['순위', '거래처', '총주문건수', '총매출_표시', '객단가_표시']].rename(columns={
+                        '총매출_표시': '총매출',
+                        '객단가_표시': '평균객단가'
+                    })
+                    display_df = display_df.astype(str)
+                    st.markdown(display_df.to_html(index=False, escape=False, classes="dataframe"), unsafe_allow_html=True)
                     
                     st.caption("💡 객단가 = 인보이스 청구금액 / 기본출고비 건수")
             
@@ -382,24 +463,37 @@ with tab4:
                 
                 top_avg_order = df_our_revenue.sort_values('평균객단가', ascending=False).head(20).copy()
                 top_avg_order['순위'] = range(1, len(top_avg_order) + 1)
+                
+                # 숫자로 변환 (에러 방지)
+                top_avg_order['총매출'] = pd.to_numeric(top_avg_order['총매출'], errors='coerce').fillna(0)
+                top_avg_order['평균객단가'] = pd.to_numeric(top_avg_order['평균객단가'], errors='coerce').fillna(0)
+                
                 top_avg_order['총매출_표시'] = top_avg_order['총매출'].apply(lambda x: f"₩{int(x):,}")
                 top_avg_order['객단가_표시'] = top_avg_order['평균객단가'].apply(lambda x: f"₩{int(x):,}")
                 
                 col_c1, col_c2 = st.columns([2, 1])
                 
                 with col_c1:
-                    st.bar_chart(top_avg_order.set_index('거래처')['평균객단가'], height=400)
+                    if plt is not None:
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        ax.bar(top_avg_order['거래처'].astype(str), top_avg_order['평균객단가'])
+                        ax.set_xlabel("거래처")
+                        ax.set_ylabel("평균객단가")
+                        ax.set_title("객단가 TOP 20 (주문당)")
+                        plt.xticks(rotation=60, ha="right")
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                 
                 with col_c2:
-                    st.dataframe(
-                        top_avg_order[['순위', '거래처', '총주문건수', '객단가_표시', '총매출_표시']].rename(columns={
-                            '객단가_표시': '평균객단가',
-                            '총매출_표시': '총매출'
-                        }),
-                        width='stretch',
-                        height=400,
-                        hide_index=True
-                    )
+                    # PyArrow 에러 방지를 위해 HTML 테이블로 표시
+                    display_df_avg = top_avg_order[['순위', '거래처', '총주문건수', '객단가_표시', '총매출_표시']].rename(columns={
+                        '객단가_표시': '평균객단가',
+                        '총매출_표시': '총매출'
+                    })
+                    display_df_avg = display_df_avg.astype(str)
+                    st.markdown(display_df_avg.to_html(index=False, escape=False, classes="dataframe"), unsafe_allow_html=True)
                     
                     st.caption("💡 각 인보이스별 객단가의 평균")
             
@@ -442,8 +536,21 @@ with tab4:
                     dist_avg_df = df_our_revenue['객단가구간'].value_counts().sort_index().reset_index()
                     dist_avg_df.columns = ['객단가 구간', '거래처 수']
                     
-                    st.dataframe(dist_avg_df, width='stretch', hide_index=True)
-                    st.bar_chart(dist_avg_df.set_index('객단가 구간')['거래처 수'])
+                    df_dist_avg = dist_avg_df.copy()
+                    st.markdown(
+                        df_dist_avg.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
+                    )
+                    if plt is not None:
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        ax.bar(df_dist_avg['객단가 구간'].astype(str), df_dist_avg['거래처 수'])
+                        ax.set_xlabel('객단가 구간')
+                        ax.set_ylabel('거래처 수')
+                        ax.set_title('객단가별 거래처 분포')
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                 
                 # 총매출(청구금액) 분포
                 with col_dist2:
@@ -458,8 +565,21 @@ with tab4:
                     dist_revenue_df = df_our_revenue['총매출구간'].value_counts().sort_index().reset_index()
                     dist_revenue_df.columns = ['청구금액 구간', '거래처 수']
                     
-                    st.dataframe(dist_revenue_df, width='stretch', hide_index=True)
-                    st.bar_chart(dist_revenue_df.set_index('청구금액 구간')['거래처 수'])
+                    df_dist_rev = dist_revenue_df.copy()
+                    st.markdown(
+                        df_dist_rev.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
+                    )
+                    if plt is not None:
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        ax.bar(df_dist_rev['청구금액 구간'].astype(str), df_dist_rev['거래처 수'])
+                        ax.set_xlabel('청구금액 구간')
+                        ax.set_ylabel('거래처 수')
+                        ax.set_title('총매출(청구금액)별 거래처 분포')
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                     
                     # 구간별 비율
                     total_vendors = len(df_our_revenue)
@@ -483,13 +603,13 @@ with tab4:
                     top5['총매출_fmt'] = top5['총매출'].apply(lambda x: f"₩{int(x):,}")
                     top5['객단가_fmt'] = top5['평균객단가'].apply(lambda x: f"₩{int(x):,}")
                     
-                    st.dataframe(
-                        top5[['순위', '거래처', '총주문건수', '총매출_fmt', '객단가_fmt']].rename(columns={
-                            '총매출_fmt': '총매출',
-                            '객단가_fmt': '객단가'
-                        }),
-                        width='stretch',
-                        hide_index=True
+                    df_top5 = top5[['순위', '거래처', '총주문건수', '총매출_fmt', '객단가_fmt']].rename(columns={
+                        '총매출_fmt': '총매출',
+                        '객단가_fmt': '객단가'
+                    }).copy()
+                    st.markdown(
+                        df_top5.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
                     )
                     
                     # 상위 5개 합계
@@ -502,21 +622,32 @@ with tab4:
                     
                     bottom5 = df_our_revenue.tail(5).copy()
                     bottom5 = bottom5.sort_values('총매출', ascending=True).reset_index(drop=True)
-                    bottom5['순위'] = range(len(df_our_revenue) - 4, len(df_our_revenue) + 1)
+                    
+                    # 순위 계산 수정 (음수 방지)
+                    start_rank = max(1, len(df_our_revenue) - len(bottom5) + 1)
+                    bottom5['순위'] = range(start_rank, start_rank + len(bottom5))
+                    
+                    # 숫자로 변환 (에러 방지)
+                    bottom5['총매출'] = pd.to_numeric(bottom5['총매출'], errors='coerce').fillna(0)
+                    bottom5['평균객단가'] = pd.to_numeric(bottom5['평균객단가'], errors='coerce').fillna(0)
+                    
                     bottom5['총매출_fmt'] = bottom5['총매출'].apply(lambda x: f"₩{int(x):,}")
                     bottom5['객단가_fmt'] = bottom5['평균객단가'].apply(lambda x: f"₩{int(x):,}")
                     
-                    st.dataframe(
-                        bottom5[['순위', '거래처', '총주문건수', '총매출_fmt', '객단가_fmt']].rename(columns={
-                            '총매출_fmt': '총매출',
-                            '객단가_fmt': '객단가'
-                        }),
-                        width='stretch',
-                        hide_index=True
+                    df_bottom5 = bottom5[['순위', '거래처', '총주문건수', '총매출_fmt', '객단가_fmt']].rename(columns={
+                        '총매출_fmt': '총매출',
+                        '객단가_fmt': '객단가'
+                    }).copy()
+                    st.markdown(
+                        df_bottom5.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
                     )
                     
                     # 하위 5개 합계
-                    bottom5_total = bottom5['총매출'].sum()
+                    bottom5_total = pd.to_numeric(bottom5['총매출'], errors='coerce').fillna(0).sum()
+                    total_our_revenue = pd.to_numeric(total_our_revenue, errors='coerce') # total_our_revenue도 확인 필요
+                    if pd.isna(total_our_revenue): total_our_revenue = 0
+                    
                     bottom5_pct = (bottom5_total / total_our_revenue * 100) if total_our_revenue > 0 else 0
                     st.metric("하위 5개 매출 비중", f"{bottom5_pct:.1f}%", delta=f"₩{int(bottom5_total):,}")
                 
@@ -577,13 +708,40 @@ with tab5:
             col_t1, col_t2 = st.columns([3, 2])
             
             with col_t1:
-                st.line_chart(monthly_stats.set_index('년월')[['총출고수량', '주문건수']])
-                
-                if '총매출' in monthly_stats.columns:
-                    st.line_chart(monthly_stats.set_index('년월')['총매출'])
+                # PyArrow 우회: Matplotlib 라인 차트
+                if plt is not None:
+                    x = monthly_stats['년월'].astype(str)
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    ax.plot(x, monthly_stats['총출고수량'], marker='o', label='총출고수량')
+                    ax.plot(x, monthly_stats['주문건수'], marker='o', label='주문건수')
+                    ax.set_xlabel('년월')
+                    ax.set_ylabel('수량/건수')
+                    ax.set_title('월별 출고량 & 주문건수')
+                    ax.legend()
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    st.pyplot(fig, use_container_width=True)
+
+                    if '총매출' in monthly_stats.columns:
+                        fig2, ax2 = plt.subplots(figsize=(10, 4))
+                        ax2.plot(x, monthly_stats['총매출'], marker='o', color='green', label='총매출')
+                        ax2.set_xlabel('년월')
+                        ax2.set_ylabel('총매출')
+                        ax2.set_title('월별 총매출')
+                        ax2.legend()
+                        plt.xticks(rotation=45, ha='right')
+                        plt.tight_layout()
+                        st.pyplot(fig2, use_container_width=True)
+                else:
+                    st.warning("matplotlib이 설치되어 있지 않아 트렌드 차트 대신 표만 표시합니다.")
             
             with col_t2:
-                st.dataframe(monthly_stats, width='stretch', height=400, hide_index=True)
+                # PyArrow 우회: 월별 통계 표를 HTML로 표시
+                df_month = monthly_stats.copy()
+                st.markdown(
+                    df_month.to_html(index=False, escape=False, classes="dataframe"),
+                    unsafe_allow_html=True,
+                )
                 
                 # 최근 월 vs 이전 월 비교
                 if len(monthly_stats) >= 2:
@@ -638,11 +796,26 @@ with tab5:
                 col_w1, col_w2 = st.columns([3, 2])
                 
                 with col_w1:
-                    st.line_chart(weekly_stats.set_index('년주')['총출고수량'])
+                    if plt is not None:
+                        x = weekly_stats['년주'].astype(str)
+                        fig, ax = plt.subplots(figsize=(10, 4))
+                        ax.plot(x, weekly_stats['총출고수량'], marker='o')
+                        ax.set_xlabel('년-주')
+                        ax.set_ylabel('총출고수량')
+                        ax.set_title('주별 출고량 추이')
+                        plt.xticks(rotation=45, ha='right')
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 트렌드 차트 대신 표만 표시합니다.")
                     st.caption("주별 출고량 추이")
                 
                 with col_w2:
-                    st.dataframe(weekly_stats.tail(10), width='stretch', height=400, hide_index=True)
+                    df_week_tail = weekly_stats.tail(10).copy()
+                    st.markdown(
+                        df_week_tail.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
+                    )
                     st.caption("최근 10주")
                     
                     # 주간 평균
@@ -695,18 +868,34 @@ with tab5:
                 
                 with col_d1:
                     st.markdown("##### 📊 요일별 출고량")
-                    st.bar_chart(dow_stats.set_index('요일')['총출고수량'])
+                    if plt is not None:
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        ax.bar(dow_stats['요일'], dow_stats['총출고수량'])
+                        ax.set_xlabel('요일')
+                        ax.set_ylabel('총출고수량')
+                        ax.set_title('요일별 출고량')
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                     
                     st.markdown("##### 📊 요일별 주문 건수")
-                    st.bar_chart(dow_stats.set_index('요일')['주문건수'])
-                
+                    if plt is not None:
+                        fig2, ax2 = plt.subplots(figsize=(8, 4))
+                        ax2.bar(dow_stats['요일'], dow_stats['주문건수'])
+                        ax2.set_xlabel('요일')
+                        ax2.set_ylabel('주문건수')
+                        ax2.set_title('요일별 주문 건수')
+                        plt.tight_layout()
+                        st.pyplot(fig2, use_container_width=True)
+
                 with col_d2:
                     st.markdown("##### 📋 요일별 통계")
                     
-                    st.dataframe(
-                        dow_stats[['요일', '주문건수', '총출고수량', '비율(%)']],
-                        width='stretch',
-                        hide_index=True
+                    df_dow_table = dow_stats[['요일', '주문건수', '총출고수량', '비율(%)']].copy()
+                    st.markdown(
+                        df_dow_table.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
                     )
                     
                     # 인사이트
@@ -768,10 +957,10 @@ with tab5:
                     top10_days = daily_stats.head(10).copy()
                     top10_days['순위'] = range(1, len(top10_days) + 1)
                     
-                    st.dataframe(
-                        top10_days[['순위', '날짜', '요일', '주문건수', '총출고수량']],
-                        width='stretch',
-                        hide_index=True
+                    df_top10 = top10_days[['순위', '날짜', '요일', '주문건수', '총출고수량']].copy()
+                    st.markdown(
+                        df_top10.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
                     )
                     
                     # 최다 출고일 하이라이트
@@ -781,12 +970,21 @@ with tab5:
                 with col_chart:
                     st.markdown("##### 📈 일별 출고량 추이")
                     
-                    # 최근 30일 차트
+                    # 최근 30일 차트 (Matplotlib)
                     recent_30 = daily_stats.sort_values('날짜').tail(30)
-                    recent_30_chart = recent_30.copy()
-                    recent_30_chart['날짜_str'] = recent_30_chart['날짜'].astype(str)
-                    
-                    st.line_chart(recent_30_chart.set_index('날짜_str')['총출고수량'])
+                    if plt is not None and not recent_30.empty:
+                        recent_30_chart = recent_30.copy()
+                        x = recent_30_chart['날짜'].astype(str)
+                        fig, ax = plt.subplots(figsize=(10, 4))
+                        ax.plot(x, recent_30_chart['총출고수량'], marker='o')
+                        ax.set_xlabel('날짜')
+                        ax.set_ylabel('총출고수량')
+                        ax.set_title('최근 30일 출고량 추이')
+                        plt.xticks(rotation=45, ha='right')
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                     st.caption("최근 30일 출고량 추이")
                 
                 # 통계 요약
@@ -833,10 +1031,23 @@ with tab5:
                 col_seg1, col_seg2 = st.columns([2, 1])
                 
                 with col_seg1:
-                    st.bar_chart(segment_counts.set_index('출고량 구간')['일수'])
+                    if plt is not None:
+                        fig, ax = plt.subplots(figsize=(8, 4))
+                        ax.bar(segment_counts['출고량 구간'].astype(str), segment_counts['일수'])
+                        ax.set_xlabel('출고량 구간')
+                        ax.set_ylabel('일수')
+                        ax.set_title('출고량 구간별 일수')
+                        plt.tight_layout()
+                        st.pyplot(fig, use_container_width=True)
+                    else:
+                        st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                 
                 with col_seg2:
-                    st.dataframe(segment_counts, width='stretch', hide_index=True)
+                    df_seg = segment_counts.copy()
+                    st.markdown(
+                        df_seg.to_html(index=False, escape=False, classes="dataframe"),
+                        unsafe_allow_html=True,
+                    )
                     
                     total_days = len(daily_stats)
                     st.caption(f"총 {total_days}일 분석")
@@ -862,10 +1073,10 @@ with tab6:
     
     with col_a1:
         st.markdown("#### 📦 거래처별 상품 다양성 TOP 10")
-        st.dataframe(
-            vendor_sku.head(10).reset_index(drop=True),
-            width='stretch',
-            height=300
+        df_sku_top = vendor_sku.head(10).reset_index(drop=True)
+        st.markdown(
+            df_sku_top.to_html(index=False, escape=False, classes="dataframe"),
+            unsafe_allow_html=True,
         )
         st.caption("상품종류수가 많을수록 다양한 상품 취급")
     
@@ -906,8 +1117,22 @@ with tab6:
                         size_df = pd.DataFrame(list(size_dist.items()), columns=['구간', '건수'])
                         size_df = size_df.sort_values('건수', ascending=False)
                         
-                        st.dataframe(size_df, width='stretch', height=250, hide_index=True)
-                        st.bar_chart(size_df.set_index('구간')['건수'])
+                        # 표: HTML 렌더링
+                        st.markdown(
+                            size_df.to_html(index=False, escape=False, classes="dataframe"),
+                            unsafe_allow_html=True,
+                        )
+                        # 차트: Matplotlib
+                        if plt is not None:
+                            fig, ax = plt.subplots(figsize=(8, 4))
+                            ax.bar(size_df['구간'].astype(str), size_df['건수'])
+                            ax.set_xlabel('구간')
+                            ax.set_ylabel('건수')
+                            ax.set_title('택배 구간별 분포')
+                            plt.tight_layout()
+                            st.pyplot(fig, use_container_width=True)
+                        else:
+                            st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
                         
                         # 비율 표시
                         total_size = size_df['건수'].sum()
@@ -945,10 +1170,24 @@ with tab6:
         col_c1, col_c2 = st.columns([2, 1])
         
         with col_c1:
-            st.bar_chart(courier_stats.set_index('택배사')['건수'])
+            if plt is not None:
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.bar(courier_stats['택배사'].astype(str), courier_stats['건수'])
+                ax.set_xlabel('택배사')
+                ax.set_ylabel('건수')
+                ax.set_title('택배사별 배송 건수')
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                st.pyplot(fig, use_container_width=True)
+            else:
+                st.warning("matplotlib이 설치되어 있지 않아 차트 대신 표만 표시합니다.")
         
         with col_c2:
-            st.dataframe(courier_stats, width='stretch', height=300, hide_index=True)
+            df_courier = courier_stats.copy()
+            st.markdown(
+                df_courier.to_html(index=False, escape=False, classes="dataframe"),
+                unsafe_allow_html=True,
+            )
     
     # 합포장 분석
     if '내품수량' in df.columns:
@@ -979,7 +1218,11 @@ with tab6:
         vendor_multi.columns = ['거래처', '합포장비율(%)']
         
         st.markdown("##### 거래처별 합포장 비율 TOP 10")
-        st.dataframe(vendor_multi, width='stretch', hide_index=True)
+        df_multi = vendor_multi.copy()
+        st.markdown(
+            df_multi.to_html(index=False, escape=False, classes="dataframe"),
+            unsafe_allow_html=True,
+        )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 탭7: 상세 검색
@@ -1029,10 +1272,10 @@ with tab7:
         if col_amount and col_amount in df_filtered.columns:
             display_cols.append(col_amount)
         
-        st.dataframe(
-            df_filtered[display_cols].head(100),
-            width='stretch',
-            height=400
+        df_search = df_filtered[display_cols].head(100).copy()
+        st.markdown(
+            df_search.to_html(index=False, escape=False, classes="dataframe"),
+            unsafe_allow_html=True,
         )
         
         col_dl1, col_dl2 = st.columns([1, 3])

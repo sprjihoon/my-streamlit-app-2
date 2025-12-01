@@ -133,7 +133,10 @@ if st.button("🚀 인보이스 일괄 생성 시작", type="primary"):
 
             # 2) 기본 출고비
             df_basic = add_basic_shipping(pd.DataFrame(), vendor, date_from, date_to)
-            st.session_state["items"].extend(df_basic.to_dict("records"))
+            # 필요한 컬럼만 선택하여 타입 문제 방지
+            required_cols = ["항목", "수량", "단가", "금액"]
+            df_basic_clean = df_basic[[col for col in required_cols if col in df_basic.columns]]
+            st.session_state["items"].extend(df_basic_clean.to_dict("records"))
 
             # 3) 기타 비용
             zone_cnt = add_courier_fee_by_zone(vendor, str(date_from), str(date_to))
@@ -200,12 +203,18 @@ if st.button("🚀 인보이스 일괄 생성 시작", type="primary"):
     else:
         st.success("✅ 인보이스 일괄 계산·확정 완료")
     
-    st.dataframe(pd.DataFrame(log, columns=["거래처", "결과"]), width='stretch')
+    # PyArrow 에러 방지를 위해 HTML 테이블로 표시
+    log_df = pd.DataFrame(log, columns=["거래처", "결과"])
+    log_df = log_df.astype(str)  # 모든 컬럼을 문자열로 변환
+    st.markdown(log_df.to_html(index=False, escape=False, classes="dataframe"), unsafe_allow_html=True)
 
     with get_connection() as con:
         df_recent = pd.read_sql(
             "SELECT invoice_id, vendor_id, period_from, period_to, created_at FROM invoices ORDER BY invoice_id DESC LIMIT 5",
             con,
         )
-    st.write("🔍 최근 5건", df_recent)
+    st.write("🔍 최근 5건")
+    # PyArrow 에러 방지를 위해 HTML 테이블로 표시
+    df_recent = df_recent.astype(str)  # 모든 컬럼을 문자열로 변환
+    st.markdown(df_recent.to_html(index=False, escape=False, classes="dataframe"), unsafe_allow_html=True)
     st.page_link("pages/invoice_list.py", label="💠 인보이스 목록 열기", icon="📜")

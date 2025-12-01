@@ -301,11 +301,28 @@ if not st.session_state.save_completed:
     if df_unmatch.empty:
         st.success("모든 업로드 데이터가 정상 매핑되었습니다 🎉")
     else:
-        st.write("### 🔢 파일별 미매칭 개수",
-                 df_unmatch.groupby("file_type")["alias"].count()
-                            .rename("건수").to_frame().T)
+        st.write("### 🔢 파일별 미매칭 개수")
+        # PyArrow 오류 방지: HTML 테이블로 표시
+        unmatch_counts = df_unmatch.groupby("file_type")["alias"].count().rename("건수").to_frame()
+        st.markdown(unmatch_counts.to_html(escape=False), unsafe_allow_html=True)
         st.warning(f"⚠️ 미매칭 alias {len(df_unmatch):,}건 발견")
-        st.dataframe(df_unmatch.reset_index(drop=True), width='stretch', height=300)
+        # PyArrow 오류 방지: HTML 테이블로 표시
+        st.markdown(
+            df_unmatch.reset_index(drop=True)
+            .to_html(index=False, escape=False, classes="dataframe"), 
+            unsafe_allow_html=True
+        )
+        # CSS로 스크롤 가능한 테이블 스타일 추가
+        st.markdown("""
+        <style>
+        .dataframe {
+            display: block;
+            max-height: 300px;
+            overflow-y: auto;
+            width: 100%;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         st.download_button("⬇️ CSV 다운로드",
                            df_unmatch.to_csv(index=False).encode("utf-8-sig"),
                            "unmatched_alias.csv",

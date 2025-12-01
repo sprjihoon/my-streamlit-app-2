@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-from common import get_connection
+from common import get_connection, refresh_alias_vendor_cache
 from typing import List
 
 """
@@ -85,11 +85,12 @@ def get_all_aliases_from_source():
                     all_aliases[ft] = []
                     continue
 
-                df = pd.read_sql(f"SELECT DISTINCT [{col}] as alias FROM {tbl}", con)
+                df = pd.read_sql(f"SELECT DISTINCT [{col}] as alias FROM {tbl} WHERE [{col}] IS NOT NULL AND TRIM([{col}]) != ''", con)
                 aliases = [str(x).strip() for x in df.alias.dropna() if str(x).strip()]
                 all_aliases[ft] = sorted(list(set(aliases)))
-            except Exception:
-                 all_aliases[ft] = []
+            except Exception as e:
+                # 에러 발생 시 빈 리스트 반환하되, 디버깅을 위해 경고 표시하지 않음 (너무 많은 경고 방지)
+                all_aliases[ft] = []
     return all_aliases
 
 df_vendors, df_alias = load_all()
@@ -147,7 +148,23 @@ main_cols = [
     "video_out_f", "video_ret_f",
 ]
 
-st.dataframe(df_disp[main_cols], width='stretch', height=400)
+# PyArrow 오류 방지: HTML 테이블로 표시
+df_show = df_disp[main_cols].reset_index(drop=True)
+st.markdown(
+    df_show.to_html(index=False, escape=False, classes="dataframe"), 
+    unsafe_allow_html=True
+)
+# CSS로 스크롤 가능한 테이블 스타일 추가
+st.markdown("""
+<style>
+.dataframe {
+    display: block;
+    max-height: 400px;
+    overflow-y: auto;
+    width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────
 # 4-bis. 미매칭 alias 통계
@@ -216,6 +233,8 @@ try:
         }
         
         df_unmatch_stats['파일명'] = df_unmatch_stats['file_type'].map(file_type_names)
+        # 미매칭_건수를 숫자로 변환 (문자열일 수 있음)
+        df_unmatch_stats['미매칭_건수'] = pd.to_numeric(df_unmatch_stats['미매칭_건수'], errors='coerce').fillna(0).astype(int)
         
         col1, col2 = st.columns([2, 3])
         
@@ -223,11 +242,10 @@ try:
             st.metric("총 미매칭 건수", f"{df_unmatch_stats['미매칭_건수'].sum():,}건")
         
         with col2:
-            st.dataframe(
-                df_unmatch_stats[['파일명', '미매칭_건수']].rename(columns={'미매칭_건수': '건수'}),
-                width='stretch',
-                hide_index=True
-            )
+            # PyArrow 에러 방지를 위해 HTML 테이블로 표시
+            display_df = df_unmatch_stats[['파일명', '미매칭_건수']].rename(columns={'미매칭_건수': '건수'})
+            display_df['건수'] = display_df['건수'].astype(str)  # HTML 표시를 위해 문자열로 변환
+            st.markdown(display_df.to_html(index=False, escape=False, classes="dataframe"), unsafe_allow_html=True)
         
         st.info("💡 **매핑 관리** 페이지에서 미매칭 alias를 추가할 수 있습니다.")
 except Exception as e:
@@ -248,31 +266,42 @@ df_alias_v = df_alias[df_alias.vendor == sel_vendor]
 def get_options_and_defaults(file_type: str) -> (List[str], List[str]):
     """multiselect 에 필요한 옵션과 기본값을 반환합니다.
     
-    현재 공급처에 매핑된 별칭 + 아직 매핑되지 않은 별칭만 선택 가능합니다.
-    다른 공급처에 이미 매핑된 별칭들은 제외됩니다.
+    mapping_manager의 uniq() 함수와 동일한 방식으로 처리하되,
+    현재 공급처에 매핑된 별칭도 포함합니다.
     """
-    # 현재 공급처에 매핑된 별칭들
-    default_aliases = df_alias_v[df_alias_v.file_type == file_type].alias.tolist()
-    
-    # 원본 데이터의 모든 별칭들
-    source_aliases = all_source_aliases.get(file_type, [])
-    
-    # 다른 공급처에 이미 매핑된 별칭들 제외
-    with get_connection() as con:
-        try:
+    try:
+        # 현재 공급처에 매핑된 별칭들 (기본값)
+        default_aliases = df_alias_v[df_alias_v.file_type == file_type].alias.tolist()
+        default_aliases = [str(a).strip() for a in default_aliases if str(a).strip() and str(a).strip() != ""]
+        
+        # mapping_manager의 uniq() 함수와 동일한 방식으로 처리
+        tbl, col, ft = next((t, c, f) for t, c, f in SRC_TABLES if f == file_type)
+        
+        with get_connection() as con:
+            # 1) 원본 테이블에서 모든 고유 값 가져오기
+            df = pd.read_sql(f"SELECT DISTINCT [{col}] AS v FROM {tbl} WHERE [{col}] IS NOT NULL AND TRIM([{col}]) != ''", con)
+            
+            # 2) 다른 공급처에 매핑된 별칭들 가져오기 (현재 공급처 제외)
             other_mapped = pd.read_sql(
                 "SELECT DISTINCT alias FROM aliases WHERE file_type = ? AND vendor != ?", 
                 con, params=[file_type, sel_vendor]
             )
-            other_mapped_list = other_mapped.alias.tolist() if not other_mapped.empty else []
-        except Exception:
-            other_mapped_list = []
-    
-    # 사용 가능한 옵션 = 현재 매핑된 별칭들 + (원본 별칭들 - 다른 공급처 매핑된 별칭들)
-    available_source = [alias for alias in source_aliases if alias not in other_mapped_list]
-    options = sorted(list(set(default_aliases + available_source)))
-    
-    return options, default_aliases
+            
+            # 3) 다른 공급처에 매핑된 별칭 제외
+            if not other_mapped.empty:
+                df = df[~df.v.isin(other_mapped.alias)]
+            
+            # 4) 정리된 리스트 반환 (mapping_manager와 동일한 방식)
+            available_aliases = sorted(x for x in df.v.dropna().astype(str).str.strip() if x and x != "")
+        
+        # 옵션 = 현재 매핑된 별칭들 + 사용 가능한 별칭들
+        options = sorted(list(set(default_aliases + available_aliases)))
+        
+        return options, default_aliases
+    except Exception as e:
+        # 에러 발생 시 빈 리스트 반환
+        st.warning(f"⚠️ {file_type} 옵션 로드 중 오류: {e}")
+        return [], []
 
 # 파일 타입별로 multiselect 생성 (매핑 매니저와 동일한 스타일)
 c1, c2 = st.columns(2)
@@ -285,6 +314,7 @@ kpin_opts, kpin_defs = get_options_and_defaults("kpost_in")
 ktrt_opts, ktrt_defs = get_options_and_defaults("kpost_ret")
 wl_opts, wl_defs = get_options_and_defaults("work_log")
 
+# mapping_manager와 동일한 방식으로 multiselect 생성
 inb  = c1.multiselect("입고전표 별칭", inb_opts, default=inb_defs)
 ship = c2.multiselect("배송통계 별칭", ship_opts, default=ship_defs)
 kpin = c3.multiselect("우체국접수 별칭", kpin_opts, default=kpin_defs)
@@ -350,6 +380,8 @@ if save_col.button("💾 변경 사항 저장"):
             
             alias_counts = {row[0]: row[1] for row in saved_aliases}
             
+        # mapping_manager와 동일하게 캐시 새로고침
+        refresh_alias_vendor_cache()
         st.cache_data.clear()
         st.success("✅ 저장 완료!")
         

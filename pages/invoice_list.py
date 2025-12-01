@@ -281,12 +281,11 @@ with col_btn1:
     selected_count = len(st.session_state.get("selected_invoice_ids", []))
     if st.button(f"🗑️ 선택 항목 삭제 ({selected_count}건)", 
                  disabled=selected_count == 0, 
-                 width='stretch', 
                  key="btn_delete_selected"):
         st.session_state["confirm_delete_selected"] = True
 
 with col_btn2:
-    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", width='stretch', key="btn_delete_all"):
+    if st.button("🗑️ 필터된 전체 삭제", disabled=view_df.empty, type="primary", key="btn_delete_all"):
         st.session_state["confirm_delete_all"] = True
 
 # --- 선택 항목 삭제 확인 ---
@@ -354,17 +353,63 @@ if not view_df.empty:
             st.warning("항목이 없습니다.")
         else:
             st.subheader(f"Invoice #{inv_sel} 상세")
-            edt = st.data_editor(det, num_rows='dynamic', hide_index=True, key='detail_edit')
+            # PyArrow 오류 방지: data_editor 대신 CSV 기반 편집으로 전환
+            det_disp = det.drop(columns=['item_id', 'invoice_id'], errors='ignore')
+
+            # 현재 항목 표시 (PyArrow 우회: HTML 테이블)
+            st.markdown(
+                det_disp.to_html(index=False, escape=False, classes="dataframe"),
+                unsafe_allow_html=True,
+            )
+
+            # CSV 다운로드
+            csv_bytes = det_disp.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "📥 현재 항목 CSV 다운로드",
+                csv_bytes,
+                file_name=f"invoice_{inv_sel}_items.csv",
+                mime="text/csv",
+                key=f"dl_inv_{inv_sel}",
+            )
+
+            # 수정된 CSV 업로드
+            uploaded_items = st.file_uploader(
+                "수정된 항목 CSV 업로드 (item_name, qty, unit_price, amount, remark 컬럼 유지)",
+                type=["csv"],
+                key=f"ul_inv_{inv_sel}",
+            )
+
             if st.button("💾 수정 사항 저장"):
-                with sqlite3.connect(DB_PATH) as con:
-                    cur = con.cursor()
-                    cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (inv_sel,))
-                    cur.executemany(
-                        "INSERT INTO invoice_items (invoice_id,item_name,qty,unit_price,amount,remark) VALUES (?,?,?,?,?,?)",
-                        [(inv_sel, r['item_name'], r['qty'], r['unit_price'], r['amount'], r.get('remark','')) for _, r in edt.iterrows()]
-                    )
-                    con.commit()
-                st.success("✅ 저장 완료")
+                if uploaded_items is None:
+                    st.error("먼저 수정된 CSV 파일을 업로드해주세요.")
+                else:
+                    try:
+                        edt = pd.read_csv(uploaded_items)
+                        required_cols = {"item_name", "qty", "unit_price", "amount"}
+                        if not required_cols.issubset(edt.columns):
+                            st.error(f"CSV에 필수 컬럼이 없습니다: {required_cols}")
+                        else:
+                            with sqlite3.connect(DB_PATH) as con:
+                                cur = con.cursor()
+                                cur.execute("DELETE FROM invoice_items WHERE invoice_id=?", (inv_sel,))
+                                cur.executemany(
+                                    "INSERT INTO invoice_items (invoice_id,item_name,qty,unit_price,amount,remark) VALUES (?,?,?,?,?,?)",
+                                    [
+                                        (
+                                            inv_sel,
+                                            r.get("item_name", ""),
+                                            r.get("qty", 0),
+                                            r.get("unit_price", 0),
+                                            r.get("amount", 0),
+                                            r.get("remark", ""),
+                                        )
+                                        for _, r in edt.iterrows()
+                                    ],
+                                )
+                                con.commit()
+                            st.success("✅ 저장 완료")
+                    except Exception as e:
+                        st.error(f"CSV 처리 중 오류: {e}")
             if st.button("✅ 인보이스 확정"):
                 with sqlite3.connect(DB_PATH) as con:
                     con.execute("UPDATE invoices SET status='확정' WHERE invoice_id=?", (inv_sel,))
@@ -378,7 +423,13 @@ if not view_df.empty:
                 with pd.ExcelWriter(buf, engine='xlsxwriter') as w:
                     df_x.to_excel(w, index=False, sheet_name=ven_name[:31])
                 return buf.getvalue()
-            st.download_button("📥 이 인보이스 XLSX", data=_to_xlsx(edt), file_name=f"{ven_name}_{ym_tag}.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            # 편집 전/후 모두 다운로드 가능하도록 det_disp 사용 (현재 화면에 보이는 내용)
+            st.download_button(
+                "📥 이 인보이스 XLSX",
+                data=_to_xlsx(det_disp),
+                file_name=f"{ven_name}_{ym_tag}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
 # ──────────────────────────────────────
 # 7. 필터링된 전체 인보이스 XLSX 다운로드

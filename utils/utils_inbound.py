@@ -36,6 +36,8 @@ def add_inbound_inspection_fee(vendor: str, d_from: str, d_to: str) -> None:
         if df.empty or "수량" not in df.columns:
             return
 
+        # 수량을 숫자로 변환 (문자열 연결 방지)
+        df["수량"] = pd.to_numeric(df["수량"], errors="coerce").fillna(0)
         total_qty = int(df["수량"].sum())
 
         # ③ 단가 가져오기 (out_extra 테이블)

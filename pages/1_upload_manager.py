@@ -113,7 +113,30 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
     upl = col.file_uploader("엑셀 파일", type=["xlsx"], key=f"upl_{tbl}")
     if upl is not None:
         try:
-            df_up = pd.read_excel(upl)
+            # 파일을 BytesIO로 읽어서 처리 (파일 포인터 문제 방지)
+            file_buffer = io.BytesIO(upl.read())
+            # 먼저 기본 옵션으로 읽기 시도
+            try:
+                df_up = pd.read_excel(
+                    file_buffer, 
+                    engine='openpyxl',
+                    na_filter=False,
+                    keep_default_na=False
+                )
+            except (ValueError, TypeError) as e:
+                # 기본 읽기 실패 시, 모든 데이터를 문자열로 읽기
+                file_buffer.seek(0)  # 버퍼를 처음으로 되돌림
+                df_up = pd.read_excel(
+                    file_buffer,
+                    engine='openpyxl',
+                    dtype=str,
+                    na_filter=False,
+                    keep_default_na=False
+                )
+            
+            # 읽은 후 모든 컬럼을 명시적으로 문자열로 변환
+            for col_name in df_up.columns:
+                df_up[col_name] = df_up[col_name].astype(str)
             if df_up.empty:
                 col.warning("빈 파일입니다.")
             else:
@@ -122,7 +145,9 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
                 
                 # 상세 보기는 expander로
                 with col.expander("📋 상세 미리보기"):
-                    st.dataframe(df_up.head(3).astype(str), width='stretch')
+                    # PyArrow 에러 방지를 위해 HTML 테이블로 표시
+                    preview_df = df_up.head(3).astype(str)
+                    st.markdown(preview_df.to_html(index=False, escape=False, classes="dataframe"), unsafe_allow_html=True)
                     st.caption(f"컬럼: {', '.join(df_up.columns[:5])}{'...' if len(df_up.columns) > 5 else ''}")
 
                 if col.button("✅ 신규 데이터 저장", key=f"save_{tbl}"):
@@ -141,7 +166,11 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
                     except Exception as e:
                         col.error(f"❌ 저장 중 오류: {e}")
         except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
             col.error(f"읽기 실패: {e}")
+            with col.expander("🔍 상세 에러 정보"):
+                st.code(error_detail)
 
     # 📥 현 테이블 다운로드 버튼 (캐시 사용)
     has_data, row_count = check_table_exists(tbl)
@@ -178,7 +207,7 @@ for (tbl, meta), col in zip(TARGETS.items(), cols):
 
 @st.cache_data(ttl=60)  # 1분 캐시
 def get_db_status():
-    status_rows = []
+    status_data = []
     with sqlite3.connect(db_path) as con:
         for tbl, meta in TARGETS.items():
             exists = con.execute(
@@ -189,13 +218,17 @@ def get_db_status():
                 cnt_str = f"{cnt:,}"  # 숫자를 포맷팅된 문자열로 변환
             else:
                 cnt_str = "(없음)"
-            status_rows.append({"테이블": meta["label"], "행 수": cnt_str})
-    # dtype을 명시적으로 지정하여 PyArrow 변환 문제 방지
-    df = pd.DataFrame(status_rows)
-    # 모든 컬럼을 명시적으로 문자열로 변환
-    for col in df.columns:
-        df[col] = df[col].astype(str)
-    return df.set_index("테이블")
+            status_data.append([meta["label"], cnt_str])
+    
+    # 완전히 새로운 DataFrame을 문자열 데이터로 생성
+    df = pd.DataFrame(
+        data=status_data,
+        columns=["테이블", "행 수"]
+    )
+    # 모든 컬럼을 문자열로 명시적 변환
+    df["테이블"] = df["테이블"].astype(str)
+    df["행 수"] = df["행 수"].astype(str)
+    return df
 
 st.divider()
 col1, col2 = st.columns([3, 1])
@@ -206,4 +239,6 @@ with col2:
         st.cache_data.clear()
         st.rerun()
 
-st.dataframe(get_db_status(), use_container_width=True)
+# PyArrow 변환 문제 회피: HTML 테이블로 표시
+df_status = get_db_status()
+st.markdown(df_status.to_html(index=False, escape=False), unsafe_allow_html=True)

@@ -55,6 +55,9 @@ def add_basic_shipping(df_items: pd.DataFrame,
     with get_connection() as con:
         df_raw = pd.read_sql("SELECT * FROM shipping_stats", con)
         df_raw.columns = [c.strip() for c in df_raw.columns]
+        # count 컬럼이 있다면 제거 (PyArrow 에러 방지)
+        if "count" in df_raw.columns:
+            df_raw = df_raw.drop(columns=["count"])
 
         date_col = next((c for c in ["배송일","송장등록일","출고일자","기록일자","등록일자"]
                          if c in df_raw.columns), None)
@@ -88,7 +91,9 @@ def add_basic_shipping(df_items: pd.DataFrame,
 
     total = int(len(df))
     row   = {"항목": "기본 출고비", "수량": total, "단가": 900, "금액": total * 900}
-    return pd.concat([df_items, pd.DataFrame([row])], ignore_index=True)
+    # DataFrame 생성 시 컬럼을 명시적으로 지정하여 타입 문제 방지
+    new_df = pd.DataFrame([row], columns=["항목", "수량", "단가", "금액"])
+    return pd.concat([df_items, new_df], ignore_index=True)
 
 # -----------------------------------------------------------
 # 2. 구간별 택배요금
@@ -128,6 +133,28 @@ def create_and_finalize_invoice(vendor_id: int,
     with get_connection() as con:
         cur = con.cursor()
 
+        # ── items 검증 및 안전한 변환 ──
+        safe_items = []
+        total_safe = 0
+        for it in items:
+            try:
+                # 금액이 너무 크면(SQLite INTEGER 범위 초과) 0으로 처리하거나 제한
+                amount = float(it["금액"])
+                if amount > 9000000000000000000:  # SQLite INTEGER max approx 9e18
+                    st.warning(f"⚠️ 금액 초과 항목 제외: {it['항목']} ({amount})")
+                    amount = 0
+                
+                safe_items.append({
+                    "항목": str(it["항목"]),
+                    "수량": float(it["수량"]),
+                    "단가": float(it["단가"]),
+                    "금액": amount,
+                    "비고": str(it.get("비고", ""))
+                })
+                total_safe += amount
+            except (ValueError, TypeError) as e:
+                st.warning(f"⚠️ 데이터 변환 오류 항목 제외: {it} - {e}")
+
         # ── invoices 헤더 INSERT ──
         # 현지 시각(서버 로컬타임)으로 created_at 저장
         tz = zoneinfo.ZoneInfo("Asia/Seoul")
@@ -137,7 +164,7 @@ def create_and_finalize_invoice(vendor_id: int,
             "INSERT INTO invoices "
             "(vendor_id, period_from, period_to, created_at, total_amount, status) "
             "VALUES ( ?, ?, ?, ?, ?, '확정')",
-            (vendor_id, period_from, period_to, created_at, total)
+            (vendor_id, period_from, period_to, created_at, total_safe)
         )
         iid = cur.lastrowid
 
@@ -152,8 +179,8 @@ def create_and_finalize_invoice(vendor_id: int,
                  it["수량"],
                  it["단가"],
                  it["금액"],
-                 it.get("비고", ""))        # 👈 없으면 빈 문자열
-                for it in items
+                 it["비고"])
+                for it in safe_items
             ]
         )
         con.commit()
@@ -433,6 +460,10 @@ def add_worklog_items(item_list, vendor, d_from, d_to):
 
     # ─ 비고 NaN → '' 통일
     df[WL_COL_MEMO] = df[WL_COL_MEMO].fillna("").str.strip()
+
+    # ─ 수량/금액 숫자 변환 (에러 발생 시 NaN → 0)
+    for col in (WL_COL_QTY, WL_COL_AMT):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     # ─ 분류 + 단가 + 비고 동일 행 합계
     df_final = (df

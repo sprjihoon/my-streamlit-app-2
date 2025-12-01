@@ -117,19 +117,66 @@ else:
     view_df = fetch_df(selected_table)
 
 st.subheader(f"✏️ {TABLES[selected_table]} 수정")
-edit_df = st.data_editor(
-    view_df,
-    num_rows="dynamic",
-    width='stretch',
-    key=f"edit_{selected_table}",
+
+# ─────────────────────────────────────
+# PyArrow 완전 우회: HTML + CSV 기반 편집
+# ─────────────────────────────────────
+
+# 1. 컬럼/데이터 정리
+if not view_df.empty:
+    columns = list(view_df.columns)
+elif selected_table in DEFAULT_DATA:
+    columns = list(DEFAULT_DATA[selected_table].columns)
+else:
+    columns = []
+
+if not view_df.empty:
+    view_df_clean = view_df.copy()
+else:
+    view_df_clean = pd.DataFrame(columns=columns)
+
+# 2. 현재 데이터 HTML 테이블로 표시
+if view_df_clean.empty:
+    st.info("표시할 데이터가 없습니다.")
+else:
+    st.markdown(
+        view_df_clean.to_html(index=False, escape=False, classes="dataframe"),
+        unsafe_allow_html=True,
+    )
+
+# 3. CSV 다운로드 버튼
+csv_bytes = view_df_clean.to_csv(index=False).encode("utf-8-sig")
+st.download_button(
+    "⬇️ CSV 다운로드",
+    csv_bytes,
+    file_name=f"{selected_table}_rates.csv",
+    mime="text/csv",
+    key="download_rates",
 )
 
-if st.button("💾 저장"):
-    if selected_table == "shipping_zone":
-        other_df = full_df[full_df["요금제"] != rate_type]
-        replace_df("shipping_zone", pd.concat([other_df, edit_df], ignore_index=True))
-    else:
-        replace_df(selected_table, edit_df)
-    st.cache_data.clear()
-    st.success("저장 완료")
-    st.rerun()
+# 4. 수정된 CSV 업로드 후 DB 반영
+uploaded = st.file_uploader("수정된 CSV 업로드", type=["csv"], key="upload_rates")
+
+if uploaded is not None:
+    try:
+        edit_df = pd.read_csv(uploaded)
+
+        # 컬럼 구성 검증
+        if columns and set(edit_df.columns) != set(columns):
+            st.error("CSV 컬럼 구성이 현재 테이블과 다릅니다. 컬럼명을 수정하지 말고 값만 변경해주세요.")
+        else:
+            if selected_table == "shipping_zone":
+                # 선택된 요금제(rate_type) 구간만 교체
+                other_df = full_df[full_df["요금제"] != rate_type]
+                replace_df(
+                    "shipping_zone",
+                    pd.concat([other_df, edit_df], ignore_index=True),
+                )
+            else:
+                replace_df(selected_table, edit_df)
+
+            st.cache_data.clear()
+            st.success("저장 완료")
+            st.rerun()
+    except Exception as e:
+        st.error(f"CSV 처리 중 오류: {e}")

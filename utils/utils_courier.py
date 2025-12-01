@@ -12,7 +12,7 @@ from utils.clean import TRACK_COLS, normalize_tracking
 from typing import Dict
 
 # 개발용 플래그
-DEBUG_MODE = True  # 디버그 완료
+DEBUG_MODE = False  # 디버그 완료
 
 def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, int]:
     """
@@ -87,6 +87,9 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
                 """,
                 con, params=(*name_list, d_from, d_to)
             )
+            # count 컬럼이 있다면 제거 (PyArrow 에러 방지)
+            if "count" in df_post.columns:
+                df_post = df_post.drop(columns=["count"])
         except Exception as e:
             if DEBUG_MODE:
                 print(f"❌ {vendor}: kpost_in 조회 실패 - {e}")
@@ -158,8 +161,8 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
         df_zone = df_zone.sort_values("len_min_cm").reset_index(drop=True)
 
         # 디버그 로그 (필요 시 DEBUG_MODE=True)
-        if DEBUG_MODE:
-            st.write("부피 분포:", df_post['부피'].value_counts().head())
+        # if DEBUG_MODE:
+        #     st.write("부피 분포:", df_post['부피'].value_counts().head())
 
         # ⑤ 구간 매핑 및 수량 집계
         remaining = df_post.copy()
