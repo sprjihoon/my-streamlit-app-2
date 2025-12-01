@@ -186,10 +186,16 @@ def get_db_status():
             ).fetchone()
             if exists:
                 cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                cnt_str = f"{cnt:,}"  # 숫자를 포맷팅된 문자열로 변환
             else:
-                cnt = "(없음)"
-            status_rows.append({"테이블": meta["label"], "행 수": cnt})
-    return pd.DataFrame(status_rows).set_index("테이블")
+                cnt_str = "(없음)"
+            status_rows.append({"테이블": meta["label"], "행 수": cnt_str})
+    # dtype을 명시적으로 지정하여 PyArrow 변환 문제 방지
+    df = pd.DataFrame(status_rows)
+    # 모든 컬럼을 명시적으로 문자열로 변환
+    for col in df.columns:
+        df[col] = df[col].astype(str)
+    return df.set_index("테이블")
 
 st.divider()
 col1, col2 = st.columns([3, 1])
@@ -200,4 +206,4 @@ with col2:
         st.cache_data.clear()
         st.rerun()
 
-st.table(get_db_status())
+st.dataframe(get_db_status(), use_container_width=True)
