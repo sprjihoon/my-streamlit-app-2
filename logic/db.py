@@ -36,6 +36,9 @@ def get_connection():
     con = None
     try:
         con = sqlite3.connect(DB_PATH)
+        # WAL 모드: 동시 읽기 성능 향상 & 안정성
+        con.execute("PRAGMA journal_mode=WAL;")
+        con.execute("PRAGMA busy_timeout=5000;")
         yield con
     finally:
         if con:
