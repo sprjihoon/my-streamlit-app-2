@@ -6,15 +6,17 @@
 
 import sqlite3
 import pandas as pd
-import streamlit as st
-from common import get_connection
+import logging
+from logic.db import get_connection
 from utils.clean import TRACK_COLS, normalize_tracking
-from typing import Dict
+from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 # 개발용 플래그
 DEBUG_MODE = False  # 디버그 완료
 
-def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, int]:
+def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str, items_list: List[dict] = None) -> Dict[str, int]:
     """
     공급처 + 날짜 기준으로 kpost_in에서 부피 → 사이즈 구간 매핑 후,
     shipping_zone 요금표 적용하여 구간별 택배요금 항목을 session_state["items"]에 추가.
@@ -177,16 +179,16 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str) -> Dict[str, in
                 size_counts[label] = {"count": count, "fee": row["요금"]}
                 remaining = remaining[~cond]
 
-        # ⑥ session_state["items"]에 추가
+        # ⑥ items_list에 추가 (전달된 경우)
         for label, info in size_counts.items():
-            st.session_state["items"].append(
-                {
-                    "항목": f"택배요금 ({label})",
-                    "수량": info["count"],
-                    "단가": info["fee"],
-                    "금액": info["count"] * info["fee"],
-                }
-            )
+            item = {
+                "항목": f"택배요금 ({label})",
+                "수량": info["count"],
+                "단가": info["fee"],
+                "금액": info["count"] * info["fee"],
+            }
+            if items_list is not None:
+                items_list.append(item)
 
         # 기존 디버그 출력은 위에서 통합
         if DEBUG_MODE:

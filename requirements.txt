@@ -1,5 +1,7 @@
 pandas
-streamlit
 xlsxwriter
 openpyxl
 libsql-client
+fastapi
+uvicorn[standard]
+python-multipart

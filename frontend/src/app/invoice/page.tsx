@@ -6,6 +6,8 @@ import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
 import { calculateInvoice, getVendors, Vendor } from '@/lib/api';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface InvoiceItem {
   항목: string;
   수량: number;
@@ -72,6 +74,14 @@ export default function InvoicePage() {
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // 권한 체크
+  const [isAdmin, setIsAdmin] = useState(false);
+  
+  useEffect(() => {
+    const storedIsAdmin = localStorage.getItem('isAdmin') === 'true';
+    setIsAdmin(storedIsAdmin);
+  }, []);
 
   // 거래처 로드
   useEffect(() => {
@@ -129,8 +139,13 @@ export default function InvoicePage() {
     }
   }
 
-  // 단일 인보이스 계산
+  // 단일 인보이스 계산 (관리자만)
   async function handleSingleCalculate() {
+    if (!isAdmin) {
+      setError('계산 권한이 없습니다. 관리자만 인보이스를 계산할 수 있습니다.');
+      return;
+    }
+    
     if (!singleVendor.trim()) {
       setError('공급처명을 입력하세요.');
       return;
@@ -141,7 +156,8 @@ export default function InvoicePage() {
     setResult(null);
 
     try {
-      const data = await calculateInvoice({
+      const token = localStorage.getItem('token');
+      const params = {
         vendor: singleVendor.trim(),
         date_from: dateFrom,
         date_to: dateTo,
@@ -150,7 +166,20 @@ export default function InvoicePage() {
         include_inbound_fee: includeInboundFee,
         include_remote_fee: includeRemoteFee,
         include_worklog: includeWorklog,
+      };
+      
+      const res = await fetch(`${API_URL}/calculate?token=${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
       });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || '계산 실패');
+      }
+      
+      const data = await res.json();
 
       setResult(data);
     } catch (err) {
@@ -160,8 +189,13 @@ export default function InvoicePage() {
     }
   }
 
-  // 일괄 인보이스 계산
+  // 일괄 인보이스 계산 (관리자만)
   async function handleBatchCalculate() {
+    if (!isAdmin) {
+      setError('계산 권한이 없습니다. 관리자만 인보이스를 계산할 수 있습니다.');
+      return;
+    }
+    
     if (selectedVendors.length === 0) {
       setError('선택된 거래처가 없습니다.');
       return;
@@ -179,6 +213,8 @@ export default function InvoicePage() {
       message: '대기 중...',
     }));
     setBatchLogs([...logs]);
+    
+    const token = localStorage.getItem('token');
 
     for (let i = 0; i < selectedVendors.length; i++) {
       if (stopRequested) {
@@ -202,7 +238,7 @@ export default function InvoicePage() {
       setBatchLogs([...logs]);
 
       try {
-        const data = await calculateInvoice({
+        const params = {
           vendor,
           date_from: dateFrom,
           date_to: dateTo,
@@ -211,13 +247,26 @@ export default function InvoicePage() {
           include_inbound_fee: includeInboundFee,
           include_remote_fee: includeRemoteFee,
           include_worklog: includeWorklog,
+        };
+        
+        const res = await fetch(`${API_URL}/calculate?token=${token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
         });
+        
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || '계산 실패');
+        }
+        
+        const data = await res.json();
 
         const duration = (Date.now() - startTime) / 1000;
         logs[i] = {
           vendor,
           status: 'success',
-          message: `✅ 완료 (₩${data.total_amount.toLocaleString()})`,
+          message: `완료 (${data.total_amount.toLocaleString()}원)`,
           duration,
         };
       } catch (err) {
@@ -225,7 +274,7 @@ export default function InvoicePage() {
         logs[i] = {
           vendor,
           status: 'error',
-          message: `❌ ${err instanceof Error ? err.message : '실패'}`,
+          message: `${err instanceof Error ? err.message : '실패'}`,
           duration,
         };
       }
@@ -251,6 +300,10 @@ export default function InvoicePage() {
     <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
       <h1 style={{ marginBottom: '2rem' }}>📊 인보이스 계산</h1>
 
+      {!isAdmin && (
+        <Alert type="error" message="계산 권한이 없습니다. 관리자만 인보이스를 계산할 수 있습니다." onClose={() => {}} />
+      )}
+      
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
       {/* 거래처 통계 */}

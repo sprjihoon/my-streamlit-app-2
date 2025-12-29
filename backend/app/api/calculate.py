@@ -4,9 +4,12 @@ backend/app/api/calculate.py - 계산 API 엔드포인트
 logic/ 모듈의 계산 함수를 호출하는 얇은 API 레이어.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
 import pandas as pd
+
+from logic.db import get_connection
+from backend.app.api.logs import add_log
 
 # logic 모듈에서 계산 함수 import
 from logic import (
@@ -49,18 +52,37 @@ from backend.app.models import (
 router = APIRouter(prefix="/calculate", tags=["Calculate"])
 
 
+def check_admin(token: Optional[str]) -> tuple:
+    """관리자 권한 확인, (is_admin, nickname) 반환"""
+    if not token:
+        return False, None
+    with get_connection() as con:
+        result = con.execute(
+            "SELECT u.is_admin, u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,)
+        ).fetchone()
+        if result:
+            return bool(result[0]), result[1]
+    return False, None
+
+
 # ─────────────────────────────────────
 # 통합 인보이스 계산
 # ─────────────────────────────────────
 @router.post("", response_model=InvoiceCalculateResponse)
 @router.post("/", response_model=InvoiceCalculateResponse)
-async def calculate_invoice(req: InvoiceCalculateRequest) -> InvoiceCalculateResponse:
+async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] = None) -> InvoiceCalculateResponse:
     """
-    인보이스 항목 통합 계산.
+    인보이스 항목 통합 계산 (관리자만).
     
     logic/ 모듈의 계산 함수들을 순차적으로 호출하여
     인보이스 항목 리스트를 생성합니다.
     """
+    # 관리자 권한 체크
+    is_admin, nickname = check_admin(token)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    
     items: List[Dict[str, Any]] = []
     warnings: List[str] = []
     
@@ -121,6 +143,16 @@ async def calculate_invoice(req: InvoiceCalculateRequest) -> InvoiceCalculateRes
             for it in items
         ]
         
+        # 로그 기록
+        add_log(
+            action_type="인보이스 계산",
+            target_type="invoice",
+            target_id=None,
+            target_name=req.vendor,
+            user_nickname=nickname,
+            details=f"기간: {d_from} ~ {d_to}, 항목수: {len(invoice_items)}, 총액: {int(total_amount):,}원"
+        )
+        
         return InvoiceCalculateResponse(
             success=True,
             vendor=req.vendor,
@@ -131,6 +163,8 @@ async def calculate_invoice(req: InvoiceCalculateRequest) -> InvoiceCalculateRes
             warnings=warnings
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

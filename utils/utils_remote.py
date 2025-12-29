@@ -1,9 +1,11 @@
 import sqlite3
 import pandas as pd
-import streamlit as st
-from common import get_connection
+import logging
+from logic.db import get_connection
 
-def add_remote_area_fee(vendor: str, d_from: str, d_to: str) -> None:
+logger = logging.getLogger(__name__)
+
+def add_remote_area_fee(vendor: str, d_from: str, d_to: str) -> dict:
     """
     공급처 + 날짜 기준으로 kpost_in에서 '도서행' == 'y'인 건수 계산,
     단가(out_extra) 적용 → '도서산간' 항목 인보이스에 추가
@@ -14,8 +16,8 @@ def add_remote_area_fee(vendor: str, d_from: str, d_to: str) -> None:
             tables = [row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
             
             if "kpost_in" not in tables:
-                st.warning(f"📭 '{vendor}' kpost_in 테이블이 없어 도서산간 계산을 건너뜁니다.")
-                return
+                logger.warning(f"'{vendor}' kpost_in 테이블이 없어 도서산간 계산을 건너뜁니다.")
+                return None
             
             # ① 공급처 + 별칭 목록
             name_list = [vendor]
@@ -39,21 +41,21 @@ def add_remote_area_fee(vendor: str, d_from: str, d_to: str) -> None:
                     """, con, params=(*name_list, d_from, d_to)
                 )
             except Exception as e:
-                st.warning(f"📭 '{vendor}' kpost_in 조회 실패: {str(e)[:100]}")
-                return
+                logger.warning(f"'{vendor}' kpost_in 조회 실패: {str(e)[:100]}")
+                return None
 
         if df.empty or "도서행" not in df.columns:
-            st.warning(f"📭 '{vendor}' 도서산간 데이터 없음 or '도서행' 칼럼 없음")
-            return
+            logger.warning(f"'{vendor}' 도서산간 데이터 없음 or '도서행' 칼럼 없음")
+            return None
 
         # 2025-07-28: 일부 파일은 도서행 표기가 누락되어 전체 건수를 사용
         df["도서행"] = df["도서행"].astype(str).str.lower().str.strip()
         qty = df[df["도서행"] == "y"].shape[0]
 
-        st.info(f"✅ {vendor} 도서산간 적용 수량: {qty}")
+        logger.info(f"{vendor} 도서산간 적용 수량: {qty}")
 
         if qty == 0:
-            return
+            return None
 
         try:
             with sqlite3.connect("billing.db") as con:
@@ -63,15 +65,16 @@ def add_remote_area_fee(vendor: str, d_from: str, d_to: str) -> None:
             unit = None
 
         if not unit:
-            st.error("❗ out_extra 테이블에서 '도서산간' 단가를 찾을 수 없습니다.")
-            return
+            logger.error("out_extra 테이블에서 '도서산간' 단가를 찾을 수 없습니다.")
+            return None
 
-        st.session_state["items"].append({
+        return {
             "항목": "도서산간",
             "수량": qty,
             "단가": unit,
             "금액": qty * unit
-        })
+        }
         
     except Exception as e:
-        st.warning(f"⚠️ {vendor} 도서산간 계산 중 오류: {str(e)[:100]}")
+        logger.warning(f"{vendor} 도서산간 계산 중 오류: {str(e)[:100]}")
+        return None

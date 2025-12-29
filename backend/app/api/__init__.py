@@ -11,6 +11,8 @@ from .vendors import router as vendors_router
 from .rates import router as rates_router
 from .insights import router as insights_router
 from .invoices import router as invoices_router
+from .auth import router as auth_router
+from .logs import router as logs_router
 
 __all__ = [
     "health_router",
@@ -20,5 +22,7 @@ __all__ = [
     "rates_router",
     "insights_router",
     "invoices_router",
+    "auth_router",
+    "logs_router",
 ]
 

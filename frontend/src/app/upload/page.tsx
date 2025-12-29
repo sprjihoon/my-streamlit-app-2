@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import Card from '@/components/Card';
-import Loading from '@/components/Loading';
-import Alert from '@/components/Alert';
+import { Card } from '@/components/Card';
+import { Loading } from '@/components/Loading';
+import { Alert } from '@/components/Alert';
 import { uploadFile, getUploadList, deleteUpload } from '@/lib/api';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 /**
  * 업로드 타겟 정의 (Streamlit TARGETS와 동일)
@@ -39,6 +41,14 @@ export default function UploadPage() {
   
   // 파일 input refs
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  
+  // 권한 체크
+  const [isAdmin, setIsAdmin] = useState(false);
+  
+  useEffect(() => {
+    const storedIsAdmin = localStorage.getItem('isAdmin') === 'true';
+    setIsAdmin(storedIsAdmin);
+  }, []);
 
   // 업로드 목록 로드
   async function loadUploads() {
@@ -56,19 +66,36 @@ export default function UploadPage() {
     loadUploads();
   }, []);
 
-  // 파일 업로드 처리
+  // 파일 업로드 처리 (관리자만)
   async function handleUpload(table: string, file: File) {
+    if (!isAdmin) {
+      setMessage({ type: 'error', text: '업로드 권한이 없습니다. 관리자만 업로드할 수 있습니다.' });
+      return;
+    }
+    
     setUploading(table);
     setMessage(null);
     
     try {
-      const result = await uploadFile(file, table);
+      const token = localStorage.getItem('token');
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('table', table);
+      if (token) formData.append('token', token);
+      
+      const res = await fetch(`${API_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const result = await res.json();
       
       if (result.success) {
         setMessage({ type: 'success', text: result.message });
         await loadUploads(); // 목록 새로고침
       } else {
-        setMessage({ type: 'error', text: result.message });
+        setMessage({ type: 'error', text: result.message || result.detail || '업로드 실패' });
       }
     } catch (err) {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : '업로드 실패' });
@@ -112,7 +139,11 @@ export default function UploadPage() {
     <div>
       <h1 style={{ marginBottom: '1rem' }}>📤 원본 데이터 업로드</h1>
 
-      {message && <Alert type={message.type}>{message.text}</Alert>}
+      {!isAdmin && (
+        <Alert type="error" message="업로드 권한이 없습니다. 관리자만 업로드할 수 있습니다." onClose={() => {}} />
+      )}
+
+      {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
       {/* 업로드 영역 (5컬럼 그리드 - Streamlit cols와 동일) */}
       <div className="grid grid-5" style={{ marginBottom: '1rem' }}>

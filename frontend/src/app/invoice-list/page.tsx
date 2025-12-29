@@ -16,6 +16,10 @@ interface Invoice {
   total_amount: number;
   status: string;
   created_at: string;
+  modified_by: string | null;
+  modified_at: string | null;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
 }
 
 interface InvoiceItem {
@@ -38,13 +42,14 @@ interface InvoiceDetail {
 
 /**
  * 인보이스 목록 페이지
- * 기존 Streamlit invoice_list.py와 동일한 기능
+ * 기존 Streamlit invoice_list.py와 동일한 기능 + 항목 수정 기능
  */
 export default function InvoiceListPage() {
   // 목록 상태
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   
   // 필터
   const [periods, setPeriods] = useState<string[]>([]);
@@ -57,12 +62,23 @@ export default function InvoiceListPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   
-  // 상세 보기
+  // 상세 보기 / 편집 모달
   const [detailInvoice, setDetailInvoice] = useState<InvoiceDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
+  const [saving, setSaving] = useState(false);
   
   // 통계
   const [sumAmount, setSumAmount] = useState(0);
+  
+  // 권한 체크
+  const [isAdmin, setIsAdmin] = useState(false);
+  
+  useEffect(() => {
+    const storedIsAdmin = localStorage.getItem('isAdmin') === 'true';
+    setIsAdmin(storedIsAdmin);
+  }, []);
 
   // 인보이스 목록 로드
   useEffect(() => {
@@ -93,15 +109,13 @@ export default function InvoiceListPage() {
       
       if (data.periods) {
         setPeriods(data.periods);
-        // 기본값: 가장 최근 기간
-        if (!selectedPeriod && data.periods.length > 0) {
-          // setSelectedPeriod(data.periods[0]);
-        }
       }
       
-      // 고유 업체명 추출
-      const uniqueVendors = [...new Set(data.invoices?.map((i: Invoice) => i.vendor) || [])];
-      setVendors(uniqueVendors.filter(v => v) as string[]);
+      const vendorSet = new Set<string>();
+      (data.invoices || []).forEach((i: Invoice) => {
+        if (i.vendor) vendorSet.add(i.vendor);
+      });
+      setVendors(Array.from(vendorSet));
       
     } catch (err) {
       setError(err instanceof Error ? err.message : '로드 실패');
@@ -135,9 +149,11 @@ export default function InvoiceListPage() {
   async function handleViewDetail(invoiceId: number) {
     try {
       setLoadingDetail(true);
+      setIsEditing(false);
       const res = await fetch(`${API_URL}/invoices/${invoiceId}`);
       const data = await res.json();
       setDetailInvoice(data);
+      setEditItems(data.items.map((item: InvoiceItem) => ({ ...item })));
     } catch (err) {
       setError(err instanceof Error ? err.message : '상세 조회 실패');
     } finally {
@@ -145,35 +161,148 @@ export default function InvoiceListPage() {
     }
   }
 
-  // 삭제
+  // 편집 모드 시작
+  function handleStartEdit() {
+    if (detailInvoice) {
+      setEditItems(detailInvoice.items.map(item => ({ ...item })));
+      setIsEditing(true);
+    }
+  }
+
+  // 편집 취소
+  function handleCancelEdit() {
+    if (detailInvoice) {
+      setEditItems(detailInvoice.items.map(item => ({ ...item })));
+    }
+    setIsEditing(false);
+  }
+
+  // 항목 값 변경
+  function handleItemChange(index: number, field: keyof InvoiceItem, value: string | number) {
+    const updated = [...editItems];
+    if (field === '수량' || field === '단가' || field === '금액') {
+      updated[index][field] = Number(value) || 0;
+    } else {
+      updated[index][field] = String(value);
+    }
+    // 금액 자동 계산 (수량 또는 단가 변경 시)
+    if (field === '수량' || field === '단가') {
+      updated[index]['금액'] = updated[index]['수량'] * updated[index]['단가'];
+    }
+    setEditItems(updated);
+  }
+
+  // 항목 추가
+  function handleAddItem() {
+    setEditItems([...editItems, { 항목: '', 수량: 0, 단가: 0, 금액: 0, 비고: '' }]);
+  }
+
+  // 항목 삭제
+  function handleRemoveItem(index: number) {
+    setEditItems(editItems.filter((_, i) => i !== index));
+  }
+
+  // 현재 사용자 닉네임 가져오기
+  function getCurrentUserNickname(): string {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        return user.nickname || '시스템';
+      }
+    } catch {}
+    return '시스템';
+  }
+
+  // 저장
+  async function handleSave() {
+    if (!detailInvoice) return;
+    
+    try {
+      setSaving(true);
+      setError(null);
+      
+      const userNickname = getCurrentUserNickname();
+      
+      const res = await fetch(`${API_URL}/invoices/${detailInvoice.invoice_id}/items`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: editItems, user_nickname: userNickname }),
+      });
+      
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || '저장 실패');
+      }
+      
+      const result = await res.json();
+      
+      // 상세 정보 다시 로드
+      await handleViewDetail(detailInvoice.invoice_id);
+      setIsEditing(false);
+      setSuccess(`✅ 저장 완료 (총액: ₩${result.total_amount.toLocaleString()}, 수정자: ${result.modified_by})`);
+      
+      // 목록 새로고침
+      loadInvoices();
+      
+      setTimeout(() => setSuccess(null), 3000);
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '저장 실패');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // 삭제 (관리자만)
   async function handleDelete(invoiceId: number) {
+    if (!isAdmin) {
+      setError('삭제 권한이 없습니다. 관리자만 삭제할 수 있습니다.');
+      return;
+    }
     if (!confirm(`인보이스 #${invoiceId}을(를) 삭제하시겠습니까?`)) return;
     
     try {
-      const res = await fetch(`${API_URL}/invoices/${invoiceId}`, { method: 'DELETE' });
-      if (res.ok) {
-        loadInvoices();
-        if (detailInvoice?.invoice_id === invoiceId) {
-          setDetailInvoice(null);
-        }
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/invoices/${invoiceId}?token=${token}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || '삭제 실패');
       }
+      loadInvoices();
+      if (detailInvoice?.invoice_id === invoiceId) {
+        setDetailInvoice(null);
+      }
+      setSuccess(`✅ 인보이스 #${invoiceId} 삭제 완료`);
+      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '삭제 실패');
     }
   }
 
-  // 선택 삭제
+  // 선택 삭제 (관리자만)
   async function handleDeleteSelected() {
+    if (!isAdmin) {
+      setError('삭제 권한이 없습니다. 관리자만 삭제할 수 있습니다.');
+      return;
+    }
     if (selectedIds.length === 0) return;
     if (!confirm(`선택된 ${selectedIds.length}건의 인보이스를 삭제하시겠습니까?`)) return;
     
     try {
+      const token = localStorage.getItem('token');
       for (const id of selectedIds) {
-        await fetch(`${API_URL}/invoices/${id}`, { method: 'DELETE' });
+        const res = await fetch(`${API_URL}/invoices/${id}?token=${token}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || '삭제 실패');
+        }
       }
       setSelectedIds([]);
       setSelectAll(false);
       loadInvoices();
+      setSuccess(`✅ ${selectedIds.length}건 삭제 완료`);
+      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '삭제 실패');
     }
@@ -182,19 +311,46 @@ export default function InvoiceListPage() {
   // 확정
   async function handleConfirm(invoiceId: number) {
     try {
-      const res = await fetch(`${API_URL}/invoices/${invoiceId}/confirm`, { method: 'POST' });
+      const userNickname = getCurrentUserNickname();
+      const res = await fetch(
+        `${API_URL}/invoices/${invoiceId}/confirm?user_nickname=${encodeURIComponent(userNickname)}`,
+        { method: 'POST' }
+      );
       if (res.ok) {
         loadInvoices();
         if (detailInvoice?.invoice_id === invoiceId) {
           setDetailInvoice({ ...detailInvoice, status: '확정' });
         }
+        setSuccess(`✅ 인보이스 #${invoiceId} 확정 완료 (${userNickname})`);
+        setTimeout(() => setSuccess(null), 3000);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '확정 실패');
     }
   }
 
-  // 엑셀 다운로드 - 전체 (필터 적용)
+  // 미확정으로 변경
+  async function handleUnconfirm(invoiceId: number) {
+    try {
+      const userNickname = getCurrentUserNickname();
+      const res = await fetch(
+        `${API_URL}/invoices/${invoiceId}/unconfirm?user_nickname=${encodeURIComponent(userNickname)}`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        loadInvoices();
+        if (detailInvoice?.invoice_id === invoiceId) {
+          setDetailInvoice({ ...detailInvoice, status: '미확정' });
+        }
+        setSuccess(`⏪ 인보이스 #${invoiceId} 미확정으로 변경 (${userNickname})`);
+        setTimeout(() => setSuccess(null), 3000);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '미확정 변경 실패');
+    }
+  }
+
+  // 엑셀 다운로드 - 전체
   function handleExportAll() {
     const params = new URLSearchParams();
     if (selectedPeriod) params.append('period', selectedPeriod);
@@ -202,7 +358,7 @@ export default function InvoiceListPage() {
     window.open(`${API_URL}/invoices/export/xlsx?${params.toString()}`, '_blank');
   }
 
-  // 엑셀 다운로드 - 선택 항목
+  // 엑셀 다운로드 - 선택
   function handleExportSelected() {
     if (selectedIds.length === 0) {
       alert('선택된 인보이스가 없습니다.');
@@ -217,6 +373,9 @@ export default function InvoiceListPage() {
     window.open(`${API_URL}/invoices/${invoiceId}/export/xlsx`, '_blank');
   }
 
+  // 편집 항목 합계 계산
+  const editTotalAmount = editItems.reduce((sum, item) => sum + (item.금액 || 0), 0);
+
   const formatNumber = (n: number) => n.toLocaleString('ko-KR');
 
   if (loading) {
@@ -228,6 +387,7 @@ export default function InvoiceListPage() {
       <h1 style={{ marginBottom: '2rem' }}>📜 인보이스 목록</h1>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
       {/* 필터 */}
       <Card style={{ marginBottom: '1rem' }}>
@@ -326,20 +486,22 @@ export default function InvoiceListPage() {
             >
               📥 선택 XLSX ({selectedIds.length}건)
             </button>
-            <button
-              onClick={handleDeleteSelected}
-              disabled={selectedIds.length === 0}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: selectedIds.length === 0 ? '#ccc' : '#f44336',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: selectedIds.length === 0 ? 'not-allowed' : 'pointer',
-              }}
-            >
-              🗑️ 선택 삭제 ({selectedIds.length}건)
-            </button>
+            {isAdmin && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={selectedIds.length === 0}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: selectedIds.length === 0 ? '#ccc' : '#f44336',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: selectedIds.length === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                🗑️ 선택 삭제 ({selectedIds.length}건)
+              </button>
+            )}
           </div>
         </div>
       </Card>
@@ -357,7 +519,6 @@ export default function InvoiceListPage() {
           </div>
         ) : (
           <>
-            {/* 전체 선택 */}
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                 <input
@@ -369,7 +530,6 @@ export default function InvoiceListPage() {
               </label>
             </div>
 
-            {/* 테이블 */}
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -380,6 +540,7 @@ export default function InvoiceListPage() {
                     <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>기간</th>
                     <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>금액</th>
                     <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>상태</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>수정/확정</th>
                     <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>작업</th>
                   </tr>
                 </thead>
@@ -416,6 +577,21 @@ export default function InvoiceListPage() {
                           {inv.status}
                         </span>
                       </td>
+                      <td style={{ padding: '0.5rem', textAlign: 'center', fontSize: '0.75rem' }}>
+                        {inv.modified_by && (
+                          <div style={{ color: '#666' }}>
+                            ✏️ {inv.modified_by}
+                          </div>
+                        )}
+                        {inv.confirmed_by && (
+                          <div style={{ color: '#0f5132' }}>
+                            ✅ {inv.confirmed_by}
+                          </div>
+                        )}
+                        {!inv.modified_by && !inv.confirmed_by && (
+                          <span style={{ color: '#999' }}>-</span>
+                        )}
+                      </td>
                       <td style={{ padding: '0.5rem', textAlign: 'center' }}>
                         <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'center' }}>
                           <button
@@ -430,7 +606,7 @@ export default function InvoiceListPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            상세
+                            상세/수정
                           </button>
                           <button
                             onClick={() => handleExportSingle(inv.invoice_id)}
@@ -446,36 +622,55 @@ export default function InvoiceListPage() {
                           >
                             XLSX
                           </button>
-                          {inv.status !== '확정' && (
+                          {inv.status === '확정' ? (
+                            <button
+                              onClick={() => handleUnconfirm(inv.invoice_id)}
+                              style={{
+                                padding: '0.25rem 0.5rem',
+                                fontSize: '0.75rem',
+                                backgroundColor: '#9e9e9e',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                              }}
+                              title="확정 해제"
+                            >
+                              확정해제
+                            </button>
+                          ) : (
                             <button
                               onClick={() => handleConfirm(inv.invoice_id)}
                               style={{
                                 padding: '0.25rem 0.5rem',
                                 fontSize: '0.75rem',
-                                backgroundColor: '#ff9800',
+                                backgroundColor: '#4CAF50',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                              }}
+                              title="인보이스 확정"
+                            >
+                              확정
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDelete(inv.invoice_id)}
+                              style={{
+                                padding: '0.25rem 0.5rem',
+                                fontSize: '0.75rem',
+                                backgroundColor: '#f44336',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '4px',
                                 cursor: 'pointer',
                               }}
                             >
-                              확정
+                              삭제
                             </button>
                           )}
-                          <button
-                            onClick={() => handleDelete(inv.invoice_id)}
-                            style={{
-                              padding: '0.25rem 0.5rem',
-                              fontSize: '0.75rem',
-                              backgroundColor: '#f44336',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            삭제
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -487,7 +682,7 @@ export default function InvoiceListPage() {
         )}
       </Card>
 
-      {/* 상세 보기 모달 */}
+      {/* 상세 보기 / 편집 모달 */}
       {(loadingDetail || detailInvoice) && (
         <div
           style={{
@@ -502,17 +697,17 @@ export default function InvoiceListPage() {
             justifyContent: 'center',
             zIndex: 1000,
           }}
-          onClick={() => setDetailInvoice(null)}
+          onClick={() => { setDetailInvoice(null); setIsEditing(false); }}
         >
           <div
             style={{
               backgroundColor: 'white',
               borderRadius: '8px',
               padding: '2rem',
-              maxWidth: '900px',
-              maxHeight: '80vh',
+              maxWidth: '1000px',
+              maxHeight: '90vh',
               overflow: 'auto',
-              width: '90%',
+              width: '95%',
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -521,9 +716,9 @@ export default function InvoiceListPage() {
             ) : detailInvoice && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <h2>인보이스 #{detailInvoice.invoice_id} 상세</h2>
+                  <h2>인보이스 #{detailInvoice.invoice_id} {isEditing ? '수정' : '상세'}</h2>
                   <button
-                    onClick={() => setDetailInvoice(null)}
+                    onClick={() => { setDetailInvoice(null); setIsEditing(false); }}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -535,6 +730,7 @@ export default function InvoiceListPage() {
                   </button>
                 </div>
                 
+                {/* 인보이스 기본 정보 */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
                   <div style={{ textAlign: 'center', padding: '1rem', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
                     <div style={{ fontWeight: 'bold' }}>{detailInvoice.vendor}</div>
@@ -548,47 +744,181 @@ export default function InvoiceListPage() {
                     <div style={{ fontWeight: 'bold' }}>{detailInvoice.period_to}</div>
                     <div style={{ color: '#666', fontSize: '0.875rem' }}>종료일</div>
                   </div>
-                  <div style={{ textAlign: 'center', padding: '1rem', backgroundColor: '#e8f5e9', borderRadius: '4px' }}>
-                    <div style={{ fontWeight: 'bold', color: 'green' }}>₩{formatNumber(detailInvoice.total_amount)}</div>
-                    <div style={{ color: '#666', fontSize: '0.875rem' }}>총 금액</div>
+                  <div style={{ textAlign: 'center', padding: '1rem', backgroundColor: isEditing ? '#fff3e0' : '#e8f5e9', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 'bold', color: isEditing ? '#e65100' : 'green' }}>
+                      ₩{formatNumber(isEditing ? editTotalAmount : detailInvoice.total_amount)}
+                    </div>
+                    <div style={{ color: '#666', fontSize: '0.875rem' }}>총 금액{isEditing && ' (수정중)'}</div>
                   </div>
                 </div>
 
+                {/* 편집/보기 모드 전환 버튼 */}
+                <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
+                  {!isEditing ? (
+                    <button
+                      onClick={handleStartEdit}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        backgroundColor: '#ff9800',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✏️ 수정하기
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleSave}
+                        disabled={saving}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          backgroundColor: saving ? '#ccc' : '#4CAF50',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: saving ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {saving ? '저장 중...' : '💾 저장'}
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          backgroundColor: '#9e9e9e',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={handleAddItem}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          backgroundColor: '#2196F3',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ➕ 항목 추가
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* 항목 테이블 */}
                 <h3 style={{ marginBottom: '0.5rem' }}>📝 항목</h3>
-                {detailInvoice.items.length === 0 ? (
+                {(isEditing ? editItems : detailInvoice.items).length === 0 ? (
                   <p style={{ color: '#666' }}>항목이 없습니다.</p>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ backgroundColor: '#f5f5f5' }}>
-                        <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>항목</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>수량</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>단가</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>금액</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>비고</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detailInvoice.items.map((item, idx) => (
-                        <tr key={idx}>
-                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.항목}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.수량)}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(item.단가)}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(item.금액)}</td>
-                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>{item.비고 || '-'}</td>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f5f5f5' }}>
+                          <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd', minWidth: '200px' }}>항목</th>
+                          <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd', minWidth: '80px' }}>수량</th>
+                          <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd', minWidth: '100px' }}>단가</th>
+                          <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd', minWidth: '100px' }}>금액</th>
+                          <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd', minWidth: '150px' }}>비고</th>
+                          {isEditing && <th style={{ padding: '0.5rem', borderBottom: '2px solid #ddd', width: '50px' }}></th>}
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr style={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>
-                        <td colSpan={3} style={{ padding: '0.5rem' }}>합계</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right' }}>₩{formatNumber(detailInvoice.total_amount)}</td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {(isEditing ? editItems : detailInvoice.items).map((item, idx) => (
+                          <tr key={idx}>
+                            <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={item.항목}
+                                  onChange={(e) => handleItemChange(idx, '항목', e.target.value)}
+                                  style={{ width: '100%', padding: '0.25rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                                />
+                              ) : item.항목}
+                            </td>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={item.수량}
+                                  onChange={(e) => handleItemChange(idx, '수량', e.target.value)}
+                                  style={{ width: '80px', padding: '0.25rem', border: '1px solid #ddd', borderRadius: '4px', textAlign: 'right' }}
+                                />
+                              ) : formatNumber(item.수량)}
+                            </td>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={item.단가}
+                                  onChange={(e) => handleItemChange(idx, '단가', e.target.value)}
+                                  style={{ width: '100px', padding: '0.25rem', border: '1px solid #ddd', borderRadius: '4px', textAlign: 'right' }}
+                                />
+                              ) : `₩${formatNumber(item.단가)}`}
+                            </td>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={item.금액}
+                                  onChange={(e) => handleItemChange(idx, '금액', e.target.value)}
+                                  style={{ width: '100px', padding: '0.25rem', border: '1px solid #ddd', borderRadius: '4px', textAlign: 'right', backgroundColor: '#f5f5f5' }}
+                                />
+                              ) : `₩${formatNumber(item.금액)}`}
+                            </td>
+                            <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={item.비고}
+                                  onChange={(e) => handleItemChange(idx, '비고', e.target.value)}
+                                  style={{ width: '100%', padding: '0.25rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                                />
+                              ) : (item.비고 || '-')}
+                            </td>
+                            {isEditing && (
+                              <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                                <button
+                                  onClick={() => handleRemoveItem(idx)}
+                                  style={{
+                                    padding: '0.25rem 0.5rem',
+                                    backgroundColor: '#f44336',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>
+                          <td colSpan={3} style={{ padding: '0.5rem' }}>합계</td>
+                          <td style={{ padding: '0.5rem', textAlign: 'right' }}>
+                            ₩{formatNumber(isEditing ? editTotalAmount : detailInvoice.total_amount)}
+                          </td>
+                          <td colSpan={isEditing ? 2 : 1}></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 )}
 
+                {/* 하단 버튼 */}
                 <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
                   <button
                     onClick={() => handleExportSingle(detailInvoice.invoice_id)}
@@ -603,12 +933,26 @@ export default function InvoiceListPage() {
                   >
                     📥 이 인보이스 XLSX
                   </button>
-                  {detailInvoice.status !== '확정' && (
+                  {detailInvoice.status === '확정' ? (
+                    <button
+                      onClick={() => handleUnconfirm(detailInvoice.invoice_id)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        backgroundColor: '#9e9e9e',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ⏪ 확정 해제
+                    </button>
+                  ) : (
                     <button
                       onClick={() => handleConfirm(detailInvoice.invoice_id)}
                       style={{
                         padding: '0.5rem 1rem',
-                        backgroundColor: '#ff9800',
+                        backgroundColor: '#4CAF50',
                         color: 'white',
                         border: 'none',
                         borderRadius: '4px',

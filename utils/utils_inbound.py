@@ -1,7 +1,9 @@
 import sqlite3
 import pandas as pd
-import streamlit as st
-from common import get_connection
+import logging
+from logic.db import get_connection
+
+logger = logging.getLogger(__name__)
 
 def add_inbound_inspection_fee(vendor: str, d_from: str, d_to: str) -> None:
     """
@@ -45,13 +47,13 @@ def add_inbound_inspection_fee(vendor: str, d_from: str, d_to: str) -> None:
         unit = int(row[0]) if row else None
 
     if not unit:
-        st.error("❗ '입고검수' 단가를 out_extra 테이블에서 찾을 수 없습니다.")
-        return
+        logger.error("'입고검수' 단가를 out_extra 테이블에서 찾을 수 없습니다.")
+        return None
 
-    # ④ 인보이스 항목 추가
-    st.session_state["items"].append({
+    # ④ 인보이스 항목 반환
+    return {
         "항목": "입고검수",
         "수량": total_qty,
         "단가": unit,
         "금액": total_qty * unit
-    })
+    }

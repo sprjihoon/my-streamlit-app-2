@@ -203,9 +203,9 @@ export default function RatesPage() {
   function updateOutBasic(index: number, field: keyof OutBasicRate, value: string | number) {
     const updated = [...outBasicData];
     if (field === '단가') {
-      updated[index] = { ...updated[index], [field]: parseInt(String(value)) || 0 };
+      updated[index] = { ...updated[index], 단가: parseInt(String(value)) || 0 };
     } else {
-      updated[index] = { ...updated[index], [field]: value };
+      updated[index] = { ...updated[index], sku_group: String(value) };
     }
     setOutBasicData(updated);
   }
@@ -213,19 +213,25 @@ export default function RatesPage() {
   function updateOutExtra(index: number, field: keyof OutExtraRate, value: string | number) {
     const updated = [...outExtraData];
     if (field === '단가') {
-      updated[index] = { ...updated[index], [field]: parseInt(String(value)) || 0 };
+      updated[index] = { ...updated[index], 단가: parseInt(String(value)) || 0 };
     } else {
-      updated[index] = { ...updated[index], [field]: value };
+      updated[index] = { ...updated[index], 항목: String(value) };
     }
     setOutExtraData(updated);
   }
 
   function updateShippingZone(index: number, field: keyof ShippingZoneRate, value: string | number) {
     const updated = [...shippingZoneData];
-    if (['len_min_cm', 'len_max_cm', '요금'].includes(field)) {
-      updated[index] = { ...updated[index], [field]: parseInt(String(value)) || 0 };
-    } else {
-      updated[index] = { ...updated[index], [field]: value };
+    if (field === 'len_min_cm') {
+      updated[index] = { ...updated[index], len_min_cm: parseInt(String(value)) || 0 };
+    } else if (field === 'len_max_cm') {
+      updated[index] = { ...updated[index], len_max_cm: parseInt(String(value)) || 0 };
+    } else if (field === '요금') {
+      updated[index] = { ...updated[index], 요금: parseInt(String(value)) || 0 };
+    } else if (field === '요금제') {
+      updated[index] = { ...updated[index], 요금제: String(value) };
+    } else if (field === '구간') {
+      updated[index] = { ...updated[index], 구간: String(value) };
     }
     setShippingZoneData(updated);
   }
@@ -233,9 +239,9 @@ export default function RatesPage() {
   function updateMaterial(index: number, field: keyof MaterialRate, value: string | number) {
     const updated = [...materialData];
     if (field === '단가') {
-      updated[index] = { ...updated[index], [field]: parseInt(String(value)) || 0 };
+      updated[index] = { ...updated[index], 단가: parseInt(String(value)) || 0 };
     } else {
-      updated[index] = { ...updated[index], [field]: value };
+      updated[index] = { ...updated[index], 항목: String(value) };
     }
     setMaterialData(updated);
   }

@@ -1,15 +1,17 @@
 import sqlite3
-import streamlit as st
 import pandas as pd
+import logging
 
-def add_combined_pack_fee(df_ship: pd.DataFrame) -> None:
+logger = logging.getLogger(__name__)
+
+def add_combined_pack_fee(df_ship: pd.DataFrame) -> dict:
     """
     배송통계 df_ship의 내품수량 기준으로,
     합포장 (2개 초과분) 수량을 계산하고, out_extra 테이블의 단가로 인보이스 항목 추가.
     """
     if "내품수량" not in df_ship.columns:
-        st.warning("❗ '내품수량' 칼럼이 배송통계에 없습니다.")
-        return
+        logger.warning("'내품수량' 칼럼이 배송통계에 없습니다.")
+        return None
 
     # ① 초과 합포장 수량 계산
     df_ship["내품수량"] = pd.to_numeric(df_ship["내품수량"], errors="coerce").fillna(0)
@@ -18,7 +20,7 @@ def add_combined_pack_fee(df_ship: pd.DataFrame) -> None:
     total_qty = int(df_ship["초과수량"].sum())
 
     if total_qty == 0:
-        return
+        return None
 
     # ② 단가 가져오기 (out_extra 테이블)
     try:
@@ -29,13 +31,13 @@ def add_combined_pack_fee(df_ship: pd.DataFrame) -> None:
         unit = None
 
     if not unit:
-        st.error("❗ out_extra 테이블에서 '합포장' 단가를 찾을 수 없습니다.")
-        return
+        logger.error("out_extra 테이블에서 '합포장' 단가를 찾을 수 없습니다.")
+        return None
 
-    # ③ 인보이스 항목 추가
-    st.session_state["items"].append({
+    # ③ 인보이스 항목 반환
+    return {
         "항목": "합포장 (2개 초과/개)",
         "수량": total_qty,
         "단가": unit,
         "금액": total_qty * unit
-    })
+    }

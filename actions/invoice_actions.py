@@ -1,15 +1,17 @@
 # actions/invoice_actions.py
 # -----------------------------------------------------------
 # • 인보이스 계산에 필요한 모든 액션
-# • Python 3.12  / Streamlit 1.44
+# • Python 3.12  / Next.js + FastAPI
 # -----------------------------------------------------------
 import sqlite3, datetime, zoneinfo
 from typing import Dict, List
+import logging
 
 import pandas as pd
-import streamlit as st
-from common import get_connection
+from logic.db import get_connection
 from utils.clean import TRACK_COLS, clean_invoice_id
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────
 # 작업일지 컬럼 상수
@@ -141,7 +143,7 @@ def create_and_finalize_invoice(vendor_id: int,
                 # 금액이 너무 크면(SQLite INTEGER 범위 초과) 0으로 처리하거나 제한
                 amount = float(it["금액"])
                 if amount > 9000000000000000000:  # SQLite INTEGER max approx 9e18
-                    st.warning(f"⚠️ 금액 초과 항목 제외: {it['항목']} ({amount})")
+                    logger.warning(f"금액 초과 항목 제외: {it['항목']} ({amount})")
                     amount = 0
                 
                 safe_items.append({
@@ -153,7 +155,7 @@ def create_and_finalize_invoice(vendor_id: int,
                 })
                 total_safe += amount
             except (ValueError, TypeError) as e:
-                st.warning(f"⚠️ 데이터 변환 오류 항목 제외: {it} - {e}")
+                logger.warning(f"데이터 변환 오류 항목 제외: {it} - {e}")
 
         # ── invoices 헤더 INSERT ──
         # 현지 시각(서버 로컬타임)으로 created_at 저장
@@ -297,13 +299,15 @@ def add_return_courier_fee(vendor, d_from, d_to):
                     params=(rate,))
                 .sort_values("len_min_cm"))
 
+    result_items = []
     for _, z in zone.iterrows():
         cnt = df[(df["우편물부피"] >= z["len_min_cm"]) &
                  (df["우편물부피"] <= z["len_max_cm"])].shape[0]
         if cnt:
-            st.session_state["items"].append(
+            result_items.append(
                 {"항목": f"반품 택배요금 ({z['구간']})", "수량": cnt,
                  "단가": z["요금"], "금액": cnt * z["요금"]})
+    return result_items
 
 
 def add_video_ret_fee(items, vendor, d_from, d_to):

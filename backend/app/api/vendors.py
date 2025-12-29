@@ -302,7 +302,7 @@ async def get_unmatched_aliases():
 
 @router.get("/aliases/available/{file_type}", response_model=List[str])
 async def get_available_aliases(file_type: str, exclude_vendor: Optional[str] = None):
-    """특정 파일 타입에서 사용 가능한 별칭 목록"""
+    """특정 파일 타입에서 사용 가능한 별칭 목록 (미매핑된 것만)"""
     ensure_tables()
     
     SRC_TABLES = {
@@ -360,4 +360,72 @@ async def get_available_aliases(file_type: str, exclude_vendor: Optional[str] = 
             pass
     
     return []
+
+
+@router.get("/aliases/for-vendor/{vendor_id}/{file_type}", response_model=Dict[str, Any])
+async def get_aliases_for_vendor(vendor_id: str, file_type: str):
+    """거래처 수정용: 해당 거래처에 매핑된 별칭 + 사용 가능한 별칭 반환"""
+    ensure_tables()
+    
+    SRC_TABLES = {
+        "inbound_slip": ("inbound_slip", "공급처"),
+        "shipping_stats": ("shipping_stats", "공급처"),
+        "kpost_in": ("kpost_in", "발송인명"),
+        "kpost_ret": ("kpost_ret", "수취인명"),
+        "work_log": ("work_log", "업체명"),
+    }
+    
+    if file_type not in SRC_TABLES:
+        return {"mapped": [], "available": []}
+    
+    tbl, col = SRC_TABLES[file_type]
+    
+    with get_connection() as con:
+        # 해당 거래처에 이미 매핑된 별칭
+        mapped_df = pd.read_sql(
+            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = ?",
+            con, params=[vendor_id, file_type]
+        )
+        mapped_aliases = mapped_df['alias'].tolist() if not mapped_df.empty else []
+        
+        # 테이블 존재 확인
+        table_exists = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
+        ).fetchone()
+        
+        if not table_exists:
+            return {"mapped": mapped_aliases, "available": []}
+        
+        # 컬럼 존재 확인
+        cols = [c[1] for c in con.execute(f"PRAGMA table_info({tbl});")]
+        if col not in cols:
+            return {"mapped": mapped_aliases, "available": []}
+        
+        try:
+            # 원본 테이블에서 모든 고유 값
+            all_aliases = pd.read_sql(
+                f"SELECT DISTINCT [{col}] as alias FROM {tbl} WHERE [{col}] IS NOT NULL AND TRIM([{col}]) != ''",
+                con
+            )
+            
+            # 다른 거래처에 매핑된 별칭 (이 거래처 제외)
+            other_mapped = pd.read_sql(
+                "SELECT DISTINCT alias FROM aliases WHERE file_type = ? AND vendor != ?",
+                con, params=[file_type, vendor_id]
+            )
+            
+            # 사용 가능한 별칭 = 전체 - 다른 거래처에 매핑된 것
+            if not all_aliases.empty:
+                available = all_aliases[~all_aliases['alias'].isin(other_mapped['alias'])]
+                available_list = sorted(available['alias'].tolist())
+            else:
+                available_list = []
+            
+            return {
+                "mapped": mapped_aliases,
+                "available": available_list
+            }
+            
+        except Exception:
+            return {"mapped": mapped_aliases, "available": []}
 

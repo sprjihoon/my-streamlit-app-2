@@ -29,10 +29,12 @@ from datetime import date
 
 # 외부 헬퍼 (settings DB 연결 + 단가 조회)
 try:
-    from common import get_connection, get_price  # type: ignore
+    from logic.db import get_connection  # type: ignore
 except ImportError:  # graceful degradation (tests)
     get_connection = None  # type: ignore
-    get_price = None  # type: ignore
+
+# get_price는 별도 구현 필요 시 추가
+get_price = None  # type: ignore
 
 BILLING_DB = "billing.db"
 DEFAULT_ITEM_NAME = "기본 출고비"
