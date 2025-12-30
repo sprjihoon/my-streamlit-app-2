@@ -1,3 +1,6 @@
+
+
+
 # logic/invoice_calc.py
 # -----------------------------------------------------------
 # • 인보이스 계산에 필요한 모든 액션
@@ -104,10 +107,21 @@ def add_basic_shipping(
             "SELECT alias FROM aliases WHERE vendor=? AND file_type='shipping_stats'",
             con, params=(vendor,)
         )
-        df = df_raw[
-            df_raw["공급처"].str.strip()
-            .isin([vendor] + alias["alias"].astype(str).str.strip().tolist())
-        ]
+        
+        # 공급처 컬럼 찾기 (다양한 이름 지원)
+        supply_col = None
+        for col in df_raw.columns:
+            if '공급처' in col or '공급자' in col or '업체명' in col or 'vendor' in col.lower():
+                supply_col = col
+                break
+        
+        if supply_col:
+            df = df_raw[
+                df_raw[supply_col].astype(str).str.strip()
+                .isin([vendor] + alias["alias"].astype(str).str.strip().tolist())
+            ]
+        else:
+            df = pd.DataFrame()  # 공급처 컬럼이 없으면 빈 DataFrame
 
     total = int(len(df))
     row = {"항목": "기본 출고비", "수량": total, "단가": 900, "금액": total * 900}
@@ -242,7 +256,7 @@ def get_extra_unit(label: str) -> int:
                 con, params=(label,)
             ).squeeze()
             if pd.notna(val):
-                return int(val)
+                return int(float(val))
         except Exception:
             pass
     defaults = {"출고영상촬영": 200, "반품영상촬영": 400, "반품회수": 1100}
@@ -258,7 +272,7 @@ def get_material_unit(label: str) -> int:
                 con, params=(label,)
             ).squeeze()
             if pd.notna(val):
-                return int(val)
+                return int(float(val))
         except Exception:
             pass
     return 80
@@ -529,9 +543,9 @@ def add_box_fee_by_zone(
             continue
         item_list.append({
             "항목": rec["항목"],
-            "수량": int(qty),
-            "단가": int(rec["단가"]),
-            "금액": int(qty) * int(rec["단가"]),
+            "수량": int(float(qty)),
+            "단가": int(float(rec["단가"])),
+            "금액": int(float(qty)) * int(float(rec["단가"])),
         })
 
 
@@ -589,9 +603,9 @@ def add_worklog_items(
         )
         item_list.append({
             "항목": name,
-            "수량": int(r[WL_COL_QTY]),
-            "단가": int(r[WL_COL_UNIT]),
-            "금액": int(r[WL_COL_AMT]),
+            "수량": int(float(r[WL_COL_QTY])),
+            "단가": int(float(r[WL_COL_UNIT])),
+            "금액": int(float(r[WL_COL_AMT])),
             "비고": r[WL_COL_MEMO]
         })
 

@@ -434,3 +434,246 @@ async def get_vendors_list(period: Optional[str] = None):
     
     return sorted(df[cols['vendor']].dropna().unique().tolist())
 
+
+# ─────────────────────────────────────
+# 인보이스 기반 분석
+# ─────────────────────────────────────
+
+@router.get("/invoice-summary")
+async def get_invoice_summary(period: Optional[str] = None):
+    """인보이스 기반 전체 요약 (보관료, 택배비, 항목별 비용 등)"""
+    try:
+        with get_connection() as con:
+            # 기간 필터
+            date_filter = ""
+            if period and period != "전체":
+                date_filter = f"WHERE strftime('%Y-%m', i.period_from) = '{period}'"
+            
+            # 인보이스 목록
+            df_invoices = pd.read_sql(f"""
+                SELECT invoice_id, vendor_id, total_amount, period_from
+                FROM invoices
+                {date_filter}
+            """, con)
+            
+            if df_invoices.empty:
+                return {
+                    "total_invoices": 0,
+                    "total_amount": 0,
+                    "total_storage_fee": 0,
+                    "total_courier_fee": 0,
+                    "total_basic_shipping": 0,
+                    "total_box_fee": 0,
+                    "category_breakdown": [],
+                    "vendor_breakdown": [],
+                    "periods": []
+                }
+            
+            invoice_ids = df_invoices['invoice_id'].tolist()
+            placeholders = ",".join(["?"] * len(invoice_ids))
+            
+            # 모든 인보이스 항목
+            df_items = pd.read_sql(f"""
+                SELECT ii.invoice_id, ii.item_name, ii.qty, ii.unit_price, ii.amount,
+                       i.vendor_id, v.name as vendor_name
+                FROM invoice_items ii
+                JOIN invoices i ON ii.invoice_id = i.invoice_id
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor
+                WHERE ii.invoice_id IN ({placeholders})
+            """, con, params=invoice_ids)
+            
+            # 사용 가능한 기간 목록
+            periods_df = pd.read_sql("""
+                SELECT DISTINCT strftime('%Y-%m', period_from) as period
+                FROM invoices
+                ORDER BY period DESC
+            """, con)
+            periods = periods_df['period'].tolist()
+        
+        if df_items.empty:
+            return {
+                "total_invoices": len(df_invoices),
+                "total_amount": int(df_invoices['total_amount'].sum()),
+                "total_storage_fee": 0,
+                "total_courier_fee": 0,
+                "total_basic_shipping": 0,
+                "total_box_fee": 0,
+                "category_breakdown": [],
+                "vendor_breakdown": [],
+                "periods": periods
+            }
+        
+        # 항목 분류
+        def categorize_item(name: str) -> str:
+            name_lower = name.lower() if name else ""
+            if '보관료' in name_lower or '보관' in name_lower:
+                return '보관료'
+            elif '택배' in name_lower:
+                return '택배요금'
+            elif '기본' in name_lower and ('출고' in name_lower or '출고비' in name_lower):
+                return '기본출고비'
+            elif '박스' in name_lower or '봉투' in name_lower:
+                return '박스/봉투'
+            elif '입고' in name_lower and '검수' in name_lower:
+                return '입고검수'
+            elif '도서산간' in name_lower:
+                return '도서산간'
+            elif '합포장' in name_lower:
+                return '합포장'
+            elif '바코드' in name_lower:
+                return '바코드'
+            elif '완충' in name_lower:
+                return '완충작업'
+            elif '반품' in name_lower:
+                return '반품'
+            elif '영상' in name_lower or '촬영' in name_lower:
+                return '영상촬영'
+            else:
+                return '기타'
+        
+        df_items['category'] = df_items['item_name'].apply(categorize_item)
+        
+        # 카테고리별 집계
+        category_stats = df_items.groupby('category').agg({
+            'amount': 'sum',
+            'qty': 'sum',
+            'item_name': 'count'
+        }).reset_index()
+        category_stats.columns = ['category', 'total_amount', 'total_qty', 'item_count']
+        category_stats = category_stats.sort_values('total_amount', ascending=False)
+        
+        category_breakdown = []
+        for _, row in category_stats.iterrows():
+            category_breakdown.append({
+                "category": row['category'],
+                "total_amount": int(row['total_amount']),
+                "total_qty": int(row['total_qty']),
+                "item_count": int(row['item_count'])
+            })
+        
+        # 거래처별 집계
+        vendor_stats = df_items.groupby(['vendor_id', 'vendor_name']).agg({
+            'amount': 'sum',
+            'item_name': 'count'
+        }).reset_index()
+        vendor_stats.columns = ['vendor_id', 'vendor_name', 'total_amount', 'item_count']
+        vendor_stats = vendor_stats.sort_values('total_amount', ascending=False)
+        
+        vendor_breakdown = []
+        for _, row in vendor_stats.iterrows():
+            vendor_breakdown.append({
+                "vendor": row['vendor_id'],
+                "vendor_name": row['vendor_name'] or row['vendor_id'],
+                "total_amount": int(row['total_amount']),
+                "item_count": int(row['item_count'])
+            })
+        
+        # 주요 비용 합계
+        total_storage = int(df_items[df_items['category'] == '보관료']['amount'].sum())
+        total_courier = int(df_items[df_items['category'] == '택배요금']['amount'].sum())
+        total_basic = int(df_items[df_items['category'] == '기본출고비']['amount'].sum())
+        total_box = int(df_items[df_items['category'] == '박스/봉투']['amount'].sum())
+        
+        return {
+            "total_invoices": len(df_invoices),
+            "total_amount": int(df_invoices['total_amount'].sum()),
+            "total_storage_fee": total_storage,
+            "total_courier_fee": total_courier,
+            "total_basic_shipping": total_basic,
+            "total_box_fee": total_box,
+            "category_breakdown": category_breakdown,
+            "vendor_breakdown": vendor_breakdown,
+            "periods": periods
+        }
+    
+    except Exception as e:
+        return {
+            "error": str(e),
+            "total_invoices": 0,
+            "total_amount": 0,
+            "total_storage_fee": 0,
+            "total_courier_fee": 0,
+            "total_basic_shipping": 0,
+            "total_box_fee": 0,
+            "category_breakdown": [],
+            "vendor_breakdown": [],
+            "periods": []
+        }
+
+
+@router.get("/invoice-items-detail")
+async def get_invoice_items_detail(
+    period: Optional[str] = None,
+    category: Optional[str] = None,
+    vendor: Optional[str] = None
+):
+    """인보이스 항목 상세 조회"""
+    try:
+        with get_connection() as con:
+            # 기본 쿼리
+            query = """
+                SELECT 
+                    ii.item_name,
+                    SUM(ii.qty) as total_qty,
+                    ii.unit_price,
+                    SUM(ii.amount) as total_amount,
+                    COUNT(DISTINCT ii.invoice_id) as invoice_count,
+                    v.name as vendor_name,
+                    i.vendor_id
+                FROM invoice_items ii
+                JOIN invoices i ON ii.invoice_id = i.invoice_id
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor
+                WHERE 1=1
+            """
+            params = []
+            
+            if period and period != "전체":
+                query += " AND strftime('%Y-%m', i.period_from) = ?"
+                params.append(period)
+            
+            if vendor and vendor != "전체":
+                query += " AND i.vendor_id = ?"
+                params.append(vendor)
+            
+            query += " GROUP BY ii.item_name, ii.unit_price, i.vendor_id"
+            query += " ORDER BY total_amount DESC"
+            
+            df = pd.read_sql(query, con, params=params)
+        
+        if df.empty:
+            return []
+        
+        # 카테고리 필터
+        if category and category != "전체":
+            def categorize_item(name: str) -> str:
+                name_lower = name.lower() if name else ""
+                if '보관료' in name_lower or '보관' in name_lower:
+                    return '보관료'
+                elif '택배' in name_lower:
+                    return '택배요금'
+                elif '기본' in name_lower and ('출고' in name_lower or '출고비' in name_lower):
+                    return '기본출고비'
+                elif '박스' in name_lower or '봉투' in name_lower:
+                    return '박스/봉투'
+                else:
+                    return '기타'
+            
+            df['category'] = df['item_name'].apply(categorize_item)
+            df = df[df['category'] == category]
+        
+        result = []
+        for _, row in df.iterrows():
+            result.append({
+                "item_name": row['item_name'],
+                "vendor": row['vendor_id'],
+                "vendor_name": row['vendor_name'] or row['vendor_id'],
+                "total_qty": int(row['total_qty']),
+                "unit_price": int(row['unit_price']),
+                "total_amount": int(row['total_amount']),
+                "invoice_count": int(row['invoice_count'])
+            })
+        
+        return result
+    
+    except Exception as e:
+        return {"error": str(e)}

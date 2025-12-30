@@ -280,7 +280,7 @@ export default function InvoiceListPage() {
     }
   }
 
-  // 선택 삭제 (관리자만)
+  // 선택 삭제 (관리자만) - 일괄 삭제 API 사용
   async function handleDeleteSelected() {
     if (!isAdmin) {
       setError('삭제 권한이 없습니다. 관리자만 삭제할 수 있습니다.');
@@ -291,17 +291,23 @@ export default function InvoiceListPage() {
     
     try {
       const token = localStorage.getItem('token');
-      for (const id of selectedIds) {
-        const res = await fetch(`${API_URL}/invoices/${id}?token=${token}`, { method: 'DELETE' });
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.detail || '삭제 실패');
-        }
+      const res = await fetch(`${API_URL}/invoices/batch/delete?token=${token}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(selectedIds),
+      });
+      
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || '삭제 실패');
       }
+      
+      const result = await res.json();
+      const deletedCount = selectedIds.length;
       setSelectedIds([]);
       setSelectAll(false);
       loadInvoices();
-      setSuccess(`✅ ${selectedIds.length}건 삭제 완료`);
+      setSuccess(`✅ ${deletedCount}건 삭제 완료`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : '삭제 실패');
@@ -371,6 +377,11 @@ export default function InvoiceListPage() {
   // 엑셀 다운로드 - 단일
   function handleExportSingle(invoiceId: number) {
     window.open(`${API_URL}/invoices/${invoiceId}/export/xlsx`, '_blank');
+  }
+
+  // PDF 다운로드 - 단일
+  function handleExportPdf(invoiceId: number) {
+    window.open(`${API_URL}/invoices/${invoiceId}/export/pdf`, '_blank');
   }
 
   // 편집 항목 합계 계산
@@ -622,6 +633,20 @@ export default function InvoiceListPage() {
                           >
                             XLSX
                           </button>
+                          <button
+                            onClick={() => handleExportPdf(inv.invoice_id)}
+                            style={{
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              backgroundColor: '#E91E63',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            PDF
+                          </button>
                           {inv.status === '확정' ? (
                             <button
                               onClick={() => handleUnconfirm(inv.invoice_id)}
@@ -833,7 +858,7 @@ export default function InvoiceListPage() {
                       </thead>
                       <tbody>
                         {(isEditing ? editItems : detailInvoice.items).map((item, idx) => (
-                          <tr key={idx}>
+                          <tr key={idx} style={{ backgroundColor: item.금액 < 0 ? '#fff5f5' : 'transparent' }}>
                             <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
                               {isEditing ? (
                                 <input
@@ -844,7 +869,7 @@ export default function InvoiceListPage() {
                                 />
                               ) : item.항목}
                             </td>
-                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.수량 < 0 ? '#dc2626' : 'inherit' }}>
                               {isEditing ? (
                                 <input
                                   type="number"
@@ -854,7 +879,7 @@ export default function InvoiceListPage() {
                                 />
                               ) : formatNumber(item.수량)}
                             </td>
-                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.단가 < 0 ? '#dc2626' : 'inherit' }}>
                               {isEditing ? (
                                 <input
                                   type="number"
@@ -864,7 +889,7 @@ export default function InvoiceListPage() {
                                 />
                               ) : `₩${formatNumber(item.단가)}`}
                             </td>
-                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.금액 < 0 ? '#dc2626' : 'inherit', fontWeight: item.금액 < 0 ? 'bold' : 'normal' }}>
                               {isEditing ? (
                                 <input
                                   type="number"
@@ -931,7 +956,20 @@ export default function InvoiceListPage() {
                       cursor: 'pointer',
                     }}
                   >
-                    📥 이 인보이스 XLSX
+                    📥 XLSX
+                  </button>
+                  <button
+                    onClick={() => handleExportPdf(detailInvoice.invoice_id)}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#E91E63',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📄 청구서 PDF
                   </button>
                   {detailInvoice.status === '확정' ? (
                     <button

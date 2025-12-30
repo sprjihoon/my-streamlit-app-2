@@ -193,9 +193,9 @@ def calculate_courier_fee_by_zone(
             for label, info in size_counts.items():
                 items.append({
                     "항목": f"택배요금 ({label})",
-                    "수량": info["count"],
-                    "단가": info["fee"],
-                    "금액": info["count"] * info["fee"],
+                    "수량": int(float(info["count"])),
+                    "단가": int(float(info["fee"])),
+                    "금액": int(float(info["count"])) * int(float(info["fee"])),
                 })
 
         if DEBUG_MODE:

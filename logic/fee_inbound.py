@@ -71,7 +71,7 @@ def add_inbound_inspection_fee(
         row = con.execute(
             "SELECT 단가 FROM out_extra WHERE 항목 = '입고검수'"
         ).fetchone()
-        unit = int(row[0]) if row else None
+        unit = int(float(row[0])) if row else None
 
     if not unit:
         return False, "❗ '입고검수' 단가를 out_extra 테이블에서 찾을 수 없습니다."
@@ -142,7 +142,7 @@ def calculate_inbound_inspection_fee(
         row = con.execute(
             "SELECT 단가 FROM out_extra WHERE 항목 = '입고검수'"
         ).fetchone()
-        unit = int(row[0]) if row else 0
+        unit = int(float(row[0])) if row else 0
 
     if not unit:
         return {}

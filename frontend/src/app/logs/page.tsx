@@ -277,12 +277,35 @@ export default function LogsPage() {
 }
 
 function getActionColor(action: string): string {
+  // 삭제 관련 (빨간색)
   if (action.includes('삭제')) return '#dc2626';
-  if (action.includes('확정')) return '#16a34a';
+  
+  // 확정 관련 (초록색)
+  if (action.includes('확정') && !action.includes('미확정')) return '#16a34a';
+  
+  // 미확정 관련 (주황색)
   if (action.includes('미확정')) return '#f59e0b';
+  
+  // 수정/업데이트 관련 (파란색)
   if (action.includes('수정')) return '#2563eb';
-  if (action.includes('계산')) return '#8b5cf6';
+  
+  // 생성 관련 (보라색)
+  if (action.includes('생성')) return '#8b5cf6';
+  
+  // 업로드 관련 (청록색)
   if (action.includes('업로드')) return '#06b6d4';
+  
+  // 인증 관련 (남색)
+  if (action.includes('로그인')) return '#4f46e5';
+  if (action.includes('로그아웃')) return '#64748b';
+  
+  // 거래처 관련 (분홍색)
+  if (action.includes('거래처')) return '#ec4899';
+  
+  // 사용자 관련 (청록색)
+  if (action.includes('사용자')) return '#0891b2';
+  
+  // 기본 색상 (회색)
   return '#6b7280';
 }
 

@@ -31,6 +31,9 @@ const NAV_ITEMS = [
 const ADMIN_NAV_ITEMS = [
   { href: '/users', label: '👥 사용자 관리' },
   { href: '/logs', label: '📝 활동 로그' },
+  { href: '/storage', label: '📦 보관료 관리' },
+  { href: '/vendor-charges', label: '💰 추가비용 관리' },
+  { href: '/settings', label: '⚙️ 회사 설정' },
 ];
 
 export default function RootLayout({

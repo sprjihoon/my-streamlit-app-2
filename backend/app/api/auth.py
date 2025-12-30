@@ -10,6 +10,7 @@ import secrets
 import pandas as pd
 
 from logic.db import get_connection
+from backend.app.api.logs import add_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -113,6 +114,16 @@ async def login(request: LoginRequest):
         con.execute("INSERT OR REPLACE INTO sessions (token, user_id) VALUES (?, ?)", (token, user_id))
         con.commit()
         
+        # 로그 기록
+        add_log(
+            action_type="로그인",
+            target_type="user",
+            target_id=str(user_id),
+            target_name=nickname,
+            user_nickname=nickname,
+            details=f"아이디: {username}"
+        )
+        
         return {
             "success": True,
             "token": token,
@@ -128,9 +139,29 @@ async def login(request: LoginRequest):
 @router.post("/logout")
 async def logout(token: str):
     """로그아웃"""
+    nickname = None
     with get_connection() as con:
+        # 로그아웃 전 사용자 정보 가져오기
+        result = con.execute(
+            "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,)
+        ).fetchone()
+        nickname = result[0] if result else None
+        
         con.execute("DELETE FROM sessions WHERE token = ?", (token,))
         con.commit()
+    
+    # 로그 기록
+    if nickname:
+        add_log(
+            action_type="로그아웃",
+            target_type="user",
+            target_id=None,
+            target_name=nickname,
+            user_nickname=nickname,
+            details=None
+        )
+    
     return {"success": True}
 
 
@@ -223,6 +254,23 @@ async def create_user(user: UserCreate, token: str):
             (user.username, hash_password(user.password), user.nickname, 1 if user.is_admin else 0)
         )
         con.commit()
+        
+        # 현재 작업자 닉네임 가져오기
+        actor = con.execute(
+            "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,)
+        ).fetchone()
+        actor_nickname = actor[0] if actor else None
+    
+    # 로그 기록
+    add_log(
+        action_type="사용자 생성",
+        target_type="user",
+        target_id=None,
+        target_name=user.nickname,
+        user_nickname=actor_nickname,
+        details=f"아이디: {user.username}, 관리자: {'예' if user.is_admin else '아니오'}"
+    )
     
     return {"success": True, "message": f"사용자 '{user.username}' 생성 완료"}
 
@@ -261,6 +309,29 @@ async def update_user(user_id: int, data: UserUpdate, token: str):
             params.append(user_id)
             con.execute(f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?", params)
             con.commit()
+        
+        # 대상 사용자 정보 가져오기
+        target_user = con.execute(
+            "SELECT nickname FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        target_nickname = target_user[0] if target_user else None
+        
+        # 현재 작업자 닉네임 가져오기
+        actor = con.execute(
+            "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,)
+        ).fetchone()
+        actor_nickname = actor[0] if actor else None
+    
+    # 로그 기록
+    add_log(
+        action_type="사용자 수정",
+        target_type="user",
+        target_id=str(user_id),
+        target_name=target_nickname,
+        user_nickname=actor_nickname,
+        details=f"수정 항목: {', '.join(updates) if updates else '없음'}"
+    )
     
     return {"success": True, "message": "사용자 정보 수정 완료"}
 
@@ -284,9 +355,33 @@ async def delete_user(user_id: int, token: str):
         if session[0] == user_id:
             raise HTTPException(status_code=400, detail="자기 자신은 삭제할 수 없습니다.")
         
+        # 삭제 대상 사용자 정보 가져오기
+        target_user = con.execute(
+            "SELECT username, nickname FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        target_username = target_user[0] if target_user else None
+        target_nickname = target_user[1] if target_user else None
+        
+        # 현재 작업자 닉네임 가져오기
+        actor = con.execute(
+            "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,)
+        ).fetchone()
+        actor_nickname = actor[0] if actor else None
+        
         con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         con.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
         con.commit()
+    
+    # 로그 기록
+    add_log(
+        action_type="사용자 삭제",
+        target_type="user",
+        target_id=str(user_id),
+        target_name=target_nickname,
+        user_nickname=actor_nickname,
+        details=f"아이디: {target_username}"
+    )
     
     return {"success": True, "message": "사용자 삭제 완료"}
 

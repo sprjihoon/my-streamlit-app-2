@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any
 import pandas as pd
 
 from logic.db import get_connection
+from backend.app.api.logs import add_log
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])
 
@@ -158,7 +159,7 @@ async def get_vendor(vendor_id: str):
 
 @router.post("", response_model=Dict[str, str])
 @router.post("/", response_model=Dict[str, str])
-async def create_or_update_vendor(data: VendorCreate):
+async def create_or_update_vendor(data: VendorCreate, token: Optional[str] = None):
     """거래처 생성 또는 업데이트"""
     ensure_tables()
     
@@ -166,6 +167,16 @@ async def create_or_update_vendor(data: VendorCreate):
         raise HTTPException(status_code=400, detail="vendor(PK) is required")
     if not data.name.strip():
         raise HTTPException(status_code=400, detail="name is required")
+    
+    # 사용자 닉네임 가져오기
+    nickname = None
+    if token:
+        with get_connection() as con:
+            result = con.execute(
+                "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+                (token,)
+            ).fetchone()
+            nickname = result[0] if result else None
     
     try:
         with get_connection() as con:
@@ -222,6 +233,16 @@ async def create_or_update_vendor(data: VendorCreate):
             
             con.commit()
         
+        # 로그 기록
+        add_log(
+            action_type="거래처 생성" if action == "created" else "거래처 수정",
+            target_type="vendor",
+            target_id=data.vendor,
+            target_name=data.name,
+            user_nickname=nickname,
+            details=f"요금제: {data.rate_type}, SKU: {data.sku_group}, 활성: {data.active}"
+        )
+        
         return {"status": "success", "action": action, "vendor": data.vendor}
     
     except Exception as e:
@@ -229,14 +250,42 @@ async def create_or_update_vendor(data: VendorCreate):
 
 
 @router.delete("/{vendor_id}")
-async def delete_vendor(vendor_id: str):
+async def delete_vendor(vendor_id: str, token: Optional[str] = None):
     """거래처 삭제"""
     ensure_tables()
+    
+    # 사용자 닉네임 가져오기
+    nickname = None
+    if token:
+        with get_connection() as con:
+            result = con.execute(
+                "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+                (token,)
+            ).fetchone()
+            nickname = result[0] if result else None
+    
     try:
         with get_connection() as con:
+            # 삭제 전 정보 가져오기
+            vendor_row = con.execute(
+                "SELECT name FROM vendors WHERE vendor = ?", (vendor_id,)
+            ).fetchone()
+            vendor_name = vendor_row[0] if vendor_row else vendor_id
+            
             con.execute("DELETE FROM vendors WHERE vendor = ?", (vendor_id,))
             con.execute("DELETE FROM aliases WHERE vendor = ?", (vendor_id,))
             con.commit()
+        
+        # 로그 기록
+        add_log(
+            action_type="거래처 삭제",
+            target_type="vendor",
+            target_id=vendor_id,
+            target_name=vendor_name,
+            user_nickname=nickname,
+            details=f"거래처 '{vendor_name}' 삭제"
+        )
+        
         return {"status": "success", "deleted": vendor_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

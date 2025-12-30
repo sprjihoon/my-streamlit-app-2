@@ -61,6 +61,7 @@ export default function InvoicePage() {
   const [includeInboundFee, setIncludeInboundFee] = useState(true);
   const [includeRemoteFee, setIncludeRemoteFee] = useState(true);
   const [includeWorklog, setIncludeWorklog] = useState(true);
+  const [includeCombinedFee, setIncludeCombinedFee] = useState(true);
   
   // 계산 모드
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
@@ -166,6 +167,7 @@ export default function InvoicePage() {
         include_inbound_fee: includeInboundFee,
         include_remote_fee: includeRemoteFee,
         include_worklog: includeWorklog,
+        include_combined_fee: includeCombinedFee,
       };
       
       const res = await fetch(`${API_URL}/calculate?token=${token}`, {
@@ -247,6 +249,7 @@ export default function InvoicePage() {
           include_inbound_fee: includeInboundFee,
           include_remote_fee: includeRemoteFee,
           include_worklog: includeWorklog,
+          include_combined_fee: includeCombinedFee,
         };
         
         const res = await fetch(`${API_URL}/calculate?token=${token}`, {
@@ -419,6 +422,10 @@ export default function InvoicePage() {
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <input type="checkbox" checked={includeWorklog} onChange={(e) => setIncludeWorklog(e.target.checked)} />
             작업일지
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            <input type="checkbox" checked={includeCombinedFee} onChange={(e) => setIncludeCombinedFee(e.target.checked)} />
+            합포장
           </label>
         </div>
       </Card>
@@ -643,11 +650,11 @@ export default function InvoicePage() {
                     </thead>
                     <tbody>
                       {result.items.map((item, i) => (
-                        <tr key={i}>
+                        <tr key={i} style={{ backgroundColor: item.금액 < 0 ? '#fff5f5' : 'transparent' }}>
                           <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.항목}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.수량)}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(item.단가)}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(item.금액)}</td>
+                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.수량 < 0 ? '#dc2626' : 'inherit' }}>{formatNumber(item.수량)}</td>
+                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.단가 < 0 ? '#dc2626' : 'inherit' }}>₩{formatNumber(item.단가)}</td>
+                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.금액 < 0 ? '#dc2626' : 'inherit', fontWeight: item.금액 < 0 ? 'bold' : 'normal' }}>₩{formatNumber(item.금액)}</td>
                           <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>{item.비고 || '-'}</td>
                         </tr>
                       ))}

@@ -559,6 +559,157 @@ async def export_invoices_xlsx(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{invoice_id}/export/pdf")
+async def export_single_invoice_pdf(invoice_id: int):
+    """단일 인보이스 PDF 다운로드 (물류대행 서비스 대금청구서 양식)"""
+    try:
+        from logic.invoice_pdf_v2 import create_billing_invoice_pdf
+        from datetime import datetime
+        
+        with get_connection() as con:
+            # 인보이스 컬럼 확인
+            cols = [c[1] for c in con.execute("PRAGMA table_info(invoices);")]
+            has_confirmed_by = 'confirmed_by' in cols
+            
+            # 인보이스 정보 (확정자 닉네임 포함)
+            select_cols = """
+                i.invoice_id,
+                i.vendor_id,
+                COALESCE(v.name, v.vendor) as vendor_name,
+                i.period_from,
+                i.period_to,
+                i.total_amount,
+                i.created_at
+            """
+            if has_confirmed_by:
+                select_cols += ", i.confirmed_by"
+            
+            inv_df = pd.read_sql(
+                f"""
+                SELECT {select_cols}
+                FROM invoices i
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                WHERE i.invoice_id = ?
+                """,
+                con, params=[invoice_id]
+            )
+            
+            if inv_df.empty:
+                raise HTTPException(status_code=404, detail="Invoice not found")
+            
+            inv = inv_df.iloc[0]
+            vendor_name = str(inv['vendor_name']) if inv['vendor_name'] else 'Unknown'
+            period_from = str(inv['period_from']) if inv['period_from'] else ''
+            period_to = str(inv['period_to']) if inv['period_to'] else ''
+            
+            # 담당자 = 인보이스 확정자 닉네임
+            confirmed_by = ""
+            if has_confirmed_by and pd.notna(inv.get('confirmed_by')):
+                confirmed_by = str(inv['confirmed_by'])
+            
+            # 항목 조회
+            items_df = pd.read_sql(
+                "SELECT item_name as 항목, qty as 수량, unit_price as 단가, amount as 금액, remark as 비고 FROM invoice_items WHERE invoice_id = ?",
+                con, params=[invoice_id]
+            )
+            
+            items = items_df.to_dict('records')
+        
+        # 청구일자
+        invoice_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # 건명 생성
+        period_str = period_from[:7].replace("-", "년 ") + "월" if period_from else ""
+        title = f"{period_str} 풀필먼트 서비스 대금"
+        
+        # 수신자 - "업체별칭 대표님 귀하"
+        recipient_name = f"{vendor_name} 대표님 귀하"
+        
+        # 회사 설정 조회 (DB에서)
+        with get_connection() as con2:
+            company_row = con2.execute("""
+                SELECT company_name, business_number, address, business_type, business_item,
+                       bank_name, account_holder, account_number, representative
+                FROM company_settings WHERE id = 1
+            """).fetchone()
+        
+        if company_row:
+            supplier_info = {
+                "사업자번호": company_row[1] or "",
+                "상호": company_row[0] or "",
+                "소재지": company_row[2] or "",
+                "업태": company_row[3] or "",
+                "종목": company_row[4] or "",
+            }
+            bank_info = {
+                "은행명": company_row[5] or "",
+                "예금주": company_row[6] or "",
+                "계좌번호": company_row[7] or "",
+            }
+            representative = company_row[8] or ""
+            company_display_name = company_row[0] or ""
+        else:
+            # 기본값 (설정이 없는 경우)
+            supplier_info = {
+                "사업자번호": "",
+                "상호": "",
+                "소재지": "",
+                "업태": "",
+                "종목": "",
+            }
+            bank_info = {
+                "은행명": "",
+                "예금주": "",
+                "계좌번호": "",
+            }
+            representative = ""
+            company_display_name = ""
+        
+        # 지급기한 - 청구 기간 시작월 + 1개월의 5일
+        # period_from이 "2025-11-01"이면 -> "2025년 12월 05일"
+        if period_from:
+            try:
+                from dateutil.relativedelta import relativedelta
+                period_dt = datetime.strptime(period_from[:10], "%Y-%m-%d")
+                next_month = period_dt + relativedelta(months=1)
+                payment_deadline = f"{next_month.year}년 {next_month.month:02d}월 05일"
+            except:
+                payment_deadline = ""
+        else:
+            payment_deadline = ""
+        
+        # PDF 생성
+        pdf_bytes = create_billing_invoice_pdf(
+            invoice_id=invoice_id,
+            invoice_date=invoice_date,
+            recipient_name=recipient_name,
+            title=title,
+            supplier_info=supplier_info,
+            items=items,
+            payment_deadline=payment_deadline,
+            bank_info=bank_info,
+            stamp_holder=representative,  # 대표 - DB에서 가져옴
+            manager=confirmed_by,         # 담당 - 인보이스 확정자 닉네임
+            company_name=company_display_name,  # 하단 회사명 - DB에서 가져옴
+        )
+        
+        # 파일명 생성
+        filename = f"invoice_{invoice_id}_{period_from[:7] if period_from else 'unknown'}.pdf"
+        
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{invoice_id}/export/xlsx")
 async def export_single_invoice_xlsx(invoice_id: int):
     """단일 인보이스 엑셀 다운로드"""

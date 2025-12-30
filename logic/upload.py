@@ -48,11 +48,11 @@ DATE_COL = {
 TIME_TABLES = {"shipping_stats", "inbound_slip"}
 
 UNIQUE_KEY: dict[str, list[str] | None] = {
-    "shipping_stats": None,
-    "inbound_slip": None,
-    "work_log": None,
-    "kpost_in": None,
-    "kpost_ret": None,
+    "shipping_stats": ["송장번호", "배송일"],
+    "inbound_slip": ["상품코드", "작업일", "수량"],
+    "work_log": ["날짜", "업체명", "분류", "수량"],
+    "kpost_in": ["등기번호"],
+    "kpost_ret": ["등기번호", "배달일자"],
 }
 
 

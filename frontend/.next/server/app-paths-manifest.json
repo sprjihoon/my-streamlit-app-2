@@ -1,1 +1,7 @@
-{}
+{
+  "/rates/page": "app/rates/page.js",
+  "/logs/page": "app/logs/page.js",
+  "/insights/page": "app/insights/page.js",
+  "/users/page": "app/users/page.js",
+  "/mapping/page": "app/mapping/page.js"
+}

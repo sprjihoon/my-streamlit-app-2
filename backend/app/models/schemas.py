@@ -51,6 +51,7 @@ class InvoiceCalculateRequest(BaseModel):
     include_inbound_fee: bool = Field(default=True, description="입고검수 포함")
     include_remote_fee: bool = Field(default=True, description="도서산간 포함")
     include_worklog: bool = Field(default=True, description="작업일지 포함")
+    include_combined_fee: bool = Field(default=True, description="합포장 포함")
 
 
 class InvoiceCalculateResponse(BaseModel):
@@ -62,6 +63,7 @@ class InvoiceCalculateResponse(BaseModel):
     items: List[InvoiceItem]
     total_amount: int = Field(..., description="총 금액")
     warnings: List[str] = Field(default_factory=list, description="경고 메시지")
+    invoice_id: Optional[int] = Field(default=None, description="생성된 인보이스 ID")
 
 
 # ─────────────────────────────────────

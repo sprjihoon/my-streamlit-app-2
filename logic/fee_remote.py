@@ -86,7 +86,7 @@ def add_remote_area_fee(
                 row = con.execute(
                     "SELECT 단가 FROM out_extra WHERE 항목 = '도서산간'"
                 ).fetchone()
-                unit = int(row[0]) if row else None
+                unit = int(float(row[0])) if row else None
         except Exception:
             unit = None
 
@@ -170,7 +170,7 @@ def calculate_remote_area_fee(
                 row = con.execute(
                     "SELECT 단가 FROM out_extra WHERE 항목 = '도서산간'"
                 ).fetchone()
-                unit = int(row[0]) if row else 0
+                unit = int(float(row[0])) if row else 0
         except Exception:
             unit = 0
 

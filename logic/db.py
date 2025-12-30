@@ -99,9 +99,66 @@ DDL_SQL = textwrap.dedent(
         UNIQUE(rate_type, size_grp)
     );
 
+    /* 회사 설정 테이블 */
+    CREATE TABLE IF NOT EXISTS company_settings(
+        id              INTEGER PRIMARY KEY CHECK (id = 1),
+        company_name    TEXT DEFAULT '회사명',
+        business_number TEXT DEFAULT '000-00-00000',
+        address         TEXT DEFAULT '주소를 입력하세요',
+        business_type   TEXT DEFAULT '서비스',
+        business_item   TEXT DEFAULT '물류대행',
+        bank_name       TEXT DEFAULT '은행명',
+        account_holder  TEXT DEFAULT '예금주',
+        account_number  TEXT DEFAULT '계좌번호',
+        representative  TEXT DEFAULT '대표자명',
+        updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS shipping_stats(
         id       INTEGER PRIMARY KEY AUTOINCREMENT,
         택배요금   INTEGER
+    );
+
+    /* 보관료 단가표 */
+    CREATE TABLE IF NOT EXISTS storage_rates(
+        rate_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_name   TEXT UNIQUE NOT NULL,
+        unit_price  INTEGER NOT NULL,
+        unit        TEXT DEFAULT '월',
+        description TEXT DEFAULT '',
+        is_active   INTEGER DEFAULT 1
+    );
+
+    /* 거래처별 보관료 사용 내역 */
+    CREATE TABLE IF NOT EXISTS vendor_storage(
+        storage_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor_id   TEXT NOT NULL,
+        rate_id     INTEGER,
+        item_name   TEXT NOT NULL,
+        qty         INTEGER DEFAULT 1,
+        unit_price  INTEGER NOT NULL,
+        amount      INTEGER NOT NULL,
+        period      TEXT,
+        remark      TEXT DEFAULT '',
+        is_active   INTEGER DEFAULT 1,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (rate_id) REFERENCES storage_rates(rate_id)
+    );
+
+    /* 거래처별 추가 청구 비용 (보관비 등) */
+    CREATE TABLE IF NOT EXISTS vendor_charges(
+        charge_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor_id   TEXT NOT NULL,
+        item_name   TEXT NOT NULL,
+        qty         INTEGER DEFAULT 1,
+        unit_price  INTEGER NOT NULL,
+        amount      INTEGER NOT NULL,
+        remark      TEXT DEFAULT '',
+        charge_type TEXT DEFAULT '보관비',
+        is_active   INTEGER DEFAULT 1,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
 )
