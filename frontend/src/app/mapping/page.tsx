@@ -384,9 +384,11 @@ export default function MappingPage() {
     }
   }
 
-  if (loading && !vendors.length) {
-    return <Loading />;
+  if (loading) {
+    return <Loading text="매핑 데이터 로딩 중..." />;
   }
+
+  // 빈 상태 안내 (폼은 계속 표시)
 
   const totalUnmatched = unmatchedAliases.reduce((sum, u) => sum + u.count, 0);
 
@@ -396,6 +398,15 @@ export default function MappingPage() {
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
+
+      {/* 빈 상태 안내 */}
+      {vendors.length === 0 && (
+        <Alert 
+          type="info" 
+          message="등록된 거래처가 없습니다. 아래 폼을 사용하여 첫 번째 거래처를 등록하세요." 
+          onClose={() => {}} 
+        />
+      )}
 
       {/* 거래처 선택 */}
       <Card title="거래처 선택" style={{ marginBottom: '1rem' }}>

@@ -24,6 +24,7 @@ from logic import (
     add_return_courier_fee,
     add_video_ret_fee,
     add_box_fee_by_zone,
+    add_storage_fee,
     # 개별 요금 계산
     calculate_courier_fee_by_zone,
     get_courier_fee_items,
@@ -109,9 +110,19 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         # 2. 택배요금 (구간별) - 반드시 먼저 계산해야 zone_counts 확보
         zone_counts: Dict[str, int] = {}
         if req.include_courier_fee:
-            zone_counts = calculate_courier_fee_by_zone(
-                req.vendor, d_from, d_to, items
-            )
+            try:
+                zone_counts = calculate_courier_fee_by_zone(
+                    req.vendor, d_from, d_to, items
+                )
+                # 택배비 항목이 추가되었는지 확인
+                courier_items_count = sum(1 for item in items if "택배요금" in item.get("항목", ""))
+                if courier_items_count == 0 and zone_counts:
+                    # zone_counts는 있지만 items에 추가되지 않은 경우
+                    warnings.append(f"택배요금 계산: 구간별 수량은 있으나 항목 추가 실패 (구간: {list(zone_counts.keys())})")
+                elif not zone_counts:
+                    warnings.append("택배요금 계산: 해당 기간에 배송 데이터가 없거나 shipping_zone 테이블에 요금제 데이터가 없습니다.")
+            except Exception as e:
+                warnings.append(f"택배요금 계산 오류: {str(e)}")
         
         # 3. 입고검수
         if req.include_inbound_fee:
@@ -179,32 +190,10 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
                 warnings.append(f"합포장 계산 오류: {str(e)}")
         
         # 10. 거래처별 보관료 (활성 상태인 항목은 매월 자동 청구)
+        # 보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정)
+        # period 컬럼이 있더라도 기간 조건 없이 is_active=1인 모든 항목을 가져옴
         try:
-            with get_connection() as con:
-                # vendor_storage 테이블 확인
-                table_exists = con.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_storage'"
-                ).fetchone()
-                
-                if table_exists:
-                    # 활성 상태인 보관료 항목 조회 (기간 무관, is_active=1인 항목 모두)
-                    storages = con.execute(
-                        """
-                        SELECT item_name, qty, unit_price, amount, remark
-                        FROM vendor_storage
-                        WHERE vendor_id = ? AND is_active = 1
-                        """,
-                        (req.vendor,)
-                    ).fetchall()
-                    
-                    for storage in storages:
-                        items.append({
-                            "항목": f"보관료({storage[0]})",
-                            "수량": storage[1],
-                            "단가": storage[2],
-                            "금액": storage[3],
-                            "비고": storage[4] or ""
-                        })
+            add_storage_fee(items, req.vendor)
         except Exception as e:
             warnings.append(f"보관료 조회 오류: {str(e)}")
         

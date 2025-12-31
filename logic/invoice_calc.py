@@ -609,3 +609,51 @@ def add_worklog_items(
             "비고": r[WL_COL_MEMO]
         })
 
+
+# ─────────────────────────────────────────────
+# 9. 보관료 추가
+# ─────────────────────────────────────────────
+def add_storage_fee(
+    items: List[dict],
+    vendor: str
+) -> None:
+    """
+    거래처별 보관료 추가.
+    
+    보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정).
+    period 컬럼이 있더라도 기간 조건 없이 is_active=1인 모든 항목을 가져옴.
+    
+    Args:
+        items: 인보이스 항목 리스트 (in-place 수정)
+        vendor: 공급처명
+    """
+    with get_connection() as con:
+        # vendor_storage 테이블 확인
+        table_exists = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_storage'"
+        ).fetchone()
+        
+        if not table_exists:
+            return
+        
+        # 활성 상태인 보관료 항목 조회
+        # 기간(period) 조건 없이 is_active=1인 모든 항목을 가져옴
+        # 한 번 추가된 보관료는 수정하기 전까지 모든 월에 자동으로 반영됨
+        storages = con.execute(
+            """
+            SELECT item_name, qty, unit_price, amount, remark
+            FROM vendor_storage
+            WHERE vendor_id = ? AND is_active = 1
+            ORDER BY created_at
+            """,
+            (vendor,)
+        ).fetchall()
+        
+        for storage in storages:
+            items.append({
+                "항목": f"보관료({storage[0]})",
+                "수량": storage[1],
+                "단가": storage[2],
+                "금액": storage[3],
+                "비고": storage[4] or ""
+            })

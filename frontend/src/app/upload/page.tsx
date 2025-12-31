@@ -73,32 +73,45 @@ export default function UploadPage() {
       return;
     }
     
+    // 파일 크기 체크 (50MB)
+    const MAX_SIZE = 50 * 1024 * 1024; // 50MB
+    if (file.size > MAX_SIZE) {
+      setMessage({ type: 'error', text: `파일 크기가 너무 큽니다. 최대 50MB까지 업로드 가능합니다. (현재: ${(file.size / 1024 / 1024).toFixed(2)}MB)` });
+      return;
+    }
+    
+    // 파일 형식 체크
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+      setMessage({ type: 'error', text: '엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.' });
+      return;
+    }
+    
     setUploading(table);
     setMessage(null);
     
     try {
       const token = localStorage.getItem('token');
       
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('table', table);
-      if (token) formData.append('token', token);
-      
-      const res = await fetch(`${API_URL}/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const result = await res.json();
+      // api.ts의 uploadFile 함수 사용
+      const result = await uploadFile(file, table, token || undefined);
       
       if (result.success) {
         setMessage({ type: 'success', text: result.message });
         await loadUploads(); // 목록 새로고침
       } else {
-        setMessage({ type: 'error', text: result.message || result.detail || '업로드 실패' });
+        setMessage({ type: 'error', text: result.message || '업로드 실패' });
       }
     } catch (err) {
-      setMessage({ type: 'error', text: err instanceof Error ? err.message : '업로드 실패' });
+      let errorMessage = '업로드 실패';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        // 네트워크 에러인 경우
+        if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+          errorMessage = '서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해주세요.';
+        }
+      }
+      console.error('Upload error:', err);
+      setMessage({ type: 'error', text: errorMessage });
     } finally {
       setUploading(null);
       // 파일 input 초기화

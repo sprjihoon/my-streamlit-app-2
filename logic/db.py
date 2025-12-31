@@ -164,10 +164,48 @@ DDL_SQL = textwrap.dedent(
 )
 
 # 레거시 DB 컬럼 보강 맵
+# 업로드 가능한 테이블들의 기본 스켈레톤 생성
 CRITICAL_COLS = {
-    "shipping_stats": [("택배요금", "INTEGER")],
+    # shipping_stats: 배송통계
+    "shipping_stats": [
+        ("배송일", "TEXT"), 
+        ("공급처", "TEXT"), 
+        ("택배요금", "INTEGER"),
+        ("송장번호", "TEXT"),  # 중복 제거용
+    ],
+    # outbound_slip: 출고전표
     "outbound_slip": [("수량", "INTEGER")],
-    "kpost_ret": [("수량", "INTEGER")],
+    # kpost_ret: 우체국 반품
+    "kpost_ret": [
+        ("수취인명", "TEXT"),
+        ("배달일자", "TEXT"),
+        ("우편물부피", "INTEGER"),
+        ("등기번호", "TEXT"),
+        ("수량", "INTEGER"),
+    ],
+    # 업로드 테이블 스켈레톤 (컬럼은 업로드 시 자동 추가됨)
+    "inbound_slip": [
+        ("상품코드", "TEXT"), 
+        ("작업일", "TEXT"), 
+        ("수량", "INTEGER"), 
+        ("공급처", "TEXT")
+    ],
+    "kpost_in": [
+        ("발송인명", "TEXT"), 
+        ("접수일자", "TEXT"), 
+        ("우편물부피", "INTEGER"),
+        ("등기번호", "TEXT"),
+        ("도서행", "TEXT"),  # 도서산간 여부
+    ],
+    "work_log": [
+        ("날짜", "TEXT"), 
+        ("업체명", "TEXT"), 
+        ("분류", "TEXT"), 
+        ("단가", "INTEGER"), 
+        ("수량", "INTEGER"), 
+        ("합계", "INTEGER"), 
+        ("비고1", "TEXT")
+    ],
 }
 
 
@@ -180,9 +218,41 @@ def _create_skeleton(con: sqlite3.Connection, tbl: str, col_defs: list[tuple[str
 
 
 def ensure_tables() -> None:
-    """필수 테이블 생성 + 레거시 컬럼 누락 보강."""
+    """필수 테이블 생성 + 레거시 컬럼 누락 보강.
+    
+    ⚠️ 중요: 이 함수는 기존 데이터를 절대 삭제하지 않습니다.
+    - CREATE TABLE IF NOT EXISTS만 사용 (데이터 보존)
+    - ALTER TABLE ADD COLUMN만 사용 (데이터 보존)
+    - DROP TABLE, DELETE, TRUNCATE 절대 사용 안 함
+    """
     with get_connection() as con:
+        # DDL_SQL 실행 (CREATE TABLE IF NOT EXISTS만 사용 - 데이터 보존)
+        # 이 스크립트는 테이블이 없을 때만 생성하며, 기존 데이터는 절대 삭제하지 않습니다.
         con.executescript(DDL_SQL)
+
+        # shipping_zone 테이블 스키마 보강 (요금제, 구간, 요금 컬럼 추가)
+        shipping_zone_cols = [c[1] for c in con.execute("PRAGMA table_info(shipping_zone);")]
+        shipping_zone_required_cols = [
+            ("요금제", "TEXT"),
+            ("구간", "TEXT"),
+            ("len_min_cm", "INTEGER"),
+            ("len_max_cm", "INTEGER"),
+            ("요금", "INTEGER")
+        ]
+        for col, coltype in shipping_zone_required_cols:
+            if col not in shipping_zone_cols:
+                try:
+                    con.execute(f"ALTER TABLE shipping_zone ADD COLUMN [{col}] {coltype};")
+                except sqlite3.OperationalError:
+                    pass  # 이미 존재하거나 다른 오류 (무시)
+        
+        # invoice_items 테이블 스키마 보강 (remark 컬럼 추가)
+        invoice_items_cols = [c[1] for c in con.execute("PRAGMA table_info(invoice_items);")]
+        if "remark" not in invoice_items_cols:
+            try:
+                con.execute("ALTER TABLE invoice_items ADD COLUMN remark TEXT DEFAULT '';")
+            except sqlite3.OperationalError:
+                pass  # 이미 존재하거나 다른 오류 (무시)
 
         for tbl, col_defs in CRITICAL_COLS.items():
             tbl_exists = con.execute(
@@ -197,6 +267,8 @@ def ensure_tables() -> None:
             for col, coltype in col_defs:
                 if col not in existing_cols:
                     con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {coltype};")
+        
+        con.commit()
 
 
 # ─────────────────────────────────────

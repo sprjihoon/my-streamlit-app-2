@@ -48,7 +48,8 @@ def calculate_courier_fee_by_zone(
         if missing_tables:
             if DEBUG_MODE:
                 print(f"❌ {vendor}: 필요한 테이블 누락 - {missing_tables}")
-            return {}
+            # 에러를 발생시켜서 호출자가 알 수 있도록
+            raise ValueError(f"필요한 테이블이 없습니다: {missing_tables}")
 
         # ① 공급처의 rate_type 확인
         cur = con.cursor()
@@ -119,11 +120,21 @@ def calculate_courier_fee_by_zone(
                 발송인_counts = df_post["발송인명"].value_counts()
                 print(f"발송인명별 건수: {발송인_counts.head(10).to_dict()}")
 
-        # 필수 컬럼/행 체크
-        if df_post.empty or "부피" not in df_post.columns:
+        # 필수 컬럼/행 체크 - 부피 컬럼명 확인 (부피 또는 우편물부피)
+        volume_col = None
+        for col_name in ["부피", "우편물부피"]:
+            if col_name in df_post.columns:
+                volume_col = col_name
+                break
+        
+        if df_post.empty or volume_col is None:
             if DEBUG_MODE:
-                print(f"❌ {vendor}: 데이터 없음 또는 부피 컬럼 없음")
+                print(f"❌ {vendor}: 데이터 없음 또는 부피 컬럼 없음 (사용 가능한 컬럼: {list(df_post.columns)})")
             return {}
+
+        # 부피 컬럼명 통일 (부피로 변경)
+        if volume_col != "부피":
+            df_post["부피"] = df_post[volume_col]
 
         # 송장/등기 번호 컬럼 → 문자열 & 정규화
         track_cols = [c for c in TRACK_COLS if c in df_post.columns]
@@ -170,10 +181,27 @@ def calculate_courier_fee_by_zone(
             "SELECT * FROM shipping_zone WHERE 요금제 = ?",
             con, params=(rate_type,)
         )
+        
+        if df_zone.empty:
+            # shipping_zone 테이블에 해당 요금제가 없으면 빈 딕셔너리 반환
+            # 에러 메시지는 호출자에게 전달
+            error_msg = f"shipping_zone 테이블에 '{rate_type}' 요금제 데이터가 없습니다. 요금 관리 페이지에서 구간별 택배요금을 등록해주세요."
+            if DEBUG_MODE:
+                print(f"[WARN] {vendor}: {error_msg}")
+            raise ValueError(error_msg)
+        
         df_zone[["len_min_cm", "len_max_cm"]] = df_zone[["len_min_cm", "len_max_cm"]].apply(
             pd.to_numeric, errors="coerce"
         )
         df_zone = df_zone.sort_values("len_min_cm").reset_index(drop=True)
+        
+        # 필수 컬럼 확인
+        required_zone_cols = ["구간", "len_min_cm", "len_max_cm", "요금"]
+        missing_cols = [col for col in required_zone_cols if col not in df_zone.columns]
+        if missing_cols:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: shipping_zone 테이블에 필수 컬럼이 없습니다: {missing_cols}")
+            raise ValueError(f"shipping_zone 테이블에 필수 컬럼이 없습니다: {missing_cols}")
 
         # ⑤ 구간 매핑 및 수량 집계
         remaining = df_post.copy()

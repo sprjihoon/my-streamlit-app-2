@@ -54,6 +54,7 @@ from .invoice_calc import (
     add_video_ret_fee,
     add_box_fee_by_zone,
     add_worklog_items,
+    add_storage_fee,
 )
 
 # 요금 계산
@@ -124,6 +125,7 @@ __all__ = [
     "add_video_ret_fee",
     "add_box_fee_by_zone",
     "add_worklog_items",
+    "add_storage_fee",
     # fees
     "add_combined_pack_fee",
     "calculate_combined_pack_fee",

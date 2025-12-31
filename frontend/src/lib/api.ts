@@ -116,19 +116,30 @@ export async function getShippingStats(params: {
 /**
  * 파일 업로드
  */
-export async function uploadFile(file: File, table: string) {
+export async function uploadFile(file: File, table: string, token?: string) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('table', table);
+  if (token) {
+    formData.append('token', token);
+  }
 
   const response = await fetch(`${API_BASE}/upload`, {
     method: 'POST',
     body: formData,
+    // FormData를 사용할 때는 Content-Type을 설정하지 않아야 브라우저가 자동으로 boundary를 추가합니다
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(error || `Upload Error: ${response.status}`);
+    let errorMessage = `Upload Error: ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.detail || errorData.message || errorMessage;
+    } catch {
+      const errorText = await response.text();
+      errorMessage = errorText || errorMessage;
+    }
+    throw new Error(errorMessage);
   }
 
   return response.json() as Promise<{

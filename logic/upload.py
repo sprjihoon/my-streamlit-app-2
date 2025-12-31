@@ -24,7 +24,7 @@ from typing import Literal, BinaryIO, Tuple
 
 import pandas as pd
 
-from .db import get_connection
+from .db import get_connection, ensure_column
 from .clean import TRACK_COLS, normalize_tracking
 
 # 저장 폴더
@@ -174,9 +174,70 @@ def ingest(
     d_min = series.min().date().isoformat() if not series.empty else ""
     d_max = series.max().date().isoformat() if not series.empty else ""
 
-    # 7) DB 적재 + 메타 INSERT
+    # 7) 테이블에 없는 컬럼 자동 추가
     with get_connection() as con:
-        df.to_sql(table, con, if_exists="append", index=False)
+        # 테이블이 없으면 생성 (ensure_tables가 이미 했지만 안전장치)
+        existing_cols = []
+        try:
+            existing_cols = [c[1] for c in con.execute(f"PRAGMA table_info({table});")]
+        except sqlite3.OperationalError:
+            # 테이블이 없으면 빈 리스트로 시작
+            existing_cols = []
+        
+        # DataFrame의 모든 컬럼 확인 및 추가
+        for col in df.columns:
+            # 컬럼명 그대로 사용 (공백, 특수문자 포함)
+            if col not in existing_cols:
+                # 숫자 컬럼인지 확인하여 적절한 타입 지정
+                if df[col].dtype in ['int64', 'Int64']:
+                    coltype = "INTEGER"
+                elif df[col].dtype in ['float64', 'Float64']:
+                    coltype = "REAL"
+                else:
+                    coltype = "TEXT"
+                # 특수문자 포함 컬럼명을 대괄호로 감싸서 추가
+                try:
+                    con.execute(f'ALTER TABLE [{table}] ADD COLUMN [{col}] {coltype};')
+                    existing_cols.append(col)  # 추가된 컬럼을 리스트에 추가
+                except sqlite3.OperationalError as e:
+                    # 이미 존재하는 컬럼이거나 다른 오류
+                    err_msg = str(e).lower()
+                    if "duplicate column" not in err_msg and "already exists" not in err_msg:
+                        # 다른 오류는 재발생
+                        raise
+        con.commit()
+    
+    # 8) DB 적재 + 메타 INSERT
+    with get_connection() as con:
+        try:
+            df.to_sql(table, con, if_exists="append", index=False)
+        except (sqlite3.OperationalError, ValueError) as e:
+            # 컬럼 누락 에러인 경우 다시 컬럼 추가 시도
+            err_msg = str(e)
+            if "no such column" in err_msg.lower() or "has no column" in err_msg.lower():
+                # 누락된 컬럼 찾기
+                missing_col = None
+                for col in df.columns:
+                    if col.lower() in err_msg.lower() or col in err_msg:
+                        missing_col = col
+                        break
+                
+                if missing_col:
+                    # 컬럼 추가 재시도
+                    if df[missing_col].dtype in ['int64', 'Int64']:
+                        coltype = "INTEGER"
+                    elif df[missing_col].dtype in ['float64', 'Float64']:
+                        coltype = "REAL"
+                    else:
+                        coltype = "TEXT"
+                    con.execute(f'ALTER TABLE [{table}] ADD COLUMN [{missing_col}] {coltype};')
+                    con.commit()
+                    # 다시 시도
+                    df.to_sql(table, con, if_exists="append", index=False)
+                else:
+                    raise
+            else:
+                raise
         con.execute("""
           INSERT INTO uploads
             (filename, orig_name, table_name,

@@ -14,6 +14,7 @@ from logic.db import get_connection
 
 from backend.app.models import UploadResponse, UploadListResponse
 from backend.app.api.logs import add_log
+from backend.app.config import settings
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
@@ -53,8 +54,19 @@ async def upload_file(
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
     
     try:
-        # UploadFile → BytesIO 변환
+        # 파일 크기 확인
+        file_size = 0
         contents = await file.read()
+        file_size = len(contents)
+        
+        if file_size > settings.MAX_UPLOAD_SIZE:
+            max_size_mb = settings.MAX_UPLOAD_SIZE / (1024 * 1024)
+            raise HTTPException(
+                status_code=413,
+                detail=f"파일 크기가 너무 큽니다. 최대 {max_size_mb:.0f}MB까지 업로드 가능합니다."
+            )
+        
+        # UploadFile → BytesIO 변환
         file_like = io.BytesIO(contents)
         file_like.name = file.filename or "upload.xlsx"
         

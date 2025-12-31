@@ -231,6 +231,17 @@ async def create_or_update_vendor(data: VendorCreate, token: Optional[str] = Non
             insert_aliases("kpost_ret", data.alias_kpost_ret)
             insert_aliases("work_log", data.alias_work_log)
             
+            # 백업 테이블 자동 생성 (데이터 손실 방지)
+            try:
+                vendors_df = pd.read_sql("SELECT * FROM vendors", con)
+                if not vendors_df.empty:
+                    vendors_df.to_sql('vendors_backup', con, if_exists='replace', index=False)
+                aliases_df = pd.read_sql("SELECT * FROM aliases", con)
+                if not aliases_df.empty:
+                    aliases_df.to_sql('aliases_backup', con, if_exists='replace', index=False)
+            except Exception:
+                pass  # 백업 실패해도 메인 작업은 계속
+            
             con.commit()
         
         # 로그 기록
