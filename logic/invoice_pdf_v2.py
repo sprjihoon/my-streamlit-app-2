@@ -47,54 +47,77 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
 # 폰트 이름
-FONT_NAME = "Malgun"
-FONT_NAME_BOLD = "MalgunBold"
+FONT_NAME = "NanumGothic"
+FONT_NAME_BOLD = "NanumGothicBold"
+
+# assets 디렉토리 경로
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets")
 
 _font_registered = False
 
 def _register_korean_font():
-    """한글 TTF 폰트 등록"""
+    """한글 TTF 폰트 등록 (assets 폴더 우선, 시스템 폰트 대체)"""
     global _font_registered, FONT_NAME, FONT_NAME_BOLD
     if _font_registered:
         return True
     
-    # Windows 맑은 고딕 경로
-    regular_path = r"C:\Windows\Fonts\malgun.ttf"
-    bold_path = r"C:\Windows\Fonts\malgunbd.ttf"
+    # 1. assets 폴더의 나눔고딕 시도 (Mac/Linux/Windows 모두 지원)
+    nanum_path = os.path.join(ASSETS_DIR, "NanumGothic.ttf")
+    nanum_bold_path = os.path.join(ASSETS_DIR, "NanumGothic-Bold.ttf")
     
     try:
+        if os.path.exists(nanum_path):
+            FONT_NAME = "NanumGothic"
+            FONT_NAME_BOLD = "NanumGothicBold"
+            pdfmetrics.registerFont(TTFont(FONT_NAME, nanum_path))
+            if os.path.exists(nanum_bold_path):
+                pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, nanum_bold_path))
+            else:
+                pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, nanum_path))
+            registerFontFamily(FONT_NAME, normal=FONT_NAME, bold=FONT_NAME_BOLD)
+            _font_registered = True
+            print(f"Font registered from assets: {nanum_path}")
+            return True
+    except Exception as e:
+        print(f"Assets NanumGothic font registration failed: {e}")
+    
+    # 2. Windows 맑은 고딕 시도
+    try:
+        regular_path = r"C:\Windows\Fonts\malgun.ttf"
+        bold_path = r"C:\Windows\Fonts\malgunbd.ttf"
         if os.path.exists(regular_path):
+            FONT_NAME = "Malgun"
+            FONT_NAME_BOLD = "MalgunBold"
             pdfmetrics.registerFont(TTFont(FONT_NAME, regular_path))
             if os.path.exists(bold_path):
                 pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, bold_path))
             else:
                 pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, regular_path))
-            
-            # 폰트 패밀리 등록
             registerFontFamily(FONT_NAME, normal=FONT_NAME, bold=FONT_NAME_BOLD)
             _font_registered = True
             return True
     except Exception as e:
         print(f"Malgun font registration failed: {e}")
     
-    # 나눔고딕 시도
+    # 3. Windows 시스템 나눔고딕 시도
     try:
-        nanum_path = r"C:\Windows\Fonts\NanumGothic.ttf"
-        nanum_bold = r"C:\Windows\Fonts\NanumGothicBold.ttf"
-        if os.path.exists(nanum_path):
+        nanum_sys = r"C:\Windows\Fonts\NanumGothic.ttf"
+        nanum_sys_bold = r"C:\Windows\Fonts\NanumGothicBold.ttf"
+        if os.path.exists(nanum_sys):
             FONT_NAME = "Nanum"
             FONT_NAME_BOLD = "NanumBold"
-            pdfmetrics.registerFont(TTFont(FONT_NAME, nanum_path))
-            if os.path.exists(nanum_bold):
-                pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, nanum_bold))
+            pdfmetrics.registerFont(TTFont(FONT_NAME, nanum_sys))
+            if os.path.exists(nanum_sys_bold):
+                pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, nanum_sys_bold))
             else:
-                pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, nanum_path))
+                pdfmetrics.registerFont(TTFont(FONT_NAME_BOLD, nanum_sys))
             registerFontFamily(FONT_NAME, normal=FONT_NAME, bold=FONT_NAME_BOLD)
             _font_registered = True
             return True
     except Exception as e:
-        print(f"Nanum font registration failed: {e}")
+        print(f"System NanumGothic font registration failed: {e}")
     
+    print("WARNING: No Korean font found. PDF will use Helvetica (Korean text will not display correctly)")
     return False
 
 # 모듈 로드 시 폰트 등록
