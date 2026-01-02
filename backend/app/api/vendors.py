@@ -383,9 +383,13 @@ async def get_unmatched_aliases():
                     con, params=[ft]
                 )
                 
-                # 미매칭 찾기
+                # 미매칭 찾기 (공백 제거 후 비교)
                 if not all_aliases.empty:
-                    unmatched = all_aliases[~all_aliases['alias'].isin(mapped['alias'])]
+                    # 원본 데이터와 매핑된 별칭 모두 trim 적용
+                    all_aliases['alias_trimmed'] = all_aliases['alias'].str.strip()
+                    mapped_set = set(mapped['alias'].str.strip().tolist()) if not mapped.empty else set()
+                    
+                    unmatched = all_aliases[~all_aliases['alias_trimmed'].isin(mapped_set)]
                     if not unmatched.empty:
                         result.append({
                             "file_type": ft,
