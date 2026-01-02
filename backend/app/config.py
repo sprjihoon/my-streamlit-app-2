@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # ─────────────────────────────────────
     # 데이터베이스
     # ─────────────────────────────────────
-    DATABASE_PATH: str = "billing.db"
+    DATABASE_PATH: str = "/app/data/billing.db" if os.path.exists("/app/data") else "billing.db"
     
     # ─────────────────────────────────────
     # CORS 설정
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # ─────────────────────────────────────
     # 파일 업로드
     # ─────────────────────────────────────
-    UPLOAD_DIR: str = "data/uploads"
+    UPLOAD_DIR: str = "/app/data/uploads" if os.path.exists("/app/data") else "data/uploads"
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
     
     # ─────────────────────────────────────
