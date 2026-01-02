@@ -1,5 +1,6 @@
 # ═══════════════════════════════════════════════════════════
-# FastAPI Backend Dockerfile
+# FastAPI Backend Dockerfile  
+# Updated: 2026-01-02 v2
 # ═══════════════════════════════════════════════════════════
 
 FROM python:3.12-slim
