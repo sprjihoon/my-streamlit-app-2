@@ -65,10 +65,13 @@ async def list_invoices(
             if "invoices" not in tables:
                 return {"invoices": [], "total": 0, "sum_amount": 0}
             
+            # 필수 컬럼 존재 확인 및 추가
+            ensure_invoice_user_columns(con)
+            
             # 컬럼 존재 확인
             cols = [c[1] for c in con.execute("PRAGMA table_info(invoices);")]
-            has_modified_by = 'modified_by' in cols
-            has_confirmed_by = 'confirmed_by' in cols
+            has_modified_by = 'modified_by' in cols and 'modified_at' in cols
+            has_confirmed_by = 'confirmed_by' in cols and 'confirmed_at' in cols
             
             # 기본 쿼리
             select_cols = """
