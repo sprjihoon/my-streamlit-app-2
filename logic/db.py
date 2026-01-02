@@ -24,7 +24,22 @@ sqlite3.register_adapter(
 # ─────────────────────────────────────
 # 0. 전역 상수
 # ─────────────────────────────────────
-DB_PATH = pathlib.Path(os.getenv("BILLING_DB", "billing.db"))
+def _get_db_path() -> pathlib.Path:
+    """데이터베이스 경로 반환 (환경변수 우선)"""
+    env_db = os.getenv("BILLING_DB") or os.getenv("DATABASE_PATH")
+    if env_db:
+        path = pathlib.Path(env_db)
+        # 디렉토리가 없으면 생성
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+    # Docker/Railway 환경 감지
+    if os.path.exists("/app/data"):
+        data_dir = pathlib.Path("/app/data")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir / "billing.db"
+    return pathlib.Path("billing.db")
+
+DB_PATH = _get_db_path()
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 # ─────────────────────────────────────
