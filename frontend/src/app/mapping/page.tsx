@@ -11,9 +11,11 @@ import {
   getAvailableAliases,
   getAliasesForVendor,
   getUnmatchedAliases,
+  getMappingSummary,
   UnmatchedAlias,
   Vendor,
   VendorDetail,
+  MappingSummary,
 } from '@/lib/api';
 
 const SKU_OPTS = ['≤100', '≤300', '≤500', '≤1,000', '≤2,000', '>2,000'];
@@ -75,6 +77,11 @@ export default function MappingPage() {
   // 미매칭 별칭
   const [unmatchedAliases, setUnmatchedAliases] = useState<UnmatchedAlias[]>([]);
 
+  // 매핑 현황
+  const [mappingSummary, setMappingSummary] = useState<MappingSummary[]>([]);
+  const [showMappingSummary, setShowMappingSummary] = useState(false);
+  const [mappingFilter, setMappingFilter] = useState('');
+
   // UI 상태
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -116,6 +123,15 @@ export default function MappingPage() {
       console.error('Failed to load aliases:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMappingSummary() {
+    try {
+      const data = await getMappingSummary();
+      setMappingSummary(data);
+    } catch (err) {
+      console.error('Failed to load mapping summary:', err);
     }
   }
 
@@ -565,6 +581,141 @@ export default function MappingPage() {
               {saving ? '저장 중...' : isEditMode ? '거래처 업데이트' : '거래처 저장'}
             </button>
           </>
+        )}
+      </Card>
+
+      {/* 매핑 상세 현황 섹션 */}
+      <Card title="📋 매핑 상세 현황" style={{ marginTop: '2rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', alignItems: 'center' }}>
+          <button
+            onClick={() => {
+              if (!showMappingSummary) {
+                loadMappingSummary();
+              }
+              setShowMappingSummary(!showMappingSummary);
+            }}
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: showMappingSummary ? '#f44336' : '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            {showMappingSummary ? '접기' : '매핑 현황 보기'}
+          </button>
+          {showMappingSummary && (
+            <>
+              <input
+                type="text"
+                placeholder="거래처명 검색..."
+                value={mappingFilter}
+                onChange={(e) => setMappingFilter(e.target.value)}
+                style={{
+                  padding: '0.5rem',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  width: '200px',
+                }}
+              />
+              <button
+                onClick={loadMappingSummary}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#2196F3',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                새로고침
+              </button>
+            </>
+          )}
+        </div>
+        
+        {showMappingSummary && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd', whiteSpace: 'nowrap' }}>
+                    거래처
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd', whiteSpace: 'nowrap' }}>
+                    상태
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                    입고전표
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                    배송통계
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                    우체국접수
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                    우체국반품
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                    작업일지
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {mappingSummary
+                  .filter(m => 
+                    !mappingFilter || 
+                    m.vendor.toLowerCase().includes(mappingFilter.toLowerCase()) ||
+                    m.name.toLowerCase().includes(mappingFilter.toLowerCase())
+                  )
+                  .map((m) => (
+                    <tr 
+                      key={m.vendor} 
+                      style={{ 
+                        backgroundColor: m.active === 'YES' ? 'white' : '#f9f9f9',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => handleSelectVendor(m.vendor)}
+                    >
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', fontWeight: 500 }}>
+                        {m.vendor}
+                        {m.name && m.name !== m.vendor && (
+                          <span style={{ color: '#666', fontWeight: 'normal', marginLeft: '0.5rem' }}>
+                            ({m.name})
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                        {m.active === 'YES' ? '🟢' : '⚪'}
+                      </td>
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.inbound_slip.length ? '#333' : '#ccc' }}>
+                        {m.inbound_slip.length > 0 ? m.inbound_slip.join(', ') : '-'}
+                      </td>
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.shipping_stats.length ? '#333' : '#ccc' }}>
+                        {m.shipping_stats.length > 0 ? m.shipping_stats.join(', ') : '-'}
+                      </td>
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.kpost_in.length ? '#333' : '#ccc' }}>
+                        {m.kpost_in.length > 0 ? m.kpost_in.join(', ') : '-'}
+                      </td>
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.kpost_ret.length ? '#333' : '#ccc' }}>
+                        {m.kpost_ret.length > 0 ? m.kpost_ret.join(', ') : '-'}
+                      </td>
+                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.work_log.length ? '#333' : '#ccc' }}>
+                        {m.work_log.length > 0 ? m.work_log.join(', ') : '-'}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {mappingSummary.length === 0 && (
+              <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>
+                등록된 거래처가 없습니다.
+              </p>
+            )}
+          </div>
         )}
       </Card>
 

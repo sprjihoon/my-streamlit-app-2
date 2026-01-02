@@ -225,6 +225,24 @@ export async function getVendors(activeOnly: boolean = false) {
 }
 
 /**
+ * 매핑 현황 요약 조회
+ */
+export interface MappingSummary {
+  vendor: string;
+  name: string;
+  active: string;
+  inbound_slip: string[];
+  shipping_stats: string[];
+  kpost_in: string[];
+  kpost_ret: string[];
+  work_log: string[];
+}
+
+export async function getMappingSummary() {
+  return fetchApi<MappingSummary[]>('/vendors/mapping-summary');
+}
+
+/**
  * 거래처 상세 조회
  */
 export async function getVendor(vendorId: string) {

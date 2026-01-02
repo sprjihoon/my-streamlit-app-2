@@ -117,6 +117,44 @@ async def list_vendors(active_only: bool = False):
     return df.to_dict(orient="records")
 
 
+@router.get("/mapping-summary", response_model=List[Dict[str, Any]])
+async def get_mapping_summary():
+    """모든 거래처의 매핑 현황 조회"""
+    ensure_tables()
+    with get_connection() as con:
+        # 모든 거래처 조회
+        vendors_df = pd.read_sql(
+            "SELECT vendor, name, active FROM vendors ORDER BY vendor", con
+        )
+        
+        if vendors_df.empty:
+            return []
+        
+        # 모든 별칭 조회
+        aliases_df = pd.read_sql(
+            "SELECT vendor, alias, file_type FROM aliases", con
+        )
+        
+        result = []
+        for _, row in vendors_df.iterrows():
+            vendor_id = row['vendor']
+            vendor_aliases = aliases_df[aliases_df['vendor'] == vendor_id]
+            
+            mapping = {
+                'vendor': vendor_id,
+                'name': row['name'] or '',
+                'active': row['active'] or 'YES',
+                'inbound_slip': sorted(vendor_aliases[vendor_aliases['file_type'] == 'inbound_slip']['alias'].tolist()),
+                'shipping_stats': sorted(vendor_aliases[vendor_aliases['file_type'] == 'shipping_stats']['alias'].tolist()),
+                'kpost_in': sorted(vendor_aliases[vendor_aliases['file_type'] == 'kpost_in']['alias'].tolist()),
+                'kpost_ret': sorted(vendor_aliases[vendor_aliases['file_type'] == 'kpost_ret']['alias'].tolist()),
+                'work_log': sorted(vendor_aliases[vendor_aliases['file_type'] == 'work_log']['alias'].tolist()),
+            }
+            result.append(mapping)
+        
+        return result
+
+
 @router.get("/{vendor_id}", response_model=Dict[str, Any])
 async def get_vendor(vendor_id: str):
     """특정 거래처 상세 조회 (별칭 포함)"""
