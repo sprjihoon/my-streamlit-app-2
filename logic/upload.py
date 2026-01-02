@@ -115,10 +115,16 @@ def _read_excel_or_html(path: Path, **kwargs) -> pd.DataFrame:
     
     if is_html:
         try:
-            # HTML 테이블로 읽기
-            tables = pd.read_html(path, **{k: v for k, v in kwargs.items() if k != 'dtype'})
+            # HTML 테이블로 읽기 (header=0: 첫 번째 행을 헤더로 사용)
+            tables = pd.read_html(path, header=0, **{k: v for k, v in kwargs.items() if k != 'dtype'})
             if tables:
                 df = tables[0]  # 첫 번째 테이블 사용
+                
+                # 숫자 인덱스 컬럼인 경우 첫 번째 행을 헤더로 변환
+                if all(isinstance(c, (int, float)) for c in df.columns):
+                    df.columns = df.iloc[0].astype(str).str.strip()
+                    df = df[1:].reset_index(drop=True)
+                
                 # dtype 적용 (문자열 타입 변환)
                 if 'dtype' in kwargs:
                     for col, dtype in kwargs['dtype'].items():
