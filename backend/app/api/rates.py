@@ -60,10 +60,53 @@ TABLES_INFO = {
 
 
 # ─────────────────────────────────────
+# 기본 요금 데이터
+# ─────────────────────────────────────
+DEFAULT_RATES = {
+    "out_basic": [
+        {"SKU 구간": "≤100", "출고비": 900},
+        {"SKU 구간": "≤300", "출고비": 950},
+        {"SKU 구간": "≤500", "출고비": 1000},
+        {"SKU 구간": "≤1,000", "출고비": 1100},
+        {"SKU 구간": "≤2,000", "출고비": 1200},
+        {"SKU 구간": ">2,000", "출고비": 1300},
+    ],
+    "out_extra": [
+        {"항목": "입고검수", "단가": 100},
+        {"항목": "바코드 부착", "단가": 150},
+        {"항목": "합포장", "단가": 100},
+        {"항목": "완충작업", "단가": 100},
+        {"항목": "출고영상촬영", "단가": 200},
+        {"항목": "반품영상촬영", "단가": 400},
+    ],
+    "shipping_zone": [
+        {"요금제": "표준", "구간": "극소", "len_min_cm": 0, "len_max_cm": 50, "요금": 2100},
+        {"요금제": "표준", "구간": "소", "len_min_cm": 51, "len_max_cm": 70, "요금": 2400},
+        {"요금제": "표준", "구간": "중", "len_min_cm": 71, "len_max_cm": 100, "요금": 2900},
+        {"요금제": "표준", "구간": "대", "len_min_cm": 101, "len_max_cm": 120, "요금": 3800},
+        {"요금제": "표준", "구간": "특대", "len_min_cm": 121, "len_max_cm": 140, "요금": 7400},
+        {"요금제": "표준", "구간": "특특대", "len_min_cm": 141, "len_max_cm": 160, "요금": 10400},
+        {"요금제": "A", "구간": "극소", "len_min_cm": 0, "len_max_cm": 50, "요금": 1900},
+        {"요금제": "A", "구간": "소", "len_min_cm": 51, "len_max_cm": 70, "요금": 2100},
+        {"요금제": "A", "구간": "중", "len_min_cm": 71, "len_max_cm": 100, "요금": 2500},
+        {"요금제": "A", "구간": "대", "len_min_cm": 101, "len_max_cm": 120, "요금": 3300},
+        {"요금제": "A", "구간": "특대", "len_min_cm": 121, "len_max_cm": 140, "요금": 7200},
+        {"요금제": "A", "구간": "특특대", "len_min_cm": 141, "len_max_cm": 160, "요금": 10200},
+    ],
+    "material_rates": [
+        {"항목": "택배 봉투 소형", "단가": 80, "size_code": "극소"},
+        {"항목": "택배 봉투 대형", "단가": 120, "size_code": "소"},
+        {"항목": "박스 중형", "단가": 500, "size_code": "중"},
+        {"항목": "박스 대형", "단가": 800, "size_code": "대"},
+    ],
+}
+
+
+# ─────────────────────────────────────
 # 테이블 보장 (기존 스키마 유지)
 # ─────────────────────────────────────
 def ensure_rate_tables():
-    """요금 테이블 존재 확인 (기존 테이블이 있으면 그대로 사용)"""
+    """요금 테이블 존재 확인 및 기본 데이터 삽입"""
     with get_connection() as con:
         # out_basic - 기존 스키마: [SKU 구간], [출고비]
         con.execute("""
@@ -98,7 +141,45 @@ def ensure_rate_tables():
                 size_code TEXT
             )""")
         
+        # 기본 데이터 삽입 (테이블이 비어있을 경우에만)
+        _insert_default_if_empty(con, "out_basic", DEFAULT_RATES["out_basic"])
+        _insert_default_if_empty(con, "out_extra", DEFAULT_RATES["out_extra"])
+        _insert_default_if_empty(con, "shipping_zone", DEFAULT_RATES["shipping_zone"])
+        _insert_default_if_empty(con, "material_rates", DEFAULT_RATES["material_rates"])
+        
         con.commit()
+
+
+def _insert_default_if_empty(con, table_name: str, default_data: list):
+    """테이블이 비어있을 경우 기본 데이터 삽입"""
+    count = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+    if count > 0:
+        return  # 이미 데이터가 있으면 건너뜀
+    
+    if table_name == "out_basic":
+        for row in default_data:
+            con.execute(
+                "INSERT INTO out_basic ([SKU 구간], [출고비]) VALUES (?, ?)",
+                (row["SKU 구간"], row["출고비"])
+            )
+    elif table_name == "out_extra":
+        for row in default_data:
+            con.execute(
+                "INSERT INTO out_extra ([항목], [단가]) VALUES (?, ?)",
+                (row["항목"], row["단가"])
+            )
+    elif table_name == "shipping_zone":
+        for row in default_data:
+            con.execute(
+                "INSERT INTO shipping_zone ([요금제], [구간], len_min_cm, len_max_cm, [요금]) VALUES (?, ?, ?, ?, ?)",
+                (row["요금제"], row["구간"], row["len_min_cm"], row["len_max_cm"], row["요금"])
+            )
+    elif table_name == "material_rates":
+        for row in default_data:
+            con.execute(
+                "INSERT INTO material_rates ([항목], [단가], size_code) VALUES (?, ?, ?)",
+                (row["항목"], row["단가"], row.get("size_code", ""))
+            )
 
 
 # ─────────────────────────────────────
