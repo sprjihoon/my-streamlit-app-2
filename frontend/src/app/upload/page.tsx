@@ -73,10 +73,10 @@ export default function UploadPage() {
       return;
     }
     
-    // 파일 크기 체크 (50MB)
-    const MAX_SIZE = 50 * 1024 * 1024; // 50MB
+    // 파일 크기 체크 (100MB)
+    const MAX_SIZE = 100 * 1024 * 1024; // 100MB
     if (file.size > MAX_SIZE) {
-      setMessage({ type: 'error', text: `파일 크기가 너무 큽니다. 최대 50MB까지 업로드 가능합니다. (현재: ${(file.size / 1024 / 1024).toFixed(2)}MB)` });
+      setMessage({ type: 'error', text: `파일 크기가 너무 큽니다. 최대 100MB까지 업로드 가능합니다. (현재: ${(file.size / 1024 / 1024).toFixed(2)}MB)` });
       return;
     }
     

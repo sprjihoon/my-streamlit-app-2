@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # 파일 업로드
     # ─────────────────────────────────────
     UPLOAD_DIR: str = "/app/data/uploads" if os.path.exists("/app/data") else "data/uploads"
-    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
+    MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
     
     # ─────────────────────────────────────
     # 보안
