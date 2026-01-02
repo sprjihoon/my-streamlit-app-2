@@ -302,11 +302,25 @@ def ingest(
         except sqlite3.OperationalError:
             existed = pd.DataFrame(columns=key_cols)
 
+        # 날짜 컬럼 타입 맞추기 (datetime -> string으로 변환하여 비교)
+        date_col = DATE_COL.get(table)
+        if date_col and date_col in key_cols:
+            # 새 데이터의 날짜를 문자열로 변환
+            if date_col in df.columns and pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
+            # 기존 데이터의 날짜도 문자열로 통일
+            if date_col in existed.columns:
+                existed[date_col] = pd.to_datetime(existed[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+
         df = (
             df.merge(existed, on=key_cols, how="left", indicator=True)
             .query("_merge == 'left_only'")
             .drop(columns="_merge")
         )
+        
+        # 다시 datetime으로 변환 (저장용)
+        if date_col and date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
     # 6) 날짜 범위 (이미 파싱된 날짜 컬럼 사용)
     date_col_name = DATE_COL.get(table, "")
