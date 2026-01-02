@@ -192,7 +192,13 @@ def ingest(
         read_kwargs["dtype"] = {col: "string" for col in TRACK_COLS}
 
     # HTML 형식 XLS 파일 감지 및 처리
-    df = _read_excel_or_html(path, **read_kwargs)
+    try:
+        df = _read_excel_or_html(path, **read_kwargs)
+    except Exception as e:
+        return False, f"⚠️ 파일 읽기 실패: {str(e)}"
+    
+    # 컬럼명 정리 (공백 제거, 줄바꿈 제거)
+    df.columns = df.columns.astype(str).str.strip().str.replace('\n', ' ').str.replace('\r', '')
 
     # 송장번호 정규화
     if table == "kpost_in":
@@ -203,8 +209,13 @@ def ingest(
     # 4) 시간 포함 열 → 날짜 전용
     if table in TIME_TABLES:
         col = DATE_COL[table]
-        df[col] = pd.to_datetime(df[col], errors="coerce")
-        df[f"{col}_날짜"] = df[col].dt.date
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+            df[f"{col}_날짜"] = df[col].dt.date
+        else:
+            # 필수 날짜 컬럼이 없으면 에러
+            available_cols = ", ".join(df.columns.tolist()[:10])
+            return False, f"⚠️ 필수 컬럼 '{col}'이(가) 없습니다. 파일의 컬럼: {available_cols}..."
 
     # 5) 행-중복 제거
     key_cols = UNIQUE_KEY.get(table)
