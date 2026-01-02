@@ -29,16 +29,38 @@ def _get_db_path() -> pathlib.Path:
     env_db = os.getenv("BILLING_DB") or os.getenv("DATABASE_PATH")
     if env_db:
         path = pathlib.Path(env_db)
-        # 디렉토리가 없으면 생성
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # 디렉토리가 없으면 생성 (권한 오류 무시)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            pass
         return path
-    # Docker/Railway 환경 감지
-    if os.path.exists("/app/data"):
+    # Docker/Railway 환경 감지 (/app 디렉토리 존재 여부로 판단)
+    if os.path.exists("/app"):
         data_dir = pathlib.Path("/app/data")
-        data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            data_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            pass
         return data_dir / "billing.db"
     return pathlib.Path("billing.db")
 
+# DB_PATH는 get_connection에서 동적으로 결정
+_db_path_cache = None
+
+def _resolve_db_path() -> pathlib.Path:
+    """DB 경로를 런타임에 결정 (볼륨 마운트 후)"""
+    global _db_path_cache
+    if _db_path_cache is None:
+        _db_path_cache = _get_db_path()
+        # 디렉토리 생성 재시도
+        try:
+            _db_path_cache.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            pass
+    return _db_path_cache
+
+# 하위 호환성을 위해 유지
 DB_PATH = _get_db_path()
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -49,8 +71,9 @@ DATE_FMT = "%Y-%m-%d %H:%M:%S"
 def get_connection():
     """로컬 'billing.db' 파일에 직접 연결합니다."""
     con = None
+    db_path = _resolve_db_path()
     try:
-        con = sqlite3.connect(DB_PATH)
+        con = sqlite3.connect(db_path)
         # WAL 모드: 동시 읽기 성능 향상 & 안정성
         con.execute("PRAGMA journal_mode=WAL;")
         con.execute("PRAGMA busy_timeout=5000;")
