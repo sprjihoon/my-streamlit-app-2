@@ -70,14 +70,36 @@ DATE_FMT = "%Y-%m-%d %H:%M:%S"
 @contextmanager
 def get_connection():
     """로컬 'billing.db' 파일에 직접 연결합니다."""
+    import time
+    
     con = None
     db_path = _resolve_db_path()
+    
+    # 디렉토리 생성 보장 (Railway 볼륨 마운트 대기)
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            break
+        except (PermissionError, OSError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(1)  # 볼륨 마운트 대기
+            else:
+                print(f"Warning: Could not create directory {db_path.parent}: {e}")
+    
     try:
         con = sqlite3.connect(db_path)
         # WAL 모드: 동시 읽기 성능 향상 & 안정성
         con.execute("PRAGMA journal_mode=WAL;")
         con.execute("PRAGMA busy_timeout=5000;")
         yield con
+    except sqlite3.OperationalError as e:
+        # 디버그 정보 출력
+        print(f"DB Error: {e}")
+        print(f"DB Path: {db_path}")
+        print(f"Parent exists: {db_path.parent.exists()}")
+        print(f"Parent is writable: {os.access(db_path.parent, os.W_OK) if db_path.parent.exists() else 'N/A'}")
+        raise
     finally:
         if con:
             con.close()
