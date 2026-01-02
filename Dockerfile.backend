@@ -27,18 +27,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY logic/ ./logic/
 COPY backend/ ./backend/
 
-# 비루트 사용자 생성
-RUN adduser --disabled-password --gecos "" appuser
+# 데이터 디렉토리 생성 (Railway Volume 마운트 포인트)
+RUN mkdir -p /app/data/uploads
 
-# 데이터 디렉토리 생성 및 권한 설정 (Railway Volume 마운트 포인트)
-RUN mkdir -p /app/data/uploads && \
-    chown -R appuser:appuser /app/data && \
-    chmod -R 755 /app/data
-
-# 전체 앱 디렉토리 권한 설정
-RUN chown -R appuser:appuser $APP_HOME
-
-USER appuser
+# Railway에서는 root로 실행 (Volume 권한 문제 해결)
+# Railway 플랫폼이 컨테이너 격리를 제공하므로 보안 문제 없음
 
 # 포트
 EXPOSE 8000
