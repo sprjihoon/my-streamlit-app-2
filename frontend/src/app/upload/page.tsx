@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
-import { uploadFile, getUploadList, deleteUpload } from '@/lib/api';
+import { uploadFile, getUploadList, deleteUpload, resetTableData } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -139,6 +139,24 @@ export default function UploadPage() {
     }
   }
 
+  // 테이블 데이터 초기화
+  async function handleResetTable(tableName: string, tableLabel: string) {
+    if (!confirm(`⚠️ ${tableLabel} 테이블의 모든 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+    if (!confirm(`정말로 ${tableLabel} 데이터를 모두 삭제하시겠습니까?`)) return;
+    
+    try {
+      const result = await resetTableData(tableName);
+      if (result.success) {
+        setMessage({ type: 'success', text: result.message });
+        await loadUploads();
+      } else {
+        setMessage({ type: 'error', text: result.message });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : '초기화 실패' });
+    }
+  }
+
   // 테이블별 업로드 수
   const tableStats = uploads.reduce((acc, u) => {
     acc[u.table_name] = (acc[u.table_name] || 0) + 1;
@@ -192,6 +210,26 @@ export default function UploadPage() {
               <div className="metric-value">{tableStats[target.key] || 0}</div>
               <div className="metric-label">업로드 수</div>
             </div>
+
+            {/* 초기화 버튼 */}
+            {isAdmin && tableStats[target.key] > 0 && (
+              <button
+                onClick={() => handleResetTable(target.key, target.label)}
+                style={{
+                  marginTop: '0.5rem',
+                  padding: '0.25rem 0.5rem',
+                  fontSize: '0.75rem',
+                  backgroundColor: '#ff5722',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  width: '100%',
+                }}
+              >
+                🗑️ 데이터 초기화
+              </button>
+            )}
           </Card>
         ))}
       </div>

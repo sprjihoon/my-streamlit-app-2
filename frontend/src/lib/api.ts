@@ -183,6 +183,21 @@ export async function deleteUpload(uploadId: number) {
   });
 }
 
+/**
+ * 테이블 데이터 초기화
+ */
+export async function resetTableData(tableName: string) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const queryParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  
+  return fetchApi<{
+    success: boolean;
+    message: string;
+  }>(`/upload/table/${tableName}${queryParam}`, {
+    method: 'DELETE',
+  });
+}
+
 // ─────────────────────────────────────
 // Vendors API
 // ─────────────────────────────────────

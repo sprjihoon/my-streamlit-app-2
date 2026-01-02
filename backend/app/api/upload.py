@@ -157,3 +157,51 @@ async def remove_upload(upload_id: int, token: Optional[str] = None) -> UploadRe
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/table/{table_name}")
+async def reset_table_data(table_name: str, token: Optional[str] = None) -> UploadResponse:
+    """
+    특정 테이블의 모든 데이터 삭제 (관리자만).
+    업로드 기록도 함께 삭제됩니다.
+    """
+    # 관리자 권한 체크
+    is_admin, nickname = check_admin(token)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    
+    # 허용된 테이블만 삭제 가능
+    allowed_tables = ["inbound_slip", "shipping_stats", "kpost_in", "kpost_ret", "work_log"]
+    if table_name not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"허용되지 않은 테이블입니다: {table_name}")
+    
+    try:
+        with get_connection() as con:
+            # 테이블 데이터 삭제 전 건수 확인
+            count_before = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            
+            # 테이블 데이터 삭제
+            con.execute(f"DELETE FROM {table_name}")
+            
+            # 관련 업로드 기록도 삭제
+            con.execute("DELETE FROM uploads WHERE table_name = ?", (table_name,))
+            
+            con.commit()
+        
+        # 로그 기록
+        add_log(
+            action_type="테이블 초기화",
+            target_type="table",
+            target_id=table_name,
+            target_name=table_name,
+            user_nickname=nickname,
+            details=f"테이블 '{table_name}' 초기화 ({count_before}건 삭제)"
+        )
+        
+        return UploadResponse(
+            success=True,
+            message=f"✅ {table_name} 테이블 초기화 완료 ({count_before}건 삭제)"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
