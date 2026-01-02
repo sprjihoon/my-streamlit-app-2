@@ -321,7 +321,7 @@ async def export_single_invoice_pdf(invoice_id: int):
             payment_deadline=payment_deadline,
             bank_info=bank_info,
             stamp_holder=representative,  # 대표 - DB에서 가져옴
-            manager=confirmed_by,         # 담당 - 인보이스 확정자 닉네임
+            manager=confirmed_by if confirmed_by else representative,  # 담당 - 확정자 없으면 대표자
             company_name=company_display_name,  # 하단 회사명 - DB에서 가져옴
         )
         
