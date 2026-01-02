@@ -80,8 +80,9 @@ export default function UploadPage() {
       return;
     }
     
-    // 파일 형식 체크
-    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+    // 파일 형식 체크 (.xlsx, .xls 허용 - HTML 형식 XLS도 지원)
+    const fileName = file.name.toLowerCase();
+    if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
       setMessage({ type: 'error', text: '엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.' });
       return;
     }
@@ -169,7 +170,7 @@ export default function UploadPage() {
             >
               <input
                 type="file"
-                accept=".xlsx"
+                accept=".xlsx,.xls"
                 ref={(el) => { fileRefs.current[target.key] = el; }}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -181,7 +182,7 @@ export default function UploadPage() {
               ) : (
                 <>
                   <div>📁 엑셀 파일 선택</div>
-                  <small className="text-muted">.xlsx</small>
+                  <small className="text-muted">.xlsx, .xls</small>
                 </>
               )}
             </div>
