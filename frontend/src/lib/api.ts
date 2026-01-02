@@ -171,10 +171,14 @@ export async function getUploadList() {
  * 업로드 기록 삭제
  */
 export async function deleteUpload(uploadId: number) {
+  // localStorage에서 토큰 가져오기
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const queryParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  
   return fetchApi<{
     success: boolean;
     message: string;
-  }>(`/upload/${uploadId}`, {
+  }>(`/upload/${uploadId}${queryParam}`, {
     method: 'DELETE',
   });
 }
