@@ -23,8 +23,73 @@ from pathlib import Path
 from typing import Literal, BinaryIO, Tuple
 
 import pandas as pd
+import re
 
 from .db import get_connection, ensure_column
+
+
+# ───────────── 한국어 날짜 파싱 ─────────────────────────────────
+def _parse_korean_date(date_str: str, default_year: int = None) -> pd.Timestamp:
+    """
+    한국어 날짜 형식을 파싱합니다.
+    지원 형식:
+      - "1월 2일", "1월2일"
+      - "2025년 1월 2일", "2025년1월2일"
+      - "25년 1월 2일"
+    """
+    if pd.isna(date_str):
+        return pd.NaT
+    
+    date_str = str(date_str).strip()
+    if not date_str:
+        return pd.NaT
+    
+    # 기본 연도 설정
+    if default_year is None:
+        default_year = dt.datetime.now().year
+    
+    # 패턴 1: "2025년 1월 2일" 또는 "25년 1월 2일"
+    match = re.match(r'(\d{2,4})년\s*(\d{1,2})월\s*(\d{1,2})일?', date_str)
+    if match:
+        year = int(match.group(1))
+        if year < 100:  # 2자리 연도
+            year = 2000 + year
+        month = int(match.group(2))
+        day = int(match.group(3))
+        try:
+            return pd.Timestamp(year=year, month=month, day=day)
+        except:
+            return pd.NaT
+    
+    # 패턴 2: "1월 2일" 또는 "1월2일"
+    match = re.match(r'(\d{1,2})월\s*(\d{1,2})일?', date_str)
+    if match:
+        month = int(match.group(1))
+        day = int(match.group(2))
+        try:
+            return pd.Timestamp(year=default_year, month=month, day=day)
+        except:
+            return pd.NaT
+    
+    return pd.NaT
+
+
+def _parse_date_column(series: pd.Series, default_year: int = None) -> pd.Series:
+    """
+    날짜 컬럼을 파싱합니다. 표준 형식 우선, 실패시 한국어 형식 시도.
+    """
+    # 먼저 표준 datetime 파싱 시도
+    result = pd.to_datetime(series, errors='coerce')
+    
+    # NaT인 값들에 대해 한국어 날짜 파싱 시도
+    nat_mask = result.isna() & series.notna()
+    if nat_mask.any():
+        korean_parsed = series[nat_mask].apply(
+            lambda x: _parse_korean_date(x, default_year)
+        )
+        result.loc[nat_mask] = korean_parsed
+    
+    return result
 from .clean import TRACK_COLS, normalize_tracking
 
 # 저장 폴더 - 환경변수 우선, 없으면 절대경로 사용
@@ -216,7 +281,7 @@ def ingest(
     if table in TIME_TABLES:
         col = DATE_COL[table]
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
+            df[col] = _parse_date_column(df[col])  # 한국어 날짜 지원
             df[f"{col}_날짜"] = df[col].dt.date
         else:
             # 필수 날짜 컬럼이 없으면 에러
@@ -245,7 +310,12 @@ def ingest(
     if table in TIME_TABLES:
         series = pd.to_datetime(df[f"{date_col_name}_날짜"], errors="coerce")
     else:
-        series = pd.to_datetime(df.get(date_col_name, pd.Series()), errors="coerce")
+        # 일반 테이블의 날짜 컬럼도 한국어 날짜 지원
+        date_series = df.get(date_col_name, pd.Series())
+        if not date_series.empty:
+            series = _parse_date_column(date_series)
+        else:
+            series = pd.Series(dtype='datetime64[ns]')
     series = series.dropna()
     d_min = series.min().date().isoformat() if not series.empty else ""
     d_max = series.max().date().isoformat() if not series.empty else ""
