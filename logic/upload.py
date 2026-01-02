@@ -277,16 +277,19 @@ def ingest(
             if col in df.columns:
                 df[col] = normalize_tracking(df[col])
 
-    # 4) 시간 포함 열 → 날짜 전용
-    if table in TIME_TABLES:
-        col = DATE_COL[table]
-        if col in df.columns:
-            df[col] = _parse_date_column(df[col])  # 한국어 날짜 지원
-            df[f"{col}_날짜"] = df[col].dt.date
-        else:
-            # 필수 날짜 컬럼이 없으면 에러
-            available_cols = ", ".join(df.columns.tolist()[:10])
-            return False, f"⚠️ 필수 컬럼 '{col}'이(가) 없습니다. 파일의 컬럼: {available_cols}..."
+    # 4) 날짜 컬럼 파싱 (모든 테이블에 적용)
+    date_col = DATE_COL.get(table)
+    if date_col and date_col in df.columns:
+        # 한국어 날짜 형식 지원 ("1월 2일", "2025년 1월 2일" 등)
+        df[date_col] = _parse_date_column(df[date_col])
+        
+        # 시간 포함 테이블은 별도의 날짜 전용 컬럼 추가
+        if table in TIME_TABLES:
+            df[f"{date_col}_날짜"] = df[date_col].dt.date
+    elif date_col:
+        # 필수 날짜 컬럼이 없으면 에러
+        available_cols = ", ".join(df.columns.tolist()[:10])
+        return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 파일의 컬럼: {available_cols}..."
 
     # 5) 행-중복 제거
     key_cols = UNIQUE_KEY.get(table)
@@ -305,17 +308,12 @@ def ingest(
             .drop(columns="_merge")
         )
 
-    # 6) 날짜 범위
+    # 6) 날짜 범위 (이미 파싱된 날짜 컬럼 사용)
     date_col_name = DATE_COL.get(table, "")
-    if table in TIME_TABLES:
-        series = pd.to_datetime(df[f"{date_col_name}_날짜"], errors="coerce")
+    if date_col_name and date_col_name in df.columns:
+        series = pd.to_datetime(df[date_col_name], errors="coerce")
     else:
-        # 일반 테이블의 날짜 컬럼도 한국어 날짜 지원
-        date_series = df.get(date_col_name, pd.Series())
-        if not date_series.empty:
-            series = _parse_date_column(date_series)
-        else:
-            series = pd.Series(dtype='datetime64[ns]')
+        series = pd.Series(dtype='datetime64[ns]')
     series = series.dropna()
     d_min = series.min().date().isoformat() if not series.empty else ""
     d_max = series.max().date().isoformat() if not series.empty else ""
