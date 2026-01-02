@@ -21,6 +21,7 @@ python-multipart==0.0.9
 pandas==2.2.0
 openpyxl==3.1.2
 numpy==1.26.3
+lxml==5.1.0  # HTML 형식 XLS 파일 읽기용
 
 # ─────────────────────────────────────
 # PDF Generation

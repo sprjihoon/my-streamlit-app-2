@@ -92,6 +92,50 @@ def _save_file_to_disk(file: BinaryIO, orig_name: str = "") -> Tuple[Path, str]:
     return path, fname
 
 
+# ───────────── HTML/Excel 파일 읽기 ─────────────────────
+def _read_excel_or_html(path: Path, **kwargs) -> pd.DataFrame:
+    """
+    Excel 파일 또는 HTML 형식의 XLS 파일을 읽습니다.
+    
+    일부 시스템에서는 .xls 확장자로 HTML 테이블을 내보내기 때문에
+    파일 내용을 확인하여 적절한 방법으로 읽습니다.
+    """
+    # 파일 시작 부분을 읽어서 HTML인지 확인
+    with open(path, 'rb') as f:
+        header = f.read(1024).lower()
+    
+    # HTML 시그니처 확인
+    is_html = (
+        b'<html' in header or 
+        b'<!doctype html' in header or
+        b'<table' in header or
+        b'<meta' in header or
+        b'<?xml' in header  # XML 스프레드시트도 처리
+    )
+    
+    if is_html:
+        try:
+            # HTML 테이블로 읽기
+            tables = pd.read_html(path, **{k: v for k, v in kwargs.items() if k != 'dtype'})
+            if tables:
+                df = tables[0]  # 첫 번째 테이블 사용
+                # dtype 적용 (문자열 타입 변환)
+                if 'dtype' in kwargs:
+                    for col, dtype in kwargs['dtype'].items():
+                        if col in df.columns:
+                            df[col] = df[col].astype(dtype)
+                return df
+            else:
+                raise ValueError("HTML 파일에 테이블이 없습니다.")
+        except Exception as e:
+            # HTML 읽기 실패 시 Excel로 시도
+            print(f"HTML 읽기 실패, Excel로 재시도: {e}")
+            return pd.read_excel(path, **kwargs)
+    else:
+        # 일반 Excel 파일
+        return pd.read_excel(path, **kwargs)
+
+
 # ───────────── 인제스트 ─────────────────────────────────
 def ingest(
     file: BinaryIO,
@@ -147,7 +191,8 @@ def ingest(
     if table == "kpost_in":
         read_kwargs["dtype"] = {col: "string" for col in TRACK_COLS}
 
-    df = pd.read_excel(path, **read_kwargs)
+    # HTML 형식 XLS 파일 감지 및 처리
+    df = _read_excel_or_html(path, **read_kwargs)
 
     # 송장번호 정규화
     if table == "kpost_in":
