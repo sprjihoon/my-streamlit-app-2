@@ -136,9 +136,9 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
             if remote:
                 items.append(remote)
         
-        # 5. 작업일지
-        if req.include_worklog:
-            add_worklog_items(items, req.vendor, d_from, d_to)
+        # 5. 박스/봉투 (택배요금 다음에 바로 추가)
+        if zone_counts:
+            add_box_fee_by_zone(items, req.vendor, zone_counts)
         
         # 6. 플래그 기반 요금 (바코드, 완충작업 등)
         add_barcode_fee(items, req.vendor)
@@ -151,9 +151,9 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         add_return_courier_fee(items, req.vendor, d_from, d_to)
         add_video_ret_fee(items, req.vendor, d_from, d_to)
         
-        # 8. 박스/봉투
-        if zone_counts:
-            add_box_fee_by_zone(items, req.vendor, zone_counts)
+        # 8. 작업일지 (플래그/반품 요금 뒤에 추가)
+        if req.include_worklog:
+            add_worklog_items(items, req.vendor, d_from, d_to)
         
         # 9. 합포장 (배송통계 기반)
         if req.include_combined_fee:
