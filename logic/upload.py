@@ -27,15 +27,20 @@ import pandas as pd
 from .db import get_connection, ensure_column
 from .clean import TRACK_COLS, normalize_tracking
 
-# 저장 폴더 - 절대 경로 사용 (Docker/Railway 호환)
-_default_upload = "/app/data/uploads" if os.path.exists("/app") else "data/uploads"
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", _default_upload))
+# 저장 폴더 - 환경변수 우선, 없으면 절대경로 사용
+def _get_upload_dir() -> Path:
+    """업로드 디렉토리 경로 반환 (지연 초기화)"""
+    env_dir = os.getenv("UPLOAD_DIR")
+    if env_dir:
+        return Path(env_dir)
+    # Docker/Railway 환경 감지
+    if os.path.exists("/app/data"):
+        return Path("/app/data/uploads")
+    return Path("data/uploads")
 
-# 디렉토리 생성 (권한 오류 시 무시 - 런타임에 재시도)
-try:
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-except PermissionError:
-    pass  # 런타임에 다시 시도
+UPLOAD_DIR = _get_upload_dir()
+
+# 주의: 디렉토리 생성은 런타임에 _save_file_to_disk()에서 수행
 
 # 날짜 컬럼 정의
 TableName = Literal[
