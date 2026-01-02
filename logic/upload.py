@@ -27,9 +27,15 @@ import pandas as pd
 from .db import get_connection, ensure_column
 from .clean import TRACK_COLS, normalize_tracking
 
-# 저장 폴더
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# 저장 폴더 - 절대 경로 사용 (Docker/Railway 호환)
+_default_upload = "/app/data/uploads" if os.path.exists("/app") else "data/uploads"
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", _default_upload))
+
+# 디렉토리 생성 (권한 오류 시 무시 - 런타임에 재시도)
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+except PermissionError:
+    pass  # 런타임에 다시 시도
 
 # 날짜 컬럼 정의
 TableName = Literal[
@@ -70,6 +76,9 @@ def _md5(file: BinaryIO) -> str:
 
 def _save_file_to_disk(file: BinaryIO, orig_name: str = "") -> Tuple[Path, str]:
     """파일을 디스크에 저장."""
+    # 디렉토리가 없으면 생성 (런타임 보장)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    
     fname = f"{dt.datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex}.xlsx"
     path = UPLOAD_DIR / fname
     with open(path, "wb") as out:
