@@ -5,7 +5,7 @@ logic/clean.py – 공통 정규화 헬퍼
 • clean_invoice_id(): 과학표기·소수 포함 문자열을 순수 숫자ㆍ영문 문자열로 변환
 • normalize_tracking(): 송장번호 정규화 (기존 함수명 유지)
 
-Streamlit 의존성 없음 - 순수 Python 함수.
+순수 Python 함수 (FastAPI 백엔드에서 사용).
 """
 from __future__ import annotations
 

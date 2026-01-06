@@ -8,7 +8,7 @@ Excel(xlsx) 업로드 → 지정 테이블 적재 + uploads 메타 기록
   • 테이블별 UNIQUE_KEY 로 행-중복 제거
   • 시간 포함 테이블(shipping_stats·inbound_slip) → 날짜 전용 컬럼 추가
 
-Streamlit 의존성 제거 - 순수 Python 함수.
+순수 Python 함수 (FastAPI 백엔드에서 사용).
 """
 
 from __future__ import annotations

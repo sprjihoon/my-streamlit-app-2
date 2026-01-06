@@ -117,9 +117,9 @@ npm run dev
 - 요금 계산 로직
 
 ### 변경된 부분
-- **UI**: Streamlit → React + TailwindCSS
-- **API**: 동기 호출 → RESTful API
-- **상태 관리**: st.session_state → React Query
+- **UI**: React + TailwindCSS (Next.js)
+- **API**: RESTful API (FastAPI)
+- **상태 관리**: React Query
 
 ## 📦 프로덕션 배포
 

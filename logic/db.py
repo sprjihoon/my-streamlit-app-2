@@ -1,7 +1,7 @@
 """
 logic/db.py - DB 연결 헬퍼
 ───────────────────────────────────
-Streamlit 의존성 제거된 순수 Python 버전.
+FastAPI 백엔드에서 사용하는 순수 Python 버전.
 billing.db 자동 생성, 모든 필수 테이블·컬럼 보장.
 """
 from __future__ import annotations

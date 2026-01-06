@@ -7,7 +7,7 @@ Shared template class (InvoicePDF) for all invoice‑related pages.
 • 한·영 다국어 지원 (lang='ko' | 'en')
 • add_header / add_company_block / add_items_table / add_footer helpers
 
-Streamlit 의존성 없음 - 순수 Python 클래스.
+순수 Python 클래스 (FastAPI 백엔드에서 사용).
 
 Usage:
     from logic.invoice_pdf import InvoicePDF

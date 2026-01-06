@@ -30,6 +30,7 @@ from actions.invoice_actions import (
     add_return_courier_fee,
     add_video_ret_fee,
     add_worklog_items,
+    add_storage_fee,
     create_and_finalize_invoice,
 )
 
@@ -118,9 +119,18 @@ class InvoiceAllTab(QWidget):
                 add_box_fee_by_zone(items, ven, zone_counts)
 
                 # 합포장 / 도서산간 / 입고검수
-                add_combined_pack_fee(df_ship, items)
-                add_remote_area_fee(ven, d_from, d_to, items)
-                add_inbound_inspection_fee(ven, d_from, d_to, items)
+                try:
+                    add_combined_pack_fee(df_ship, items)
+                except Exception as e:
+                    logs.append({"공급처": ven, "결과": f"⚠️ 합포장 계산 오류: {str(e)[:50]}"})
+                try:
+                    add_remote_area_fee(ven, d_from, d_to, items)
+                except Exception as e:
+                    logs.append({"공급처": ven, "결과": f"⚠️ 도서산간 계산 오류: {str(e)[:50]}"})
+                try:
+                    add_inbound_inspection_fee(ven, d_from, d_to, items)
+                except Exception as e:
+                    logs.append({"공급처": ven, "결과": f"⚠️ 입고검수 계산 오류: {str(e)[:50]}"})
 
                 # 플래그 기반 추가 항목
                 add_barcode_fee(items, ven)
@@ -135,6 +145,9 @@ class InvoiceAllTab(QWidget):
 
                 # 작업일지 항목
                 add_worklog_items(items, ven, d_from, d_to)
+
+                # 보관료 (활성 상태인 항목은 매월 자동 청구)
+                add_storage_fee(items, ven)
 
                 iid = create_and_finalize_invoice(
                     vendor_id=int(vmap.get(ven)),

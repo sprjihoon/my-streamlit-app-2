@@ -4,7 +4,7 @@ logic/fee_remote.py - 도서산간 요금 계산
 공급처 + 날짜 기준으로 kpost_in에서 '도서행' == 'y'인 건수 계산,
 단가(out_extra) 적용.
 
-Streamlit 의존성 제거 - 순수 Python 함수.
+순수 Python 함수 (FastAPI 백엔드에서 사용).
 """
 import sqlite3
 from typing import List, Dict, Tuple, Optional

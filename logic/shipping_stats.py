@@ -1,7 +1,7 @@
 """
 logic/shipping_stats.py - 배송통계 필터 로직
 ───────────────────────────────────────────────
-Streamlit 의존성 제거 - 순수 Python 함수.
+순수 Python 함수 (FastAPI 백엔드에서 사용).
 """
 from datetime import date
 from typing import Optional

@@ -9,7 +9,7 @@ import { uploadFile, getUploadList, deleteUpload, resetTableData } from '@/lib/a
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 /**
- * 업로드 타겟 정의 (Streamlit TARGETS와 동일)
+ * 업로드 타겟 정의
  */
 const TARGETS = [
   { key: 'inbound_slip', label: '입고전표' },
@@ -31,7 +31,6 @@ interface UploadRecord {
 
 /**
  * 데이터 업로드 페이지
- * Streamlit 1_upload_manager.py와 동일한 화면 흐름
  */
 export default function UploadPage() {
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
@@ -177,7 +176,7 @@ export default function UploadPage() {
 
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
-      {/* 업로드 영역 (5컬럼 그리드 - Streamlit cols와 동일) */}
+      {/* 업로드 영역 (5컬럼 그리드) */}
       <div className="grid grid-5" style={{ marginBottom: '1rem' }}>
         {TARGETS.map((target) => (
           <Card key={target.key} title={target.label}>

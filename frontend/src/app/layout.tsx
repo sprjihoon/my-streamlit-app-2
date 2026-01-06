@@ -15,7 +15,7 @@ interface User {
 }
 
 /**
- * 네비게이션 링크 (Streamlit pages/ 구조와 동일)
+ * 네비게이션 링크
  */
 const NAV_ITEMS = [
   { href: '/', label: '🏠 대시보드' },
@@ -206,7 +206,7 @@ export default function RootLayout({
       </head>
       <body>
         <div className="layout">
-          {/* 사이드바 (Streamlit 스타일) */}
+          {/* 사이드바 */}
           <aside className="sidebar">
             <h1>📋 청구서 시스템</h1>
             

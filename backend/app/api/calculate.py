@@ -25,6 +25,8 @@ from logic import (
     add_video_ret_fee,
     add_box_fee_by_zone,
     add_storage_fee,
+    add_combined_pack_fee,
+    add_remote_area_fee,
     # 개별 요금 계산
     calculate_courier_fee_by_zone,
     get_courier_fee_items,
@@ -132,9 +134,12 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         
         # 4. 도서산간
         if req.include_remote_fee:
-            remote = calculate_remote_area_fee(req.vendor, d_from, d_to)
-            if remote:
-                items.append(remote)
+            try:
+                success, error_msg, info_msg = add_remote_area_fee(req.vendor, d_from, d_to, items)
+                if not success and error_msg:
+                    warnings.append(f"도서산간 계산 오류: {error_msg}")
+            except Exception as e:
+                warnings.append(f"도서산간 계산 오류: {str(e)}")
         
         # 5. 박스/봉투 (택배요금 다음에 바로 추가)
         if zone_counts:
@@ -159,33 +164,11 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         if req.include_combined_fee:
             try:
                 # 배송통계 조회
-                with get_connection() as con:
-                    alias_df = pd.read_sql(
-                        "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'shipping_stats'",
-                        con, params=(req.vendor,)
-                    )
-                    name_list = [req.vendor] + alias_df["alias"].astype(str).str.strip().tolist()
-                    
-                    placeholders = ",".join("?" * len(name_list))
-                    df_ship = pd.read_sql(
-                        f"""
-                        SELECT * FROM shipping_stats 
-                        WHERE TRIM(공급처) IN ({placeholders})
-                          AND DATE(배송일) BETWEEN DATE(?) AND DATE(?)
-                        """,
-                        con, params=(*name_list, d_from, d_to)
-                    )
-                
+                df_ship = shipping_stats(req.vendor, d_from, d_to)
                 if not df_ship.empty:
-                    combined = calculate_combined_pack_fee(df_ship)
-                    if combined and combined.get("수량", 0) > 0:
-                        items.append({
-                            "항목": combined["항목"],
-                            "수량": combined["수량"],
-                            "단가": combined["단가"],
-                            "금액": combined["금액"],
-                            "비고": ""
-                        })
+                    success, error_msg = add_combined_pack_fee(df_ship, items)
+                    if not success and error_msg:
+                        warnings.append(f"합포장 계산 오류: {error_msg}")
             except Exception as e:
                 warnings.append(f"합포장 계산 오류: {str(e)}")
         

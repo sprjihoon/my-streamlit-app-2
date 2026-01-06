@@ -4,7 +4,7 @@ logic/fee_inbound.py - 입고검수 요금 계산
 공급처 + 날짜 기준으로 inbound_slip에서 작업일자 필터,
 수량 총합 × out_extra 테이블 '입고검수' 단가 계산.
 
-Streamlit 의존성 제거 - 순수 Python 함수.
+순수 Python 함수 (FastAPI 백엔드에서 사용).
 """
 import sqlite3
 from typing import List, Dict, Tuple, Optional

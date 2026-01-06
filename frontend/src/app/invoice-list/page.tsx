@@ -42,7 +42,7 @@ interface InvoiceDetail {
 
 /**
  * 인보이스 목록 페이지
- * 기존 Streamlit invoice_list.py와 동일한 기능 + 항목 수정 기능
+ * 인보이스 목록 조회 및 항목 수정 기능
  */
 export default function InvoiceListPage() {
   // 목록 상태

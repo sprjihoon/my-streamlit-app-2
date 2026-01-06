@@ -1,6 +1,6 @@
 """
 backend/app/api/rates.py - 요금표 관리 API
-기존 Streamlit 앱의 테이블 스키마를 그대로 사용합니다.
+기존 테이블 스키마를 그대로 사용합니다.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field

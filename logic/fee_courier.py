@@ -2,7 +2,7 @@
 # logic/fee_courier.py
 #   • 송장번호 컬럼 정규화 (과학적 표기 → 숫자)
 #   • 복합키 중복 제거
-#   • Streamlit 의존성 제거 - 순수 Python 함수
+#   • 순수 Python 함수 (FastAPI 백엔드에서 사용)
 # ─────────────────────────────────────
 
 import sqlite3

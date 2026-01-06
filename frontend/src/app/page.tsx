@@ -8,7 +8,7 @@ import { checkHealth, getUploadList } from '@/lib/api';
 
 /**
  * 대시보드 페이지 (홈)
- * Streamlit main.py와 동일한 화면 흐름
+ * 기존 대시보드와 동일한 화면 흐름
  */
 export default function Dashboard() {
   const [health, setHealth] = useState<{ status: string; version: string } | null>(null);

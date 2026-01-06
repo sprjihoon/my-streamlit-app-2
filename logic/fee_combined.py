@@ -4,7 +4,7 @@ logic/fee_combined.py - 합포장 요금 계산
 배송통계 df_ship의 내품수량 기준으로,
 합포장 (2개 초과분) 수량을 계산하고 인보이스 항목 추가.
 
-Streamlit 의존성 제거 - 순수 Python 함수.
+순수 Python 함수 (FastAPI 백엔드에서 사용).
 """
 from typing import List, Dict, Optional, Tuple
 
