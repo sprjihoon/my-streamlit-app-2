@@ -126,13 +126,19 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
             except Exception as e:
                 warnings.append(f"택배요금 계산 오류: {str(e)}")
         
-        # 3. 입고검수
-        if req.include_inbound_fee:
-            inbound = calculate_inbound_inspection_fee(req.vendor, d_from, d_to)
-            if inbound:
-                items.append(inbound)
+        # 3. 합포장 (택배요금 바로 다음)
+        if req.include_combined_fee:
+            try:
+                # 배송통계 조회
+                df_ship = shipping_stats(req.vendor, d_from, d_to)
+                if not df_ship.empty:
+                    success, error_msg = add_combined_pack_fee(df_ship, items)
+                    if not success and error_msg:
+                        warnings.append(f"합포장 계산 오류: {error_msg}")
+            except Exception as e:
+                warnings.append(f"합포장 계산 오류: {str(e)}")
         
-        # 4. 도서산간
+        # 4. 도서산간 (택배요금 바로 다음)
         if req.include_remote_fee:
             try:
                 success, error_msg, info_msg = add_remote_area_fee(req.vendor, d_from, d_to, items)
@@ -156,21 +162,15 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         add_return_courier_fee(items, req.vendor, d_from, d_to)
         add_video_ret_fee(items, req.vendor, d_from, d_to)
         
-        # 8. 작업일지 (플래그/반품 요금 뒤에 추가)
+        # 8. 입고검수
+        if req.include_inbound_fee:
+            inbound = calculate_inbound_inspection_fee(req.vendor, d_from, d_to)
+            if inbound:
+                items.append(inbound)
+        
+        # 9. 작업일지 (플래그/반품 요금 뒤에 추가)
         if req.include_worklog:
             add_worklog_items(items, req.vendor, d_from, d_to)
-        
-        # 9. 합포장 (배송통계 기반)
-        if req.include_combined_fee:
-            try:
-                # 배송통계 조회
-                df_ship = shipping_stats(req.vendor, d_from, d_to)
-                if not df_ship.empty:
-                    success, error_msg = add_combined_pack_fee(df_ship, items)
-                    if not success and error_msg:
-                        warnings.append(f"합포장 계산 오류: {error_msg}")
-            except Exception as e:
-                warnings.append(f"합포장 계산 오류: {str(e)}")
         
         # 10. 거래처별 보관료 (활성 상태인 항목은 매월 자동 청구)
         # 보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정)

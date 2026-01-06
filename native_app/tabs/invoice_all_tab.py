@@ -114,19 +114,25 @@ class InvoiceAllTab(QWidget):
                 df_basic = add_basic_shipping(pd.DataFrame(), ven, d_from, d_to)
                 items.extend(df_basic.to_dict("records"))
 
-                # 구간별 택배요금 + 박스/봉투
+                # 구간별 택배요금
                 zone_counts = add_courier_fee_by_zone(ven, d_from, d_to, items)
-                add_box_fee_by_zone(items, ven, zone_counts)
-
-                # 합포장 / 도서산간 / 입고검수
+                
+                # 합포장 (택배요금 바로 다음)
                 try:
                     add_combined_pack_fee(df_ship, items)
                 except Exception as e:
                     logs.append({"공급처": ven, "결과": f"⚠️ 합포장 계산 오류: {str(e)[:50]}"})
+                
+                # 도서산간 (택배요금 바로 다음)
                 try:
                     add_remote_area_fee(ven, d_from, d_to, items)
                 except Exception as e:
                     logs.append({"공급처": ven, "결과": f"⚠️ 도서산간 계산 오류: {str(e)[:50]}"})
+                
+                # 박스/봉투
+                add_box_fee_by_zone(items, ven, zone_counts)
+                
+                # 입고검수
                 try:
                     add_inbound_inspection_fee(ven, d_from, d_to, items)
                 except Exception as e:
