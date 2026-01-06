@@ -47,7 +47,7 @@ def add_remote_area_fee(vendor: str, d_from: str, d_to: str, items: List[Dict] =
                     f"""
                     SELECT 도서행 FROM kpost_in
                     WHERE TRIM(발송인명) IN ({placeholders})
-                      AND 접수일자 BETWEEN ? AND ?
+                      AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
                     """, con, params=(*name_list, d_from, d_to)
                 )
             except Exception as e:
