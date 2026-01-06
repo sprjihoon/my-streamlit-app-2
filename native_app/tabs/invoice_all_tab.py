@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import List, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 import pandas as pd
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QPushButton, QTableView, QMessageBox, QListWidget, QListWidgetItem, QAbstractItemView, QProgressDialog
 )
