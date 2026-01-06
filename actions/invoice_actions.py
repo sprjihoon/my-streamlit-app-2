@@ -486,3 +486,77 @@ def add_worklog_items(item_list, vendor, d_from, d_to):
             "금액":  int(r[WL_COL_AMT]),
             "비고":  r[WL_COL_MEMO]
         })
+
+
+# ─────────────────────────────────────────────
+# 9. 보관료 추가
+# ─────────────────────────────────────────────
+def add_storage_fee(items, vendor):
+    """
+    거래처별 보관료 추가.
+    
+    보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정).
+    period 컬럼이 있더라도 기간 조건 없이 is_active=1인 모든 항목을 가져옴.
+    """
+    try:
+        with get_connection() as con:
+            # vendor_storage 테이블 확인
+            table_exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_storage'"
+            ).fetchone()
+            
+            if not table_exists:
+                return
+            
+            # 공급처명 정규화 (앞뒤 공백 제거)
+            vendor_normalized = vendor.strip() if vendor else ""
+            if not vendor_normalized:
+                return
+            
+            # 활성 상태인 보관료 항목 조회
+            # 기간(period) 조건 없이 is_active=1인 모든 항목을 가져옴
+            # 한 번 추가된 보관료는 수정하기 전까지 모든 월에 자동으로 반영됨
+            # vendor_id는 TEXT 타입이므로 공급처명과 직접 비교
+            storages = con.execute(
+                """
+                SELECT item_name, qty, unit_price, amount, remark
+                FROM vendor_storage
+                WHERE TRIM(vendor_id) = ? AND is_active = 1
+                ORDER BY created_at
+                """,
+                (vendor_normalized,)
+            ).fetchall()
+            
+            # 매칭되는 항목이 없으면 별칭(alias)도 확인
+            if not storages:
+                # vendors 테이블에서 별칭 확인
+                alias_df = pd.read_sql(
+                    "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('all', 'storage')",
+                    con, params=(vendor_normalized,)
+                )
+                aliases = [vendor_normalized] + alias_df["alias"].tolist()
+                
+                # 별칭으로도 검색 시도
+                if aliases:
+                    placeholders = ",".join("?" * len(aliases))
+                    storages = con.execute(
+                        f"""
+                        SELECT item_name, qty, unit_price, amount, remark
+                        FROM vendor_storage
+                        WHERE TRIM(vendor_id) IN ({placeholders}) AND is_active = 1
+                        ORDER BY created_at
+                        """,
+                        tuple(aliases)
+                    ).fetchall()
+            
+            for storage in storages:
+                items.append({
+                    "항목": f"보관료({storage[0]})",
+                    "수량": storage[1],
+                    "단가": storage[2],
+                    "금액": storage[3],
+                    "비고": storage[4] or ""
+                })
+    except Exception as e:
+        # 오류 발생 시 로그만 남기고 계속 진행 (다른 항목 계산에 영향 없도록)
+        logger.warning(f"⚠️ 보관료 조회 중 오류 발생 ({vendor}): {e}")

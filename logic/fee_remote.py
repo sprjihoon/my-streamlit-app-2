@@ -82,7 +82,7 @@ def add_remote_area_fee(
             return True, None, info_msg
 
         try:
-            with sqlite3.connect(db_path) as con:
+            with get_connection() as con:
                 row = con.execute(
                     "SELECT 단가 FROM out_extra WHERE 항목 = '도서산간'"
                 ).fetchone()
@@ -166,7 +166,7 @@ def calculate_remote_area_fee(
             return {}
 
         try:
-            with sqlite3.connect(db_path) as con:
+            with get_connection() as con:
                 row = con.execute(
                     "SELECT 단가 FROM out_extra WHERE 항목 = '도서산간'"
                 ).fetchone()

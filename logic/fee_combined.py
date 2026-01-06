@@ -6,10 +6,11 @@ logic/fee_combined.py - 합포장 요금 계산
 
 Streamlit 의존성 제거 - 순수 Python 함수.
 """
-import sqlite3
 from typing import List, Dict, Optional, Tuple
 
 import pandas as pd
+
+from .db import get_connection
 
 
 def add_combined_pack_fee(
@@ -44,7 +45,7 @@ def add_combined_pack_fee(
 
     # ② 단가 가져오기 (out_extra 테이블)
     try:
-        with sqlite3.connect(db_path) as con:
+        with get_connection() as con:
             row = con.execute(
                 "SELECT 단가 FROM out_extra WHERE 항목 = '합포장'"
             ).fetchone()
@@ -93,7 +94,7 @@ def calculate_combined_pack_fee(
         return {}
 
     try:
-        with sqlite3.connect(db_path) as con:
+        with get_connection() as con:
             row = con.execute(
                 "SELECT 단가 FROM out_extra WHERE 항목 = '합포장'"
             ).fetchone()
