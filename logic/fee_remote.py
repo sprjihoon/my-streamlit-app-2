@@ -51,7 +51,7 @@ def add_remote_area_fee(
             if "aliases" in tables:
                 try:
                     alias_df = pd.read_sql(
-                        "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'kpost_in'",
+                        "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('kpost_in', 'all')",
                         con, params=(vendor,)
                     )
                     name_list.extend(alias_df["alias"].astype(str).str.strip().tolist())
@@ -60,11 +60,12 @@ def add_remote_area_fee(
 
             # ② kpost_in 필터 + 도서행 여부 확인
             try:
+                placeholders = ",".join("?" * len(name_list))
                 df = pd.read_sql(
                     f"""
                     SELECT 도서행 FROM kpost_in
-                    WHERE TRIM(발송인명) IN ({','.join('?' * len(name_list))})
-                      AND 접수일자 BETWEEN ? AND ?
+                    WHERE TRIM(발송인명) IN ({placeholders})
+                      AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
                     """, con, params=(*name_list, d_from, d_to)
                 )
             except Exception as e:
@@ -138,7 +139,7 @@ def calculate_remote_area_fee(
             if "aliases" in tables:
                 try:
                     alias_df = pd.read_sql(
-                        "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'kpost_in'",
+                        "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('kpost_in', 'all')",
                         con, params=(vendor,)
                     )
                     name_list.extend(alias_df["alias"].astype(str).str.strip().tolist())
@@ -146,11 +147,12 @@ def calculate_remote_area_fee(
                     pass
 
             try:
+                placeholders = ",".join("?" * len(name_list))
                 df = pd.read_sql(
                     f"""
                     SELECT 도서행 FROM kpost_in
-                    WHERE TRIM(발송인명) IN ({','.join('?' * len(name_list))})
-                      AND 접수일자 BETWEEN ? AND ?
+                    WHERE TRIM(발송인명) IN ({placeholders})
+                      AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
                     """, con, params=(*name_list, d_from, d_to)
                 )
             except Exception:
