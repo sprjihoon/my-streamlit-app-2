@@ -58,9 +58,14 @@ def add_remote_area_fee(vendor: str, d_from: str, d_to: str, items: List[Dict] =
             logger.warning(f"'{vendor}' 도서산간 데이터 없음 or '도서행' 칼럼 없음")
             return None
 
-        # 2025-07-28: 일부 파일은 도서행 표기가 누락되어 전체 건수를 사용
+        # 도서행 컬럼 정규화: 문자열로 변환 후 소문자 변환 및 공백 제거
         df["도서행"] = df["도서행"].astype(str).str.lower().str.strip()
-        qty = df[df["도서행"] == "y"].shape[0]
+        # 'y', 'yes', '예', '1', 'true' 등 도서행으로 간주되는 값들 모두 매칭
+        # 빈 문자열, 'n', 'no', '0', 'false', 'nan' 등은 제외
+        qty = df[
+            df["도서행"].isin(["y", "yes", "예", "1", "true"]) & 
+            ~df["도서행"].isin(["", "n", "no", "아니오", "0", "false", "nan", "none"])
+        ].shape[0]
 
         logger.info(f"{vendor} 도서산간 적용 수량: {qty}")
 

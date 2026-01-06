@@ -74,8 +74,14 @@ def add_remote_area_fee(
         if df.empty or "도서행" not in df.columns:
             return True, None, f"📭 '{vendor}' 도서산간 데이터 없음 or '도서행' 칼럼 없음"
 
+        # 도서행 컬럼 정규화: 문자열로 변환 후 소문자 변환 및 공백 제거
         df["도서행"] = df["도서행"].astype(str).str.lower().str.strip()
-        qty = df[df["도서행"] == "y"].shape[0]
+        # 'y', 'yes', '예', '1', 'true' 등 도서행으로 간주되는 값들 모두 매칭
+        # 빈 문자열, 'n', 'no', '0', 'false', 'nan' 등은 제외
+        qty = df[
+            df["도서행"].isin(["y", "yes", "예", "1", "true"]) & 
+            ~df["도서행"].isin(["", "n", "no", "아니오", "0", "false", "nan", "none"])
+        ].shape[0]
 
         info_msg = f"✅ {vendor} 도서산간 적용 수량: {qty}"
 
@@ -161,8 +167,14 @@ def calculate_remote_area_fee(
         if df.empty or "도서행" not in df.columns:
             return {}
 
+        # 도서행 컬럼 정규화: 문자열로 변환 후 소문자 변환 및 공백 제거
         df["도서행"] = df["도서행"].astype(str).str.lower().str.strip()
-        qty = df[df["도서행"] == "y"].shape[0]
+        # 'y', 'yes', '예', '1', 'true' 등 도서행으로 간주되는 값들 모두 매칭
+        # 빈 문자열, 'n', 'no', '0', 'false', 'nan' 등은 제외
+        qty = df[
+            df["도서행"].isin(["y", "yes", "예", "1", "true"]) & 
+            ~df["도서행"].isin(["", "n", "no", "아니오", "0", "false", "nan", "none"])
+        ].shape[0]
 
         if qty == 0:
             return {}
