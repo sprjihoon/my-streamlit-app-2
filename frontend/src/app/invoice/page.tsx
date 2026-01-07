@@ -34,6 +34,14 @@ interface BatchLog {
   duration?: number;
 }
 
+// 로컬 날짜를 YYYY-MM-DD 형식으로 변환 (시간대 문제 방지)
+function formatLocalDate(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 /**
  * 인보이스 계산 페이지
  * 활성/비활성 거래처 필터 + 일괄 계산 기능
@@ -48,12 +56,13 @@ export default function InvoicePage() {
   const [selectedVendors, setSelectedVendors] = useState<string[]>([]);
   
   // 날짜
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
     d.setDate(1);
-    return d.toISOString().split('T')[0];
+    return formatLocalDate(d);
   });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(() => formatLocalDate(new Date()));
   
   // 옵션
   const [includeBasicShipping, setIncludeBasicShipping] = useState(true);
@@ -368,14 +377,10 @@ export default function InvoicePage() {
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>📆 월 빠른 선택</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             <select
-              value={new Date(dateFrom).getFullYear()}
+              value={selectedYear}
               onChange={(e) => {
                 const year = parseInt(e.target.value);
-                const currentMonth = new Date(dateFrom).getMonth();
-                const firstDay = new Date(year, currentMonth, 1);
-                const lastDay = new Date(year, currentMonth + 1, 0);
-                setDateFrom(firstDay.toISOString().split('T')[0]);
-                setDateTo(lastDay.toISOString().split('T')[0]);
+                setSelectedYear(year);
               }}
               style={{ 
                 padding: '0.5rem', 
@@ -398,18 +403,20 @@ export default function InvoicePage() {
             }}>
               {[...Array(12)].map((_, i) => {
                 const month = i;
-                const year = new Date(dateFrom).getFullYear();
-                const isSelected = new Date(dateFrom).getMonth() === month && 
-                  new Date(dateFrom).getDate() === 1 &&
-                  new Date(dateTo).getMonth() === month;
+                // dateFrom에서 월과 일을 직접 파싱 (시간대 문제 방지)
+                const [fromYear, fromMonth] = dateFrom.split('-').map(Number);
+                const [, toMonth] = dateTo.split('-').map(Number);
+                const isSelected = selectedYear === fromYear && 
+                  (fromMonth - 1) === month && 
+                  (toMonth - 1) === month;
                 return (
                   <button
                     key={month}
                     onClick={() => {
-                      const firstDay = new Date(year, month, 1);
-                      const lastDay = new Date(year, month + 1, 0);
-                      setDateFrom(firstDay.toISOString().split('T')[0]);
-                      setDateTo(lastDay.toISOString().split('T')[0]);
+                      const firstDay = new Date(selectedYear, month, 1);
+                      const lastDay = new Date(selectedYear, month + 1, 0);
+                      setDateFrom(formatLocalDate(firstDay));
+                      setDateTo(formatLocalDate(lastDay));
                     }}
                     style={{
                       padding: '0.4rem 0.6rem',
