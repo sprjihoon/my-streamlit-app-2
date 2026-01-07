@@ -363,6 +363,74 @@ export default function InvoicePage() {
 
       {/* 계산 조건 */}
       <Card title="📅 계산 조건" style={{ marginBottom: '1rem' }}>
+        {/* 월 빠른 선택 */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>📆 월 빠른 선택</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <select
+              value={new Date(dateFrom).getFullYear()}
+              onChange={(e) => {
+                const year = parseInt(e.target.value);
+                const currentMonth = new Date(dateFrom).getMonth();
+                const firstDay = new Date(year, currentMonth, 1);
+                const lastDay = new Date(year, currentMonth + 1, 0);
+                setDateFrom(firstDay.toISOString().split('T')[0]);
+                setDateTo(lastDay.toISOString().split('T')[0]);
+              }}
+              style={{ 
+                padding: '0.5rem', 
+                border: '1px solid #ddd', 
+                borderRadius: '4px',
+                fontWeight: 500,
+                minWidth: '90px'
+              }}
+            >
+              {[...Array(5)].map((_, i) => {
+                const year = new Date().getFullYear() - 2 + i;
+                return <option key={year} value={year}>{year}년</option>;
+              })}
+            </select>
+            <div style={{ 
+              display: 'flex', 
+              gap: '0.25rem', 
+              flexWrap: 'wrap',
+              flex: 1
+            }}>
+              {[...Array(12)].map((_, i) => {
+                const month = i;
+                const year = new Date(dateFrom).getFullYear();
+                const isSelected = new Date(dateFrom).getMonth() === month && 
+                  new Date(dateFrom).getDate() === 1 &&
+                  new Date(dateTo).getMonth() === month;
+                return (
+                  <button
+                    key={month}
+                    onClick={() => {
+                      const firstDay = new Date(year, month, 1);
+                      const lastDay = new Date(year, month + 1, 0);
+                      setDateFrom(firstDay.toISOString().split('T')[0]);
+                      setDateTo(lastDay.toISOString().split('T')[0]);
+                    }}
+                    style={{
+                      padding: '0.4rem 0.6rem',
+                      border: isSelected ? '2px solid #4CAF50' : '1px solid #ddd',
+                      borderRadius: '4px',
+                      background: isSelected ? '#e8f5e9' : '#f9f9f9',
+                      cursor: 'pointer',
+                      fontWeight: isSelected ? 600 : 400,
+                      color: isSelected ? '#2e7d32' : '#333',
+                      transition: 'all 0.15s ease',
+                      minWidth: '45px'
+                    }}
+                  >
+                    {month + 1}월
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: mode === 'single' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
           {mode === 'single' && (
             <div>
