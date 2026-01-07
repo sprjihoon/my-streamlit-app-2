@@ -19,10 +19,6 @@ interface CompanySettings {
   updated_at?: string;
 }
 
-interface ExtraFeeItem {
-  항목: string;
-  단가: number;
-}
 
 const defaultSettings: CompanySettings = {
   company_name: '',
@@ -38,21 +34,16 @@ const defaultSettings: CompanySettings = {
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<CompanySettings>(defaultSettings);
-  const [extraFees, setExtraFees] = useState<ExtraFeeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [savingFees, setSavingFees] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemPrice, setNewItemPrice] = useState(0);
 
   useEffect(() => {
     const storedIsAdmin = localStorage.getItem('isAdmin') === 'true';
     setIsAdmin(storedIsAdmin);
     loadSettings();
-    loadExtraFees();
   }, []);
 
   async function loadSettings() {
@@ -67,106 +58,6 @@ export default function SettingsPage() {
       setError('설정을 불러오는데 실패했습니다.');
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function loadExtraFees() {
-    try {
-      const res = await fetch(`${API_URL}/settings/extra-fees`);
-      if (res.ok) {
-        const data = await res.json();
-        setExtraFees(data);
-      }
-    } catch (err) {
-      console.error('부가 서비스 단가 로딩 실패:', err);
-    }
-  }
-
-  async function handleUpdateExtraFee(itemName: string, newPrice: number) {
-    if (!isAdmin) {
-      setError('관리자만 설정을 수정할 수 있습니다.');
-      return;
-    }
-
-    try {
-      setSavingFees(true);
-      const res = await fetch(`${API_URL}/settings/extra-fees/${encodeURIComponent(itemName)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 단가: newPrice }),
-      });
-
-      if (!res.ok) throw new Error('저장 실패');
-
-      await loadExtraFees();
-      setSuccess(`'${itemName}' 단가가 저장되었습니다.`);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '저장 실패');
-    } finally {
-      setSavingFees(false);
-    }
-  }
-
-  async function handleAddExtraFee() {
-    if (!isAdmin) {
-      setError('관리자만 설정을 수정할 수 있습니다.');
-      return;
-    }
-
-    if (!newItemName.trim()) {
-      setError('항목명을 입력해주세요.');
-      return;
-    }
-
-    try {
-      setSavingFees(true);
-      const res = await fetch(`${API_URL}/settings/extra-fees`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 항목: newItemName.trim(), 단가: newItemPrice }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || '추가 실패');
-      }
-
-      await loadExtraFees();
-      setNewItemName('');
-      setNewItemPrice(0);
-      setSuccess(`'${newItemName}' 항목이 추가되었습니다.`);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '추가 실패');
-    } finally {
-      setSavingFees(false);
-    }
-  }
-
-  async function handleDeleteExtraFee(itemName: string) {
-    if (!isAdmin) {
-      setError('관리자만 설정을 수정할 수 있습니다.');
-      return;
-    }
-
-    if (!confirm(`'${itemName}' 항목을 삭제하시겠습니까?`)) return;
-
-    try {
-      setSavingFees(true);
-      const res = await fetch(`${API_URL}/settings/extra-fees/${encodeURIComponent(itemName)}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) throw new Error('삭제 실패');
-
-      await loadExtraFees();
-      setSuccess(`'${itemName}' 항목이 삭제되었습니다.`);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '삭제 실패');
-    } finally {
-      setSavingFees(false);
     }
   }
 
@@ -372,115 +263,6 @@ export default function SettingsPage() {
             />
           </div>
         </div>
-      </Card>
-
-      <Card title="💰 부가 서비스 단가" style={{ marginTop: '1rem' }}>
-        <p style={{ marginBottom: '1rem', color: '#666', fontSize: '0.9rem' }}>
-          인보이스 계산 시 적용되는 부가 서비스 단가입니다. (단위: 원)
-        </p>
-        
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f5f5f5' }}>
-              <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>항목</th>
-              <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd', width: '150px' }}>단가 (원)</th>
-              {isAdmin && (
-                <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd', width: '120px' }}>작업</th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {extraFees.map((item) => (
-              <tr key={item.항목} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: '0.75rem' }}>{item.항목}</td>
-                <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                  {isAdmin ? (
-                    <input
-                      type="number"
-                      value={item.단가}
-                      onChange={(e) => {
-                        const newFees = extraFees.map((f) =>
-                          f.항목 === item.항목 ? { ...f, 단가: parseInt(e.target.value) || 0 } : f
-                        );
-                        setExtraFees(newFees);
-                      }}
-                      onBlur={(e) => handleUpdateExtraFee(item.항목, parseInt(e.target.value) || 0)}
-                      style={{
-                        ...inputStyle,
-                        width: '120px',
-                        textAlign: 'right',
-                      }}
-                      disabled={savingFees}
-                    />
-                  ) : (
-                    <span>{item.단가.toLocaleString()}원</span>
-                  )}
-                </td>
-                {isAdmin && (
-                  <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                    <button
-                      onClick={() => handleDeleteExtraFee(item.항목)}
-                      disabled={savingFees}
-                      style={{
-                        padding: '0.25rem 0.5rem',
-                        backgroundColor: '#ffebee',
-                        color: '#c62828',
-                        border: '1px solid #ffcdd2',
-                        borderRadius: '4px',
-                        cursor: savingFees ? 'not-allowed' : 'pointer',
-                        fontSize: '0.85rem',
-                      }}
-                    >
-                      삭제
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {isAdmin && (
-          <div style={{ 
-            display: 'flex', 
-            gap: '0.5rem', 
-            alignItems: 'center',
-            padding: '1rem',
-            backgroundColor: '#f9f9f9',
-            borderRadius: '4px',
-          }}>
-            <input
-              type="text"
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              placeholder="새 항목명"
-              style={{ ...inputStyle, flex: 1 }}
-              disabled={savingFees}
-            />
-            <input
-              type="number"
-              value={newItemPrice}
-              onChange={(e) => setNewItemPrice(parseInt(e.target.value) || 0)}
-              placeholder="단가"
-              style={{ ...inputStyle, width: '120px', textAlign: 'right' }}
-              disabled={savingFees}
-            />
-            <button
-              onClick={handleAddExtraFee}
-              disabled={savingFees || !newItemName.trim()}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: savingFees || !newItemName.trim() ? '#ccc' : '#2196F3',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: savingFees || !newItemName.trim() ? 'not-allowed' : 'pointer',
-              }}
-            >
-              + 추가
-            </button>
-          </div>
-        )}
       </Card>
 
       {isAdmin && (
