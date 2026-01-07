@@ -398,6 +398,86 @@ async def calculate_remote_fee(req: RemoteFeeRequest) -> RemoteFeeResponse:
 
 
 # ─────────────────────────────────────
+# 디버그: kpost_in 도서행 데이터 확인
+# ─────────────────────────────────────
+@router.get("/debug/kpost-doseo")
+async def debug_kpost_doseo(vendor: str, d_from: str, d_to: str):
+    """kpost_in 테이블의 도서행 데이터 확인 (디버그용)"""
+    try:
+        with get_connection() as con:
+            # 테이블 존재 확인
+            tables = [row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            
+            result = {
+                "tables": tables,
+                "kpost_in_exists": "kpost_in" in tables,
+                "aliases_exists": "aliases" in tables,
+            }
+            
+            if "kpost_in" not in tables:
+                return result
+            
+            # kpost_in 총 건수
+            total = con.execute("SELECT COUNT(*) FROM kpost_in").fetchone()[0]
+            result["kpost_in_total"] = total
+            
+            # 도서행 컬럼 존재 확인
+            cols = [c[1] for c in con.execute("PRAGMA table_info(kpost_in);")]
+            result["has_doseo_column"] = "도서행" in cols
+            result["kpost_in_columns"] = cols
+            
+            if "도서행" in cols:
+                # 도서행 값 분포
+                doseo_dist = pd.read_sql("SELECT 도서행, COUNT(*) as cnt FROM kpost_in GROUP BY 도서행", con)
+                result["doseo_distribution"] = doseo_dist.to_dict(orient="records")
+            
+            # 별칭 확인
+            name_list = [vendor]
+            if "aliases" in tables:
+                alias_df = pd.read_sql(
+                    "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('kpost_in', 'all')",
+                    con, params=(vendor,)
+                )
+                name_list.extend(alias_df["alias"].astype(str).str.strip().tolist())
+            
+            result["name_list_for_vendor"] = name_list
+            
+            placeholders = ",".join("?" * len(name_list))
+            
+            # 해당 vendor의 전체 건수
+            vendor_total = con.execute(
+                f"SELECT COUNT(*) FROM kpost_in WHERE TRIM(발송인명) IN ({placeholders})",
+                (*name_list,)
+            ).fetchone()[0]
+            result["vendor_total"] = vendor_total
+            
+            # 해당 vendor + 기간의 건수
+            vendor_period = con.execute(
+                f"""SELECT COUNT(*) FROM kpost_in 
+                    WHERE TRIM(발송인명) IN ({placeholders})
+                    AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)""",
+                (*name_list, d_from, d_to)
+            ).fetchone()[0]
+            result["vendor_period_count"] = vendor_period
+            
+            # 해당 vendor + 기간 + 도서행=Y 건수
+            if "도서행" in cols:
+                vendor_doseo = con.execute(
+                    f"""SELECT COUNT(*) FROM kpost_in 
+                        WHERE TRIM(발송인명) IN ({placeholders})
+                        AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
+                        AND UPPER(TRIM(도서행)) = 'Y'""",
+                    (*name_list, d_from, d_to)
+                ).fetchone()[0]
+                result["vendor_doseo_y_count"] = vendor_doseo
+            
+            return result
+            
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─────────────────────────────────────
 # 배송통계 조회
 # ─────────────────────────────────────
 @router.post("/shipping-stats", response_model=ShippingStatsResponse)
