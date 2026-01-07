@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
@@ -83,6 +83,7 @@ export default function InvoicePage() {
   const [batchProgress, setBatchProgress] = useState(0);
   const [isBatchRunning, setIsBatchRunning] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
+  const stopRequestedRef = useRef(false);  // useRef로 최신 값 추적
   const [error, setError] = useState<string | null>(null);
   
   // 권한 체크
@@ -214,6 +215,7 @@ export default function InvoicePage() {
 
     setIsBatchRunning(true);
     setStopRequested(false);
+    stopRequestedRef.current = false;  // ref도 초기화
     setBatchLogs([]);
     setBatchProgress(0);
     setError(null);
@@ -228,7 +230,7 @@ export default function InvoicePage() {
     const token = localStorage.getItem('token');
 
     for (let i = 0; i < selectedVendors.length; i++) {
-      if (stopRequested) {
+      if (stopRequestedRef.current) {
         logs[i] = {
           ...logs[i],
           status: 'error',
@@ -300,6 +302,7 @@ export default function InvoicePage() {
 
   function handleStopBatch() {
     setStopRequested(true);
+    stopRequestedRef.current = true;  // ref 업데이트 (루프에서 즉시 감지)
   }
 
   const formatNumber = (n: number) => n.toLocaleString('ko-KR');
