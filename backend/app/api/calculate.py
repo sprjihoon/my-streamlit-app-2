@@ -471,6 +471,20 @@ async def debug_kpost_doseo(vendor: str, d_from: str, d_to: str):
                 ).fetchone()[0]
                 result["vendor_doseo_y_count"] = vendor_doseo
             
+            # 접수일자 샘플 확인
+            date_sample = pd.read_sql(
+                f"SELECT 접수일자 FROM kpost_in WHERE TRIM(발송인명) IN ({placeholders}) LIMIT 5",
+                con, params=(*name_list,)
+            )
+            result["date_sample"] = date_sample["접수일자"].astype(str).tolist()
+            
+            # DATE() 함수 테스트
+            date_test = con.execute(
+                f"SELECT 접수일자, DATE(접수일자) as parsed FROM kpost_in WHERE TRIM(발송인명) IN ({placeholders}) LIMIT 3",
+                (*name_list,)
+            ).fetchall()
+            result["date_function_test"] = [{"raw": r[0], "parsed": r[1]} for r in date_test]
+            
             return result
             
     except Exception as e:
