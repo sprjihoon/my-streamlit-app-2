@@ -256,11 +256,15 @@ async def create_or_update_vendor(data: VendorCreate, token: Optional[str] = Non
             con.execute("DELETE FROM aliases WHERE vendor = ?", (data.vendor,))
             
             def insert_aliases(file_type: str, aliases: List[str]):
+                import unicodedata
                 for alias in aliases:
                     if alias.strip():
+                        # 유니코드 정규화 (NFKC) + 공백 정리
+                        normalized = unicodedata.normalize('NFKC', alias.strip())
+                        normalized = ' '.join(normalized.split())
                         con.execute(
                             "INSERT OR REPLACE INTO aliases VALUES (?, ?, ?)",
-                            (alias.strip(), data.vendor, file_type)
+                            (normalized, data.vendor, file_type)
                         )
             
             insert_aliases("inbound_slip", data.alias_inbound_slip)
@@ -383,11 +387,23 @@ async def get_unmatched_aliases():
                     con, params=[ft]
                 )
                 
-                # 미매칭 찾기 (공백 제거 후 비교)
+                # 미매칭 찾기 (공백 제거 + 유니코드 정규화 후 비교)
                 if not all_aliases.empty:
-                    # 원본 데이터와 매핑된 별칭 모두 trim 적용
-                    all_aliases['alias_trimmed'] = all_aliases['alias'].str.strip()
-                    mapped_set = set(mapped['alias'].str.strip().tolist()) if not mapped.empty else set()
+                    import unicodedata
+                    
+                    def normalize_alias(s):
+                        """별칭 정규화: 공백 제거 + 유니코드 정규화"""
+                        if pd.isna(s) or not s:
+                            return ""
+                        # NFKC 정규화 (호환 문자를 표준 형태로 변환)
+                        normalized = unicodedata.normalize('NFKC', str(s).strip())
+                        # 연속 공백을 단일 공백으로
+                        normalized = ' '.join(normalized.split())
+                        return normalized
+                    
+                    # 원본 데이터와 매핑된 별칭 모두 정규화 적용
+                    all_aliases['alias_trimmed'] = all_aliases['alias'].apply(normalize_alias)
+                    mapped_set = set(mapped['alias'].apply(normalize_alias).tolist()) if not mapped.empty else set()
                     
                     unmatched = all_aliases[~all_aliases['alias_trimmed'].isin(mapped_set)]
                     if not unmatched.empty:
@@ -453,9 +469,20 @@ async def get_available_aliases(file_type: str, exclude_vendor: Optional[str] = 
                     con, params=[file_type]
                 )
             
-            # 사용 가능한 별칭 (매핑되지 않은 것)
+            # 사용 가능한 별칭 (매핑되지 않은 것) - 정규화 후 비교
             if not all_aliases.empty:
-                available = all_aliases[~all_aliases['alias'].isin(mapped['alias'])]
+                import unicodedata
+                
+                def normalize_alias(s):
+                    if pd.isna(s) or not s:
+                        return ""
+                    normalized = unicodedata.normalize('NFKC', str(s).strip())
+                    return ' '.join(normalized.split())
+                
+                all_aliases['alias_norm'] = all_aliases['alias'].apply(normalize_alias)
+                mapped_set = set(mapped['alias'].apply(normalize_alias).tolist()) if not mapped.empty else set()
+                
+                available = all_aliases[~all_aliases['alias_norm'].isin(mapped_set)]
                 return sorted(available['alias'].tolist())
             
         except Exception:
@@ -516,9 +543,20 @@ async def get_aliases_for_vendor(vendor_id: str, file_type: str):
                 con, params=[file_type, vendor_id]
             )
             
-            # 사용 가능한 별칭 = 전체 - 다른 거래처에 매핑된 것
+            # 사용 가능한 별칭 = 전체 - 다른 거래처에 매핑된 것 (정규화 후 비교)
             if not all_aliases.empty:
-                available = all_aliases[~all_aliases['alias'].isin(other_mapped['alias'])]
+                import unicodedata
+                
+                def normalize_alias(s):
+                    if pd.isna(s) or not s:
+                        return ""
+                    normalized = unicodedata.normalize('NFKC', str(s).strip())
+                    return ' '.join(normalized.split())
+                
+                all_aliases['alias_norm'] = all_aliases['alias'].apply(normalize_alias)
+                other_mapped_set = set(other_mapped['alias'].apply(normalize_alias).tolist()) if not other_mapped.empty else set()
+                
+                available = all_aliases[~all_aliases['alias_norm'].isin(other_mapped_set)]
                 available_list = sorted(available['alias'].tolist())
             else:
                 available_list = []
