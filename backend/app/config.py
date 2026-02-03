@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # CORS 설정
     # ─────────────────────────────────────
     # 쉼표로 구분된 Origin 목록 (예: "http://localhost:3000,https://app.example.com")
-    CORS_ORIGINS: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,https://my-streamlit-app-2.vercel.app"
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "GET,POST,PUT,DELETE,OPTIONS"
     CORS_ALLOW_HEADERS: str = "*"
