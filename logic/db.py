@@ -264,7 +264,11 @@ CRITICAL_COLS = {
         ("단가", "INTEGER"), 
         ("수량", "INTEGER"), 
         ("합계", "INTEGER"), 
-        ("비고1", "TEXT")
+        ("비고1", "TEXT"),
+        ("작성자", "TEXT"),           # 작성한 직원 이름/ID
+        ("저장시간", "TIMESTAMP"),     # 레코드 생성 시각
+        ("출처", "TEXT"),             # 'bot' 또는 'excel'
+        ("works_user_id", "TEXT"),    # 네이버 웍스 사용자 ID
     ],
 }
 

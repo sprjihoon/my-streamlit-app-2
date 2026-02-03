@@ -1,0 +1,258 @@
+"""
+AI 기반 작업일지 파싱 모듈
+───────────────────────────────────────
+OpenAI GPT를 사용하여 자연어 메시지를 구조화된 작업일지 데이터로 변환합니다.
+"""
+
+import os
+import json
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+# .env 파일 로드
+load_dotenv()
+
+
+# 시스템 프롬프트
+SYSTEM_PROMPT = """당신은 물류센터 작업일지 파싱 AI입니다.
+사용자의 자연어 메시지에서 작업 정보를 추출하세요.
+
+## 추출해야 할 정보
+- vendor (업체명): 거래처/공급처 이름 (예: 틸리언, 나블리, 디오프)
+- work_type (분류): 작업 종류 (예: 1톤하차, 양품화, 입고검수, 바코드부착, 합포장, 반품처리 등)
+- qty (수량): 작업 수량 (숫자만, 없으면 1)
+- unit_price (단가): 건당/개당 가격 (숫자만, 원 단위)
+- date (날짜): 작업일 (YYYY-MM-DD 형식, 없으면 오늘)
+- remark (비고): 추가 메모 사항 (선택)
+
+## 단가 해석 규칙
+- "3만원" → 30000
+- "3만" → 30000
+- "800원" → 800
+- "1500" → 1500
+
+## 응답 형식 (반드시 JSON)
+{
+  "success": true/false,
+  "data": {
+    "vendor": "업체명 또는 null",
+    "work_type": "작업종류 또는 null",
+    "qty": 숫자 또는 null,
+    "unit_price": 숫자 또는 null,
+    "date": "YYYY-MM-DD",
+    "remark": "비고 또는 null"
+  },
+  "missing": ["누락된 필드명들"],
+  "question": "사용자에게 물어볼 질문 (missing이 있을 때만)"
+}
+
+## 예시
+
+입력: "틸리언 1톤하차 3만원"
+출력: {"success": true, "data": {"vendor": "틸리언", "work_type": "1톤하차", "qty": 1, "unit_price": 30000, "date": "2026-02-03", "remark": null}, "missing": [], "question": null}
+
+입력: "나블리 양품화 20개 800원"
+출력: {"success": true, "data": {"vendor": "나블리", "work_type": "양품화", "qty": 20, "unit_price": 800, "date": "2026-02-03", "remark": null}, "missing": [], "question": null}
+
+입력: "양품화 50개 했어요"
+출력: {"success": false, "data": {"vendor": null, "work_type": "양품화", "qty": 50, "unit_price": null, "date": "2026-02-03", "remark": null}, "missing": ["vendor", "unit_price"], "question": "어느 업체 작업인가요? 단가도 알려주세요."}
+
+입력: "틸리언 바코드"
+출력: {"success": false, "data": {"vendor": "틸리언", "work_type": "바코드부착", "qty": null, "unit_price": null, "date": "2026-02-03", "remark": null}, "missing": ["qty"], "question": "몇 개 작업했나요?"}
+
+## 중요 규칙
+1. 업체명(vendor)과 작업종류(work_type)는 필수입니다.
+2. 단가(unit_price)가 없으면 질문하세요.
+3. 수량(qty)이 명시되지 않고 작업 특성상 단건이면 1로 설정 (예: 1톤하차, 입고 등)
+4. 수량이 명시되지 않고 작업 특성상 복수이면 질문 (예: 바코드부착, 양품화 등)
+5. 오늘 날짜: {today}
+6. 반드시 유효한 JSON만 출력하세요. 다른 텍스트 없이 JSON만 출력."""
+
+
+class AIParser:
+    """AI 기반 작업일지 파서"""
+    
+    def __init__(self):
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
+        self.client = AsyncOpenAI(api_key=api_key)
+        self.model = "gpt-4o-mini"  # 비용 효율적인 모델
+    
+    async def parse_message(
+        self,
+        message: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        자연어 메시지를 작업일지 데이터로 파싱
+        
+        Args:
+            message: 사용자 메시지
+            context: 이전 대화 컨텍스트 (누락된 정보 보완용)
+        
+        Returns:
+            파싱 결과 딕셔너리
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        system_prompt = SYSTEM_PROMPT.replace("{today}", today)
+        
+        # 컨텍스트가 있으면 프롬프트에 추가
+        user_message = message
+        if context and context.get("pending_data"):
+            pending = context["pending_data"]
+            context_info = f"\n\n[이전 대화 컨텍스트]\n"
+            context_info += f"이미 파악된 정보: {json.dumps(pending, ensure_ascii=False)}\n"
+            context_info += f"누락된 정보: {context.get('missing', [])}\n"
+            context_info += f"사용자가 답변: {message}\n"
+            context_info += "이 답변으로 누락된 정보를 채워주세요."
+            user_message = context_info
+        
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.1,  # 일관된 결과를 위해 낮은 temperature
+                response_format={"type": "json_object"}
+            )
+            
+            result_text = response.choices[0].message.content
+            result = json.loads(result_text)
+            
+            # 컨텍스트와 병합
+            if context and context.get("pending_data"):
+                result = self._merge_with_context(result, context)
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            return {
+                "success": False,
+                "error": f"JSON 파싱 오류: {str(e)}",
+                "data": None,
+                "missing": ["all"],
+                "question": "죄송합니다. 메시지를 이해하지 못했어요. 다시 말씀해주세요."
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "data": None,
+                "missing": ["all"],
+                "question": "오류가 발생했습니다. 다시 시도해주세요."
+            }
+    
+    def _merge_with_context(
+        self,
+        new_result: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """이전 컨텍스트와 새 결과 병합"""
+        pending_data = context.get("pending_data", {})
+        new_data = new_result.get("data", {})
+        
+        # 새로운 데이터로 누락된 필드 채우기
+        merged_data = pending_data.copy()
+        for key, value in new_data.items():
+            if value is not None:
+                merged_data[key] = value
+        
+        # 아직 누락된 필드 확인
+        required_fields = ["vendor", "work_type", "unit_price"]
+        missing = []
+        for field in required_fields:
+            if merged_data.get(field) is None:
+                missing.append(field)
+        
+        # qty가 없고 작업 타입이 복수 작업이면 missing에 추가
+        if merged_data.get("qty") is None:
+            work_type = merged_data.get("work_type", "")
+            multi_qty_works = ["바코드", "양품화", "라벨", "스티커", "검수"]
+            if any(w in work_type for w in multi_qty_works):
+                missing.append("qty")
+            else:
+                merged_data["qty"] = 1  # 기본값
+        
+        # 결과 생성
+        if missing:
+            questions = {
+                "vendor": "어느 업체 작업인가요?",
+                "work_type": "어떤 작업인가요?",
+                "unit_price": "단가가 얼마인가요?",
+                "qty": "몇 개 작업했나요?"
+            }
+            question_parts = [questions.get(m, "") for m in missing if m in questions]
+            question = " ".join(question_parts)
+            
+            return {
+                "success": False,
+                "data": merged_data,
+                "missing": missing,
+                "question": question
+            }
+        
+        return {
+            "success": True,
+            "data": merged_data,
+            "missing": [],
+            "question": None
+        }
+    
+    async def generate_response(
+        self,
+        result: Dict[str, Any],
+        action: str = "confirm"
+    ) -> str:
+        """
+        파싱 결과를 사용자 응답 메시지로 변환
+        
+        Args:
+            result: 파싱 결과
+            action: "confirm" (저장 완료), "question" (추가 질문), "error" (오류)
+        """
+        if action == "question" or not result.get("success"):
+            return f"🤔 {result.get('question', '다시 말씀해주세요.')}"
+        
+        data = result.get("data", {})
+        vendor = data.get("vendor", "")
+        work_type = data.get("work_type", "")
+        qty = data.get("qty", 1)
+        unit_price = data.get("unit_price", 0)
+        total = qty * unit_price
+        
+        # 금액 포맷팅
+        def format_price(price: int) -> str:
+            return f"{price:,}원"
+        
+        response = f"✅ 저장완료!\n"
+        response += f"• 업체: {vendor}\n"
+        response += f"• 작업: {work_type}\n"
+        
+        if qty > 1:
+            response += f"• 수량: {qty}개 × {format_price(unit_price)}\n"
+        else:
+            response += f"• 단가: {format_price(unit_price)}\n"
+        
+        response += f"• 합계: {format_price(total)}"
+        
+        if data.get("remark"):
+            response += f"\n• 비고: {data['remark']}"
+        
+        return response
+
+
+# 싱글톤 인스턴스
+_parser: Optional[AIParser] = None
+
+
+def get_ai_parser() -> AIParser:
+    """AI 파서 싱글톤 반환"""
+    global _parser
+    if _parser is None:
+        _parser = AIParser()
+    return _parser

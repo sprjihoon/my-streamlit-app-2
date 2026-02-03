@@ -54,6 +54,27 @@ class Settings(BaseSettings):
     # ─────────────────────────────────────
     SECRET_KEY: str = "change-this-in-production"
     
+    # ─────────────────────────────────────
+    # 프론트엔드 설정
+    # ─────────────────────────────────────
+    NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
+    
+    # ─────────────────────────────────────
+    # 네이버 웍스 Bot 설정
+    # ─────────────────────────────────────
+    NAVER_WORKS_DOMAIN_ID: str = ""
+    NAVER_WORKS_BOT_ID: str = ""
+    NAVER_WORKS_BOT_SECRET: str = ""
+    NAVER_WORKS_CLIENT_ID: str = ""
+    NAVER_WORKS_CLIENT_SECRET: str = ""
+    NAVER_WORKS_SERVICE_ACCOUNT: str = ""
+    NAVER_WORKS_PRIVATE_KEY_PATH: str = "private_key.key"
+    
+    # ─────────────────────────────────────
+    # OpenAI API 설정
+    # ─────────────────────────────────────
+    OPENAI_API_KEY: str = ""
+    
     @property
     def cors_origins_list(self) -> List[str]:
         """CORS Origins를 리스트로 반환."""

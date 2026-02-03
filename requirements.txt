@@ -5,3 +5,11 @@ libsql-client
 fastapi
 uvicorn[standard]
 python-multipart
+
+# 네이버 웍스 봇 연동
+httpx
+PyJWT
+cryptography
+openai
+python-dotenv
+pydantic-settings

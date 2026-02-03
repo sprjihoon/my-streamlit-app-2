@@ -18,6 +18,8 @@ from backend.app.api import health_router, calculate_router, upload_router, vend
 from backend.app.api.settings import router as settings_router
 from backend.app.api.vendor_charges import router as vendor_charges_router
 from backend.app.api.storage import router as storage_router
+from backend.app.api.naver_works_webhook import router as naver_works_router
+from backend.app.api.work_log import router as work_log_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -52,6 +54,8 @@ app.include_router(logs_router)
 app.include_router(settings_router)
 app.include_router(vendor_charges_router)
 app.include_router(storage_router)
+app.include_router(naver_works_router)
+app.include_router(work_log_router)
 
 
 # 루트 엔드포인트
