@@ -33,27 +33,35 @@ class NaverWorksClient:
         self.client_secret = os.getenv("NAVER_WORKS_CLIENT_SECRET")
         self.service_account = os.getenv("NAVER_WORKS_SERVICE_ACCOUNT")
         
-        # Private Key 로드
-        private_key_path = os.getenv("NAVER_WORKS_PRIVATE_KEY_PATH", "private_key.key")
-        self.private_key = self._load_private_key(private_key_path)
+        # Private Key 로드 (환경변수 우선, 없으면 파일에서)
+        self.private_key = self._load_private_key()
         
         # 액세스 토큰 캐시
         self._access_token: Optional[str] = None
         self._token_expires_at: float = 0
     
-    def _load_private_key(self, path: str) -> str:
-        """Private Key 파일 로드"""
+    def _load_private_key(self) -> str:
+        """Private Key 로드 (환경변수 우선, 파일 fallback)"""
+        # 1. 환경변수에서 직접 읽기 (Railway/Vercel 배포용)
+        private_key_env = os.getenv("NAVER_WORKS_PRIVATE_KEY")
+        if private_key_env:
+            # 환경변수에서 \n을 실제 줄바꿈으로 변환
+            return private_key_env.replace("\\n", "\n")
+        
+        # 2. 파일에서 읽기 (로컬 개발용)
+        private_key_path = os.getenv("NAVER_WORKS_PRIVATE_KEY_PATH", "private_key.key")
+        
         # 절대 경로가 아니면 프로젝트 루트에서 찾기
-        if not os.path.isabs(path):
+        if not os.path.isabs(private_key_path):
             # 프로젝트 루트 경로 계산
             current_dir = Path(__file__).parent.parent.parent.parent
-            path = current_dir / path
+            private_key_path = current_dir / private_key_path
         
         try:
-            with open(path, 'r') as f:
+            with open(private_key_path, 'r') as f:
                 return f.read()
         except FileNotFoundError:
-            print(f"Warning: Private key file not found at {path}")
+            print(f"Warning: Private key not found. Set NAVER_WORKS_PRIVATE_KEY env var or provide file at {private_key_path}")
             return ""
     
     def _generate_jwt(self) -> str:
