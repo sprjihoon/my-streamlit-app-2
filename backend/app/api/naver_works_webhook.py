@@ -208,6 +208,15 @@ async def process_message(
         add_debug_log("nw_client_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
         return
     
+    # 사용자 이름 조회 (user_name이 없는 경우)
+    if not user_name:
+        try:
+            user_name = await nw_client.get_user_name(user_id)
+            add_debug_log("user_name_fetched", {"user_id": user_id, "user_name": user_name})
+        except Exception as e:
+            add_debug_log("user_name_fetch_error", error=str(e))
+            user_name = None
+    
     try:
         ai_parser = get_ai_parser()
         add_debug_log("ai_parser_loaded", {"model": ai_parser.model})

@@ -244,6 +244,55 @@ class NaverWorksClient:
         }
         return await self.send_message(channel_id, content, channel_type)
     
+    async def get_user_info(self, user_id: str) -> Dict[str, Any]:
+        """
+        사용자 정보 조회
+        
+        Args:
+            user_id: 네이버 웍스 사용자 ID
+        
+        Returns:
+            사용자 정보 (이름 등)
+        """
+        token = await self._get_access_token()
+        
+        url = f"{self.API_BASE}/users/{user_id}"
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Get user info failed: {response.status_code} - {response.text}")
+                return {}
+    
+    async def get_user_name(self, user_id: str) -> str:
+        """
+        사용자 이름만 조회
+        
+        Args:
+            user_id: 네이버 웍스 사용자 ID
+        
+        Returns:
+            사용자 이름 (실패시 빈 문자열)
+        """
+        try:
+            user_info = await self.get_user_info(user_id)
+            # 한국어 이름 우선, 없으면 영어 이름
+            user_name = user_info.get("userName", {})
+            name = user_name.get("lastName", "") + user_name.get("firstName", "")
+            if not name:
+                name = user_name.get("phoneticLastName", "") + user_name.get("phoneticFirstName", "")
+            return name
+        except Exception as e:
+            print(f"Error getting user name: {e}")
+            return ""
+    
     def verify_signature(self, body: bytes, signature: str) -> bool:
         """
         Webhook 요청의 서명 검증
