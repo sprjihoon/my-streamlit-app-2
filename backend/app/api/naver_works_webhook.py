@@ -837,122 +837,6 @@ async def process_message(
     # 1단계: 진행 중인 대화 상태 확인 (우선 처리)
     # ═══════════════════════════════════════════════════════════════════
     
-    # 작업일지 조회 응답 대기 중
-    if existing_state and existing_state.get("last_question") == "📋 작업일지 조회":
-        pending = existing_state.get("pending_data", {})
-        start_date = pending.get("start_date")
-        end_date = pending.get("end_date")
-        period_name = pending.get("period_name")
-        
-        # 먼저 간단한 패턴 매칭 시도 (빠른 응답)
-        text_lower = text.lower().strip()
-        selected_option = None
-        
-        # 1번 선택 패턴
-        if text_lower in ["1", "1번", "텍스트", "텍스트로", "텍스트로 보기", "1번 텍스트", "1번 텍스트로", "1 텍스트로보기", "1번으로"]:
-            selected_option = "1"
-        # 2번 선택 패턴
-        elif text_lower in ["2", "2번", "파일", "파일로", "다운로드", "엑셀", "엑셀로", "2번 파일", "2번으로"]:
-            selected_option = "2"
-        elif "1" in text_lower and ("텍스트" in text_lower or "보기" in text_lower):
-            selected_option = "1"
-        elif "2" in text_lower and ("파일" in text_lower or "다운" in text_lower or "엑셀" in text_lower):
-            selected_option = "2"
-        
-        # 패턴 매칭 실패시 AI 사용
-        if not selected_option:
-            intent_context = {
-                "last_question": "1번 텍스트로 보기, 2번 파일로 다운로드 중 선택",
-                "options": ["1: 텍스트로 보기", "2: 파일로 다운로드"],
-                "pending_data": pending
-            }
-            intent_result = await ai_parser.parse_intent(text, intent_context)
-            add_debug_log("summary_intent", data=intent_result)
-            
-            if intent_result.get("intent") == "select_option":
-                selected_option = intent_result.get("value")
-        
-        add_debug_log("summary_selected_option", data={"option": selected_option, "text": text})
-        
-        if selected_option == "1":
-            # 텍스트로 출력
-            try:
-                logs = get_work_logs_by_period(start_date, end_date)
-                by_vendor = {}
-                total_amount = 0
-                for log in logs:
-                    vendor = log.get("업체명", "기타")
-                    if vendor not in by_vendor:
-                        by_vendor[vendor] = []
-                    by_vendor[vendor].append(log)
-                    total_amount += log.get("합계", 0) or 0
-                
-                # 항상 요약 형태로 (네이버웍스 메시지 길이 제한: 약 2000자)
-                msg = f"📋 {period_name} 작업일지\n━━━━━━━━━━━━━━━━━━━━\n\n"
-                msg += f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
-                
-                # 업체별 요약만 (상위 8개)
-                msg += "🏢 업체별 현황:\n"
-                top_vendors = sorted(by_vendor.items(), key=lambda x: -sum(l.get("합계", 0) or 0 for l in x[1]))[:8]
-                for vendor, vlogs in top_vendors:
-                    vendor_total = sum(l.get("합계", 0) or 0 for l in vlogs)
-                    msg += f"  • {vendor}: {len(vlogs)}건, {vendor_total:,}원\n"
-                
-                if len(by_vendor) > 8:
-                    msg += f"  ... 외 {len(by_vendor) - 8}개 업체\n"
-                
-                msg += "\n💡 상세 내역은 '2'를 입력해 파일로 받으세요."
-                
-                # 혹시 그래도 길면 더 줄임
-                if len(msg) > 1500:
-                    msg = f"📋 {period_name}\n📊 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
-                    msg += f"🏢 {len(by_vendor)}개 업체\n"
-                    msg += "💡 상세: '2' 입력 → 파일 다운"
-                
-                conv_manager.clear_state(user_id)
-                await nw_client.send_text_message(channel_id, msg, channel_type)
-                return
-            except Exception as e:
-                add_debug_log("summary_text_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
-                conv_manager.clear_state(user_id)
-                await nw_client.send_text_message(
-                    channel_id,
-                    f"❌ 텍스트 출력 오류: {str(e)}\n\n파일로 다운받으시려면 '2'를 입력하세요.",
-                    channel_type
-                )
-                return
-            
-        elif selected_option == "2":
-            # 파일 다운로드 링크
-            try:
-                import os
-                base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
-                download_url = f"{base_url}/work-log/export?start_date={start_date}&end_date={end_date}&format=excel"
-                
-                conv_manager.clear_state(user_id)
-                await nw_client.send_text_message(
-                    channel_id,
-                    f"📥 작업일지 다운로드\n\n📅 기간: {period_name}\n📊 건수: {pending.get('log_count', 0)}건\n💰 금액: {pending.get('total_amount', 0):,}원\n\n아래 링크를 클릭하세요:\n📎 {download_url}",
-                    channel_type
-                )
-                return
-            except Exception as e:
-                add_debug_log("summary_file_error", error=str(e))
-                await nw_client.send_text_message(channel_id, f"❌ 오류: {str(e)}", channel_type)
-                return
-        
-        else:
-            # 선택을 인식하지 못함 - 다시 안내
-            try:
-                await nw_client.send_text_message(
-                    channel_id,
-                    "🤔 선택을 인식하지 못했어요.\n\n1️⃣ 텍스트로 보기 → '1' 입력\n2️⃣ 파일로 다운로드 → '2' 입력",
-                    channel_type
-                )
-            except Exception as e:
-                add_debug_log("summary_else_error", error=str(e))
-            return
-    
     # 취소 확인 대기 중
     if existing_state and existing_state.get("last_question") == "🗑️ 취소 확인":
         intent_context = {
@@ -1228,35 +1112,36 @@ async def process_message(
                         channel_type
                     )
                 else:
-                    # 선택 옵션 제공
+                    # 바로 다운로드 링크 제공
                     total_amount = sum(l.get("합계", 0) or 0 for l in logs)
                     
-                    conv_manager.set_state(
-                        user_id=user_id,
-                        channel_id=channel_id,
-                        pending_data={
-                            "summary_mode": True,
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "period_name": period_name,
-                            "log_count": len(logs),
-                            "total_amount": total_amount,
-                        },
-                        missing=[],
-                        last_question="📋 작업일지 조회"
-                    )
+                    import os
+                    base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
+                    download_url = f"{base_url}/work-log/export?start_date={start_date}&end_date={end_date}&format=excel"
                     
-                    await nw_client.send_text_message(
-                        channel_id,
-                        f"📋 {period_name} 작업일지\n"
-                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                        f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
-                        f"어떻게 보여드릴까요?\n"
-                        f"1️⃣ 텍스트로 보기\n"
-                        f"2️⃣ 파일로 다운로드 (링크)\n\n"
-                        f"원하시는 방식을 말씀해주세요.",
-                        channel_type
-                    )
+                    # 업체별 간단 요약
+                    by_vendor = {}
+                    for log in logs:
+                        vendor = log.get("업체명", "기타")
+                        if vendor not in by_vendor:
+                            by_vendor[vendor] = {"count": 0, "amount": 0}
+                        by_vendor[vendor]["count"] += 1
+                        by_vendor[vendor]["amount"] += log.get("합계", 0) or 0
+                    
+                    msg = f"📋 {period_name} 작업일지\n━━━━━━━━━━━━━━━━━━━━\n\n"
+                    msg += f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n"
+                    msg += f"🏢 {len(by_vendor)}개 업체\n\n"
+                    
+                    # 상위 5개 업체만 표시
+                    top_vendors = sorted(by_vendor.items(), key=lambda x: -x[1]["amount"])[:5]
+                    for vendor, data in top_vendors:
+                        msg += f"  • {vendor}: {data['count']}건, {data['amount']:,}원\n"
+                    if len(by_vendor) > 5:
+                        msg += f"  ... 외 {len(by_vendor) - 5}개 업체\n"
+                    
+                    msg += f"\n📥 다운로드:\n{download_url}"
+                    
+                    await nw_client.send_text_message(channel_id, msg, channel_type)
                 return
             except Exception as e:
                 add_debug_log("summary_error", error=str(e))
