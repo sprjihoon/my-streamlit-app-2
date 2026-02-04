@@ -45,8 +45,39 @@ class NaverWorksClient:
         # 1. 환경변수에서 직접 읽기 (Railway/Vercel 배포용)
         private_key_env = os.getenv("NAVER_WORKS_PRIVATE_KEY")
         if private_key_env:
-            # 환경변수에서 \n을 실제 줄바꿈으로 변환
-            return private_key_env.replace("\\n", "\n")
+            # 다양한 형식의 줄바꿈 처리
+            key = private_key_env
+            
+            # 이스케이프된 줄바꿈 처리 (\n 문자열 -> 실제 줄바꿈)
+            key = key.replace("\\n", "\n")
+            
+            # \\n이 아닌 리터럴 \n 처리 (일부 환경에서)
+            if "\\n" in key:
+                key = key.replace("\\n", "\n")
+            
+            # 앞뒤 공백 제거
+            key = key.strip()
+            
+            # 헤더/푸터 확인 및 수정
+            if not key.startswith("-----BEGIN"):
+                key = "-----BEGIN PRIVATE KEY-----\n" + key
+            if not key.endswith("-----"):
+                key = key + "\n-----END PRIVATE KEY-----"
+            
+            # 줄바꿈이 없는 경우 64자마다 줄바꿈 추가
+            lines = key.split("\n")
+            if len(lines) <= 3:  # 헤더, 내용, 푸터만 있는 경우
+                # 헤더와 푸터 분리
+                header = "-----BEGIN PRIVATE KEY-----"
+                footer = "-----END PRIVATE KEY-----"
+                content = key.replace(header, "").replace(footer, "").replace("\n", "").strip()
+                
+                # 64자마다 줄바꿈
+                formatted_content = "\n".join([content[i:i+64] for i in range(0, len(content), 64)])
+                key = f"{header}\n{formatted_content}\n{footer}"
+            
+            print(f"[NaverWorks] Private key loaded from env, length: {len(key)}")
+            return key
         
         # 2. 파일에서 읽기 (로컬 개발용)
         private_key_path = os.getenv("NAVER_WORKS_PRIVATE_KEY_PATH", "private_key.key")
@@ -59,7 +90,9 @@ class NaverWorksClient:
         
         try:
             with open(private_key_path, 'r') as f:
-                return f.read()
+                key = f.read()
+                print(f"[NaverWorks] Private key loaded from file, length: {len(key)}")
+                return key
         except FileNotFoundError:
             print(f"Warning: Private key not found. Set NAVER_WORKS_PRIVATE_KEY env var or provide file at {private_key_path}")
             return ""

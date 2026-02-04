@@ -5,6 +5,7 @@
 하이브리드 방식: 자동 저장 + 취소 가능 + 중복 체크
 """
 
+import os
 import json
 import asyncio
 import logging
@@ -227,6 +228,57 @@ async def process_message(
     
     text_lower = text.strip().lower()
     
+    # 인사/도움말 처리
+    greetings = ["안녕", "하이", "hi", "hello", "헬로", "ㅎㅇ"]
+    help_commands = ["도움말", "도움", "help", "?", "사용법"]
+    test_commands = ["테스트", "test", "핑", "ping"]
+    
+    if any(g in text_lower for g in greetings):
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                "👋 안녕하세요! 작업일지봇입니다.\n\n"
+                "📝 작업 내용을 입력하면 자동으로 저장해드려요.\n"
+                "예: 'A업체 1톤하차 50000원'\n\n"
+                "'도움말'을 입력하면 사용법을 확인할 수 있어요.",
+                channel_type
+            )
+        except Exception as e:
+            add_debug_log("greeting_send_error", error=str(e))
+        return
+    
+    if any(h in text_lower for h in help_commands):
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                "📚 작업일지봇 사용법\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "✅ 작업 입력 예시:\n"
+                "• A업체 1톤하차 50000원\n"
+                "• B업체 양품화 3개 10000원\n"
+                "• C업체 바코드부착 100개 500원\n\n"
+                "📌 명령어:\n"
+                "• 취소 - 방금 저장한 작업 삭제 (30초 내)\n"
+                "• 도움말 - 사용법 보기\n\n"
+                "💡 업체명, 작업종류, 금액을 말씀해주시면\n"
+                "자동으로 인식해서 저장합니다!",
+                channel_type
+            )
+        except Exception as e:
+            add_debug_log("help_send_error", error=str(e))
+        return
+    
+    if any(t in text_lower for t in test_commands):
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                f"🏓 퐁! 봇이 정상 작동 중입니다.\n시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                channel_type
+            )
+        except Exception as e:
+            add_debug_log("test_send_error", error=str(e))
+        return
+    
     # 취소 명령 처리 (최근 저장 삭제)
     if text_lower in ["취소", "cancel", "삭제"]:
         # 최근 저장된 레코드 확인
@@ -366,7 +418,27 @@ async def process_message(
         # 파싱 실패 - 추가 정보 요청
         data = parse_result.get("data", {})
         missing = parse_result.get("missing", [])
-        question = parse_result.get("question", "다시 말씀해주세요.")
+        question = parse_result.get("question", "")
+        
+        # 아무것도 인식 못한 경우 기본 응답
+        if not data or (not data.get("vendor") and not data.get("work_type") and not data.get("unit_price")):
+            add_debug_log("no_data_parsed", {"original_text": text})
+            try:
+                await nw_client.send_text_message(
+                    channel_id,
+                    f"🤖 메시지를 받았어요: \"{text[:50]}{'...' if len(text) > 50 else ''}\"\n\n"
+                    "작업일지를 저장하시려면 아래 형식으로 입력해주세요:\n"
+                    "예: 'A업체 1톤하차 50000원'\n\n"
+                    "'도움말'을 입력하면 자세한 사용법을 확인할 수 있어요.",
+                    channel_type
+                )
+            except Exception as e:
+                add_debug_log("default_response_error", error=str(e))
+            return
+        
+        # 부분 인식 - 추가 정보 요청
+        if not question:
+            question = "다시 말씀해주세요."
         
         # 대화 상태 저장
         conv_manager.set_state(
@@ -565,14 +637,26 @@ async def test_bot():
     try:
         nw_client = get_naver_works_client()
         
+        # Private key 분석
+        pk = nw_client.private_key
+        pk_info = {
+            "loaded": bool(pk),
+            "length": len(pk) if pk else 0,
+            "has_header": pk.startswith("-----BEGIN") if pk else False,
+            "has_footer": pk.endswith("-----") if pk else False,
+            "line_count": len(pk.split("\n")) if pk else 0,
+            "first_20_chars": pk[:20] if pk else None,
+            "last_20_chars": pk[-20:] if pk else None,
+        }
+        
         return {
             "status": "ok",
             "domain_id": nw_client.domain_id,
             "bot_id": nw_client.bot_id,
             "client_id": nw_client.client_id,
             "service_account": nw_client.service_account,
-            "private_key_loaded": bool(nw_client.private_key),
-            "private_key_length": len(nw_client.private_key) if nw_client.private_key else 0,
+            "private_key_info": pk_info,
+            "openai_key_set": bool(os.getenv("OPENAI_API_KEY")),
         }
     except Exception as e:
         return {
