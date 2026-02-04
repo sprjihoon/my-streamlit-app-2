@@ -723,7 +723,7 @@ async def process_message(
             )
         return
     
-    # 작업일지 조회 응답 처리 (1: 텍스트, 2: 파일)
+    # 작업일지 조회 응답 처리 (1: 텍스트, 2: 파일) - AI 의도 파악 사용
     existing_state = conv_manager.get_state(user_id)
     if existing_state and existing_state.get("last_question") == "📋 작업일지 조회":
         pending = existing_state.get("pending_data", {})
@@ -731,20 +731,20 @@ async def process_message(
         end_date = pending.get("end_date")
         period_name = pending.get("period_name")
         
-        # 유연한 입력 인식 (1, 1번, 1번 텍스트로 보기, 텍스트 등)
-        is_text_option = (
-            text_lower in ["1", "텍스트", "텍스트로"] or
-            text_lower.startswith("1번") or
-            text_lower.startswith("1 ") or
-            "텍스트로 보기" in text_lower
-        )
-        is_file_option = (
-            text_lower in ["2", "파일", "다운로드", "파일로"] or
-            text_lower.startswith("2번") or
-            text_lower.startswith("2 ") or
-            "파일로 다운로드" in text_lower or
-            "파일로 보기" in text_lower
-        )
+        # AI로 의도 파악
+        intent_context = {
+            "last_question": "1번 텍스트로 보기, 2번 파일로 다운로드 중 선택",
+            "options": ["1: 텍스트로 보기", "2: 파일로 다운로드"],
+            "pending_data": pending
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        add_debug_log("intent_parsed", data=intent_result)
+        
+        intent = intent_result.get("intent")
+        value = intent_result.get("value")
+        
+        is_text_option = (intent == "select_option" and value == "1")
+        is_file_option = (intent == "select_option" and value == "2")
         
         if is_text_option:
             # 텍스트로 출력
@@ -962,13 +962,22 @@ async def process_message(
             )
         return
     
-    # 확인 응답 처리 (취소/중복/경고)
+    # 확인 응답 처리 (취소/중복/경고) - AI 의도 파악 사용
     existing_state = conv_manager.get_state(user_id)
     last_question = existing_state.get("last_question", "") if existing_state else ""
     
     # 취소 확인 대기 중일 때
     if last_question.startswith("🗑️ 취소"):
-        if text_lower in ["예", "네", "yes", "y", "ㅇㅇ", "응", "ㅇ"]:
+        # AI로 의도 파악
+        intent_context = {
+            "last_question": "작업일지를 삭제할까요? (예/아니오)",
+            "options": ["예: 삭제", "아니오: 유지"],
+            "pending_data": existing_state.get("pending_data", {})
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        add_debug_log("cancel_intent", data=intent_result)
+        
+        if intent_result.get("intent") == "confirm_yes":
             # 삭제 실행
             pending_data = existing_state.get("pending_data", {})
             log_id = pending_data.get("log_id")
@@ -986,7 +995,7 @@ async def process_message(
                     channel_type
                 )
             return
-        elif text_lower in ["아니", "아니요", "아니오", "no", "n", "ㄴㄴ", "ㄴ", "아뇨"]:
+        elif intent_result.get("intent") == "confirm_no":
             conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,
@@ -997,7 +1006,16 @@ async def process_message(
     
     # 중복 또는 경고 확인 대기 중일 때
     if last_question.startswith("⚠️"):
-        if text_lower in ["예", "네", "yes", "y", "ㅇㅇ", "응", "ㅇ"]:
+        # AI로 의도 파악
+        intent_context = {
+            "last_question": "경고가 있습니다. 그래도 저장할까요? (예/아니오)",
+            "options": ["예: 저장", "아니오: 취소"],
+            "pending_data": existing_state.get("pending_data", {})
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        add_debug_log("warning_intent", data=intent_result)
+        
+        if intent_result.get("intent") == "confirm_yes":
             # 확인 후 저장
             data = existing_state.get("pending_data", {})
             try:
@@ -1026,7 +1044,7 @@ async def process_message(
                     channel_type
                 )
             return
-        elif text_lower in ["아니", "아니요", "아니오", "no", "n", "ㄴㄴ", "ㄴ", "아뇨"]:
+        elif intent_result.get("intent") == "confirm_no":
             conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,

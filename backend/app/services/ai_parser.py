@@ -378,6 +378,86 @@ class AIParser:
         
         return response
     
+    async def parse_intent(
+        self,
+        message: str,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        사용자 메시지의 의도를 AI로 파악
+        
+        Args:
+            message: 사용자 메시지
+            context: 대화 컨텍스트 (last_question, options 등)
+        
+        Returns:
+            {"intent": "의도", "value": "값", "confidence": 0.0-1.0}
+        """
+        last_question = context.get("last_question", "")
+        options = context.get("options", [])
+        pending_data = context.get("pending_data", {})
+        
+        intent_prompt = f"""사용자의 의도를 파악하세요.
+
+## 현재 상황
+- 마지막 질문: {last_question}
+- 선택 옵션: {options}
+- 대화 컨텍스트: {json.dumps(pending_data, ensure_ascii=False)}
+
+## 사용자 메시지
+"{message}"
+
+## 파악할 의도 종류
+1. "select_option" - 옵션 선택 (예: "1번", "텍스트로", "파일로 다운받을래")
+2. "confirm_yes" - 긍정 응답 (예: "네", "응", "맞아", "그래", "ㅇㅇ", "확인")
+3. "confirm_no" - 부정 응답 (예: "아니", "아니오", "취소", "ㄴㄴ", "안해")
+4. "cancel" - 취소 요청 (예: "취소해줘", "방금거 취소", "삭제")
+5. "edit" - 수정 요청 (예: "수정해줘", "고쳐줘", "변경")
+6. "work_log" - 작업일지 형식 (업체명+작업+금액 포함)
+7. "chat" - 일반 대화
+8. "unknown" - 파악 불가
+
+## 응답 형식 (JSON)
+{{
+  "intent": "의도종류",
+  "value": "선택한 값 (select_option일 때: 1 또는 2 등)",
+  "confidence": 0.0~1.0,
+  "reason": "판단 이유 (짧게)"
+}}
+
+## 예시
+- "1번으로 해줘" → {{"intent": "select_option", "value": "1", "confidence": 0.95, "reason": "1번 선택"}}
+- "텍스트로 볼래요" → {{"intent": "select_option", "value": "1", "confidence": 0.9, "reason": "텍스트=1번"}}
+- "엑셀로 받을게" → {{"intent": "select_option", "value": "2", "confidence": 0.9, "reason": "파일=2번"}}
+- "응 저장해" → {{"intent": "confirm_yes", "value": null, "confidence": 0.95, "reason": "긍정"}}
+- "아니 됐어" → {{"intent": "confirm_no", "value": null, "confidence": 0.9, "reason": "부정"}}
+- "틸리언 하차 3만원" → {{"intent": "work_log", "value": null, "confidence": 0.95, "reason": "작업일지 형식"}}
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "사용자 의도를 정확하게 파악하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": intent_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=150
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            return result
+            
+        except Exception as e:
+            return {
+                "intent": "unknown",
+                "value": None,
+                "confidence": 0.0,
+                "reason": f"Error: {str(e)}"
+            }
+
     async def chat_response(
         self,
         message: str,
