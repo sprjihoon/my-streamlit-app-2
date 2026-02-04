@@ -175,6 +175,97 @@ def delete_work_log(log_id: int) -> bool:
         return True
 
 
+def get_user_recent_log(user_id: str) -> Optional[Dict[str, Any]]:
+    """사용자의 가장 최근 작업일지 조회"""
+    with get_connection() as con:
+        row = con.execute(
+            """SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
+               FROM work_log 
+               WHERE works_user_id = ?
+               ORDER BY id DESC LIMIT 1""",
+            (user_id,)
+        ).fetchone()
+        
+        if row:
+            return {
+                "id": row[0],
+                "날짜": row[1],
+                "업체명": row[2],
+                "분류": row[3],
+                "수량": row[4],
+                "단가": row[5],
+                "합계": row[6],
+                "저장시간": str(row[7]) if row[7] else None,
+                "작성자": row[8],
+            }
+        return None
+
+
+def get_today_work_logs(user_id: str = None) -> List[Dict[str, Any]]:
+    """오늘 작업일지 목록 조회"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    with get_connection() as con:
+        if user_id:
+            rows = con.execute(
+                """SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
+                   FROM work_log 
+                   WHERE 날짜 = ? AND works_user_id = ?
+                   ORDER BY id DESC""",
+                (today, user_id)
+            ).fetchall()
+        else:
+            rows = con.execute(
+                """SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
+                   FROM work_log 
+                   WHERE 날짜 = ?
+                   ORDER BY id DESC""",
+                (today,)
+            ).fetchall()
+        
+        result = []
+        for row in rows:
+            result.append({
+                "id": row[0],
+                "날짜": row[1],
+                "업체명": row[2],
+                "분류": row[3],
+                "수량": row[4],
+                "단가": row[5],
+                "합계": row[6],
+                "저장시간": str(row[7]) if row[7] else None,
+                "작성자": row[8],
+            })
+        return result
+
+
+def get_work_logs_by_period(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """기간별 작업일지 목록 조회"""
+    with get_connection() as con:
+        rows = con.execute(
+            """SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
+               FROM work_log 
+               WHERE 날짜 >= ? AND 날짜 <= ?
+               ORDER BY 날짜 DESC, id DESC""",
+            (start_date, end_date)
+        ).fetchall()
+        
+        result = []
+        for row in rows:
+            result.append({
+                "id": row[0],
+                "날짜": row[1],
+                "업체명": row[2],
+                "분류": row[3],
+                "수량": row[4],
+                "단가": row[5],
+                "합계": row[6],
+                "저장시간": str(row[7]) if row[7] else None,
+                "작성자": row[8],
+            })
+        return result
+
+
 def is_vendor_registered(vendor_name: str) -> bool:
     """업체명이 등록된 리스트에 있는지 확인"""
     if not vendor_name:
@@ -366,8 +457,10 @@ async def process_message(
                 time_greeting = "좋은 아침이에요! ☀️"
             elif 12 <= hour < 18:
                 time_greeting = "좋은 오후예요! 🌤️"
+            elif 18 <= hour < 22:
+                time_greeting = "수고하셨어요! 🌆"
             else:
-                time_greeting = "좋은 저녁이에요! 🌙"
+                time_greeting = "늦은 시간까지 수고하세요! 🌙"
             
             # 사용자 이름이 있으면 포함
             name_part = f"{user_name}님, " if user_name else ""
@@ -497,29 +590,47 @@ async def process_message(
                 pass
             return
     
-    # 취소 명령 처리 (자연어 인식)
+    # 취소 명령 처리 (자연어 인식) - 시간 제한 없음, 확인 후 삭제
     cancel_keywords = ["취소", "cancel", "삭제", "방금거", "직전", "되돌려", "되돌리", "undo"]
     if any(k in text_lower for k in cancel_keywords) and any(w in text_lower for w in ["취소", "삭제", "되돌", "cancel", "undo"]):
-        # 최근 저장된 레코드 확인
-        recent = _recent_saves.get(user_id)
-        if recent and datetime.now().timestamp() < recent.get("expires_at", 0):
-            log_id = recent.get("log_id")
-            log_info = recent.get("log_info", {})
-            delete_work_log(log_id)
-            del _recent_saves[user_id]
+        # DB에서 사용자의 최근 작업일지 조회
+        recent_log = get_user_recent_log(user_id)
+        
+        if recent_log:
+            # 취소 확인 상태 저장
+            conv_manager.set_state(
+                user_id=user_id,
+                channel_id=channel_id,
+                pending_data={"cancel_mode": True, "log_id": recent_log["id"], "log_info": recent_log},
+                missing=[],
+                last_question="🗑️ 취소 확인"
+            )
+            
+            저장시간 = recent_log.get("저장시간", "")
+            if 저장시간:
+                try:
+                    dt = datetime.fromisoformat(저장시간)
+                    저장시간 = dt.strftime("%H:%M")
+                except:
+                    pass
+            
             await nw_client.send_text_message(
                 channel_id,
-                f"🚫 방금 저장한 작업일지가 삭제되었습니다.\n"
-                f"• 업체: {log_info.get('vendor', '-')}\n"
-                f"• 작업: {log_info.get('work_type', '-')}\n"
-                f"• 금액: {log_info.get('total', 0):,}원",
+                f"🗑️ 이 작업을 삭제할까요?\n\n"
+                f"• 날짜: {recent_log.get('날짜', '-')}\n"
+                f"• 업체: {recent_log.get('업체명', '-')}\n"
+                f"• 작업: {recent_log.get('분류', '-')}\n"
+                f"• 수량: {recent_log.get('수량', 1)}개\n"
+                f"• 단가: {recent_log.get('단가', 0):,}원\n"
+                f"• 합계: {recent_log.get('합계', 0):,}원\n"
+                f"• 저장시간: {저장시간}\n\n"
+                f"삭제하시려면 '예', 취소하시려면 '아니오'를 입력하세요.",
                 channel_type
             )
         else:
-            conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,
-                "🚫 취소할 작업이 없습니다. (저장 후 30초 내에만 취소 가능)",
+                "🚫 삭제할 작업일지가 없습니다.",
                 channel_type
             )
         return
@@ -559,9 +670,38 @@ async def process_message(
             )
         return
     
-    # 중복/경고 확인 응답 처리
+    # 확인 응답 처리 (취소/중복/경고)
     existing_state = conv_manager.get_state(user_id)
     last_question = existing_state.get("last_question", "") if existing_state else ""
+    
+    # 취소 확인 대기 중일 때
+    if last_question.startswith("🗑️ 취소"):
+        if text_lower in ["예", "네", "yes", "y", "ㅇㅇ", "응", "ㅇ"]:
+            # 삭제 실행
+            pending_data = existing_state.get("pending_data", {})
+            log_id = pending_data.get("log_id")
+            log_info = pending_data.get("log_info", {})
+            
+            if log_id:
+                delete_work_log(log_id)
+                conv_manager.clear_state(user_id)
+                await nw_client.send_text_message(
+                    channel_id,
+                    f"🚫 작업일지가 삭제되었습니다.\n"
+                    f"• 업체: {log_info.get('업체명', '-')}\n"
+                    f"• 작업: {log_info.get('분류', '-')}\n"
+                    f"• 금액: {log_info.get('합계', 0):,}원",
+                    channel_type
+                )
+            return
+        elif text_lower in ["아니", "아니요", "아니오", "no", "n", "ㄴㄴ", "ㄴ", "아뇨"]:
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(
+                channel_id,
+                "✅ 취소가 취소되었습니다. 작업일지가 유지됩니다.",
+                channel_type
+            )
+            return
     
     # 중복 또는 경고 확인 대기 중일 때
     if last_question.startswith("⚠️"):
@@ -594,7 +734,7 @@ async def process_message(
                     channel_type
                 )
             return
-        elif text_lower in ["아니", "아니요", "no", "n", "ㄴㄴ", "ㄴ"]:
+        elif text_lower in ["아니", "아니요", "아니오", "no", "n", "ㄴㄴ", "ㄴ", "아뇨"]:
             conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,
