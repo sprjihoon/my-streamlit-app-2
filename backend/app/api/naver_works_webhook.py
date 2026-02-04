@@ -1146,24 +1146,21 @@ async def process_message(
         return
     
     # ═══════════════════════════════════════════════════════════════════
-    # 대화모드 체크 - 작업 관련 의도가 감지되면 작업모드 전환 안내
+    # 대화모드 체크 - 허용된 의도만 처리
     # ═══════════════════════════════════════════════════════════════════
     is_chat_mode = (current_mode == "chat")
-    work_intents = [
-        "work_log_entry", "work_log_query", "cancel", "edit", 
-        "search_query", "stats_query", "specific_edit", "specific_delete",
-        "multi_entry", "compare_periods", "undo", "add_memo", 
-        "bulk_edit", "copy_entry"
+    
+    # 대화모드에서 허용되는 의도 (이것만 처리, 나머지는 대화로)
+    chat_mode_allowed = [
+        "greeting", "help", "test", "chat_mode_start", "chat_mode_end",
+        "work_mode_start", "web_search", "dashboard", "chat"
     ]
     
-    if is_chat_mode and intent in work_intents:
-        await nw_client.send_text_message(
-            channel_id,
-            f"📋 현재 대화모드입니다.\n\n"
-            f"작업을 하시려면 먼저 '작업모드'를 입력해주세요!",
-            channel_type
-        )
-        return
+    if is_chat_mode:
+        # 대화모드에서 허용되지 않은 의도면 대화로 전환
+        if intent not in chat_mode_allowed:
+            add_debug_log("chat_mode_override", {"original_intent": intent, "override_to": "chat"})
+            intent = "chat"  # 강제로 chat으로 변경
     
     # ═══════════════════════════════════════════════════════════════════
     # 미완성 작업일지 상태에서 다른 의도 감지 시 상태 초기화
@@ -1792,10 +1789,24 @@ async def process_message(
         return
     
     # ═══════════════════════════════════════════════════════════════════
-    # 4단계: 작업일지 입력 또는 일반 대화 처리
+    # 일반 대화 (chat) 처리
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "chat":
+        add_debug_log("chat_intent_handler", {"text": text})
+        try:
+            chat_response = await ai_parser.generate_chat_response(text, user_name)
+            add_debug_log("chat_response", {"response": chat_response})
+            await nw_client.send_text_message(channel_id, chat_response, channel_type)
+        except Exception as e:
+            add_debug_log("chat_response_error", error=str(e))
+            await nw_client.send_text_message(channel_id, "죄송합니다, 응답 생성 중 오류가 발생했습니다.", channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 4단계: 작업일지 입력 또는 일반 대화 처리 (작업모드)
     # ═══════════════════════════════════════════════════════════════════
     
-    # 대화모드에서는 일반 대화만 처리
+    # 대화모드에서는 일반 대화만 처리 (여기까지 왔으면 이미 chat으로 처리됨)
     if is_chat_mode:
         # 대화모드에서는 GPT 대화로 처리
         add_debug_log("chat_mode_response", {"text": text})
