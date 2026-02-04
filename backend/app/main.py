@@ -73,9 +73,13 @@ async def root():
 # 앱 시작 이벤트
 @app.on_event("startup")
 async def startup_event():
-    """앱 시작 시 DB 테이블 확인."""
+    """앱 시작 시 DB 테이블 확인 및 스케줄러 시작."""
     from logic import ensure_tables
     ensure_tables()
+    
+    # 스케줄러 시작 (평일 오전 10시 인사)
+    from backend.app.services.scheduler import start_scheduler
+    start_scheduler()
 
 
 if __name__ == "__main__":

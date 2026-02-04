@@ -244,12 +244,24 @@ async def process_message(
     
     if any(g in text_lower for g in greetings):
         try:
+            # 시간대별 인사말
+            hour = datetime.now().hour
+            if 5 <= hour < 12:
+                time_greeting = "좋은 아침이에요! ☀️"
+            elif 12 <= hour < 18:
+                time_greeting = "좋은 오후예요! 🌤️"
+            else:
+                time_greeting = "좋은 저녁이에요! 🌙"
+            
+            # 사용자 이름이 있으면 포함
+            name_part = f"{user_name}님, " if user_name else ""
+            
             await nw_client.send_text_message(
                 channel_id,
-                "👋 안녕하세요! 작업일지봇입니다.\n\n"
-                "📝 작업 내용을 입력하면 자동으로 저장해드려요.\n"
-                "예: 'A업체 1톤하차 50000원'\n\n"
-                "'도움말'을 입력하면 사용법을 확인할 수 있어요.",
+                f"👋 {name_part}{time_greeting}\n"
+                f"작업일지봇이에요!\n\n"
+                f"📝 작업 내용을 입력하면 자동 저장해드려요.\n"
+                f"💬 '대화모드' 입력하면 자유롭게 대화할 수 있어요!",
                 channel_type
             )
         except Exception as e:
@@ -865,6 +877,39 @@ async def test_token():
             "token_received": bool(token),
             "token_length": len(token) if token else 0,
             "token_preview": token[:20] + "..." if token else None
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+@router.post("/test-greeting")
+async def test_morning_greeting(channel_id: str):
+    """
+    아침 인사 테스트 (수동 전송)
+    
+    Args:
+        channel_id: 인사 보낼 채널 ID
+    """
+    try:
+        from backend.app.services.scheduler import get_morning_greeting
+        
+        nw_client = get_naver_works_client()
+        greeting = get_morning_greeting()
+        
+        # 채널 타입 결정
+        channel_type = "user" if "-" in channel_id and len(channel_id) > 30 else "group"
+        
+        result = await nw_client.send_text_message(channel_id, greeting, channel_type)
+        
+        return {
+            "status": "ok",
+            "greeting": greeting,
+            "channel_id": channel_id,
+            "result": result
         }
     except Exception as e:
         return {
