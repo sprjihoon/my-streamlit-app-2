@@ -595,8 +595,15 @@ async def process_message(
         "이번주", "이번 주", "금주", "주간", "이번달", "이번 달", "월간", "한달",
     ]
     
-    # 날짜 범위 파싱 (예: "1월 1일부터 1월 31일까지", "2026-01-01부터 2026-01-31")
-    date_range_match = re.search(r'(\d{1,2}월\s*\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}).*?(부터|~).*?(\d{1,2}월\s*\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2})', text_lower)
+    # 날짜 범위 파싱 (예: "1월 1일부터 1월 31일까지", "1월 20일부터 21일까지")
+    # 시작 날짜: 월+일 또는 YYYY-MM-DD 또는 M/D
+    # 끝 날짜: 월+일 또는 일만 또는 YYYY-MM-DD 또는 M/D
+    date_range_match = re.search(
+        r'(\d{1,2}월\s*\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2})\s*'  # 시작날짜
+        r'(부터|~|에서)\s*'  # 구분자
+        r'(\d{1,2}월\s*\d{1,2}일|\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2})',  # 끝날짜 (일만도 가능)
+        text_lower
+    )
     
     if any(k in text_lower for k in summary_patterns) or date_range_match:
         try:
@@ -605,7 +612,17 @@ async def process_message(
             # 기간 결정
             if date_range_match:
                 # 날짜 범위 지정된 경우
-                def parse_date(date_str):
+                start_str = date_range_match.group(1).strip()
+                end_str = date_range_match.group(3).strip()
+                
+                # 시작 날짜에서 월 추출 (끝 날짜에 월이 없을 때 사용)
+                start_month = None
+                if '월' in start_str:
+                    month_match = re.match(r'(\d{1,2})월', start_str)
+                    if month_match:
+                        start_month = int(month_match.group(1))
+                
+                def parse_date(date_str, fallback_month=None):
                     date_str = date_str.strip()
                     if '-' in date_str and len(date_str) == 10:
                         return date_str
@@ -618,10 +635,27 @@ async def process_message(
                         parts = date_str.split('/')
                         if len(parts) == 2:
                             return f"{now.year}-{int(parts[0]):02d}-{int(parts[1]):02d}"
+                    elif '일' in date_str and fallback_month:
+                        # "21일" 형식 - 월은 시작날짜에서 가져옴
+                        day_match = re.match(r'(\d{1,2})일', date_str)
+                        if day_match:
+                            day = int(day_match.group(1))
+                            return f"{now.year}-{fallback_month:02d}-{day:02d}"
                     return None
                 
-                start_date = parse_date(date_range_match.group(1))
-                end_date = parse_date(date_range_match.group(3))
+                start_date = parse_date(start_str)
+                end_date = parse_date(end_str, fallback_month=start_month)
+                
+                # 파싱 실패 시 에러 처리
+                if not start_date or not end_date:
+                    await nw_client.send_text_message(
+                        channel_id,
+                        "❌ 날짜 형식을 인식하지 못했습니다.\n"
+                        "예시: '1월 1일부터 1월 31일까지' 또는 '1월 20일부터 21일까지'",
+                        channel_type
+                    )
+                    return
+                
                 period_name = f"{start_date} ~ {end_date}"
             elif any(k in text_lower for k in ["이번주", "이번 주", "금주", "주간"]):
                 # 이번 주 (월~일)
@@ -690,13 +724,29 @@ async def process_message(
         return
     
     # 작업일지 조회 응답 처리 (1: 텍스트, 2: 파일)
+    existing_state = conv_manager.get_state(user_id)
     if existing_state and existing_state.get("last_question") == "📋 작업일지 조회":
         pending = existing_state.get("pending_data", {})
         start_date = pending.get("start_date")
         end_date = pending.get("end_date")
         period_name = pending.get("period_name")
         
-        if text_lower in ["1", "텍스트", "텍스트로"]:
+        # 유연한 입력 인식 (1, 1번, 1번 텍스트로 보기, 텍스트 등)
+        is_text_option = (
+            text_lower in ["1", "텍스트", "텍스트로"] or
+            text_lower.startswith("1번") or
+            text_lower.startswith("1 ") or
+            "텍스트로 보기" in text_lower
+        )
+        is_file_option = (
+            text_lower in ["2", "파일", "다운로드", "파일로"] or
+            text_lower.startswith("2번") or
+            text_lower.startswith("2 ") or
+            "파일로 다운로드" in text_lower or
+            "파일로 보기" in text_lower
+        )
+        
+        if is_text_option:
             # 텍스트로 출력
             logs = get_work_logs_by_period(start_date, end_date)
             
@@ -732,7 +782,7 @@ async def process_message(
             await nw_client.send_text_message(channel_id, msg, channel_type)
             return
             
-        elif text_lower in ["2", "파일", "다운로드", "파일로"]:
+        elif is_file_option:
             # 파일 다운로드 링크 제공
             import os
             base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
