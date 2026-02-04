@@ -175,6 +175,122 @@ def delete_work_log(log_id: int) -> bool:
         return True
 
 
+def is_vendor_registered(vendor_name: str) -> bool:
+    """업체명이 등록된 리스트에 있는지 확인"""
+    if not vendor_name:
+        return False
+    
+    with get_connection() as con:
+        # vendors 테이블에서 확인
+        row = con.execute(
+            """SELECT vendor FROM vendors 
+               WHERE vendor = ? OR name = ?
+               LIMIT 1""",
+            (vendor_name, vendor_name)
+        ).fetchone()
+        
+        if row:
+            return True
+        
+        # aliases 테이블에서도 확인
+        alias_row = con.execute(
+            """SELECT vendor FROM aliases 
+               WHERE alias = ? OR vendor = ?
+               LIMIT 1""",
+            (vendor_name, vendor_name)
+        ).fetchone()
+        
+        return bool(alias_row)
+
+
+def get_registered_vendors() -> list:
+    """등록된 업체 목록 조회"""
+    with get_connection() as con:
+        rows = con.execute(
+            "SELECT DISTINCT vendor FROM vendors WHERE active != 'NO' OR active IS NULL"
+        ).fetchall()
+        return [row[0] for row in rows if row[0]]
+
+
+async def send_welcome_message(channel_id: str):
+    """봇 초대 시 환영 메시지 전송"""
+    try:
+        nw_client = get_naver_works_client()
+        
+        welcome_msg = (
+            "👋 안녕하세요! 작업일지봇이에요!\n\n"
+            "저를 초대해주셔서 감사합니다 😊\n\n"
+            "📝 **사용법**\n"
+            "• 작업 입력: 'A업체 1톤하차 50000원'\n"
+            "• 취소: '취소' 또는 '방금거 취소해줘'\n"
+            "• 수정: '방금거 수정해줘'\n"
+            "• 대화모드: '대화모드' (GPT와 자유 대화)\n"
+            "• 도움말: '도움말'\n\n"
+            "무엇이든 물어보세요! 💬"
+        )
+        
+        await nw_client.send_text_message(channel_id, welcome_msg, "group")
+        add_debug_log("welcome_message_sent", {"channel_id": channel_id})
+        
+    except Exception as e:
+        add_debug_log("welcome_message_error", error=str(e))
+
+
+def validate_work_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    작업 데이터 유효성 검증
+    
+    Returns:
+        {
+            "valid": True/False,
+            "warnings": ["경고 메시지들"],
+            "errors": ["에러 메시지들"]
+        }
+    """
+    warnings = []
+    errors = []
+    
+    vendor = data.get("vendor", "")
+    work_type = data.get("work_type", "")
+    qty = data.get("qty", 1)
+    unit_price = data.get("unit_price", 0)
+    
+    # 필수 필드 체크
+    if not vendor:
+        errors.append("업체명이 없습니다.")
+    if not work_type:
+        errors.append("작업 종류가 없습니다.")
+    
+    # 업체명 등록 여부 확인
+    if vendor and not is_vendor_registered(vendor):
+        warnings.append(f"'{vendor}'은(는) 등록되지 않은 업체입니다.")
+    
+    # 단가 체크
+    if unit_price == 0:
+        warnings.append("단가가 0원입니다.")
+    elif unit_price < 0:
+        errors.append("단가가 음수입니다.")
+    elif unit_price > 10000000:  # 천만원 초과
+        warnings.append(f"단가가 {unit_price:,}원으로 매우 높습니다.")
+    
+    # 수량 체크
+    if qty <= 0:
+        errors.append("수량이 0 이하입니다.")
+    elif qty > 10000:  # 만개 초과
+        warnings.append(f"수량이 {qty:,}개로 매우 많습니다.")
+    
+    # 합계 체크
+    total = qty * unit_price
+    if total > 100000000:  # 1억 초과
+        warnings.append(f"합계가 {total:,}원으로 매우 높습니다.")
+    
+    return {
+        "valid": len(errors) == 0,
+        "warnings": warnings,
+        "errors": errors
+    }
+
+
 async def process_message(
     user_id: str,
     channel_id: str,
@@ -414,11 +530,14 @@ async def process_message(
             )
         return
     
-    # 중복 저장 확인 응답 처리
+    # 중복/경고 확인 응답 처리
     existing_state = conv_manager.get_state(user_id)
-    if existing_state and existing_state.get("last_question", "").startswith("⚠️ 중복"):
-        if text_lower in ["예", "네", "yes", "y", "ㅇㅇ", "응"]:
-            # 중복이어도 저장
+    last_question = existing_state.get("last_question", "") if existing_state else ""
+    
+    # 중복 또는 경고 확인 대기 중일 때
+    if last_question.startswith("⚠️"):
+        if text_lower in ["예", "네", "yes", "y", "ㅇㅇ", "응", "ㅇ"]:
+            # 확인 후 저장
             data = existing_state.get("pending_data", {})
             try:
                 record_id = save_work_log(data, user_id, user_name)
@@ -427,7 +546,14 @@ async def process_message(
                 # 취소 가능 시간 설정 (30초)
                 _recent_saves[user_id] = {
                     "log_id": record_id,
-                    "expires_at": datetime.now().timestamp() + 30
+                    "expires_at": datetime.now().timestamp() + 30,
+                    "log_info": {
+                        "vendor": data.get("vendor", ""),
+                        "work_type": data.get("work_type", ""),
+                        "qty": data.get("qty", 1),
+                        "unit_price": data.get("unit_price", 0),
+                        "total": data.get("qty", 1) * data.get("unit_price", 0),
+                    }
                 }
                 
                 response_msg = generate_success_message(data, record_id)
@@ -439,7 +565,7 @@ async def process_message(
                     channel_type
                 )
             return
-        elif text_lower in ["아니", "아니요", "no", "n", "ㄴㄴ"]:
+        elif text_lower in ["아니", "아니요", "no", "n", "ㄴㄴ", "ㄴ"]:
             conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,
@@ -468,6 +594,38 @@ async def process_message(
     if parse_result.get("success"):
         # 파싱 성공 - 중복 체크 후 저장
         data = parse_result.get("data", {})
+        
+        # 유효성 검증
+        validation = validate_work_data(data)
+        
+        # 에러가 있으면 저장 불가
+        if not validation["valid"]:
+            error_msg = "❌ 저장할 수 없습니다:\n" + "\n".join(f"• {e}" for e in validation["errors"])
+            await nw_client.send_text_message(channel_id, error_msg, channel_type)
+            return
+        
+        # 경고가 있으면 사용자에게 확인 요청
+        if validation["warnings"]:
+            warning_msg = "⚠️ 확인이 필요합니다:\n"
+            warning_msg += "\n".join(f"• {w}" for w in validation["warnings"])
+            warning_msg += f"\n\n저장할 내용:\n"
+            warning_msg += f"• 업체: {data.get('vendor', '-')}\n"
+            warning_msg += f"• 작업: {data.get('work_type', '-')}\n"
+            warning_msg += f"• 수량: {data.get('qty', 1)}개\n"
+            warning_msg += f"• 단가: {data.get('unit_price', 0):,}원\n"
+            warning_msg += f"• 합계: {data.get('qty', 1) * data.get('unit_price', 0):,}원\n\n"
+            warning_msg += "그래도 저장할까요? ('예' / '아니오')"
+            
+            conv_manager.set_state(
+                user_id=user_id,
+                channel_id=channel_id,
+                pending_data=data,
+                missing=[],
+                last_question="⚠️ 경고 확인"
+            )
+            
+            await nw_client.send_text_message(channel_id, warning_msg, channel_type)
+            return
         
         # 중복 체크
         duplicate = check_duplicate(data)
@@ -709,6 +867,20 @@ async def naver_works_webhook(
     if event_type == "url_verification":
         add_debug_log("url_verification", "success")
         return {"type": "url_verification"}
+    
+    # 봇 초대 이벤트 처리 (join)
+    if event_type == "join":
+        source = payload.get("source", {})
+        channel_id = source.get("channelId", "")
+        
+        add_debug_log("bot_joined", {"channel_id": channel_id})
+        
+        if channel_id:
+            background_tasks.add_task(
+                send_welcome_message,
+                channel_id
+            )
+        return {"status": "ok"}
     
     # 메시지 이벤트 처리
     if event_type == "message":
