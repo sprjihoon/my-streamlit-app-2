@@ -2302,7 +2302,8 @@ async def process_excel_upload(
             await nw_client.send_text_message(
                 channel_id,
                 f"❌ 필수 컬럼 누락: {', '.join(missing_cols)}\n\n"
-                f"필요한 컬럼: 날짜, 업체명, 분류, 단가, 수량(선택), 비고(선택)",
+                f"필요한 컬럼: 날짜, 업체명, 분류, 단가\n"
+                f"선택 컬럼: 수량, 비고(또는 비고1)",
                 channel_type
             )
             return
@@ -2335,7 +2336,8 @@ async def process_excel_upload(
                 분류 = str(row.get("분류", "")).strip()
                 단가 = int(row.get("단가", 0) or 0)
                 수량 = int(row.get("수량", 1) or 1)
-                비고 = str(row.get("비고", "") or "")
+                # 비고 또는 비고1 둘 다 지원
+                비고 = str(row.get("비고", "") or row.get("비고1", "") or "")
                 
                 if not 업체명 or not 분류:
                     continue
