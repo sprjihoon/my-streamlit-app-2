@@ -844,19 +844,37 @@ async def process_message(
         end_date = pending.get("end_date")
         period_name = pending.get("period_name")
         
-        # AI로 의도 파악
-        intent_context = {
-            "last_question": "1번 텍스트로 보기, 2번 파일로 다운로드 중 선택",
-            "options": ["1: 텍스트로 보기", "2: 파일로 다운로드"],
-            "pending_data": pending
-        }
-        intent_result = await ai_parser.parse_intent(text, intent_context)
-        add_debug_log("summary_intent", data=intent_result)
+        # 먼저 간단한 패턴 매칭 시도 (빠른 응답)
+        text_lower = text.lower().strip()
+        selected_option = None
         
-        intent = intent_result.get("intent")
-        value = intent_result.get("value")
+        # 1번 선택 패턴
+        if text_lower in ["1", "1번", "텍스트", "텍스트로", "텍스트로 보기", "1번 텍스트", "1번 텍스트로", "1 텍스트로보기", "1번으로"]:
+            selected_option = "1"
+        # 2번 선택 패턴
+        elif text_lower in ["2", "2번", "파일", "파일로", "다운로드", "엑셀", "엑셀로", "2번 파일", "2번으로"]:
+            selected_option = "2"
+        elif "1" in text_lower and ("텍스트" in text_lower or "보기" in text_lower):
+            selected_option = "1"
+        elif "2" in text_lower and ("파일" in text_lower or "다운" in text_lower or "엑셀" in text_lower):
+            selected_option = "2"
         
-        if intent == "select_option" and value == "1":
+        # 패턴 매칭 실패시 AI 사용
+        if not selected_option:
+            intent_context = {
+                "last_question": "1번 텍스트로 보기, 2번 파일로 다운로드 중 선택",
+                "options": ["1: 텍스트로 보기", "2: 파일로 다운로드"],
+                "pending_data": pending
+            }
+            intent_result = await ai_parser.parse_intent(text, intent_context)
+            add_debug_log("summary_intent", data=intent_result)
+            
+            if intent_result.get("intent") == "select_option":
+                selected_option = intent_result.get("value")
+        
+        add_debug_log("summary_selected_option", data={"option": selected_option, "text": text})
+        
+        if selected_option == "1":
             # 텍스트로 출력
             logs = get_work_logs_by_period(start_date, end_date)
             by_vendor = {}
@@ -886,7 +904,7 @@ async def process_message(
             await nw_client.send_text_message(channel_id, msg, channel_type)
             return
             
-        elif intent == "select_option" and value == "2":
+        elif selected_option == "2":
             # 파일 다운로드 링크
             import os
             base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
@@ -896,6 +914,15 @@ async def process_message(
             await nw_client.send_text_message(
                 channel_id,
                 f"📥 작업일지 다운로드\n\n📅 기간: {period_name}\n📊 건수: {pending.get('log_count', 0)}건\n💰 금액: {pending.get('total_amount', 0):,}원\n\n아래 링크를 클릭하세요:\n📎 {download_url}",
+                channel_type
+            )
+            return
+        
+        else:
+            # 선택을 인식하지 못함 - 다시 안내
+            await nw_client.send_text_message(
+                channel_id,
+                "🤔 선택을 인식하지 못했어요.\n\n1️⃣ 텍스트로 보기 → '1' 입력\n2️⃣ 파일로 다운로드 → '2' 입력",
                 channel_type
             )
             return
