@@ -2,17 +2,97 @@
 AI 기반 작업일지 파싱 모듈
 ───────────────────────────────────────
 OpenAI GPT를 사용하여 자연어 메시지를 구조화된 작업일지 데이터로 변환합니다.
+별칭 매핑: 채팅에서 입력한 업체명/별칭을 DB의 aliases 테이블과 매핑합니다.
 """
 
 import os
 import json
+import unicodedata
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from logic.db import get_connection
+
 # .env 파일 로드
 load_dotenv()
+
+
+def get_vendor_aliases() -> Dict[str, str]:
+    """
+    aliases 테이블에서 모든 별칭-업체 매핑을 가져옵니다.
+    work_log 파일 타입의 별칭만 가져옵니다.
+    
+    Returns:
+        Dict[str, str]: {별칭(정규화): 업체명} 형태의 딕셔너리
+    """
+    alias_map = {}
+    try:
+        with get_connection() as con:
+            # aliases 테이블에서 work_log 타입 별칭 조회
+            rows = con.execute(
+                """SELECT alias, vendor FROM aliases 
+                   WHERE file_type = 'work_log'"""
+            ).fetchall()
+            
+            for alias, vendor in rows:
+                if alias and vendor:
+                    # 정규화된 별칭을 키로 사용
+                    normalized = normalize_text(alias)
+                    alias_map[normalized] = vendor
+            
+            # vendors 테이블에서 vendor 이름도 추가 (직접 입력용)
+            vendor_rows = con.execute(
+                "SELECT vendor, name FROM vendors WHERE active != 'NO' OR active IS NULL"
+            ).fetchall()
+            
+            for vendor, name in vendor_rows:
+                if vendor:
+                    alias_map[normalize_text(vendor)] = vendor
+                    if name:
+                        alias_map[normalize_text(name)] = vendor
+    except Exception as e:
+        print(f"Warning: Could not load vendor aliases: {e}")
+    
+    return alias_map
+
+
+def normalize_text(text: str) -> str:
+    """텍스트 정규화 (공백 제거 + 유니코드 정규화 + 소문자)"""
+    if not text:
+        return ""
+    normalized = unicodedata.normalize('NFKC', str(text).strip())
+    normalized = ' '.join(normalized.split())
+    return normalized.lower()
+
+
+def find_vendor_by_alias(input_name: str, alias_map: Dict[str, str]) -> Optional[str]:
+    """
+    입력된 업체명/별칭으로 실제 vendor를 찾습니다.
+    
+    Args:
+        input_name: 사용자가 입력한 업체명 또는 별칭
+        alias_map: 별칭-업체 매핑 딕셔너리
+    
+    Returns:
+        매핑된 vendor 이름, 없으면 None
+    """
+    if not input_name:
+        return None
+    
+    normalized_input = normalize_text(input_name)
+    
+    # 정확히 일치하는 경우
+    if normalized_input in alias_map:
+        return alias_map[normalized_input]
+    
+    # 부분 일치 시도 (입력이 별칭을 포함하거나 별칭이 입력을 포함)
+    for alias, vendor in alias_map.items():
+        if alias in normalized_input or normalized_input in alias:
+            return vendor
+    
+    return None
 
 
 # 시스템 프롬프트
@@ -80,6 +160,46 @@ class AIParser:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = "gpt-4o-mini"  # 비용 효율적인 모델
+        
+        # 별칭 매핑 캐시 (초기화 시 로드)
+        self._alias_cache: Optional[Dict[str, str]] = None
+        self._alias_cache_time: Optional[datetime] = None
+        self._cache_ttl_seconds = 300  # 5분마다 새로고침
+    
+    def _get_alias_map(self) -> Dict[str, str]:
+        """별칭 매핑 가져오기 (캐시 사용)"""
+        now = datetime.now()
+        
+        # 캐시가 없거나 만료됐으면 새로 로드
+        if (self._alias_cache is None or 
+            self._alias_cache_time is None or
+            (now - self._alias_cache_time).seconds > self._cache_ttl_seconds):
+            self._alias_cache = get_vendor_aliases()
+            self._alias_cache_time = now
+        
+        return self._alias_cache or {}
+    
+    def _map_vendor_alias(self, vendor_name: str) -> str:
+        """
+        입력된 업체명을 별칭 테이블과 매핑하여 실제 vendor로 변환
+        
+        Args:
+            vendor_name: AI가 파싱한 업체명
+        
+        Returns:
+            매핑된 vendor 이름 (매핑 실패 시 원본 반환)
+        """
+        if not vendor_name:
+            return vendor_name
+        
+        alias_map = self._get_alias_map()
+        mapped_vendor = find_vendor_by_alias(vendor_name, alias_map)
+        
+        if mapped_vendor:
+            return mapped_vendor
+        
+        # 매핑 실패 시 원본 반환
+        return vendor_name
     
     async def parse_message(
         self,
@@ -127,6 +247,19 @@ class AIParser:
             # 컨텍스트와 병합
             if context and context.get("pending_data"):
                 result = self._merge_with_context(result, context)
+            
+            # 별칭 매핑 적용: AI가 파싱한 업체명을 실제 vendor로 변환
+            if result.get("data") and result["data"].get("vendor"):
+                original_vendor = result["data"]["vendor"]
+                mapped_vendor = self._map_vendor_alias(original_vendor)
+                result["data"]["vendor"] = mapped_vendor
+                
+                # 매핑 정보 로그 (디버깅용)
+                if original_vendor != mapped_vendor:
+                    result["_alias_mapped"] = {
+                        "original": original_vendor,
+                        "mapped": mapped_vendor
+                    }
             
             return result
             
