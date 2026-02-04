@@ -7,8 +7,10 @@
 
 import json
 import asyncio
+import logging
+import traceback
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -20,8 +22,33 @@ from backend.app.services import (
 )
 from logic.db import get_connection
 
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/naver-works", tags=["naver-works"])
+
+# 디버그 로그 저장 (최근 50개)
+_debug_logs: List[Dict[str, Any]] = []
+MAX_DEBUG_LOGS = 50
+
+def add_debug_log(event: str, data: Any = None, error: str = None):
+    """디버그 로그 추가"""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "event": event,
+        "data": data,
+        "error": error
+    }
+    _debug_logs.append(log_entry)
+    if len(_debug_logs) > MAX_DEBUG_LOGS:
+        _debug_logs.pop(0)
+    
+    # 콘솔에도 출력
+    if error:
+        logger.error(f"[{event}] {error}")
+    else:
+        logger.info(f"[{event}] {data}")
 
 # 최근 저장된 레코드 캐시 (취소용)
 # {user_id: {"log_id": id, "expires_at": timestamp}}
@@ -166,8 +193,36 @@ async def process_message(
     """
     global _recent_saves
     
-    nw_client = get_naver_works_client()
-    ai_parser = get_ai_parser()
+    add_debug_log("process_message_start", {
+        "user_id": user_id,
+        "channel_id": channel_id,
+        "text": text,
+        "channel_type": channel_type
+    })
+    
+    try:
+        nw_client = get_naver_works_client()
+        add_debug_log("nw_client_loaded", {"private_key_loaded": bool(nw_client.private_key)})
+    except Exception as e:
+        add_debug_log("nw_client_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
+        return
+    
+    try:
+        ai_parser = get_ai_parser()
+        add_debug_log("ai_parser_loaded", {"model": ai_parser.model})
+    except Exception as e:
+        add_debug_log("ai_parser_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
+        # AI 파서 실패 시에도 에러 메시지 전송 시도
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                f"❌ AI 파서 초기화 오류: {str(e)}",
+                channel_type
+            )
+        except:
+            pass
+        return
+    
     conv_manager = get_conversation_manager()
     
     text_lower = text.strip().lower()
@@ -229,7 +284,21 @@ async def process_message(
             return
     
     # AI 파싱
-    parse_result = await ai_parser.parse_message(text, existing_state)
+    try:
+        add_debug_log("ai_parsing_start", {"text": text})
+        parse_result = await ai_parser.parse_message(text, existing_state)
+        add_debug_log("ai_parsing_result", parse_result)
+    except Exception as e:
+        add_debug_log("ai_parsing_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                f"❌ AI 파싱 오류: {str(e)}",
+                channel_type
+            )
+        except Exception as send_err:
+            add_debug_log("send_error_msg_failed", error=str(send_err))
+        return
     
     if parse_result.get("success"):
         # 파싱 성공 - 중복 체크 후 저장
@@ -279,7 +348,13 @@ async def process_message(
             
             # 확인 메시지 생성 및 전송
             response_msg = generate_success_message(data, record_id)
-            await nw_client.send_text_message(channel_id, response_msg, channel_type)
+            add_debug_log("sending_success_message", {"channel_id": channel_id, "message": response_msg})
+            
+            try:
+                send_result = await nw_client.send_text_message(channel_id, response_msg, channel_type)
+                add_debug_log("message_sent", send_result)
+            except Exception as e:
+                add_debug_log("send_message_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
             
         except Exception as e:
             await nw_client.send_text_message(
@@ -303,7 +378,12 @@ async def process_message(
         )
         
         # 질문 메시지 전송
-        await nw_client.send_text_message(channel_id, f"🤔 {question}", channel_type)
+        add_debug_log("sending_question", {"channel_id": channel_id, "question": question})
+        try:
+            send_result = await nw_client.send_text_message(channel_id, f"🤔 {question}", channel_type)
+            add_debug_log("question_sent", send_result)
+        except Exception as e:
+            add_debug_log("send_question_error", error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}")
 
 
 def generate_success_message(data: Dict[str, Any], record_id: int) -> str:
@@ -391,26 +471,31 @@ async def naver_works_webhook(
     """
     # 요청 본문 읽기
     body = await request.body()
+    add_debug_log("webhook_received", {"body_length": len(body)})
     
     # 서명 검증 (선택적 - 보안 강화)
     signature = request.headers.get("X-WORKS-Signature", "")
-    nw_client = get_naver_works_client()
     
-    # 서명 검증이 필요한 경우 활성화
-    # if signature and not nw_client.verify_signature(body, signature):
-    #     raise HTTPException(status_code=401, detail="Invalid signature")
+    try:
+        nw_client = get_naver_works_client()
+    except Exception as e:
+        add_debug_log("webhook_nw_client_error", error=str(e))
     
     # JSON 파싱
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
+        add_debug_log("webhook_payload", payload)
+    except json.JSONDecodeError as e:
+        add_debug_log("webhook_json_error", error=str(e))
         raise HTTPException(status_code=400, detail="Invalid JSON")
     
     # 이벤트 타입 확인
     event_type = payload.get("type")
+    add_debug_log("webhook_event_type", {"type": event_type})
     
     # 봇 연결 확인 (URL 검증 요청)
     if event_type == "url_verification":
+        add_debug_log("url_verification", "success")
         return {"type": "url_verification"}
     
     # 메시지 이벤트 처리
@@ -428,9 +513,17 @@ async def naver_works_webhook(
         
         content_type = content.get("type", "")
         
+        add_debug_log("message_event", {
+            "user_id": user_id,
+            "channel_id": channel_id,
+            "channel_type": channel_type,
+            "content_type": content_type
+        })
+        
         if content_type == "text":
             text = content.get("text", "")
             if text:
+                add_debug_log("text_message", {"text": text})
                 # 백그라운드에서 메시지 처리 (빠른 응답을 위해)
                 background_tasks.add_task(
                     process_message,
@@ -443,6 +536,7 @@ async def naver_works_webhook(
         elif content_type == "postback":
             postback = content.get("postback", "")
             if postback:
+                add_debug_log("postback_message", {"postback": postback})
                 background_tasks.add_task(
                     process_postback,
                     user_id,
@@ -468,12 +562,101 @@ async def webhook_health():
 @router.get("/test")
 async def test_bot():
     """봇 설정 테스트 (개발용)"""
-    nw_client = get_naver_works_client()
-    
+    try:
+        nw_client = get_naver_works_client()
+        
+        return {
+            "status": "ok",
+            "domain_id": nw_client.domain_id,
+            "bot_id": nw_client.bot_id,
+            "client_id": nw_client.client_id,
+            "service_account": nw_client.service_account,
+            "private_key_loaded": bool(nw_client.private_key),
+            "private_key_length": len(nw_client.private_key) if nw_client.private_key else 0,
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+@router.get("/debug-logs")
+async def get_debug_logs():
+    """디버그 로그 조회 (최근 50개)"""
     return {
-        "domain_id": nw_client.domain_id,
-        "bot_id": nw_client.bot_id,
-        "client_id": nw_client.client_id,
-        "service_account": nw_client.service_account,
-        "private_key_loaded": bool(nw_client.private_key),
+        "count": len(_debug_logs),
+        "logs": _debug_logs
     }
+
+
+@router.delete("/debug-logs")
+async def clear_debug_logs():
+    """디버그 로그 초기화"""
+    global _debug_logs
+    _debug_logs = []
+    return {"status": "cleared"}
+
+
+@router.post("/test-send")
+async def test_send_message(channel_id: str, message: str = "테스트 메시지입니다"):
+    """
+    테스트 메시지 전송 (디버깅용)
+    
+    Args:
+        channel_id: 채널 ID
+        message: 전송할 메시지
+    """
+    try:
+        nw_client = get_naver_works_client()
+        
+        # 토큰 발급 테스트
+        add_debug_log("test_send_start", {"channel_id": channel_id, "message": message})
+        
+        token = await nw_client._get_access_token()
+        add_debug_log("test_token_received", {"token_length": len(token) if token else 0})
+        
+        result = await nw_client.send_text_message(channel_id, message, "group")
+        add_debug_log("test_send_result", result)
+        
+        return {
+            "status": "ok",
+            "result": result
+        }
+    except Exception as e:
+        error_info = {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+        add_debug_log("test_send_error", error=str(e))
+        return error_info
+
+
+@router.get("/test-token")
+async def test_token():
+    """액세스 토큰 발급 테스트"""
+    try:
+        nw_client = get_naver_works_client()
+        
+        add_debug_log("test_token_start", {
+            "client_id": nw_client.client_id,
+            "service_account": nw_client.service_account,
+            "private_key_loaded": bool(nw_client.private_key)
+        })
+        
+        token = await nw_client._get_access_token()
+        
+        return {
+            "status": "ok",
+            "token_received": bool(token),
+            "token_length": len(token) if token else 0,
+            "token_preview": token[:20] + "..." if token else None
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
