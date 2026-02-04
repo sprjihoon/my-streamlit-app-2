@@ -7,6 +7,7 @@ import { Alert } from '@/components/Alert';
 import { 
   getWorkLogs, 
   getWorkLogStats, 
+  createWorkLog,
   updateWorkLog, 
   deleteWorkLog,
   WorkLog, 
@@ -43,6 +44,18 @@ export default function WorkLogPage() {
 
   // 삭제 확인 모달
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // 새 작업일지 추가 모달
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({
+    날짜: new Date().toISOString().split('T')[0],
+    업체명: '',
+    분류: '',
+    단가: 0,
+    수량: 1,
+    비고1: '',
+  });
+  const [addLoading, setAddLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -129,6 +142,41 @@ export default function WorkLogPage() {
     }
   };
 
+  const handleAdd = async () => {
+    if (!addForm.업체명 || !addForm.분류 || addForm.단가 <= 0) {
+      setMessage({ type: 'error', text: '업체명, 작업 종류, 단가는 필수입니다.' });
+      return;
+    }
+
+    setAddLoading(true);
+    try {
+      await createWorkLog({
+        날짜: addForm.날짜,
+        업체명: addForm.업체명,
+        분류: addForm.분류,
+        단가: addForm.단가,
+        수량: addForm.수량,
+        비고1: addForm.비고1 || undefined,
+        출처: 'manual',
+      });
+      setMessage({ type: 'success', text: '작업일지가 추가되었습니다.' });
+      setShowAddModal(false);
+      setAddForm({
+        날짜: new Date().toISOString().split('T')[0],
+        업체명: '',
+        분류: '',
+        단가: 0,
+        수량: 1,
+        비고1: '',
+      });
+      loadData();
+    } catch (err) {
+      setMessage({ type: 'error', text: err instanceof Error ? err.message : '추가에 실패했습니다.' });
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
   const formatPrice = (price: number | null) => {
     if (price === null) return '-';
     return `${price.toLocaleString()}원`;
@@ -157,21 +205,24 @@ export default function WorkLogPage() {
       manual: '#8b5cf6',
     };
     const labels: Record<string, string> = {
-      bot: '봇',
-      excel: '엑셀',
-      manual: '수동',
+      bot: '🤖 봇',
+      excel: '📊 엑셀',
+      manual: '✏️ 수동',
     };
     const color = colors[source || ''] || '#6b7280';
     const label = labels[source || ''] || source || '-';
     
     return (
       <span style={{
-        display: 'inline-block',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.25rem',
         padding: '0.125rem 0.5rem',
         borderRadius: '4px',
         fontSize: '0.75rem',
         backgroundColor: color,
         color: 'white',
+        fontWeight: source === 'bot' ? '600' : '400',
       }}>
         {label}
       </span>
@@ -323,7 +374,35 @@ export default function WorkLogPage() {
       </Card>
 
       {/* 작업일지 목록 */}
-      <Card title={`작업일지 목록 (${logs.length}건)`} style={{ marginTop: '1rem' }}>
+      <div style={{ marginTop: '1rem' }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '0.5rem'
+        }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: '600' }}>
+            작업일지 목록 ({logs.length}건)
+          </h3>
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.5rem 1rem',
+              backgroundColor: '#22c55e',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: '500',
+            }}
+          >
+            ➕ 수동 추가
+          </button>
+        </div>
+      <Card title="" style={{ marginTop: '0' }}>
         {loading ? (
           <Loading />
         ) : logs.length === 0 ? (
@@ -399,6 +478,149 @@ export default function WorkLogPage() {
           </div>
         )}
       </Card>
+      </div>
+
+      {/* 새 작업일지 추가 모달 */}
+      {showAddModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '1.5rem',
+            borderRadius: '8px',
+            maxWidth: '500px',
+            width: '90%',
+          }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>
+              ➕ 작업일지 수동 추가
+            </h2>
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                  날짜 <span style={{ color: 'red' }}>*</span>
+                </label>
+                <input
+                  type="date"
+                  value={addForm.날짜}
+                  onChange={(e) => setAddForm({ ...addForm, 날짜: e.target.value })}
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                  업체명 <span style={{ color: 'red' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={addForm.업체명}
+                  onChange={(e) => setAddForm({ ...addForm, 업체명: e.target.value })}
+                  placeholder="업체명을 입력하세요"
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                  작업 종류 <span style={{ color: 'red' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={addForm.분류}
+                  onChange={(e) => setAddForm({ ...addForm, 분류: e.target.value })}
+                  placeholder="예: 1톤하차, 양품화, 바코드부착"
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>수량</label>
+                  <input
+                    type="number"
+                    value={addForm.수량}
+                    onChange={(e) => setAddForm({ ...addForm, 수량: parseInt(e.target.value) || 1 })}
+                    min={1}
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                    단가 <span style={{ color: 'red' }}>*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={addForm.단가}
+                    onChange={(e) => setAddForm({ ...addForm, 단가: parseInt(e.target.value) || 0 })}
+                    placeholder="원"
+                    style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                  />
+                </div>
+              </div>
+              <div style={{ 
+                padding: '0.5rem', 
+                backgroundColor: '#f0fdf4', 
+                borderRadius: '4px',
+                textAlign: 'center'
+              }}>
+                <span style={{ fontSize: '0.875rem', color: '#666' }}>합계: </span>
+                <span style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#16a34a' }}>
+                  {(addForm.수량 * addForm.단가).toLocaleString()}원
+                </span>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>비고</label>
+                <input
+                  type="text"
+                  value={addForm.비고1}
+                  onChange={(e) => setAddForm({ ...addForm, 비고1: e.target.value })}
+                  placeholder="추가 메모 (선택)"
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
+              <button
+                onClick={() => setShowAddModal(false)}
+                disabled={addLoading}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: addLoading ? 'not-allowed' : 'pointer',
+                  opacity: addLoading ? 0.6 : 1,
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={handleAdd}
+                disabled={addLoading}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#22c55e',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: addLoading ? 'not-allowed' : 'pointer',
+                  opacity: addLoading ? 0.6 : 1,
+                }}
+              >
+                {addLoading ? '저장 중...' : '저장'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 편집 모달 */}
       {editingLog && (
