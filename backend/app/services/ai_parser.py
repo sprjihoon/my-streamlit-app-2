@@ -378,6 +378,85 @@ class AIParser:
         
         return response
     
+    async def parse_date_range(
+        self,
+        message: str,
+        today: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        자연어에서 날짜 범위를 AI로 파악
+        
+        Args:
+            message: 사용자 메시지 (예: "1월 20일부터 21일까지", "지난주", "이번달")
+            today: 오늘 날짜 (YYYY-MM-DD), None이면 자동 설정
+        
+        Returns:
+            {"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "period_name": "기간명"}
+        """
+        if today is None:
+            today = datetime.now().strftime("%Y-%m-%d")
+        
+        date_prompt = f"""사용자 메시지에서 날짜 범위를 파악하세요.
+
+## 오늘 날짜
+{today} (요일: {datetime.strptime(today, "%Y-%m-%d").strftime("%A")})
+
+## 사용자 메시지
+"{message}"
+
+## 날짜 해석 규칙
+- "오늘" → 오늘 하루
+- "어제" → 어제 하루
+- "이번주" → 이번 주 월요일 ~ 오늘
+- "지난주" → 지난 주 월요일 ~ 일요일
+- "이번달" / "이번 달" → 이번 달 1일 ~ 오늘
+- "지난달" / "저번달" → 지난 달 1일 ~ 말일
+- "1월" → 1월 1일 ~ 1월 31일
+- "1월 20일부터 21일까지" → 1월 20일 ~ 1월 21일 (같은 달로 해석)
+- "1월 20일부터 2월 5일까지" → 1월 20일 ~ 2월 5일
+- "20일부터 25일까지" → 이번 달 20일 ~ 25일
+- 연도가 없으면 올해로 가정
+
+## 응답 형식 (JSON)
+{{
+  "found": true/false,
+  "start_date": "YYYY-MM-DD",
+  "end_date": "YYYY-MM-DD",
+  "period_name": "사람이 읽기 쉬운 기간명"
+}}
+
+## 예시
+- "오늘 작업 정리해줘" → {{"found": true, "start_date": "{today}", "end_date": "{today}", "period_name": "오늘 ({today})"}}
+- "1월 20일부터 21일까지" → {{"found": true, "start_date": "2026-01-20", "end_date": "2026-01-21", "period_name": "2026-01-20 ~ 2026-01-21"}}
+- "지난주 작업" → {{"found": true, "start_date": "...", "end_date": "...", "period_name": "지난 주 (...)"}}
+- "안녕하세요" → {{"found": false, "start_date": null, "end_date": null, "period_name": null}}
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "날짜 범위를 정확하게 파악하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": date_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=200
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            return result
+            
+        except Exception as e:
+            return {
+                "found": False,
+                "start_date": None,
+                "end_date": None,
+                "period_name": None,
+                "error": str(e)
+            }
+
     async def parse_intent(
         self,
         message: str,

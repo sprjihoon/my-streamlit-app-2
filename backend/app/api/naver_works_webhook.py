@@ -587,141 +587,75 @@ async def process_message(
         return
     
     # 작업일지 정리/조회 명령어 (다양한 기간 지원)
-    import re
-    from datetime import timedelta
-    
-    summary_patterns = [
-        "오늘 작업", "작업 정리", "작업일지 정리", "오늘 정리", "작업 목록", "작업 리스트",
-        "이번주", "이번 주", "금주", "주간", "이번달", "이번 달", "월간", "한달",
+    # 작업일지 조회 관련 키워드
+    summary_keywords = [
+        "작업", "정리", "일지", "조회", "보여", "알려", "목록", "리스트",
+        "오늘", "어제", "이번주", "지난주", "이번달", "지난달", "저번달",
+        "월", "일", "부터", "까지"
     ]
     
-    # 날짜 범위 파싱 (예: "1월 1일부터 1월 31일까지", "1월 20일부터 21일까지")
-    # 시작 날짜: 월+일 또는 YYYY-MM-DD 또는 M/D
-    # 끝 날짜: 월+일 또는 일만 또는 YYYY-MM-DD 또는 M/D
-    date_range_match = re.search(
-        r'(\d{1,2}월\s*\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2})\s*'  # 시작날짜
-        r'(부터|~|에서)\s*'  # 구분자
-        r'(\d{1,2}월\s*\d{1,2}일|\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2})',  # 끝날짜 (일만도 가능)
-        text_lower
-    )
+    # 작업일지 조회 요청인지 AI로 판단 (날짜 관련 키워드가 있거나 정리/조회 요청인 경우)
+    might_be_summary = any(k in text_lower for k in summary_keywords)
     
-    if any(k in text_lower for k in summary_patterns) or date_range_match:
-        try:
-            now = datetime.now()
-            
-            # 기간 결정
-            if date_range_match:
-                # 날짜 범위 지정된 경우
-                start_str = date_range_match.group(1).strip()
-                end_str = date_range_match.group(3).strip()
+    if might_be_summary:
+        # AI로 날짜 범위 파싱
+        date_result = await ai_parser.parse_date_range(text)
+        add_debug_log("date_range_parsed", data=date_result)
+        
+        if date_result.get("found") and date_result.get("start_date") and date_result.get("end_date"):
+            try:
+                start_date = date_result["start_date"]
+                end_date = date_result["end_date"]
+                period_name = date_result.get("period_name", f"{start_date} ~ {end_date}")
                 
-                # 시작 날짜에서 월 추출 (끝 날짜에 월이 없을 때 사용)
-                start_month = None
-                if '월' in start_str:
-                    month_match = re.match(r'(\d{1,2})월', start_str)
-                    if month_match:
-                        start_month = int(month_match.group(1))
+                # 기간별 작업일지 조회
+                logs = get_work_logs_by_period(start_date, end_date)
                 
-                def parse_date(date_str, fallback_month=None):
-                    date_str = date_str.strip()
-                    if '-' in date_str and len(date_str) == 10:
-                        return date_str
-                    elif '월' in date_str:
-                        match = re.match(r'(\d{1,2})월\s*(\d{1,2})일', date_str)
-                        if match:
-                            month, day = int(match.group(1)), int(match.group(2))
-                            return f"{now.year}-{month:02d}-{day:02d}"
-                    elif '/' in date_str:
-                        parts = date_str.split('/')
-                        if len(parts) == 2:
-                            return f"{now.year}-{int(parts[0]):02d}-{int(parts[1]):02d}"
-                    elif '일' in date_str and fallback_month:
-                        # "21일" 형식 - 월은 시작날짜에서 가져옴
-                        day_match = re.match(r'(\d{1,2})일', date_str)
-                        if day_match:
-                            day = int(day_match.group(1))
-                            return f"{now.year}-{fallback_month:02d}-{day:02d}"
-                    return None
-                
-                start_date = parse_date(start_str)
-                end_date = parse_date(end_str, fallback_month=start_month)
-                
-                # 파싱 실패 시 에러 처리
-                if not start_date or not end_date:
+                if not logs:
                     await nw_client.send_text_message(
                         channel_id,
-                        "❌ 날짜 형식을 인식하지 못했습니다.\n"
-                        "예시: '1월 1일부터 1월 31일까지' 또는 '1월 20일부터 21일까지'",
+                        f"📋 {period_name} 작업일지가 없습니다.",
                         channel_type
                     )
-                    return
-                
-                period_name = f"{start_date} ~ {end_date}"
-            elif any(k in text_lower for k in ["이번주", "이번 주", "금주", "주간"]):
-                # 이번 주 (월~일)
-                start_of_week = now - timedelta(days=now.weekday())
-                start_date = start_of_week.strftime("%Y-%m-%d")
-                end_date = now.strftime("%Y-%m-%d")
-                period_name = f"이번 주 ({start_date} ~ {end_date})"
-            elif any(k in text_lower for k in ["이번달", "이번 달", "월간", "한달"]):
-                # 이번 달
-                start_date = now.strftime("%Y-%m-01")
-                end_date = now.strftime("%Y-%m-%d")
-                period_name = f"이번 달 ({start_date} ~ {end_date})"
-            else:
-                # 오늘
-                start_date = now.strftime("%Y-%m-%d")
-                end_date = start_date
-                period_name = f"오늘 ({start_date})"
-            
-            # 기간별 작업일지 조회
-            logs = get_work_logs_by_period(start_date, end_date)
-            
-            if not logs:
+                else:
+                    # 선택 옵션 제공
+                    total_amount = sum(l.get("합계", 0) or 0 for l in logs)
+                    
+                    conv_manager.set_state(
+                        user_id=user_id,
+                        channel_id=channel_id,
+                        pending_data={
+                            "summary_mode": True,
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "period_name": period_name,
+                            "log_count": len(logs),
+                            "total_amount": total_amount,
+                        },
+                        missing=[],
+                        last_question="📋 작업일지 조회"
+                    )
+                    
+                    await nw_client.send_text_message(
+                        channel_id,
+                        f"📋 {period_name} 작업일지\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
+                        f"어떻게 보여드릴까요?\n"
+                        f"1️⃣ 텍스트로 보기\n"
+                        f"2️⃣ 파일로 다운로드 (링크)\n\n"
+                        f"원하시는 방식을 말씀해주세요.",
+                        channel_type
+                    )
+                return
+            except Exception as e:
+                add_debug_log("summary_error", error=str(e))
                 await nw_client.send_text_message(
                     channel_id,
-                    f"📋 {period_name} 작업일지가 없습니다.",
+                    f"❌ 작업일지 조회 중 오류: {str(e)}",
                     channel_type
                 )
-            else:
-                # 선택 옵션 제공
-                total_amount = sum(l.get("합계", 0) or 0 for l in logs)
-                
-                conv_manager.set_state(
-                    user_id=user_id,
-                    channel_id=channel_id,
-                    pending_data={
-                        "summary_mode": True,
-                        "start_date": start_date,
-                        "end_date": end_date,
-                        "period_name": period_name,
-                        "log_count": len(logs),
-                        "total_amount": total_amount,
-                    },
-                    missing=[],
-                    last_question="📋 작업일지 조회"
-                )
-                
-                await nw_client.send_text_message(
-                    channel_id,
-                    f"📋 {period_name} 작업일지\n"
-                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
-                    f"어떻게 보여드릴까요?\n"
-                    f"1️⃣ 텍스트로 보기\n"
-                    f"2️⃣ 파일로 다운로드 (링크)\n\n"
-                    f"'1' 또는 '2'를 입력해주세요.",
-                    channel_type
-                )
-            return
-        except Exception as e:
-            add_debug_log("summary_error", error=str(e))
-            await nw_client.send_text_message(
-                channel_id,
-                f"❌ 작업일지 조회 중 오류: {str(e)}",
-                channel_type
-            )
-        return
+                return
     
     # 작업일지 조회 응답 처리 (1: 텍스트, 2: 파일) - AI 의도 파악 사용
     existing_state = conv_manager.get_state(user_id)
