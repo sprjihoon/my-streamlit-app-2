@@ -442,7 +442,9 @@ class AIParser:
     예: "오늘 틸리언 전부 5만원으로", "이번주 나블리 단가 일괄 수정"
 23. "copy_entry" - 복사 기능
     예: "어제꺼 오늘로 복사", "지난주 틸리언꺼 복사해줘"
-24. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
+24. "web_search" - 웹 검색/인터넷 조사 요청
+    예: "스프링 풀필먼트 회사 조사해줘", "풀필먼트 서비스 검색해줘", "A업체 인터넷에서 찾아봐", "뉴스 검색해줘"
+25. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
 
 ## 응답 형식 (JSON)
 {{
@@ -454,6 +456,7 @@ class AIParser:
     // multi_entry: {{"entries": ["틸리언 하차 3만", "나블리 양품화 2만"]}}
     // compare_periods: {{"period1": "지난주", "period2": "이번주"}}
     // copy_entry: {{"source_date": "어제", "target_date": "오늘", "vendor": "틸리언"}}
+    // web_search: {{"query": "검색어"}}
   }}
 }}
 
@@ -466,6 +469,7 @@ class AIParser:
 - "메모 추가", "비고에" 등이면 add_memo
 - "전부", "일괄", "모두 수정" 등이면 bulk_edit
 - "복사", "복제" 등이면 copy_entry
+- "조사해줘", "검색해줘", "찾아봐", "알아봐줘" + 회사/서비스/정보면 web_search
 - 애매하면 chat
 
 반드시 유효한 JSON만 출력하세요."""
@@ -970,6 +974,79 @@ class AIParser:
             }
         
         return {"is_anomaly": False}
+
+    async def web_search(
+        self,
+        query: str,
+        max_results: int = 5
+    ) -> Dict[str, Any]:
+        """
+        웹 검색 수행 및 결과 요약
+        
+        Args:
+            query: 검색어
+            max_results: 최대 결과 수
+        
+        Returns:
+            {"success": bool, "results": [...], "summary": str}
+        """
+        try:
+            from duckduckgo_search import DDGS
+            
+            results = []
+            with DDGS() as ddgs:
+                for r in ddgs.text(query, max_results=max_results):
+                    results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("href", ""),
+                        "snippet": r.get("body", "")
+                    })
+            
+            if not results:
+                return {"success": False, "error": "검색 결과가 없습니다."}
+            
+            # GPT로 검색 결과 요약
+            search_content = "\n\n".join([
+                f"제목: {r['title']}\n내용: {r['snippet']}\n링크: {r['url']}"
+                for r in results
+            ])
+            
+            summary_prompt = f"""다음 검색 결과를 한국어로 요약해주세요.
+
+검색어: {query}
+
+검색 결과:
+{search_content}
+
+## 요약 규칙
+- 핵심 정보만 간결하게 (500자 이내)
+- 신뢰할 수 있는 정보 위주
+- 출처(링크) 1-2개 포함
+- 이모지 적절히 사용"""
+
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "웹 검색 결과를 요약하는 AI입니다."},
+                    {"role": "user", "content": summary_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=600
+            )
+            
+            summary = response.choices[0].message.content
+            
+            return {
+                "success": True,
+                "query": query,
+                "results": results,
+                "summary": summary
+            }
+            
+        except ImportError:
+            return {"success": False, "error": "웹 검색 라이브러리가 설치되지 않았습니다."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     async def chat_response(
         self,

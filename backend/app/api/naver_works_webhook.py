@@ -1565,6 +1565,59 @@ async def process_message(
         return
     
     # ═══════════════════════════════════════════════════════════════════
+    # 웹 검색
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "web_search":
+        # 검색어 추출
+        search_query = intent_data.get("query") if intent_data else None
+        
+        if not search_query:
+            # AI로 검색어 추출
+            import re
+            # "조사해줘", "검색해줘", "찾아봐" 앞의 내용을 검색어로
+            patterns = [
+                r'(.+?)(?:에 대해|를|을)?\s*(?:조사|검색|찾아|알아).*',
+                r'(?:조사|검색|찾아|알아).*?[\"\'「」](.+?)[\"\'」]',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text)
+                if match:
+                    search_query = match.group(1).strip()
+                    break
+            
+            if not search_query:
+                search_query = text  # 전체 텍스트를 검색어로
+        
+        add_debug_log("web_search_start", {"query": search_query})
+        
+        await nw_client.send_text_message(channel_id, f"🔍 '{search_query}' 검색 중...", channel_type)
+        
+        try:
+            search_result = await ai_parser.web_search(search_query)
+            add_debug_log("web_search_result", {"success": search_result.get("success")})
+            
+            if search_result.get("success"):
+                msg = f"🌐 웹 검색 결과\n━━━━━━━━━━━━━━━━━━━━\n\n"
+                msg += f"🔎 검색어: {search_query}\n\n"
+                msg += search_result.get("summary", "요약 없음")
+                
+                # 메시지 길이 제한
+                if len(msg) > 1500:
+                    msg = msg[:1450] + "\n\n... (생략)"
+                
+                await nw_client.send_text_message(channel_id, msg, channel_type)
+            else:
+                await nw_client.send_text_message(
+                    channel_id,
+                    f"❌ 검색 실패: {search_result.get('error', '알 수 없는 오류')}",
+                    channel_type
+                )
+        except Exception as e:
+            add_debug_log("web_search_error", error=str(e))
+            await nw_client.send_text_message(channel_id, f"❌ 검색 오류: {str(e)}", channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
     # 4단계: 작업일지 입력 또는 일반 대화 처리
     # ═══════════════════════════════════════════════════════════════════
     
