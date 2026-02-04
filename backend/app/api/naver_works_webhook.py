@@ -1165,6 +1165,23 @@ async def process_message(
         )
         return
     
+    # ═══════════════════════════════════════════════════════════════════
+    # 미완성 작업일지 상태에서 다른 의도 감지 시 상태 초기화
+    # ═══════════════════════════════════════════════════════════════════
+    if existing_state and existing_state.get("missing"):
+        # 미완성 작업일지 입력 중인데 다른 의도가 감지됨
+        non_continue_intents = [
+            "greeting", "help", "test", "chat_mode_start", "chat_mode_end",
+            "work_mode_start", "work_mode_end", "web_search", "dashboard", "chat"
+        ]
+        if intent in non_continue_intents or "취소" in text or "그만" in text or "안할래" in text:
+            add_debug_log("clearing_pending_state", {"reason": f"different intent: {intent}"})
+            conv_manager.clear_state(user_id)
+            if "취소" in text or "그만" in text or "안할래" in text:
+                await nw_client.send_text_message(channel_id, "✅ 입력을 취소했습니다.", channel_type)
+                return
+            # 새 의도 처리 계속
+    
     # 취소 요청
     if intent == "cancel":
         recent_log = get_user_recent_log(user_id)
