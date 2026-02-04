@@ -887,40 +887,27 @@ async def process_message(
                     by_vendor[vendor].append(log)
                     total_amount += log.get("합계", 0) or 0
                 
+                # 항상 요약 형태로 (네이버웍스 메시지 길이 제한: 약 2000자)
                 msg = f"📋 {period_name} 작업일지\n━━━━━━━━━━━━━━━━━━━━\n\n"
+                msg += f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
                 
-                # 메시지 길이 제한 (네이버웍스 API 제한 고려)
-                max_vendors = 10
-                vendor_count = 0
-                for vendor, vlogs in sorted(by_vendor.items(), key=lambda x: -sum(l.get("합계", 0) or 0 for l in x[1])):
-                    if vendor_count >= max_vendors:
-                        remaining = len(by_vendor) - max_vendors
-                        msg += f"... 외 {remaining}개 업체\n"
-                        break
+                # 업체별 요약만 (상위 8개)
+                msg += "🏢 업체별 현황:\n"
+                top_vendors = sorted(by_vendor.items(), key=lambda x: -sum(l.get("합계", 0) or 0 for l in x[1]))[:8]
+                for vendor, vlogs in top_vendors:
                     vendor_total = sum(l.get("합계", 0) or 0 for l in vlogs)
-                    msg += f"📦 {vendor} ({len(vlogs)}건, {vendor_total:,}원)\n"
-                    for log in vlogs[:5]:  # 업체당 최대 5건
-                        msg += f"  • {log.get('날짜', '-')} {log.get('분류', '-')} "
-                        if log.get('수량', 1) > 1:
-                            msg += f"{log.get('수량')}개 "
-                        msg += f"{log.get('합계', 0):,}원\n"
-                    if len(vlogs) > 5:
-                        msg += f"  ... 외 {len(vlogs) - 5}건\n"
-                    msg += "\n"
-                    vendor_count += 1
+                    msg += f"  • {vendor}: {len(vlogs)}건, {vendor_total:,}원\n"
                 
-                msg += f"━━━━━━━━━━━━━━━━━━━━\n📊 총 {len(logs)}건 | 💰 {total_amount:,}원"
+                if len(by_vendor) > 8:
+                    msg += f"  ... 외 {len(by_vendor) - 8}개 업체\n"
                 
-                # 메시지가 너무 길면 요약만
-                if len(msg) > 3000:
-                    msg = f"📋 {period_name} 작업일지\n━━━━━━━━━━━━━━━━━━━━\n\n"
-                    msg += f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
-                    msg += f"🏢 업체: {len(by_vendor)}개\n"
-                    top_vendors = sorted(by_vendor.items(), key=lambda x: -sum(l.get("합계", 0) or 0 for l in x[1]))[:5]
-                    for vendor, vlogs in top_vendors:
-                        vendor_total = sum(l.get("합계", 0) or 0 for l in vlogs)
-                        msg += f"  • {vendor}: {len(vlogs)}건, {vendor_total:,}원\n"
-                    msg += "\n💡 상세 내역은 파일로 다운받으세요."
+                msg += "\n💡 상세 내역은 '2'를 입력해 파일로 받으세요."
+                
+                # 혹시 그래도 길면 더 줄임
+                if len(msg) > 1500:
+                    msg = f"📋 {period_name}\n📊 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
+                    msg += f"🏢 {len(by_vendor)}개 업체\n"
+                    msg += "💡 상세: '2' 입력 → 파일 다운"
                 
                 conv_manager.clear_state(user_id)
                 await nw_client.send_text_message(channel_id, msg, channel_type)
