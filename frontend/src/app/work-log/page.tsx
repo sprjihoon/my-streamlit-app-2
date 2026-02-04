@@ -534,17 +534,23 @@ export default function WorkLogPage() {
               <div>
                 <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                   작업 종류 <span style={{ color: 'red' }}>*</span>
+                  <span style={{ fontSize: '0.75rem', color: '#666', marginLeft: '0.5rem' }}>
+                    (선택 또는 직접 입력)
+                  </span>
                 </label>
-                <select
+                <input
+                  type="text"
+                  list="work-type-list"
                   value={addForm.분류}
                   onChange={(e) => setAddForm({ ...addForm, 분류: e.target.value })}
+                  placeholder="선택하거나 직접 입력하세요"
                   style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-                >
-                  <option value="">작업 종류를 선택하세요</option>
+                />
+                <datalist id="work-type-list">
                   {filters?.work_types.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <div>
