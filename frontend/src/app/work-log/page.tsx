@@ -23,13 +23,29 @@ export default function WorkLogPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 필터 상태
-  const [periodFrom, setPeriodFrom] = useState('');
-  const [periodTo, setPeriodTo] = useState('');
+  // 당월 기본값 설정
+  const getDefaultDates = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    return {
+      from: firstDay.toISOString().split('T')[0],
+      to: now.toISOString().split('T')[0],
+    };
+  };
+
+  // 필터 상태 (당월 기본값)
+  const defaultDates = getDefaultDates();
+  const [periodFrom, setPeriodFrom] = useState(defaultDates.from);
+  const [periodTo, setPeriodTo] = useState(defaultDates.to);
   const [vendor, setVendor] = useState('');
   const [workType, setWorkType] = useState('');
   const [author, setAuthor] = useState('');
   const [source, setSource] = useState('');
+
+  // 페이징 상태
+  const [pageSize, setPageSize] = useState(50);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   // 편집 모달 상태
   const [editingLog, setEditingLog] = useState<WorkLog | null>(null);
@@ -61,10 +77,13 @@ export default function WorkLogPage() {
     loadData();
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (page = currentPage) => {
     try {
       setLoading(true);
       setError(null);
+
+      const limit = pageSize === 0 ? 10000 : pageSize; // 0 = 전체
+      const offset = pageSize === 0 ? 0 : (page - 1) * pageSize;
 
       const [logsRes, statsRes] = await Promise.all([
         getWorkLogs({
@@ -74,7 +93,8 @@ export default function WorkLogPage() {
           work_type: workType || undefined,
           author: author || undefined,
           source: source || undefined,
-          limit: 500,
+          limit,
+          offset,
         }),
         getWorkLogStats({
           period_from: periodFrom || undefined,
@@ -85,6 +105,7 @@ export default function WorkLogPage() {
       setLogs(logsRes.logs);
       setFilters(logsRes.filters);
       setStats(statsRes);
+      setTotalCount(logsRes.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : '데이터를 불러오는데 실패했습니다.');
     } finally {
@@ -93,18 +114,34 @@ export default function WorkLogPage() {
   };
 
   const handleSearch = () => {
-    loadData();
+    setCurrentPage(1);
+    loadData(1);
   };
 
   const handleReset = () => {
-    setPeriodFrom('');
-    setPeriodTo('');
+    const defaults = getDefaultDates();
+    setPeriodFrom(defaults.from);
+    setPeriodTo(defaults.to);
     setVendor('');
     setWorkType('');
     setAuthor('');
     setSource('');
-    setTimeout(() => loadData(), 100);
+    setCurrentPage(1);
+    setTimeout(() => loadData(1), 100);
   };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    loadData(page);
+  };
+
+  const handlePageSizeChange = (size: number) => {
+    setPageSize(size);
+    setCurrentPage(1);
+    setTimeout(() => loadData(1), 100);
+  };
+
+  const totalPages = pageSize === 0 ? 1 : Math.ceil(totalCount / pageSize);
 
   const handleEdit = (log: WorkLog) => {
     setEditingLog(log);
@@ -343,7 +380,7 @@ export default function WorkLogPage() {
             </select>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             onClick={handleSearch}
             style={{
@@ -370,6 +407,19 @@ export default function WorkLogPage() {
           >
             초기화
           </button>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+            >
+              <option value={50}>50개</option>
+              <option value={100}>100개</option>
+              <option value={200}>200개</option>
+              <option value={0}>전체</option>
+            </select>
+          </div>
         </div>
       </Card>
 
@@ -382,7 +432,11 @@ export default function WorkLogPage() {
           marginBottom: '0.5rem'
         }}>
           <h3 style={{ fontSize: '1rem', fontWeight: '600' }}>
-            작업일지 목록 ({logs.length}건)
+            작업일지 목록 
+            <span style={{ color: '#666', fontWeight: '400', marginLeft: '0.5rem' }}>
+              ({pageSize === 0 ? totalCount : `${logs.length}/${totalCount}`}건)
+              {totalPages > 1 && ` - ${currentPage}/${totalPages}페이지`}
+            </span>
           </h3>
           <button
             onClick={() => setShowAddModal(true)}
@@ -475,6 +529,110 @@ export default function WorkLogPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        
+        {/* 페이지네이션 */}
+        {totalPages > 1 && pageSize !== 0 && (
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            gap: '0.5rem', 
+            marginTop: '1rem',
+            paddingTop: '1rem',
+            borderTop: '1px solid #eee'
+          }}>
+            <button
+              onClick={() => handlePageChange(1)}
+              disabled={currentPage === 1}
+              style={{
+                padding: '0.5rem 0.75rem',
+                backgroundColor: currentPage === 1 ? '#e5e7eb' : '#f3f4f6',
+                color: currentPage === 1 ? '#9ca3af' : '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              ⟪
+            </button>
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              style={{
+                padding: '0.5rem 0.75rem',
+                backgroundColor: currentPage === 1 ? '#e5e7eb' : '#f3f4f6',
+                color: currentPage === 1 ? '#9ca3af' : '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              ◀
+            </button>
+            
+            {/* 페이지 번호들 */}
+            {(() => {
+              const pages = [];
+              const maxVisible = 5;
+              let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+              let end = Math.min(totalPages, start + maxVisible - 1);
+              
+              if (end - start + 1 < maxVisible) {
+                start = Math.max(1, end - maxVisible + 1);
+              }
+              
+              for (let i = start; i <= end; i++) {
+                pages.push(
+                  <button
+                    key={i}
+                    onClick={() => handlePageChange(i)}
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      backgroundColor: currentPage === i ? '#2563eb' : '#f3f4f6',
+                      color: currentPage === i ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontWeight: currentPage === i ? '600' : '400',
+                    }}
+                  >
+                    {i}
+                  </button>
+                );
+              }
+              return pages;
+            })()}
+            
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              style={{
+                padding: '0.5rem 0.75rem',
+                backgroundColor: currentPage === totalPages ? '#e5e7eb' : '#f3f4f6',
+                color: currentPage === totalPages ? '#9ca3af' : '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+              }}
+            >
+              ▶
+            </button>
+            <button
+              onClick={() => handlePageChange(totalPages)}
+              disabled={currentPage === totalPages}
+              style={{
+                padding: '0.5rem 0.75rem',
+                backgroundColor: currentPage === totalPages ? '#e5e7eb' : '#f3f4f6',
+                color: currentPage === totalPages ? '#9ca3af' : '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+              }}
+            >
+              ⟫
+            </button>
           </div>
         )}
       </Card>
