@@ -1058,28 +1058,23 @@ async def process_message(
         await nw_client.send_text_message(
             channel_id,
             "📚 작업일지봇 사용법\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔄 모드 전환:\n"
+            "• '작업모드' - 작업일지 입력/관리\n"
+            "• '대화모드' - 자유 대화/웹검색\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 작업모드 기능:\n\n"
             "✅ 작업 입력:\n"
             "• 틸리언 1톤하차 3만원\n"
-            "• 나블리 양품화 20개 800원\n"
-            "• 틸리언 하차 3만, 나블리 검수 2만 (다중)\n\n"
-            "📋 기간 조회:\n"
-            "• 오늘/이번주/지난달 작업 정리해줘\n"
-            "• 1월 20일부터 25일까지\n\n"
-            "🔍 검색:\n"
-            "• 틸리언 작업 보여줘\n"
-            "• 3만원짜리 뭐있어?\n\n"
-            "📊 통계/비교:\n"
-            "• 이번달 총 얼마야?\n"
-            "• 지난주랑 이번주 비교해줘\n\n"
-            "✏️ 수정/삭제:\n"
-            "• 방금꺼 취소/수정해줘\n"
-            "• 오늘 틸리언 전부 5만원으로 (일괄)\n\n"
-            "📋 복사:\n"
-            "• 어제꺼 오늘로 복사해줘\n\n"
-            "📝 메모:\n"
-            "• 방금꺼에 긴급 메모 추가\n\n"
-            "🌐 대시보드:\n"
-            "• '대시보드' 또는 '링크' 입력\n\n"
+            "• 다중입력: 틸리언 하차 3만, 나블리 검수 2만\n\n"
+            "📋 조회: 오늘/이번주 작업 정리해줘\n"
+            "🔍 검색: 틸리언 작업 보여줘\n"
+            "📊 비교: 지난주랑 이번주 비교해줘\n"
+            "✏️ 수정: 방금꺼 수정/취소해줘\n"
+            "📋 복사: 어제꺼 오늘로 복사해줘\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💬 대화모드 기능:\n\n"
+            "🌐 웹검색: ~에 대해 조사해줘\n"
+            "💭 대화: 자유롭게 질문하기\n\n"
             "💡 자연어로 편하게 말씀하세요!",
             channel_type
         )
@@ -1096,18 +1091,71 @@ async def process_message(
     
     # 대화모드 시작
     if intent == "chat_mode_start":
-        conv_manager.set_state(user_id=user_id, channel_id=channel_id, pending_data={"chat_mode": True}, missing=[], last_question="대화모드")
+        conv_manager.set_state(user_id=user_id, channel_id=channel_id, pending_data={"chat_mode": True}, missing=[], last_question="💬 대화모드")
         await nw_client.send_text_message(
             channel_id,
-            "💬 대화모드 시작! 무엇이든 물어보세요 😊\n\n📝 작업일지 형식은 자동 저장돼요!\n• '작업모드' 입력하면 종료",
+            "💬 대화모드 시작!\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            "자유롭게 대화하거나 질문해주세요 😊\n"
+            "• 웹 검색: \"~에 대해 조사해줘\"\n"
+            "• 일반 대화: 궁금한 것 물어보기\n\n"
+            "📋 작업을 하려면 '작업모드'를 입력하세요",
             channel_type
         )
         return
     
     # 대화모드 종료
     if intent == "chat_mode_end":
+        existing_state = conv_manager.get_state(user_id)
+        if existing_state and existing_state.get("pending_data", {}).get("chat_mode"):
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "💬 대화모드가 종료되었습니다.\n📋 '작업모드'로 작업을 시작하세요!", channel_type)
+        else:
+            await nw_client.send_text_message(channel_id, "현재 대화모드가 아닙니다.", channel_type)
+        return
+    
+    # 작업모드 시작
+    if intent == "work_mode_start":
+        # 대화모드였다면 종료
         conv_manager.clear_state(user_id)
-        await nw_client.send_text_message(channel_id, "📋 작업모드로 돌아왔습니다!", channel_type)
+        conv_manager.set_state(user_id=user_id, channel_id=channel_id, pending_data={"work_mode": True}, missing=[], last_question="📋 작업모드")
+        await nw_client.send_text_message(
+            channel_id,
+            "📋 작업모드 시작!\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            "작업일지를 입력해주세요.\n"
+            "예: 틸리언 1톤하차 3만\n\n"
+            "💬 대화가 필요하면 '대화모드'를 입력하세요",
+            channel_type
+        )
+        return
+    
+    # 작업모드 종료
+    if intent == "work_mode_end":
+        existing_state = conv_manager.get_state(user_id)
+        if existing_state and existing_state.get("pending_data", {}).get("work_mode"):
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "📋 작업모드가 종료되었습니다.\n💬 '대화모드'로 대화를 시작하세요!", channel_type)
+        else:
+            await nw_client.send_text_message(channel_id, "현재 작업모드가 아닙니다.", channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 대화모드 체크 - 작업 관련 의도가 감지되면 작업모드 전환 안내
+    # ═══════════════════════════════════════════════════════════════════
+    is_chat_mode = existing_state and existing_state.get("pending_data", {}).get("chat_mode")
+    work_intents = [
+        "work_log_entry", "work_log_query", "cancel", "edit", 
+        "search_query", "stats_query", "specific_edit", "specific_delete",
+        "multi_entry", "compare_periods", "undo", "add_memo", 
+        "bulk_edit", "copy_entry"
+    ]
+    
+    if is_chat_mode and intent in work_intents:
+        await nw_client.send_text_message(
+            channel_id,
+            f"📋 현재 대화모드입니다.\n\n"
+            f"작업을 하시려면 먼저 '작업모드'를 입력해주세요!",
+            channel_type
+        )
         return
     
     # 취소 요청
@@ -1722,6 +1770,19 @@ async def process_message(
     # ═══════════════════════════════════════════════════════════════════
     # 4단계: 작업일지 입력 또는 일반 대화 처리
     # ═══════════════════════════════════════════════════════════════════
+    
+    # 대화모드에서는 일반 대화만 처리
+    if is_chat_mode:
+        # 대화모드에서는 GPT 대화로 처리
+        add_debug_log("chat_mode_response", {"text": text})
+        try:
+            chat_response = await ai_parser.generate_chat_response(text, user_name)
+            add_debug_log("chat_response", {"response": chat_response})
+            await nw_client.send_text_message(channel_id, chat_response, channel_type)
+        except Exception as e:
+            add_debug_log("chat_response_error", error=str(e))
+            await nw_client.send_text_message(channel_id, "죄송합니다, 응답 생성 중 오류가 발생했습니다.", channel_type)
+        return
     
     # AI 파싱
     try:
