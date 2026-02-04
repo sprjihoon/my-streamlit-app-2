@@ -138,6 +138,67 @@ async def send_morning_greeting():
         print(f"[Scheduler] Morning greeting error: {e}")
 
 
+async def send_daily_report():
+    """일일 작업일지 리포트 전송 (오후 6시)"""
+    now = datetime.now()
+    if not is_workday(now):
+        print(f"[Scheduler] Skipping daily report - not a workday ({now.strftime('%Y-%m-%d %A')})")
+        return
+    
+    channel_id = os.getenv("DAILY_REPORT_CHANNEL_ID") or os.getenv("MORNING_GREETING_CHANNEL_ID")
+    if not channel_id:
+        print("[Scheduler] DAILY_REPORT_CHANNEL_ID not set, skipping report")
+        return
+    
+    try:
+        from logic.db import get_connection
+        
+        today = now.strftime("%Y-%m-%d")
+        
+        with get_connection() as con:
+            # 오늘 통계
+            row = con.execute(
+                "SELECT COUNT(*), COALESCE(SUM(합계), 0) FROM work_log WHERE 날짜 = ?",
+                (today,)
+            ).fetchone()
+            total_count = row[0] or 0
+            total_amount = row[1] or 0
+            
+            # 업체별 통계 (상위 5개)
+            vendor_rows = con.execute(
+                """SELECT 업체명, COUNT(*), SUM(합계) FROM work_log 
+                   WHERE 날짜 = ? GROUP BY 업체명 ORDER BY SUM(합계) DESC LIMIT 5""",
+                (today,)
+            ).fetchall()
+        
+        if total_count == 0:
+            report = f"📊 {now.strftime('%m월 %d일')} 일일 리포트\n━━━━━━━━━━━━━━━━━━━━\n\n오늘 작업 내역이 없습니다."
+        else:
+            report = f"📊 {now.strftime('%m월 %d일')} 일일 리포트\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            report += f"📝 총 {total_count}건 | 💰 {total_amount:,}원\n\n"
+            
+            if vendor_rows:
+                report += "🏢 업체별 현황:\n"
+                for vendor, count, amount in vendor_rows:
+                    report += f"• {vendor}: {count}건 ({amount:,}원)\n"
+            
+            report += "\n수고하셨습니다! 🙏"
+        
+        nw_client = get_naver_works_client()
+        channel_ids = [cid.strip() for cid in channel_id.split(",") if cid.strip()]
+        
+        for cid in channel_ids:
+            try:
+                channel_type = "user" if "-" in cid and len(cid) > 30 else "group"
+                await nw_client.send_text_message(cid, report, channel_type)
+                print(f"[Scheduler] Daily report sent to {cid}")
+            except Exception as e:
+                print(f"[Scheduler] Failed to send report to {cid}: {e}")
+                
+    except Exception as e:
+        print(f"[Scheduler] Daily report error: {e}")
+
+
 async def scheduler_loop():
     """스케줄러 메인 루프"""
     print("[Scheduler] Started")
@@ -149,6 +210,10 @@ async def scheduler_loop():
         if now.hour == 10 and now.minute == 0:
             await send_morning_greeting()
             # 1분 대기 (중복 실행 방지)
+            await asyncio.sleep(60)
+        # 오후 6시 일일 리포트 (18:00 ~ 18:01 사이)
+        elif now.hour == 18 and now.minute == 0:
+            await send_daily_report()
             await asyncio.sleep(60)
         else:
             # 30초마다 체크

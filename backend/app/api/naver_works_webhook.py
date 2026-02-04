@@ -539,6 +539,157 @@ def find_specific_log(
         return None
 
 
+def get_price_history(vendor: str, work_type: str, limit: int = 20) -> List[int]:
+    """업체+작업종류별 과거 단가 이력 조회 (이상치 탐지용)"""
+    with get_connection() as con:
+        rows = con.execute(
+            """SELECT 단가 FROM work_log 
+               WHERE 업체명 = ? AND 분류 = ? AND 단가 > 0
+               ORDER BY id DESC LIMIT ?""",
+            (vendor, work_type, limit)
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
+
+def add_memo_to_log(log_id: int, memo: str) -> bool:
+    """작업일지에 메모(비고) 추가"""
+    with get_connection() as con:
+        # 기존 비고 가져오기
+        existing = con.execute("SELECT 비고1 FROM work_log WHERE id = ?", (log_id,)).fetchone()
+        if existing:
+            old_memo = existing[0] or ""
+            new_memo = f"{old_memo} [{memo}]" if old_memo else memo
+            con.execute("UPDATE work_log SET 비고1 = ? WHERE id = ?", (new_memo, log_id))
+            con.commit()
+            return True
+        return False
+
+
+def bulk_update_logs(
+    conditions: Dict[str, Any],
+    updates: Dict[str, Any],
+    user_id: str = None
+) -> int:
+    """조건에 맞는 여러 건 일괄 수정"""
+    where_parts = []
+    where_params = []
+    
+    if conditions.get("vendor"):
+        where_parts.append("업체명 LIKE ?")
+        where_params.append(f"%{conditions['vendor']}%")
+    if conditions.get("work_type"):
+        where_parts.append("분류 LIKE ?")
+        where_params.append(f"%{conditions['work_type']}%")
+    if conditions.get("date"):
+        where_parts.append("날짜 = ?")
+        where_params.append(conditions["date"])
+    if conditions.get("start_date"):
+        where_parts.append("날짜 >= ?")
+        where_params.append(conditions["start_date"])
+    if conditions.get("end_date"):
+        where_parts.append("날짜 <= ?")
+        where_params.append(conditions["end_date"])
+    if user_id:
+        where_parts.append("works_user_id = ?")
+        where_params.append(user_id)
+    
+    if not where_parts:
+        return 0
+    
+    set_parts = []
+    set_params = []
+    
+    if updates.get("unit_price") is not None:
+        set_parts.append("단가 = ?")
+        set_params.append(updates["unit_price"])
+        # 합계도 자동 업데이트
+        set_parts.append("합계 = 수량 * ?")
+        set_params.append(updates["unit_price"])
+    
+    if not set_parts:
+        return 0
+    
+    with get_connection() as con:
+        cursor = con.execute(
+            f"UPDATE work_log SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}",
+            set_params + where_params
+        )
+        con.commit()
+        return cursor.rowcount
+
+
+def copy_work_logs(
+    source_conditions: Dict[str, Any],
+    target_date: str
+) -> List[int]:
+    """조건에 맞는 작업일지를 다른 날짜로 복사"""
+    where_parts = []
+    params = []
+    
+    if source_conditions.get("date"):
+        where_parts.append("날짜 = ?")
+        params.append(source_conditions["date"])
+    if source_conditions.get("start_date") and source_conditions.get("end_date"):
+        where_parts.append("날짜 >= ? AND 날짜 <= ?")
+        params.extend([source_conditions["start_date"], source_conditions["end_date"]])
+    if source_conditions.get("vendor"):
+        where_parts.append("업체명 LIKE ?")
+        params.append(f"%{source_conditions['vendor']}%")
+    if source_conditions.get("work_type"):
+        where_parts.append("분류 LIKE ?")
+        params.append(f"%{source_conditions['work_type']}%")
+    
+    if not where_parts:
+        return []
+    
+    new_ids = []
+    저장시간 = datetime.now().isoformat()
+    
+    with get_connection() as con:
+        rows = con.execute(
+            f"""SELECT 업체명, 분류, 단가, 수량, 합계, 비고1, 작성자, 출처, works_user_id
+               FROM work_log WHERE {' AND '.join(where_parts)}""",
+            params
+        ).fetchall()
+        
+        for row in rows:
+            cursor = con.execute(
+                """INSERT INTO work_log (날짜, 업체명, 분류, 단가, 수량, 합계, 비고1, 작성자, 저장시간, 출처, works_user_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (target_date, row[0], row[1], row[2], row[3], row[4], 
+                 f"{row[5] or ''} [복사됨]", row[6], 저장시간, "bot_copy", row[8])
+            )
+            new_ids.append(cursor.lastrowid)
+        
+        con.commit()
+    
+    return new_ids
+
+
+def get_undo_history(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """사용자의 최근 변경 이력 조회"""
+    with get_connection() as con:
+        rows = con.execute(
+            """SELECT id, 변경유형, 변경전, 변경후, 변경자, 변경시간, work_log_id
+               FROM work_log_history 
+               WHERE works_user_id = ?
+               ORDER BY id DESC LIMIT ?""",
+            (user_id, limit)
+        ).fetchall()
+        
+        return [
+            {"id": r[0], "type": r[1], "before": r[2], "after": r[3], 
+             "user": r[4], "time": r[5], "log_id": r[6]}
+            for r in rows
+        ]
+
+
+def get_dashboard_url() -> str:
+    """대시보드 URL 반환"""
+    import os
+    return os.getenv("FRONTEND_URL", "https://my-streamlit-app-2.vercel.app")
+
+
 async def send_welcome_message(channel_id: str):
     """봇 초대 시 환영 메시지 전송"""
     try:
@@ -808,6 +959,60 @@ async def process_message(
             await nw_client.send_text_message(channel_id, "🚫 저장하지 않았습니다.", channel_type)
             return
     
+    # 일괄 수정 확인 대기 중
+    if existing_state and existing_state.get("last_question") == "⚠️ 일괄 수정 확인":
+        intent_context = {
+            "last_question": "일괄 수정할까요?",
+            "options": ["예: 수정", "아니오: 취소"],
+            "pending_data": existing_state.get("pending_data", {})
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        
+        if intent_result.get("intent") == "confirm_yes":
+            pending = existing_state.get("pending_data", {})
+            conditions = pending.get("conditions", {})
+            new_price = pending.get("new_price")
+            
+            updated = bulk_update_logs(conditions, {"unit_price": new_price}, user_id)
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(
+                channel_id, 
+                f"✅ {updated}건 일괄 수정 완료!\n단가: {new_price:,}원",
+                channel_type
+            )
+            return
+        elif intent_result.get("intent") == "confirm_no":
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "🚫 일괄 수정을 취소했습니다.", channel_type)
+            return
+    
+    # 복사 확인 대기 중
+    if existing_state and existing_state.get("last_question") == "📋 복사 확인":
+        intent_context = {
+            "last_question": "복사할까요?",
+            "options": ["예: 복사", "아니오: 취소"],
+            "pending_data": existing_state.get("pending_data", {})
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        
+        if intent_result.get("intent") == "confirm_yes":
+            pending = existing_state.get("pending_data", {})
+            source = pending.get("source", {})
+            target_date = pending.get("target_date")
+            
+            new_ids = copy_work_logs(source, target_date)
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(
+                channel_id, 
+                f"✅ {len(new_ids)}건 복사 완료!\n대상 날짜: {target_date}",
+                channel_type
+            )
+            return
+        elif intent_result.get("intent") == "confirm_no":
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "🚫 복사를 취소했습니다.", channel_type)
+            return
+    
     # ═══════════════════════════════════════════════════════════════════
     # 2단계: AI로 메시지 의도 분류
     # ═══════════════════════════════════════════════════════════════════
@@ -849,21 +1054,26 @@ async def process_message(
             "📚 작업일지봇 사용법\n━━━━━━━━━━━━━━━━━━━━\n\n"
             "✅ 작업 입력:\n"
             "• 틸리언 1톤하차 3만원\n"
-            "• 나블리 양품화 20개 800원\n\n"
+            "• 나블리 양품화 20개 800원\n"
+            "• 틸리언 하차 3만, 나블리 검수 2만 (다중)\n\n"
             "📋 기간 조회:\n"
             "• 오늘/이번주/지난달 작업 정리해줘\n"
             "• 1월 20일부터 25일까지\n\n"
             "🔍 검색:\n"
             "• 틸리언 작업 보여줘\n"
-            "• 2월 4일 나블리 있어?\n"
             "• 3만원짜리 뭐있어?\n\n"
-            "📊 통계:\n"
+            "📊 통계/비교:\n"
             "• 이번달 총 얼마야?\n"
-            "• 오늘 몇건 했어?\n"
-            "• 가장 많이 일한 업체\n\n"
+            "• 지난주랑 이번주 비교해줘\n\n"
             "✏️ 수정/삭제:\n"
             "• 방금꺼 취소/수정해줘\n"
-            "• 오늘 틸리언 3만원 삭제해줘\n\n"
+            "• 오늘 틸리언 전부 5만원으로 (일괄)\n\n"
+            "📋 복사:\n"
+            "• 어제꺼 오늘로 복사해줘\n\n"
+            "📝 메모:\n"
+            "• 방금꺼에 긴급 메모 추가\n\n"
+            "🌐 대시보드:\n"
+            "• '대시보드' 또는 '링크' 입력\n\n"
             "💡 자연어로 편하게 말씀하세요!",
             channel_type
         )
@@ -1166,6 +1376,257 @@ async def process_message(
         return
     
     # ═══════════════════════════════════════════════════════════════════
+    # 다중 건 입력
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "multi_entry":
+        multi_result = await ai_parser.parse_multi_entry(text)
+        add_debug_log("multi_entry_parsed", data=multi_result)
+        
+        entries = multi_result.get("entries", [])
+        if not entries:
+            await nw_client.send_text_message(channel_id, "❌ 작업 내용을 파싱하지 못했습니다.", channel_type)
+            return
+        
+        saved_count = 0
+        total_amount = 0
+        results = []
+        
+        for entry in entries:
+            if entry.get("vendor") and entry.get("work_type") and entry.get("unit_price"):
+                try:
+                    # 이상치 체크
+                    price_history = get_price_history(entry["vendor"], entry["work_type"])
+                    anomaly = await ai_parser.check_anomaly(
+                        entry["vendor"], entry["work_type"], entry["unit_price"], price_history
+                    )
+                    
+                    entry_total = entry.get("qty", 1) * entry["unit_price"]
+                    
+                    # 이상치 경고 있어도 일단 저장 (다중 입력이므로)
+                    record_id = save_work_log(entry, user_id, user_name)
+                    saved_count += 1
+                    total_amount += entry_total
+                    
+                    warning = f" ⚠️{anomaly['reason']}" if anomaly.get("is_anomaly") else ""
+                    results.append(f"✅ {entry['vendor']} {entry['work_type']} {entry_total:,}원{warning}")
+                except Exception as e:
+                    results.append(f"❌ {entry.get('vendor', '?')} {entry.get('work_type', '?')}: {str(e)}")
+        
+        msg = f"📝 다중 입력 결과\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg += "\n".join(results)
+        msg += f"\n\n📊 {saved_count}건 저장 | 💰 {total_amount:,}원"
+        
+        await nw_client.send_text_message(channel_id, msg, channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 대시보드 링크
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "dashboard":
+        dashboard_url = get_dashboard_url()
+        await nw_client.send_text_message(
+            channel_id,
+            f"🌐 대시보드 링크\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📊 작업일지 관리:\n{dashboard_url}/work-log\n\n"
+            f"📈 업로드/설정:\n{dashboard_url}\n\n"
+            f"💡 링크를 클릭하면 웹 페이지로 이동합니다.",
+            channel_type
+        )
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 기간 비교
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "compare_periods":
+        compare_params = await ai_parser.parse_compare_periods(text)
+        add_debug_log("compare_periods_parsed", data=compare_params)
+        
+        if compare_params.get("error") or not compare_params.get("period1") or not compare_params.get("period2"):
+            await nw_client.send_text_message(channel_id, "❌ 비교할 기간을 파악하지 못했습니다.", channel_type)
+            return
+        
+        p1 = compare_params["period1"]
+        p2 = compare_params["period2"]
+        
+        stats1 = get_work_log_stats(start_date=p1.get("start_date"), end_date=p1.get("end_date"))
+        stats2 = get_work_log_stats(start_date=p2.get("start_date"), end_date=p2.get("end_date"))
+        
+        # 변화율 계산
+        count_diff = stats2["total_count"] - stats1["total_count"]
+        amount_diff = stats2["total_amount"] - stats1["total_amount"]
+        count_rate = (count_diff / stats1["total_count"] * 100) if stats1["total_count"] > 0 else 0
+        amount_rate = (amount_diff / stats1["total_amount"] * 100) if stats1["total_amount"] > 0 else 0
+        
+        count_arrow = "📈" if count_diff > 0 else "📉" if count_diff < 0 else "➡️"
+        amount_arrow = "📈" if amount_diff > 0 else "📉" if amount_diff < 0 else "➡️"
+        
+        msg = f"📊 기간 비교\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg += f"📅 {p1.get('name', '기간1')}\n"
+        msg += f"   • {stats1['total_count']}건 | {stats1['total_amount']:,}원\n\n"
+        msg += f"📅 {p2.get('name', '기간2')}\n"
+        msg += f"   • {stats2['total_count']}건 | {stats2['total_amount']:,}원\n\n"
+        msg += f"━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"{count_arrow} 건수: {count_diff:+}건 ({count_rate:+.1f}%)\n"
+        msg += f"{amount_arrow} 금액: {amount_diff:+,}원 ({amount_rate:+.1f}%)"
+        
+        await nw_client.send_text_message(channel_id, msg, channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 실행취소 히스토리
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "undo":
+        history = get_undo_history(user_id, limit=5)
+        
+        if not history:
+            await nw_client.send_text_message(channel_id, "📜 변경 이력이 없습니다.", channel_type)
+            return
+        
+        msg = f"📜 최근 변경 이력\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        for i, h in enumerate(history, 1):
+            time_str = h.get("time", "")[:16] if h.get("time") else ""
+            msg += f"{i}. [{h.get('type', '?')}] {time_str}\n"
+            if h.get("before"):
+                msg += f"   전: {h['before'][:30]}...\n" if len(str(h.get('before', ''))) > 30 else f"   전: {h.get('before')}\n"
+        
+        msg += f"\n💡 특정 작업을 되돌리려면 조건을 알려주세요.\n예: '오늘 틸리언 삭제해줘'"
+        
+        await nw_client.send_text_message(channel_id, msg, channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 작업 메모 추가
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "add_memo":
+        query_params = await ai_parser.parse_advanced_query(text, "add_memo")
+        add_debug_log("add_memo_params", data=query_params)
+        
+        # 메모 내용 추출 (메시지에서 "메모", "비고" 다음 내용)
+        import re
+        memo_match = re.search(r'(?:메모|비고)[에\s:]+["\']?(.+?)["\']?$', text, re.IGNORECASE)
+        memo_content = memo_match.group(1).strip() if memo_match else ""
+        
+        if not memo_content:
+            await nw_client.send_text_message(channel_id, "❓ 어떤 메모를 추가할까요?\n예: '방금꺼에 긴급 메모 추가'", channel_type)
+            return
+        
+        # 최근 작업 또는 조건으로 찾기
+        log = find_specific_log(
+            vendor=query_params.get("vendor"),
+            work_type=query_params.get("work_type"),
+            date=query_params.get("date"),
+            user_id=user_id
+        )
+        
+        if not log:
+            # 최근 저장한 것 찾기
+            recent = _recent_saves.get(user_id)
+            if recent:
+                log = {"id": recent.get("log_id")}
+        
+        if log and log.get("id"):
+            if add_memo_to_log(log["id"], memo_content):
+                await nw_client.send_text_message(channel_id, f"📝 메모 추가됨: [{memo_content}]", channel_type)
+            else:
+                await nw_client.send_text_message(channel_id, "❌ 메모 추가 실패", channel_type)
+        else:
+            await nw_client.send_text_message(channel_id, "🔍 메모를 추가할 작업을 찾지 못했습니다.", channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 일괄 수정
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "bulk_edit":
+        query_params = await ai_parser.parse_advanced_query(text, "bulk_edit")
+        add_debug_log("bulk_edit_params", data=query_params)
+        
+        # 수정할 조건과 새 값
+        conditions = {
+            "vendor": query_params.get("vendor"),
+            "work_type": query_params.get("work_type"),
+            "date": query_params.get("date"),
+            "start_date": query_params.get("start_date"),
+            "end_date": query_params.get("end_date"),
+        }
+        
+        new_price = query_params.get("price")
+        
+        if not new_price:
+            await nw_client.send_text_message(
+                channel_id, 
+                "❓ 어떤 값으로 수정할까요?\n예: '오늘 틸리언 전부 5만원으로'",
+                channel_type
+            )
+            return
+        
+        # 먼저 몇 건인지 확인
+        matching_logs = search_work_logs(**{k: v for k, v in conditions.items() if v}, limit=100)
+        
+        if not matching_logs:
+            await nw_client.send_text_message(channel_id, "🔍 조건에 맞는 작업이 없습니다.", channel_type)
+            return
+        
+        # 확인 요청
+        conv_manager.set_state(
+            user_id=user_id, channel_id=channel_id,
+            pending_data={"bulk_edit_mode": True, "conditions": conditions, "new_price": new_price, "count": len(matching_logs)},
+            missing=[], last_question="⚠️ 일괄 수정 확인"
+        )
+        
+        await nw_client.send_text_message(
+            channel_id,
+            f"⚠️ 일괄 수정 확인\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📝 {len(matching_logs)}건을 {new_price:,}원으로 수정합니다.\n\n"
+            f"진행하시겠어요?",
+            channel_type
+        )
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 복사 기능
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "copy_entry":
+        copy_params = await ai_parser.parse_copy_request(text)
+        add_debug_log("copy_params", data=copy_params)
+        
+        if copy_params.get("error"):
+            await nw_client.send_text_message(channel_id, "❌ 복사 조건을 파악하지 못했습니다.", channel_type)
+            return
+        
+        source_conditions = {
+            "date": copy_params.get("source_date"),
+            "start_date": copy_params.get("source_period_start"),
+            "end_date": copy_params.get("source_period_end"),
+            "vendor": copy_params.get("vendor"),
+            "work_type": copy_params.get("work_type"),
+        }
+        
+        target_date = copy_params.get("target_date") or datetime.now().strftime("%Y-%m-%d")
+        
+        # 먼저 몇 건인지 확인
+        matching_logs = search_work_logs(**{k: v for k, v in source_conditions.items() if v}, limit=100)
+        
+        if not matching_logs:
+            await nw_client.send_text_message(channel_id, "🔍 복사할 작업을 찾지 못했습니다.", channel_type)
+            return
+        
+        # 확인 요청
+        conv_manager.set_state(
+            user_id=user_id, channel_id=channel_id,
+            pending_data={"copy_mode": True, "source": source_conditions, "target_date": target_date, "count": len(matching_logs)},
+            missing=[], last_question="📋 복사 확인"
+        )
+        
+        await nw_client.send_text_message(
+            channel_id,
+            f"📋 복사 확인\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📝 {len(matching_logs)}건을 {target_date}로 복사합니다.\n\n"
+            f"진행하시겠어요?",
+            channel_type
+        )
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
     # 4단계: 작업일지 입력 또는 일반 대화 처리
     # ═══════════════════════════════════════════════════════════════════
     
@@ -1420,6 +1881,128 @@ async def process_postback(
         pass
 
 
+async def process_excel_upload(
+    user_id: str,
+    channel_id: str, 
+    file_url: str,
+    file_name: str,
+    channel_type: str
+):
+    """엑셀 파일 업로드 처리 (작업일지 일괄 등록)"""
+    import httpx
+    import pandas as pd
+    from io import BytesIO
+    
+    try:
+        nw_client = get_naver_works_client()
+        
+        # 파일 다운로드
+        token = await nw_client._get_access_token()
+        async with httpx.AsyncClient() as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            response = await client.get(file_url, headers=headers)
+            
+            if response.status_code != 200:
+                await nw_client.send_text_message(
+                    channel_id,
+                    f"❌ 파일 다운로드 실패 (상태: {response.status_code})",
+                    channel_type
+                )
+                return
+        
+        # 엑셀 읽기
+        df = pd.read_excel(BytesIO(response.content))
+        
+        # 필수 컬럼 확인
+        required_cols = ["날짜", "업체명", "분류", "단가"]
+        missing_cols = [c for c in required_cols if c not in df.columns]
+        
+        if missing_cols:
+            await nw_client.send_text_message(
+                channel_id,
+                f"❌ 필수 컬럼 누락: {', '.join(missing_cols)}\n\n"
+                f"필요한 컬럼: 날짜, 업체명, 분류, 단가, 수량(선택), 비고(선택)",
+                channel_type
+            )
+            return
+        
+        # 데이터 처리
+        saved_count = 0
+        error_count = 0
+        total_amount = 0
+        
+        # 사용자 이름 가져오기
+        user_name = None
+        try:
+            user_info = await nw_client.get_user_info(user_id)
+            user_name = user_info.get("userName")
+        except:
+            pass
+        
+        for _, row in df.iterrows():
+            try:
+                날짜 = row.get("날짜")
+                if pd.isna(날짜):
+                    continue
+                    
+                # 날짜 포맷 변환
+                if hasattr(날짜, 'strftime'):
+                    날짜 = 날짜.strftime("%Y-%m-%d")
+                else:
+                    날짜 = str(날짜)[:10]
+                
+                업체명 = str(row.get("업체명", "")).strip()
+                분류 = str(row.get("분류", "")).strip()
+                단가 = int(row.get("단가", 0) or 0)
+                수량 = int(row.get("수량", 1) or 1)
+                비고 = str(row.get("비고", "") or "")
+                
+                if not 업체명 or not 분류:
+                    continue
+                
+                합계 = 단가 * 수량
+                
+                data = {
+                    "vendor": 업체명,
+                    "work_type": 분류,
+                    "unit_price": 단가,
+                    "qty": 수량,
+                    "date": 날짜,
+                    "remark": f"[엑셀업로드] {비고}" if 비고 else "[엑셀업로드]"
+                }
+                
+                save_work_log(data, user_id, user_name)
+                saved_count += 1
+                total_amount += 합계
+                
+            except Exception as e:
+                error_count += 1
+                add_debug_log("excel_row_error", error=str(e))
+        
+        # 결과 메시지
+        await nw_client.send_text_message(
+            channel_id,
+            f"📊 엑셀 업로드 완료\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📎 파일: {file_name}\n"
+            f"✅ 저장: {saved_count}건\n"
+            f"❌ 오류: {error_count}건\n"
+            f"💰 합계: {total_amount:,}원",
+            channel_type
+        )
+        
+    except Exception as e:
+        add_debug_log("excel_upload_error", error=f"{type(e).__name__}: {str(e)}")
+        try:
+            nw_client = get_naver_works_client()
+            await nw_client.send_text_message(
+                channel_id,
+                f"❌ 엑셀 처리 오류: {str(e)}",
+                channel_type
+            )
+        except:
+            pass
+
+
 # ─────────────────────────────────────
 # API Endpoints
 # ─────────────────────────────────────
@@ -1521,6 +2104,33 @@ async def naver_works_webhook(
                     user_id,
                     channel_id,
                     postback,
+                    channel_type
+                )
+        
+        elif content_type == "file":
+            # 파일 업로드 처리 (엑셀 일괄 업로드)
+            file_info = content.get("file", {})
+            file_name = file_info.get("name", "")
+            file_url = file_info.get("resourceUrl", "")
+            
+            add_debug_log("file_message", {"name": file_name, "url": file_url})
+            
+            if file_name.endswith((".xlsx", ".xls")):
+                background_tasks.add_task(
+                    process_excel_upload,
+                    user_id,
+                    channel_id,
+                    file_url,
+                    file_name,
+                    channel_type
+                )
+            else:
+                # 엑셀이 아닌 파일
+                nw_client = get_naver_works_client()
+                background_tasks.add_task(
+                    nw_client.send_text_message,
+                    channel_id,
+                    f"📎 파일 수신: {file_name}\n\n📊 엑셀 파일(.xlsx)을 보내주시면 작업일지를 일괄 등록해드려요!",
                     channel_type
                 )
     

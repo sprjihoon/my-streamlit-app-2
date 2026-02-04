@@ -428,7 +428,21 @@ class AIParser:
     예: "오늘 틸리언 3만원 → 5만원으로", "어제 나블리꺼 수정해줘"
 16. "specific_delete" - 특정 건 삭제 (조건으로 특정 작업을 삭제)
     예: "오늘 틸리언 3만원꺼 삭제해줘", "어제 나블리 양품화 삭제"
-17. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
+17. "multi_entry" - 다중 건 입력 (한번에 여러 작업 입력, 쉼표/그리고로 구분)
+    예: "틸리언 하차 3만, 나블리 양품화 2만", "A업체 검수 1만 그리고 B업체 하차 5만"
+18. "dashboard" - 대시보드/웹페이지 링크 요청
+    예: "대시보드", "웹페이지", "링크 줘", "사이트 주소"
+19. "compare_periods" - 기간 비교 요청
+    예: "지난주랑 이번주 비교해줘", "1월이랑 2월 비교", "어제랑 오늘 비교"
+20. "undo" - 실행취소 (여러 단계 되돌리기)
+    예: "되돌려줘", "2개 전 것도 취소", "히스토리 보여줘", "최근 변경 취소"
+21. "add_memo" - 작업에 메모 추가
+    예: "방금꺼에 긴급 메모 추가", "틸리언꺼 비고에 특이사항 적어줘"
+22. "bulk_edit" - 일괄 수정 (여러 건 한번에 수정)
+    예: "오늘 틸리언 전부 5만원으로", "이번주 나블리 단가 일괄 수정"
+23. "copy_entry" - 복사 기능
+    예: "어제꺼 오늘로 복사", "지난주 틸리언꺼 복사해줘"
+24. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
 
 ## 응답 형식 (JSON)
 {{
@@ -437,20 +451,21 @@ class AIParser:
   "reason": "판단 이유 (짧게)",
   "data": {{
     // intent별 추가 데이터
-    // search_query: {{"vendor": "업체명", "work_type": "작업종류", "date": "날짜", "price": 금액}}
-    // stats_query: {{"type": "total/count/top_vendor/compare", "period": "기간"}}
-    // specific_edit/delete: {{"vendor": "업체명", "work_type": "작업종류", "date": "날짜", "price": 금액}}
+    // multi_entry: {{"entries": ["틸리언 하차 3만", "나블리 양품화 2만"]}}
+    // compare_periods: {{"period1": "지난주", "period2": "이번주"}}
+    // copy_entry: {{"source_date": "어제", "target_date": "오늘", "vendor": "틸리언"}}
   }}
 }}
 
 ## 판단 규칙
-- "업체명 + 작업 + 금액" 형식이면 work_log_entry
-- "정리", "조회", "보여줘" + 날짜만 있으면 work_log_query
-- "업체명 + 조회/있어/보여줘" 또는 "날짜 + 업체명" 형태면 search_query
-- "총 얼마", "몇건", "가장 많이", "비교" 등이면 stats_query
-- "수정해줘" + 특정 조건이면 specific_edit
-- "삭제해줘" + 특정 조건이면 specific_delete
-- 짧은 인사말은 greeting
+- "업체명 + 작업 + 금액" 형식이 여러 개면 multi_entry (쉼표, 그리고, 또 등으로 구분)
+- "업체명 + 작업 + 금액" 형식이 1개면 work_log_entry
+- "대시보드", "링크", "사이트", "웹" 등이면 dashboard
+- "비교" + 두 개의 기간이면 compare_periods
+- "되돌려", "undo", "히스토리" 등이면 undo
+- "메모 추가", "비고에" 등이면 add_memo
+- "전부", "일괄", "모두 수정" 등이면 bulk_edit
+- "복사", "복제" 등이면 copy_entry
 - 애매하면 chat
 
 반드시 유효한 JSON만 출력하세요."""
@@ -735,6 +750,226 @@ class AIParser:
                 "confidence": 0.0,
                 "reason": f"Error: {str(e)}"
             }
+
+    async def parse_multi_entry(
+        self,
+        message: str
+    ) -> Dict[str, Any]:
+        """
+        다중 건 입력 파싱 (한 메시지에서 여러 작업 추출)
+        
+        Args:
+            message: "틸리언 하차 3만, 나블리 양품화 2만" 형태의 메시지
+        
+        Returns:
+            {"entries": [{"vendor": ..., "work_type": ..., ...}, ...]}
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        multi_prompt = f"""메시지에서 여러 작업일지 항목을 추출하세요.
+
+## 오늘 날짜: {today}
+
+## 메시지
+"{message}"
+
+## 추출 규칙
+- 쉼표(,), "그리고", "또", "랑" 등으로 구분된 여러 작업을 각각 추출
+- 각 항목에서: vendor(업체명), work_type(작업종류), qty(수량, 없으면 1), unit_price(단가), remark(비고)
+
+## 응답 형식 (JSON)
+{{
+  "entries": [
+    {{"vendor": "업체명1", "work_type": "작업1", "qty": 1, "unit_price": 30000, "date": "{today}", "remark": null}},
+    {{"vendor": "업체명2", "work_type": "작업2", "qty": 10, "unit_price": 800, "date": "{today}", "remark": null}}
+  ],
+  "count": 2
+}}
+
+## 예시
+- "틸리언 하차 3만, 나블리 양품화 20개 800원" → 2건
+- "A업체 검수 1만 그리고 B업체 하차 5만" → 2건
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "다중 작업일지를 정확하게 파싱하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": multi_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=500
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            # 업체명 별칭 매핑 적용
+            if result.get("entries"):
+                for entry in result["entries"]:
+                    if entry.get("vendor"):
+                        entry["vendor"] = self._map_vendor_alias(entry["vendor"])
+            
+            return result
+            
+        except Exception as e:
+            return {"entries": [], "count": 0, "error": str(e)}
+
+    async def parse_compare_periods(
+        self,
+        message: str
+    ) -> Dict[str, Any]:
+        """
+        기간 비교 요청 파싱
+        
+        Returns:
+            {"period1": {...}, "period2": {...}}
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        compare_prompt = f"""메시지에서 비교할 두 기간을 추출하세요.
+
+## 오늘 날짜: {today}
+
+## 메시지
+"{message}"
+
+## 응답 형식 (JSON)
+{{
+  "period1": {{
+    "name": "지난주",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD"
+  }},
+  "period2": {{
+    "name": "이번주",
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD"
+  }}
+}}
+
+## 예시
+- "지난주랑 이번주 비교" → 지난주 월~일, 이번주 월~오늘
+- "1월이랑 2월 비교" → 1월 1일~31일, 2월 1일~오늘
+- "어제랑 오늘" → 어제, 오늘
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "기간 비교를 파싱하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": compare_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=300
+            )
+            
+            return json.loads(response.choices[0].message.content)
+            
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def parse_copy_request(
+        self,
+        message: str
+    ) -> Dict[str, Any]:
+        """
+        복사 요청 파싱
+        
+        Returns:
+            {"source_date": "어제", "target_date": "오늘", "vendor": "틸리언", ...}
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        copy_prompt = f"""복사 요청에서 조건을 추출하세요.
+
+## 오늘 날짜: {today}
+
+## 메시지
+"{message}"
+
+## 응답 형식 (JSON)
+{{
+  "source_date": "YYYY-MM-DD (복사할 원본 날짜)",
+  "source_period_start": "YYYY-MM-DD (기간인 경우 시작)",
+  "source_period_end": "YYYY-MM-DD (기간인 경우 끝)",
+  "target_date": "YYYY-MM-DD (복사될 대상 날짜, 없으면 오늘)",
+  "vendor": "업체명 또는 null (특정 업체만)",
+  "work_type": "작업종류 또는 null"
+}}
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "복사 요청을 파싱하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": copy_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=200
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            if result.get("vendor"):
+                result["vendor"] = self._map_vendor_alias(result["vendor"])
+            return result
+            
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def check_anomaly(
+        self,
+        vendor: str,
+        work_type: str,
+        unit_price: int,
+        historical_prices: List[int]
+    ) -> Dict[str, Any]:
+        """
+        이상치 탐지 - 입력된 가격이 기존 패턴과 다른지 확인
+        
+        Returns:
+            {"is_anomaly": bool, "reason": str, "suggestion": int}
+        """
+        if not historical_prices:
+            return {"is_anomaly": False, "reason": "비교할 이력 없음"}
+        
+        avg_price = sum(historical_prices) / len(historical_prices)
+        min_price = min(historical_prices)
+        max_price = max(historical_prices)
+        
+        # 평균 대비 50% 이상 차이나면 이상치
+        if avg_price > 0:
+            diff_ratio = abs(unit_price - avg_price) / avg_price
+            if diff_ratio > 0.5:
+                return {
+                    "is_anomaly": True,
+                    "reason": f"평소 평균 {avg_price:,.0f}원 대비 {diff_ratio*100:.0f}% 차이",
+                    "avg_price": int(avg_price),
+                    "min_price": min_price,
+                    "max_price": max_price,
+                    "suggestion": int(avg_price)
+                }
+        
+        # 기존 범위를 크게 벗어나면 이상치
+        if unit_price < min_price * 0.5 or unit_price > max_price * 2:
+            return {
+                "is_anomaly": True,
+                "reason": f"기존 범위 ({min_price:,}~{max_price:,}원) 벗어남",
+                "avg_price": int(avg_price),
+                "min_price": min_price,
+                "max_price": max_price,
+                "suggestion": int(avg_price)
+            }
+        
+        return {"is_anomaly": False}
 
     async def chat_response(
         self,
