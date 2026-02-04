@@ -466,3 +466,87 @@ async def check_duplicate(
             }
         
         return {"is_duplicate": False, "existing": None}
+
+
+@router.get("/export")
+async def export_work_logs(
+    start_date: str = Query(..., description="시작일 (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="종료일 (YYYY-MM-DD)"),
+    format: str = Query("excel", description="출력 형식 (excel, csv, json)")
+):
+    """
+    기간별 작업일지 내보내기
+    
+    Args:
+        start_date: 시작일 (YYYY-MM-DD)
+        end_date: 종료일 (YYYY-MM-DD)
+        format: 출력 형식 (excel, csv, json)
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+    
+    with get_connection() as con:
+        rows = con.execute(
+            """SELECT 날짜, 업체명, 분류, 수량, 단가, 합계, 비고1, 작성자, 출처, 저장시간
+               FROM work_log 
+               WHERE 날짜 >= ? AND 날짜 <= ?
+               ORDER BY 날짜 DESC, id DESC""",
+            (start_date, end_date)
+        ).fetchall()
+    
+    if not rows:
+        raise HTTPException(status_code=404, detail="해당 기간에 작업일지가 없습니다.")
+    
+    # DataFrame 생성
+    df = pd.DataFrame(rows, columns=[
+        "날짜", "업체명", "분류", "수량", "단가", "합계", "비고", "작성자", "출처", "저장시간"
+    ])
+    
+    if format == "json":
+        return {
+            "period": f"{start_date} ~ {end_date}",
+            "total_count": len(rows),
+            "total_amount": int(df["합계"].sum()),
+            "data": df.to_dict(orient="records")
+        }
+    
+    elif format == "csv":
+        output = io.StringIO()
+        df.to_csv(output, index=False, encoding="utf-8-sig")
+        output.seek(0)
+        
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8-sig")),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=work_log_{start_date}_{end_date}.csv"
+            }
+        )
+    
+    else:  # excel
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="작업일지")
+            
+            # 요약 시트 추가
+            summary_by_vendor = df.groupby("업체명").agg({
+                "합계": "sum",
+                "날짜": "count"
+            }).rename(columns={"날짜": "건수"}).reset_index()
+            summary_by_vendor.to_excel(writer, index=False, sheet_name="업체별 요약")
+            
+            summary_by_type = df.groupby("분류").agg({
+                "합계": "sum",
+                "날짜": "count"
+            }).rename(columns={"날짜": "건수"}).reset_index()
+            summary_by_type.to_excel(writer, index=False, sheet_name="작업별 요약")
+        
+        output.seek(0)
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename=work_log_{start_date}_{end_date}.xlsx"
+            }
+        )

@@ -270,6 +270,22 @@ CRITICAL_COLS = {
         ("출처", "TEXT"),             # 'bot' 또는 'excel'
         ("works_user_id", "TEXT"),    # 네이버 웍스 사용자 ID
     ],
+    # 작업일지 변경 이력 로그
+    "work_log_history": [
+        ("log_id", "INTEGER"),        # 원본 작업일지 ID
+        ("action", "TEXT"),           # 'create', 'update', 'delete'
+        ("날짜", "TEXT"),
+        ("업체명", "TEXT"),
+        ("분류", "TEXT"),
+        ("단가", "INTEGER"),
+        ("수량", "INTEGER"),
+        ("합계", "INTEGER"),
+        ("작성자", "TEXT"),
+        ("변경자", "TEXT"),           # 변경한 사람
+        ("변경시간", "TIMESTAMP"),
+        ("변경사유", "TEXT"),
+        ("works_user_id", "TEXT"),
+    ],
 }
 
 

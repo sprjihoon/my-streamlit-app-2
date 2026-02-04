@@ -128,7 +128,27 @@ def save_work_log(data: Dict[str, Any], user_id: str, user_name: str = None) -> 
                 (date, vendor, work_type, unit_price, qty, total, remark)
             )
         con.commit()
-        return cursor.lastrowid
+        record_id = cursor.lastrowid
+        
+        # 생성 이력 기록
+        log_work_history(
+            record_id, 
+            "create", 
+            {
+                "날짜": date,
+                "업체명": vendor,
+                "분류": work_type,
+                "단가": unit_price,
+                "수량": qty,
+                "합계": total,
+                "작성자": user_name,
+            },
+            변경자=user_name,
+            변경사유="봇 입력",
+            works_user_id=user_id
+        )
+        
+        return record_id
 
 
 def check_duplicate(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -167,9 +187,62 @@ def check_duplicate(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def delete_work_log(log_id: int) -> bool:
-    """작업일지 삭제"""
+def log_work_history(
+    log_id: int,
+    action: str,
+    log_data: Dict[str, Any],
+    변경자: str = None,
+    변경사유: str = None,
+    works_user_id: str = None
+):
+    """작업일지 변경 이력 기록"""
     with get_connection() as con:
+        con.execute(
+            """INSERT INTO work_log_history 
+               (log_id, action, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자, 변경자, 변경시간, 변경사유, works_user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                log_id,
+                action,
+                log_data.get("날짜") or log_data.get("date"),
+                log_data.get("업체명") or log_data.get("vendor"),
+                log_data.get("분류") or log_data.get("work_type"),
+                log_data.get("단가") or log_data.get("unit_price"),
+                log_data.get("수량") or log_data.get("qty"),
+                log_data.get("합계") or (log_data.get("수량", 1) * log_data.get("단가", 0)),
+                log_data.get("작성자"),
+                변경자,
+                datetime.now().isoformat(),
+                변경사유,
+                works_user_id
+            )
+        )
+        con.commit()
+
+
+def delete_work_log(log_id: int, 변경자: str = None, works_user_id: str = None) -> bool:
+    """작업일지 삭제 (이력 로그 남김)"""
+    with get_connection() as con:
+        # 삭제 전 데이터 조회
+        row = con.execute(
+            "SELECT 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자 FROM work_log WHERE id = ?",
+            (log_id,)
+        ).fetchone()
+        
+        if row:
+            log_data = {
+                "날짜": row[0],
+                "업체명": row[1],
+                "분류": row[2],
+                "단가": row[3],
+                "수량": row[4],
+                "합계": row[5],
+                "작성자": row[6],
+            }
+            
+            # 삭제 이력 기록
+            log_work_history(log_id, "delete", log_data, 변경자, "삭제", works_user_id)
+        
         con.execute("DELETE FROM work_log WHERE id = ?", (log_id,))
         con.commit()
         return True
@@ -509,6 +582,55 @@ async def process_message(
             add_debug_log("test_send_error", error=str(e))
         return
     
+    # 오늘 작업일지 정리 명령어
+    summary_keywords = ["오늘", "정리", "요약", "리스트", "목록"]
+    if any(k in text_lower for k in ["오늘 작업", "작업 정리", "작업일지 정리", "오늘 정리", "작업 목록", "작업 리스트"]):
+        try:
+            today_logs = get_today_work_logs()
+            
+            if not today_logs:
+                await nw_client.send_text_message(
+                    channel_id,
+                    "📋 오늘 작업일지가 없습니다.",
+                    channel_type
+                )
+            else:
+                # 업체별로 그룹화
+                by_vendor = {}
+                total_amount = 0
+                for log in today_logs:
+                    vendor = log.get("업체명", "기타")
+                    if vendor not in by_vendor:
+                        by_vendor[vendor] = []
+                    by_vendor[vendor].append(log)
+                    total_amount += log.get("합계", 0) or 0
+                
+                msg = f"📋 오늘 작업일지 ({datetime.now().strftime('%Y-%m-%d')})\n"
+                msg += f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                
+                for vendor, logs in by_vendor.items():
+                    vendor_total = sum(l.get("합계", 0) or 0 for l in logs)
+                    msg += f"📦 {vendor} ({len(logs)}건, {vendor_total:,}원)\n"
+                    for log in logs:
+                        msg += f"  • {log.get('분류', '-')} "
+                        if log.get('수량', 1) > 1:
+                            msg += f"{log.get('수량')}개 "
+                        msg += f"{log.get('합계', 0):,}원\n"
+                    msg += "\n"
+                
+                msg += f"━━━━━━━━━━━━━━━━━━━━\n"
+                msg += f"📊 총 {len(today_logs)}건 | 💰 {total_amount:,}원"
+                
+                await nw_client.send_text_message(channel_id, msg, channel_type)
+        except Exception as e:
+            add_debug_log("summary_error", error=str(e))
+            await nw_client.send_text_message(
+                channel_id,
+                f"❌ 작업일지 조회 중 오류: {str(e)}",
+                channel_type
+            )
+        return
+    
     # 대화모드 시작/종료
     chat_mode_start = ["대화모드", "대화 모드", "챗모드", "chat mode", "chat"]
     chat_mode_end = ["작업모드", "작업 모드", "종료", "대화모드 종료", "챗모드 종료"]
@@ -683,7 +805,7 @@ async def process_message(
             log_info = pending_data.get("log_info", {})
             
             if log_id:
-                delete_work_log(log_id)
+                delete_work_log(log_id, 변경자=user_name, works_user_id=user_id)
                 conv_manager.clear_state(user_id)
                 await nw_client.send_text_message(
                     channel_id,
@@ -829,7 +951,7 @@ async def process_message(
         if existing_state and existing_state.get("pending_data", {}).get("edit_mode"):
             old_log_id = existing_state.get("pending_data", {}).get("log_id")
             if old_log_id:
-                delete_work_log(old_log_id)
+                delete_work_log(old_log_id, 변경자=user_name, works_user_id=user_id)
                 add_debug_log("edit_mode_deleted_old", {"old_log_id": old_log_id})
         
         # 저장
