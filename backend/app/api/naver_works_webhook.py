@@ -2262,19 +2262,31 @@ async def process_excel_upload(
     import pandas as pd
     from io import BytesIO
     
+    add_debug_log("excel_upload_start", {"file_name": file_name, "file_url": file_url[:50] + "..."})
+    
     try:
         nw_client = get_naver_works_client()
         
+        # 처리 중 메시지
+        await nw_client.send_text_message(
+            channel_id,
+            f"📊 '{file_name}' 처리 중...",
+            channel_type
+        )
+        
         # 파일 다운로드
         token = await nw_client._get_access_token()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             headers = {"Authorization": f"Bearer {token}"}
             response = await client.get(file_url, headers=headers)
+            
+            add_debug_log("excel_download_response", {"status": response.status_code, "content_length": len(response.content)})
             
             if response.status_code != 200:
                 await nw_client.send_text_message(
                     channel_id,
-                    f"❌ 파일 다운로드 실패 (상태: {response.status_code})",
+                    f"❌ 파일 다운로드 실패 (상태: {response.status_code})\n\n"
+                    f"💡 파일을 다시 보내주시거나, 웹 대시보드에서 업로드해주세요.",
                     channel_type
                 )
                 return
@@ -2303,8 +2315,7 @@ async def process_excel_upload(
         # 사용자 이름 가져오기
         user_name = None
         try:
-            user_info = await nw_client.get_user_info(user_id)
-            user_name = user_info.get("userName")
+            user_name = await nw_client.get_user_name(user_id)
         except:
             pass
         
