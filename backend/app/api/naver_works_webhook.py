@@ -2320,6 +2320,8 @@ async def process_excel_upload(
         except:
             pass
         
+        skip_count = 0  # 중복 스킵 카운트
+        
         for _, row in df.iterrows():
             try:
                 날짜 = row.get("날짜")
@@ -2338,11 +2340,48 @@ async def process_excel_upload(
                 수량 = int(row.get("수량", 1) or 1)
                 # 비고 또는 비고1 둘 다 지원
                 비고 = str(row.get("비고", "") or row.get("비고1", "") or "")
+                # no 컬럼 (원본 행 번호)
+                원본번호 = row.get("no", "")
+                if pd.notna(원본번호):
+                    원본번호 = int(원본번호)
+                else:
+                    원본번호 = None
                 
                 if not 업체명 or not 분류:
                     continue
                 
                 합계 = 단가 * 수량
+                
+                # 비고에 원본번호 포함 (중복 체크용)
+                if 원본번호:
+                    remark_prefix = f"[엑셀:no={원본번호}]"
+                else:
+                    remark_prefix = "[엑셀업로드]"
+                
+                full_remark = f"{remark_prefix} {비고}".strip() if 비고 else remark_prefix
+                
+                # 중복 체크: 날짜 + 업체명 + 분류 + 원본번호로 체크
+                with get_connection() as con:
+                    if 원본번호:
+                        # 원본번호가 있으면 원본번호로 중복 체크
+                        existing = con.execute(
+                            """SELECT id FROM work_log 
+                               WHERE 날짜 = ? AND 업체명 = ? AND 분류 = ? AND 비고1 LIKE ?
+                               LIMIT 1""",
+                            (날짜, 업체명, 분류, f"%no={원본번호}%")
+                        ).fetchone()
+                    else:
+                        # 원본번호 없으면 기존 방식 (날짜+업체+분류+수량+단가)
+                        existing = con.execute(
+                            """SELECT id FROM work_log 
+                               WHERE 날짜 = ? AND 업체명 = ? AND 분류 = ? AND 수량 = ? AND 단가 = ?
+                               LIMIT 1""",
+                            (날짜, 업체명, 분류, 수량, 단가)
+                        ).fetchone()
+                
+                if existing:
+                    skip_count += 1
+                    continue  # 중복 스킵
                 
                 data = {
                     "vendor": 업체명,
@@ -2350,7 +2389,7 @@ async def process_excel_upload(
                     "unit_price": 단가,
                     "qty": 수량,
                     "date": 날짜,
-                    "remark": f"[엑셀업로드] {비고}" if 비고 else "[엑셀업로드]"
+                    "remark": full_remark
                 }
                 
                 save_work_log(data, user_id, user_name)
@@ -2362,15 +2401,16 @@ async def process_excel_upload(
                 add_debug_log("excel_row_error", error=str(e))
         
         # 결과 메시지
-        await nw_client.send_text_message(
-            channel_id,
-            f"📊 엑셀 업로드 완료\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📎 파일: {file_name}\n"
-            f"✅ 저장: {saved_count}건\n"
-            f"❌ 오류: {error_count}건\n"
-            f"💰 합계: {total_amount:,}원",
-            channel_type
-        )
+        result_msg = f"📊 엑셀 업로드 완료\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        result_msg += f"📎 파일: {file_name}\n"
+        result_msg += f"✅ 저장: {saved_count}건\n"
+        if skip_count > 0:
+            result_msg += f"⏭️ 중복 스킵: {skip_count}건\n"
+        if error_count > 0:
+            result_msg += f"❌ 오류: {error_count}건\n"
+        result_msg += f"💰 합계: {total_amount:,}원"
+        
+        await nw_client.send_text_message(channel_id, result_msg, channel_type)
         
     except Exception as e:
         add_debug_log("excel_upload_error", error=f"{type(e).__name__}: {str(e)}")
