@@ -1018,6 +1018,60 @@ class AIParser:
         
         return {"is_anomaly": False}
 
+    async def analyze_work_data(
+        self,
+        question: str,
+        data_summary: str,
+        user_name: str = None
+    ) -> str:
+        """
+        작업일지 데이터를 분석하고 조언 제공
+        
+        Args:
+            question: 사용자 질문
+            data_summary: DB에서 가져온 데이터 요약
+            user_name: 사용자 이름
+        
+        Returns:
+            분석 결과 및 조언 문자열
+        """
+        name_part = f"{user_name}님, " if user_name else ""
+        
+        prompt = f"""당신은 물류/풀필먼트 작업일지 데이터를 분석하는 전문가입니다.
+사용자의 질문에 대해 제공된 데이터를 기반으로 분석하고 조언해주세요.
+
+## 데이터
+{data_summary}
+
+## 사용자 질문
+"{question}"
+
+## 응답 규칙
+- 데이터를 기반으로 구체적인 수치와 함께 분석
+- 실용적인 조언이나 인사이트 제공
+- 한국어로 친근하게 답변
+- 이모지 적절히 사용
+- 300자 이내로 간결하게
+
+분석 결과:"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "작업일지 데이터 분석 전문가입니다. 데이터 기반으로 분석하고 조언합니다."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.7
+            )
+            
+            result = response.choices[0].message.content.strip()
+            return f"📊 {name_part}분석 결과\n━━━━━━━━━━━━━━━━━━━━\n\n{result}"
+            
+        except Exception as e:
+            return f"분석 중 오류가 발생했습니다: {str(e)}"
+
     async def web_search(
         self,
         query: str,

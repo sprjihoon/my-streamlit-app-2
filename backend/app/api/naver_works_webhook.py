@@ -1970,21 +1970,80 @@ async def process_message(
         missing = parse_result.get("missing", [])
         question = parse_result.get("question", "")
         
-        # 아무것도 인식 못한 경우 - 작업모드에서는 안내 메시지
+        # 아무것도 인식 못한 경우 - GPT 데이터 분석/조언 모드
         if not data or (not data.get("vendor") and not data.get("work_type") and not data.get("unit_price")):
-            add_debug_log("no_data_parsed_work_mode", {"original_text": text})
-            await nw_client.send_text_message(
-                channel_id,
-                "📋 작업모드입니다.\n\n"
-                "✅ 작업일지 입력: 업체명 작업 금액\n"
-                "   예: 틸리언 1톤하차 3만원\n\n"
-                "📊 조회/분석:\n"
-                "   • 오늘 작업 정리해줘\n"
-                "   • 틸리언 작업 보여줘\n"
-                "   • 이번달 통계\n\n"
-                "💬 자유 대화는 '대화모드'를 입력하세요!",
-                channel_type
-            )
+            add_debug_log("work_mode_gpt_analysis", {"original_text": text})
+            
+            try:
+                # DB에서 최근 데이터 요약 가져오기
+                with get_connection() as con:
+                    # 이번달 요약
+                    today = datetime.now()
+                    month_start = today.replace(day=1).strftime("%Y-%m-%d")
+                    month_end = today.strftime("%Y-%m-%d")
+                    
+                    # 이번달 통계
+                    stats = con.execute("""
+                        SELECT 
+                            COUNT(*) as total_count,
+                            COALESCE(SUM(합계), 0) as total_amount,
+                            COUNT(DISTINCT 업체명) as vendor_count
+                        FROM work_log 
+                        WHERE 날짜 BETWEEN ? AND ?
+                    """, (month_start, month_end)).fetchone()
+                    
+                    # 업체별 요약 (상위 5개)
+                    top_vendors = con.execute("""
+                        SELECT 업체명, COUNT(*) as cnt, SUM(합계) as total
+                        FROM work_log 
+                        WHERE 날짜 BETWEEN ? AND ?
+                        GROUP BY 업체명 
+                        ORDER BY total DESC LIMIT 5
+                    """, (month_start, month_end)).fetchall()
+                    
+                    # 작업종류별 요약
+                    top_types = con.execute("""
+                        SELECT 분류, COUNT(*) as cnt, SUM(합계) as total
+                        FROM work_log 
+                        WHERE 날짜 BETWEEN ? AND ?
+                        GROUP BY 분류 
+                        ORDER BY total DESC LIMIT 5
+                    """, (month_start, month_end)).fetchall()
+                
+                # 데이터 요약 문자열 생성
+                data_summary = f"""
+이번달 작업일지 요약 ({month_start} ~ {month_end}):
+- 총 {stats[0]}건, {stats[1]:,}원
+- 거래 업체: {stats[2]}개
+
+업체별 (상위 5):
+"""
+                for v in top_vendors:
+                    data_summary += f"- {v[0]}: {v[1]}건, {v[2]:,}원\n"
+                
+                data_summary += "\n작업종류별 (상위 5):\n"
+                for t in top_types:
+                    data_summary += f"- {t[0]}: {t[1]}건, {t[2]:,}원\n"
+                
+                # GPT에게 데이터 분석 요청
+                analysis_response = await ai_parser.analyze_work_data(text, data_summary, user_name)
+                add_debug_log("work_analysis_response", {"response_length": len(analysis_response)})
+                
+                await nw_client.send_text_message(channel_id, analysis_response, channel_type)
+                
+            except Exception as e:
+                add_debug_log("work_analysis_error", error=str(e))
+                # 오류 시 기본 안내 메시지
+                await nw_client.send_text_message(
+                    channel_id,
+                    "📋 작업모드입니다.\n\n"
+                    "✅ 입력: 틸리언 1톤하차 3만원\n"
+                    "📊 조회: 오늘 작업 정리해줘\n"
+                    "🔍 검색: 틸리언 작업 보여줘\n"
+                    "📈 분석: 이번달 통계\n\n"
+                    "💬 자유 대화는 '대화모드'를 입력하세요!",
+                    channel_type
+                )
             return
         
         # 부분 인식 - 추가 정보 요청
