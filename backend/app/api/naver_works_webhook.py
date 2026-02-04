@@ -51,9 +51,8 @@ def add_debug_log(event: str, data: Any = None, error: str = None):
     else:
         logger.info(f"[{event}] {data}")
 
-# 최근 저장된 레코드 캐시 (취소용)
-# {user_id: {"log_id": id, "expires_at": timestamp}}
-_recent_saves: Dict[str, Dict[str, Any]] = {}
+# NOTE: 최근 저장 정보는 DB에서 직접 조회 (multi-worker 환경 지원)
+# get_user_recent_log(user_id, within_seconds=30) 사용
 
 
 # ─────────────────────────────────────
@@ -248,8 +247,14 @@ def delete_work_log(log_id: int, 변경자: str = None, works_user_id: str = Non
         return True
 
 
-def get_user_recent_log(user_id: str) -> Optional[Dict[str, Any]]:
-    """사용자의 가장 최근 작업일지 조회"""
+def get_user_recent_log(user_id: str, within_seconds: int = None) -> Optional[Dict[str, Any]]:
+    """
+    사용자의 가장 최근 작업일지 조회
+    
+    Args:
+        user_id: 사용자 ID
+        within_seconds: 지정 시 해당 초 내에 저장된 것만 반환 (취소 가능 시간 체크용)
+    """
     with get_connection() as con:
         row = con.execute(
             """SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
@@ -260,7 +265,7 @@ def get_user_recent_log(user_id: str) -> Optional[Dict[str, Any]]:
         ).fetchone()
         
         if row:
-            return {
+            result = {
                 "id": row[0],
                 "날짜": row[1],
                 "업체명": row[2],
@@ -271,6 +276,18 @@ def get_user_recent_log(user_id: str) -> Optional[Dict[str, Any]]:
                 "저장시간": str(row[7]) if row[7] else None,
                 "작성자": row[8],
             }
+            
+            # 시간 체크 (within_seconds가 지정된 경우)
+            if within_seconds and row[7]:
+                try:
+                    saved_time = datetime.fromisoformat(str(row[7]))
+                    elapsed = (datetime.now() - saved_time).total_seconds()
+                    if elapsed > within_seconds:
+                        return None  # 시간 초과
+                except:
+                    pass
+            
+            return result
         return None
 
 
@@ -669,19 +686,36 @@ def copy_work_logs(
 def get_undo_history(user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
     """사용자의 최근 변경 이력 조회"""
     with get_connection() as con:
+        # 테이블 컬럼 확인
+        cols = [c[1] for c in con.execute("PRAGMA table_info(work_log_history);")]
+        
+        # action 컬럼 기반 쿼리 (실제 테이블 구조에 맞춤)
         rows = con.execute(
-            """SELECT id, 변경유형, 변경전, 변경후, 변경자, 변경시간, work_log_id
+            """SELECT id, action, 업체명, 분류, 합계, 변경자, 변경시간, log_id
                FROM work_log_history 
                WHERE works_user_id = ?
                ORDER BY id DESC LIMIT ?""",
             (user_id, limit)
         ).fetchall()
         
-        return [
-            {"id": r[0], "type": r[1], "before": r[2], "after": r[3], 
-             "user": r[4], "time": r[5], "log_id": r[6]}
-            for r in rows
-        ]
+        result = []
+        for r in rows:
+            # before 정보를 JSON 형태로 구성
+            before_data = {
+                "업체명": r[2],
+                "분류": r[3],
+                "합계": r[4]
+            }
+            result.append({
+                "id": r[0],
+                "type": r[1].upper() if r[1] else "UNKNOWN",  # create->INSERT, delete->DELETE
+                "before": json.dumps(before_data, ensure_ascii=False) if r[1] == "delete" else None,
+                "after": json.dumps(before_data, ensure_ascii=False) if r[1] == "create" else None,
+                "user": r[5],
+                "time": r[6],
+                "log_id": r[7]
+            })
+        return result
 
 
 def get_dashboard_url() -> str:
@@ -786,8 +820,6 @@ async def process_message(
         channel_type: 채널 타입
         user_name: 사용자 이름
     """
-    global _recent_saves
-    
     add_debug_log("process_message_start", {
         "user_id": user_id,
         "channel_id": channel_id,
@@ -881,11 +913,6 @@ async def process_message(
             try:
                 record_id = save_work_log(data, user_id, user_name)
                 conv_manager.clear_state(user_id)
-                _recent_saves[user_id] = {
-                    "log_id": record_id,
-                    "expires_at": datetime.now().timestamp() + 30,
-                    "log_info": data
-                }
                 response_msg = generate_success_message(data, record_id)
                 await nw_client.send_text_message(channel_id, response_msg, channel_type)
             except Exception as e:
@@ -992,11 +1019,11 @@ async def process_message(
                             with get_connection() as con:
                                 con.execute(
                                     """UPDATE work_log 
-                                       SET 업체명=?, 분류=?, 수량=?, 단가=?, 합계=?, 비고=?
+                                       SET 업체명=?, 분류=?, 수량=?, 단가=?, 합계=?, 비고1=?
                                        WHERE id=?""",
                                     (restore_data.get("업체명"), restore_data.get("분류"),
-                                     restore_data.get("수량"), restore_data.get("단가"),
-                                     restore_data.get("합계"), restore_data.get("비고"), log_id)
+                                     restore_data.get("수량", 1), restore_data.get("단가", 0),
+                                     restore_data.get("합계", 0), restore_data.get("비고1", ""), log_id)
                                 )
                                 con.commit()
                             conv_manager.clear_state(user_id)
@@ -1331,17 +1358,17 @@ async def process_message(
     
     # 수정 요청
     if intent == "edit":
-        recent = _recent_saves.get(user_id)
-        if recent and datetime.now().timestamp() < recent.get("expires_at", 0):
-            log_info = recent.get("log_info", {})
+        # DB에서 30초 내 저장된 최근 로그 확인
+        recent_log = get_user_recent_log(user_id, within_seconds=30)
+        if recent_log:
             conv_manager.set_state(
                 user_id=user_id, channel_id=channel_id,
-                pending_data={"edit_mode": True, "log_id": recent.get("log_id"), "original": log_info},
+                pending_data={"edit_mode": True, "log_id": recent_log.get("id"), "original": recent_log},
                 missing=[], last_question="수정 대기"
             )
             await nw_client.send_text_message(
                 channel_id,
-                f"✏️ 수정할 내용을 입력해주세요.\n\n현재: {log_info.get('vendor', '-')} {log_info.get('work_type', '-')} {log_info.get('total', 0):,}원",
+                f"✏️ 수정할 내용을 입력해주세요.\n\n현재: {recent_log.get('업체명', '-')} {recent_log.get('분류', '-')} {recent_log.get('합계', 0):,}원",
                 channel_type
             )
         else:
@@ -1409,6 +1436,18 @@ async def process_message(
                     channel_type
                 )
                 return
+        else:
+            # 날짜를 파악하지 못한 경우 안내
+            await nw_client.send_text_message(
+                channel_id,
+                "❓ 조회할 기간을 파악하지 못했습니다.\n\n"
+                "예시:\n"
+                "• 오늘 작업 정리해줘\n"
+                "• 이번주 작업일지 보여줘\n"
+                "• 1월 20일부터 25일까지",
+                channel_type
+            )
+            return
     
     # ═══════════════════════════════════════════════════════════════════
     # 조건부 검색 (업체/작업종류/금액/날짜 조건)
@@ -1748,10 +1787,10 @@ async def process_message(
         )
         
         if not log:
-            # 최근 저장한 것 찾기
-            recent = _recent_saves.get(user_id)
-            if recent:
-                log = {"id": recent.get("log_id")}
+            # 최근 저장한 것 찾기 (DB에서 조회)
+            recent_log = get_user_recent_log(user_id, within_seconds=300)  # 5분 내 저장된 것
+            if recent_log:
+                log = {"id": recent_log.get("id")}
         
         if log and log.get("id"):
             if add_memo_to_log(log["id"], memo_content):
@@ -1923,21 +1962,8 @@ async def process_message(
         return
     
     # ═══════════════════════════════════════════════════════════════════
-    # 4단계: 작업일지 입력 또는 일반 대화 처리 (작업모드)
+    # 4단계: 작업일지 입력 처리 (작업모드)
     # ═══════════════════════════════════════════════════════════════════
-    
-    # 대화모드에서는 일반 대화만 처리 (여기까지 왔으면 이미 chat으로 처리됨)
-    if is_chat_mode:
-        # 대화모드에서는 GPT 대화로 처리
-        add_debug_log("chat_mode_response", {"text": text})
-        try:
-            chat_response = await ai_parser.generate_chat_response(text, user_name)
-            add_debug_log("chat_response", {"response": chat_response})
-            await nw_client.send_text_message(channel_id, chat_response, channel_type)
-        except Exception as e:
-            add_debug_log("chat_response_error", error=str(e))
-            await nw_client.send_text_message(channel_id, "죄송합니다, 응답 생성 중 오류가 발생했습니다.", channel_type)
-        return
     
     # AI 파싱
     try:
@@ -2035,20 +2061,7 @@ async def process_message(
             # 대화 상태 초기화
             conv_manager.clear_state(user_id)
             
-            # 취소/수정 가능 시간 설정 (30초) - log_info 포함
-            _recent_saves[user_id] = {
-                "log_id": record_id,
-                "expires_at": datetime.now().timestamp() + 30,
-                "log_info": {
-                    "vendor": data.get("vendor", ""),
-                    "work_type": data.get("work_type", ""),
-                    "qty": data.get("qty", 1),
-                    "unit_price": data.get("unit_price", 0),
-                    "total": data.get("qty", 1) * data.get("unit_price", 0),
-                }
-            }
-            
-            # 확인 메시지 생성 및 전송
+            # 확인 메시지 생성 및 전송 (취소는 30초 내 DB 조회로 처리)
             response_msg = generate_success_message(data, record_id)
             add_debug_log("sending_success_message", {"channel_id": channel_id, "message": response_msg})
             
