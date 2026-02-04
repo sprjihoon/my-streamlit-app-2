@@ -520,25 +520,31 @@ export default function WorkLogPage() {
                 <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                   업체명 <span style={{ color: 'red' }}>*</span>
                 </label>
-                <input
-                  type="text"
+                <select
                   value={addForm.업체명}
                   onChange={(e) => setAddForm({ ...addForm, 업체명: e.target.value })}
-                  placeholder="업체명을 입력하세요"
                   style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-                />
+                >
+                  <option value="">업체를 선택하세요</option>
+                  {filters?.vendors.map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                   작업 종류 <span style={{ color: 'red' }}>*</span>
                 </label>
-                <input
-                  type="text"
+                <select
                   value={addForm.분류}
                   onChange={(e) => setAddForm({ ...addForm, 분류: e.target.value })}
-                  placeholder="예: 1톤하차, 양품화, 바코드부착"
                   style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-                />
+                >
+                  <option value="">작업 종류를 선택하세요</option>
+                  {filters?.work_types.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <div>
