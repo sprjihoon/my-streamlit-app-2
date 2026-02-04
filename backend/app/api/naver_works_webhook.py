@@ -1042,20 +1042,13 @@ async def process_message(
     
     # 인사
     if intent == "greeting":
-        hour = datetime.now().hour
-        if 5 <= hour < 12:
-            time_greeting = "좋은 아침이에요! ☀️"
-        elif 12 <= hour < 18:
-            time_greeting = "좋은 오후예요! 🌤️"
-        elif 18 <= hour < 22:
-            time_greeting = "수고하셨어요! 🌆"
-        else:
-            time_greeting = "늦은 시간까지 수고하세요! 🌙"
-        
-        name_part = f"{user_name}님, " if user_name else ""
+        name_part = f"{user_name}님! " if user_name else ""
         await nw_client.send_text_message(
             channel_id,
-            f"👋 {name_part}{time_greeting}\n작업일지봇이에요! 자유롭게 말씀하세요 😊",
+            f"👋 안녕하세요, {name_part}작업일지봇이에요!\n\n"
+            "📋 '작업모드' - 작업일지 입력/관리\n"
+            "💬 '대화모드' - 자유 대화\n"
+            "❓ '도움말' - 사용법 확인",
             channel_type
         )
         return
