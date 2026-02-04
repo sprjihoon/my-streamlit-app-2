@@ -376,6 +376,169 @@ def get_registered_vendors() -> list:
         return [row[0] for row in rows if row[0]]
 
 
+def search_work_logs(
+    vendor: str = None,
+    work_type: str = None,
+    date: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    price: int = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """조건부 작업일지 검색"""
+    conditions = []
+    params = []
+    
+    if vendor:
+        conditions.append("업체명 LIKE ?")
+        params.append(f"%{vendor}%")
+    if work_type:
+        conditions.append("분류 LIKE ?")
+        params.append(f"%{work_type}%")
+    if date:
+        conditions.append("날짜 = ?")
+        params.append(date)
+    elif start_date and end_date:
+        conditions.append("날짜 >= ? AND 날짜 <= ?")
+        params.extend([start_date, end_date])
+    elif start_date:
+        conditions.append("날짜 >= ?")
+        params.append(start_date)
+    elif end_date:
+        conditions.append("날짜 <= ?")
+        params.append(end_date)
+    if price:
+        # 10% 오차 허용
+        conditions.append("합계 BETWEEN ? AND ?")
+        params.extend([int(price * 0.9), int(price * 1.1)])
+    
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    
+    with get_connection() as con:
+        rows = con.execute(
+            f"""SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
+               FROM work_log 
+               WHERE {where_clause}
+               ORDER BY 날짜 DESC, id DESC
+               LIMIT ?""",
+            params + [limit]
+        ).fetchall()
+        
+        return [
+            {"id": r[0], "날짜": r[1], "업체명": r[2], "분류": r[3], "수량": r[4], 
+             "단가": r[5], "합계": r[6], "저장시간": str(r[7]) if r[7] else None, "작성자": r[8]}
+            for r in rows
+        ]
+
+
+def get_work_log_stats(
+    start_date: str = None,
+    end_date: str = None,
+    vendor: str = None
+) -> Dict[str, Any]:
+    """작업일지 통계"""
+    conditions = []
+    params = []
+    
+    if start_date:
+        conditions.append("날짜 >= ?")
+        params.append(start_date)
+    if end_date:
+        conditions.append("날짜 <= ?")
+        params.append(end_date)
+    if vendor:
+        conditions.append("업체명 LIKE ?")
+        params.append(f"%{vendor}%")
+    
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    
+    with get_connection() as con:
+        # 총 합계
+        total_row = con.execute(
+            f"SELECT COUNT(*), SUM(합계) FROM work_log WHERE {where_clause}",
+            params
+        ).fetchone()
+        
+        total_count = total_row[0] or 0
+        total_amount = total_row[1] or 0
+        
+        # 업체별 통계
+        vendor_stats = con.execute(
+            f"""SELECT 업체명, COUNT(*), SUM(합계)
+               FROM work_log WHERE {where_clause}
+               GROUP BY 업체명
+               ORDER BY SUM(합계) DESC""",
+            params
+        ).fetchall()
+        
+        # 작업종류별 통계
+        work_type_stats = con.execute(
+            f"""SELECT 분류, COUNT(*), SUM(합계)
+               FROM work_log WHERE {where_clause}
+               GROUP BY 분류
+               ORDER BY COUNT(*) DESC""",
+            params
+        ).fetchall()
+        
+        return {
+            "total_count": total_count,
+            "total_amount": total_amount,
+            "by_vendor": [{"vendor": v[0], "count": v[1], "amount": v[2]} for v in vendor_stats],
+            "by_work_type": [{"work_type": w[0], "count": w[1], "amount": w[2]} for w in work_type_stats]
+        }
+
+
+def find_specific_log(
+    vendor: str = None,
+    work_type: str = None,
+    date: str = None,
+    price: int = None,
+    user_id: str = None
+) -> Optional[Dict[str, Any]]:
+    """특정 조건의 작업일지 1건 찾기 (가장 최근)"""
+    conditions = []
+    params = []
+    
+    if vendor:
+        conditions.append("업체명 LIKE ?")
+        params.append(f"%{vendor}%")
+    if work_type:
+        conditions.append("분류 LIKE ?")
+        params.append(f"%{work_type}%")
+    if date:
+        conditions.append("날짜 = ?")
+        params.append(date)
+    if price:
+        conditions.append("합계 BETWEEN ? AND ?")
+        params.extend([int(price * 0.9), int(price * 1.1)])
+    if user_id:
+        conditions.append("works_user_id = ?")
+        params.append(user_id)
+    
+    if not conditions:
+        return None
+    
+    where_clause = " AND ".join(conditions)
+    
+    with get_connection() as con:
+        row = con.execute(
+            f"""SELECT id, 날짜, 업체명, 분류, 수량, 단가, 합계, 저장시간, 작성자
+               FROM work_log 
+               WHERE {where_clause}
+               ORDER BY id DESC
+               LIMIT 1""",
+            params
+        ).fetchone()
+        
+        if row:
+            return {
+                "id": row[0], "날짜": row[1], "업체명": row[2], "분류": row[3],
+                "수량": row[4], "단가": row[5], "합계": row[6],
+                "저장시간": str(row[7]) if row[7] else None, "작성자": row[8]
+            }
+        return None
+
+
 async def send_welcome_message(channel_id: str):
     """봇 초대 시 환영 메시지 전송"""
     try:
@@ -684,16 +847,24 @@ async def process_message(
         await nw_client.send_text_message(
             channel_id,
             "📚 작업일지봇 사용법\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            "✅ 작업 입력 (자연어 OK):\n"
+            "✅ 작업 입력:\n"
             "• 틸리언 1톤하차 3만원\n"
             "• 나블리 양품화 20개 800원\n\n"
-            "📋 조회 (자연어 OK):\n"
-            "• 오늘 작업 정리해줘\n"
-            "• 지난주꺼 보여줘\n"
+            "📋 기간 조회:\n"
+            "• 오늘/이번주/지난달 작업 정리해줘\n"
             "• 1월 20일부터 25일까지\n\n"
-            "📌 기타:\n"
-            "• 방금꺼 취소/수정해줘\n\n"
-            "💡 편하게 말씀하세요!",
+            "🔍 검색:\n"
+            "• 틸리언 작업 보여줘\n"
+            "• 2월 4일 나블리 있어?\n"
+            "• 3만원짜리 뭐있어?\n\n"
+            "📊 통계:\n"
+            "• 이번달 총 얼마야?\n"
+            "• 오늘 몇건 했어?\n"
+            "• 가장 많이 일한 업체\n\n"
+            "✏️ 수정/삭제:\n"
+            "• 방금꺼 취소/수정해줘\n"
+            "• 오늘 틸리언 3만원 삭제해줘\n\n"
+            "💡 자연어로 편하게 말씀하세요!",
             channel_type
         )
         return
@@ -832,6 +1003,167 @@ async def process_message(
                     channel_type
                 )
                 return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 조건부 검색 (업체/작업종류/금액/날짜 조건)
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "search_query":
+        query_params = await ai_parser.parse_advanced_query(text, "search")
+        add_debug_log("search_query_params", data=query_params)
+        
+        logs = search_work_logs(
+            vendor=query_params.get("vendor"),
+            work_type=query_params.get("work_type"),
+            date=query_params.get("date"),
+            start_date=query_params.get("start_date"),
+            end_date=query_params.get("end_date"),
+            price=query_params.get("price"),
+            limit=20
+        )
+        
+        if not logs:
+            conditions = []
+            if query_params.get("vendor"):
+                conditions.append(f"업체: {query_params['vendor']}")
+            if query_params.get("work_type"):
+                conditions.append(f"작업: {query_params['work_type']}")
+            if query_params.get("date"):
+                conditions.append(f"날짜: {query_params['date']}")
+            if query_params.get("price"):
+                conditions.append(f"금액: {query_params['price']:,}원")
+            
+            condition_str = ", ".join(conditions) if conditions else "조건"
+            await nw_client.send_text_message(channel_id, f"🔍 [{condition_str}] 조건에 맞는 작업일지가 없습니다.", channel_type)
+        else:
+            total_amount = sum(l.get("합계", 0) or 0 for l in logs)
+            msg = f"🔍 검색 결과: {len(logs)}건 | 💰 {total_amount:,}원\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            for log in logs[:10]:
+                msg += f"• {log.get('날짜', '-')} {log.get('업체명', '-')} {log.get('분류', '-')} {log.get('합계', 0):,}원\n"
+            
+            if len(logs) > 10:
+                msg += f"\n... 외 {len(logs) - 10}건"
+            
+            await nw_client.send_text_message(channel_id, msg, channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 통계/분석 쿼리
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "stats_query":
+        query_params = await ai_parser.parse_advanced_query(text, "stats")
+        add_debug_log("stats_query_params", data=query_params)
+        
+        stats = get_work_log_stats(
+            start_date=query_params.get("start_date") or query_params.get("date"),
+            end_date=query_params.get("end_date") or query_params.get("date"),
+            vendor=query_params.get("vendor")
+        )
+        
+        stats_type = query_params.get("stats_type", "total_amount")
+        period_name = query_params.get("period_name", "")
+        
+        if stats_type in ["total_amount", "total_count"]:
+            msg = f"📊 {period_name} 통계\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            msg += f"📝 총 {stats['total_count']}건\n"
+            msg += f"💰 총 {stats['total_amount']:,}원"
+            
+        elif stats_type == "top_vendor":
+            msg = f"🏆 업체별 순위 {period_name}\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            for i, v in enumerate(stats["by_vendor"][:5], 1):
+                msg += f"{i}. {v['vendor']} - {v['count']}건, {v['amount']:,}원\n"
+            if not stats["by_vendor"]:
+                msg += "데이터가 없습니다."
+                
+        elif stats_type == "by_vendor":
+            msg = f"📦 업체별 합계 {period_name}\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            for v in stats["by_vendor"]:
+                msg += f"• {v['vendor']}: {v['count']}건, {v['amount']:,}원\n"
+            msg += f"\n━━━━━━━━━━━━━━━━━━━━\n📊 총 {stats['total_count']}건 | 💰 {stats['total_amount']:,}원"
+            
+        elif stats_type == "by_work_type":
+            msg = f"🔧 작업종류별 합계 {period_name}\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            for w in stats["by_work_type"]:
+                msg += f"• {w['work_type']}: {w['count']}건, {w['amount']:,}원\n"
+            msg += f"\n━━━━━━━━━━━━━━━━━━━━\n📊 총 {stats['total_count']}건 | 💰 {stats['total_amount']:,}원"
+            
+        elif stats_type == "compare":
+            # 기간 비교 (간단 버전)
+            msg = f"📈 기간 비교\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            msg += f"📊 총 {stats['total_count']}건 | 💰 {stats['total_amount']:,}원\n\n"
+            msg += "💡 더 자세한 비교가 필요하시면 각 기간을 따로 조회해주세요."
+        else:
+            msg = f"📊 통계\n\n📝 총 {stats['total_count']}건 | 💰 {stats['total_amount']:,}원"
+        
+        await nw_client.send_text_message(channel_id, msg, channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 특정 건 삭제
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "specific_delete":
+        query_params = await ai_parser.parse_advanced_query(text, "specific_delete")
+        add_debug_log("specific_delete_params", data=query_params)
+        
+        log = find_specific_log(
+            vendor=query_params.get("vendor"),
+            work_type=query_params.get("work_type"),
+            date=query_params.get("date"),
+            price=query_params.get("price"),
+            user_id=user_id
+        )
+        
+        if log:
+            conv_manager.set_state(
+                user_id=user_id, channel_id=channel_id,
+                pending_data={"cancel_mode": True, "log_id": log["id"], "log_info": log},
+                missing=[], last_question="🗑️ 취소 확인"
+            )
+            await nw_client.send_text_message(
+                channel_id,
+                f"🗑️ 이 작업을 삭제할까요?\n\n"
+                f"• 날짜: {log.get('날짜', '-')}\n"
+                f"• 업체: {log.get('업체명', '-')}\n"
+                f"• 작업: {log.get('분류', '-')}\n"
+                f"• 금액: {log.get('합계', 0):,}원\n\n"
+                f"삭제하시겠어요?",
+                channel_type
+            )
+        else:
+            await nw_client.send_text_message(channel_id, "🔍 조건에 맞는 작업일지를 찾지 못했습니다.", channel_type)
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 특정 건 수정
+    # ═══════════════════════════════════════════════════════════════════
+    if intent == "specific_edit":
+        query_params = await ai_parser.parse_advanced_query(text, "specific_edit")
+        add_debug_log("specific_edit_params", data=query_params)
+        
+        log = find_specific_log(
+            vendor=query_params.get("vendor"),
+            work_type=query_params.get("work_type"),
+            date=query_params.get("date"),
+            price=query_params.get("price"),
+            user_id=user_id
+        )
+        
+        if log:
+            conv_manager.set_state(
+                user_id=user_id, channel_id=channel_id,
+                pending_data={"edit_mode": True, "log_id": log["id"], "original": log},
+                missing=[], last_question="수정 대기"
+            )
+            await nw_client.send_text_message(
+                channel_id,
+                f"✏️ 수정할 내용을 입력해주세요.\n\n"
+                f"현재: {log.get('업체명', '-')} {log.get('분류', '-')} {log.get('합계', 0):,}원\n\n"
+                f"예: 'A업체 2톤하차 50000원'",
+                channel_type
+            )
+        else:
+            await nw_client.send_text_message(channel_id, "🔍 조건에 맞는 작업일지를 찾지 못했습니다.", channel_type)
+        return
     
     # ═══════════════════════════════════════════════════════════════════
     # 4단계: 작업일지 입력 또는 일반 대화 처리

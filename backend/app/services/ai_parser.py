@@ -411,18 +411,24 @@ class AIParser:
 1. "greeting" - 인사 (안녕, 하이, 반가워, 좋은아침 등)
 2. "help" - 도움말/사용법 요청 (도움말, 어떻게 써, 사용법, 뭐할수있어 등)
 3. "test" - 테스트/상태확인 (테스트, 퐁, 핑, 살아있어? 등)
-4. "work_log_query" - 작업일지 조회 요청 (오늘 작업 정리해줘, 이번주 작업, 1월 작업 보여줘 등)
-   - 날짜/기간이 포함되어야 함
+4. "work_log_query" - 기간별 작업일지 전체 조회 (오늘 작업 정리해줘, 이번주 작업 등)
 5. "work_log_entry" - 작업일지 입력 (업체명 + 작업종류 + 금액 형식)
-   - 예: "틸리언 1톤하차 3만원", "나블리 양품화 20개 800원"
-6. "cancel" - 취소 요청 (취소, 방금거 취소, 삭제해줘 등)
-7. "edit" - 수정 요청 (수정, 방금거 수정, 고쳐줘 등)
+6. "cancel" - 취소 요청 (취소, 방금거 취소, 삭제해줘 등) - 직전 작업 취소
+7. "edit" - 수정 요청 (수정, 방금거 수정, 고쳐줘 등) - 직전 작업 수정
 8. "chat_mode_start" - 대화모드 시작 (대화모드, 챗모드, 대화하자 등)
 9. "chat_mode_end" - 대화모드 종료 (작업모드, 종료, 대화모드 끝 등)
 10. "confirm_yes" - 긍정 응답 (네, 응, 맞아, 그래, ㅇㅇ, 확인 등)
 11. "confirm_no" - 부정 응답 (아니, 아니오, 취소, ㄴㄴ, 안해 등)
 12. "select_option" - 옵션 선택 (1번, 2번, 텍스트로, 파일로 등)
-13. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
+13. "search_query" - 조건부 검색 (업체/작업종류/금액 등 특정 조건으로 검색)
+    예: "틸리언 작업 보여줘", "2월 4일 나블리 있어?", "3만원짜리 뭐있어?", "1톤하차 몇번 했어?"
+14. "stats_query" - 통계/분석 요청
+    예: "이번달 총 얼마야?", "오늘 몇건 했어?", "가장 많이 일한 업체", "지난주랑 이번주 비교"
+15. "specific_edit" - 특정 건 수정 (조건으로 특정 작업을 수정)
+    예: "오늘 틸리언 3만원 → 5만원으로", "어제 나블리꺼 수정해줘"
+16. "specific_delete" - 특정 건 삭제 (조건으로 특정 작업을 삭제)
+    예: "오늘 틸리언 3만원꺼 삭제해줘", "어제 나블리 양품화 삭제"
+17. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
 
 ## 응답 형식 (JSON)
 {{
@@ -431,15 +437,19 @@ class AIParser:
   "reason": "판단 이유 (짧게)",
   "data": {{
     // intent별 추가 데이터
-    // work_log_query: {{"period_hint": "오늘/이번주/1월 등"}}
-    // work_log_entry: {{"has_vendor": true, "has_work_type": true, "has_price": true}}
-    // select_option: {{"value": "1" 또는 "2"}}
+    // search_query: {{"vendor": "업체명", "work_type": "작업종류", "date": "날짜", "price": 금액}}
+    // stats_query: {{"type": "total/count/top_vendor/compare", "period": "기간"}}
+    // specific_edit/delete: {{"vendor": "업체명", "work_type": "작업종류", "date": "날짜", "price": 금액}}
   }}
 }}
 
 ## 판단 규칙
 - "업체명 + 작업 + 금액" 형식이면 work_log_entry
-- "정리", "조회", "보여줘" + 날짜 표현이면 work_log_query
+- "정리", "조회", "보여줘" + 날짜만 있으면 work_log_query
+- "업체명 + 조회/있어/보여줘" 또는 "날짜 + 업체명" 형태면 search_query
+- "총 얼마", "몇건", "가장 많이", "비교" 등이면 stats_query
+- "수정해줘" + 특정 조건이면 specific_edit
+- "삭제해줘" + 특정 조건이면 specific_delete
 - 짧은 인사말은 greeting
 - 애매하면 chat
 
@@ -545,6 +555,105 @@ class AIParser:
                 "end_date": None,
                 "period_name": None,
                 "error": str(e)
+            }
+
+    async def parse_advanced_query(
+        self,
+        message: str,
+        query_type: str
+    ) -> Dict[str, Any]:
+        """
+        고급 쿼리 파싱 (조건부 검색, 통계, 특정 건 수정/삭제)
+        
+        Args:
+            message: 사용자 메시지
+            query_type: "search", "stats", "specific_edit", "specific_delete"
+        
+        Returns:
+            쿼리 조건 딕셔너리
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        query_prompt = f"""사용자 메시지에서 쿼리 조건을 추출하세요.
+
+## 오늘 날짜: {today}
+## 쿼리 유형: {query_type}
+
+## 사용자 메시지
+"{message}"
+
+## 추출할 조건들
+- vendor: 업체명 (틸리언, 나블리 등)
+- work_type: 작업종류 (1톤하차, 양품화, 바코드 등)
+- date: 특정 날짜 (YYYY-MM-DD 형식, "오늘"이면 {today})
+- start_date: 시작 날짜
+- end_date: 끝 날짜
+- price: 금액 (숫자, "3만원" → 30000)
+- qty: 수량
+
+## 통계 유형 (query_type이 stats인 경우)
+- stats_type: 
+  - "total_amount" (총 매출/금액)
+  - "total_count" (총 건수)
+  - "top_vendor" (가장 많은 업체)
+  - "by_vendor" (업체별 합계)
+  - "by_work_type" (작업종류별 합계)
+  - "compare" (기간 비교)
+
+## 응답 형식 (JSON)
+{{
+  "vendor": "업체명 또는 null",
+  "work_type": "작업종류 또는 null",
+  "date": "YYYY-MM-DD 또는 null",
+  "start_date": "YYYY-MM-DD 또는 null",
+  "end_date": "YYYY-MM-DD 또는 null",
+  "price": 숫자 또는 null,
+  "qty": 숫자 또는 null,
+  "stats_type": "통계유형 또는 null",
+  "compare_period1": "비교기간1 또는 null",
+  "compare_period2": "비교기간2 또는 null",
+  "period_name": "사람이 읽기 쉬운 기간명"
+}}
+
+## 예시
+- "틸리언 작업 보여줘" → {{"vendor": "틸리언", "work_type": null, ...}}
+- "2월 4일 나블리 있어?" → {{"vendor": "나블리", "date": "2026-02-04", ...}}
+- "3만원짜리 뭐있어?" → {{"price": 30000, ...}}
+- "이번달 총 얼마야?" → {{"stats_type": "total_amount", "start_date": "2026-02-01", "end_date": "{today}", ...}}
+- "오늘 몇건 했어?" → {{"stats_type": "total_count", "date": "{today}", ...}}
+- "가장 많이 일한 업체" → {{"stats_type": "top_vendor", ...}}
+- "지난주랑 이번주 비교" → {{"stats_type": "compare", "compare_period1": "지난주", "compare_period2": "이번주", ...}}
+- "오늘 틸리언 3만원 삭제해줘" → {{"vendor": "틸리언", "date": "{today}", "price": 30000, ...}}
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "쿼리 조건을 정확하게 추출하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": query_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=300
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            # 업체명 별칭 매핑 적용
+            if result.get("vendor"):
+                result["vendor"] = self._map_vendor_alias(result["vendor"])
+            
+            return result
+            
+        except Exception as e:
+            return {
+                "error": str(e),
+                "vendor": None,
+                "work_type": None,
+                "date": None,
+                "price": None
             }
 
     async def parse_intent(
