@@ -950,6 +950,75 @@ async def process_message(
             await nw_client.send_text_message(channel_id, "🚫 복사를 취소했습니다.", channel_type)
             return
     
+    # 되돌리기 선택 대기 중
+    if existing_state and existing_state.get("last_question") == "🔄 되돌리기 선택":
+        import re
+        # 번호 추출 (1, 1번, 1번 되돌려줘 등)
+        num_match = re.search(r'(\d+)', text)
+        
+        if num_match:
+            selected_num = int(num_match.group(1))
+            history = existing_state.get("pending_data", {}).get("undo_history", [])
+            
+            if 1 <= selected_num <= len(history):
+                item = history[selected_num - 1]
+                change_type = item.get("type", "")
+                log_id = item.get("log_id")
+                before_data = item.get("before")
+                after_data = item.get("after")
+                
+                try:
+                    if change_type == "INSERT" and log_id:
+                        # 추가된 것 삭제
+                        delete_work_log(log_id, 변경자=user_name, works_user_id=user_id)
+                        conv_manager.clear_state(user_id)
+                        await nw_client.send_text_message(channel_id, f"✅ 되돌리기 완료 (추가된 데이터 삭제됨)", channel_type)
+                    elif change_type == "DELETE" and before_data:
+                        # 삭제된 것 복구
+                        import json
+                        try:
+                            restore_data = json.loads(before_data) if isinstance(before_data, str) else before_data
+                            record_id = save_work_log(restore_data, user_id, user_name)
+                            conv_manager.clear_state(user_id)
+                            await nw_client.send_text_message(channel_id, f"✅ 되돌리기 완료 (삭제된 데이터 복구됨)\nID: {record_id}", channel_type)
+                        except json.JSONDecodeError:
+                            await nw_client.send_text_message(channel_id, "❌ 복구 데이터 파싱 오류", channel_type)
+                    elif change_type == "UPDATE" and log_id and before_data:
+                        # 수정 전으로 되돌리기
+                        import json
+                        try:
+                            restore_data = json.loads(before_data) if isinstance(before_data, str) else before_data
+                            # 기존 레코드 업데이트
+                            with get_connection() as con:
+                                con.execute(
+                                    """UPDATE work_log 
+                                       SET 업체명=?, 분류=?, 수량=?, 단가=?, 합계=?, 비고=?
+                                       WHERE id=?""",
+                                    (restore_data.get("업체명"), restore_data.get("분류"),
+                                     restore_data.get("수량"), restore_data.get("단가"),
+                                     restore_data.get("합계"), restore_data.get("비고"), log_id)
+                                )
+                                con.commit()
+                            conv_manager.clear_state(user_id)
+                            await nw_client.send_text_message(channel_id, f"✅ 되돌리기 완료 (수정 전으로 복구됨)", channel_type)
+                        except json.JSONDecodeError:
+                            await nw_client.send_text_message(channel_id, "❌ 복구 데이터 파싱 오류", channel_type)
+                    else:
+                        await nw_client.send_text_message(channel_id, "❌ 이 항목은 되돌릴 수 없습니다.", channel_type)
+                except Exception as e:
+                    add_debug_log("undo_error", error=str(e))
+                    await nw_client.send_text_message(channel_id, f"❌ 되돌리기 오류: {str(e)}", channel_type)
+                return
+            else:
+                await nw_client.send_text_message(channel_id, f"❓ 1~{len(history)} 사이 번호를 입력해주세요.", channel_type)
+                return
+        
+        # 취소 처리
+        if "취소" in text or "그만" in text:
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "✅ 되돌리기를 취소했습니다.", channel_type)
+            return
+    
     # ═══════════════════════════════════════════════════════════════════
     # 2단계: AI로 메시지 의도 분류
     # ═══════════════════════════════════════════════════════════════════
@@ -1420,14 +1489,25 @@ async def process_message(
             await nw_client.send_text_message(channel_id, "📜 변경 이력이 없습니다.", channel_type)
             return
         
-        msg = f"📜 최근 변경 이력\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        msg = f"📜 최근 변경 이력 (되돌리기 가능)\n━━━━━━━━━━━━━━━━━━━━\n\n"
         for i, h in enumerate(history, 1):
             time_str = h.get("time", "")[:16] if h.get("time") else ""
-            msg += f"{i}. [{h.get('type', '?')}] {time_str}\n"
+            change_type = h.get("type", "?")
+            # 변경 유형 한글화
+            type_label = {"INSERT": "추가", "UPDATE": "수정", "DELETE": "삭제"}.get(change_type, change_type)
+            msg += f"{i}. [{type_label}] {time_str}\n"
             if h.get("before"):
-                msg += f"   전: {h['before'][:30]}...\n" if len(str(h.get('before', ''))) > 30 else f"   전: {h.get('before')}\n"
+                before_str = str(h['before'])[:35]
+                msg += f"   → {before_str}{'...' if len(str(h.get('before', ''))) > 35 else ''}\n"
         
-        msg += f"\n💡 특정 작업을 되돌리려면 조건을 알려주세요.\n예: '오늘 틸리언 삭제해줘'"
+        msg += f"\n🔄 번호를 입력하면 해당 작업을 되돌립니다.\n예: '1' 또는 '1번 되돌려줘'"
+        
+        # 선택 대기 상태 저장
+        conv_manager.set_state(
+            user_id=user_id, channel_id=channel_id,
+            pending_data={"undo_history": history},
+            missing=[], last_question="🔄 되돌리기 선택"
+        )
         
         await nw_client.send_text_message(channel_id, msg, channel_type)
         return
@@ -1439,13 +1519,35 @@ async def process_message(
         query_params = await ai_parser.parse_advanced_query(text, "add_memo")
         add_debug_log("add_memo_params", data=query_params)
         
-        # 메모 내용 추출 (메시지에서 "메모", "비고" 다음 내용)
+        # 메모 내용 추출 - 다양한 패턴 지원
         import re
-        memo_match = re.search(r'(?:메모|비고)[에\s:]+["\']?(.+?)["\']?$', text, re.IGNORECASE)
-        memo_content = memo_match.group(1).strip() if memo_match else ""
+        memo_content = ""
+        
+        # 패턴 1: "메모: 내용", "메모 내용" (메모 뒤에 내용)
+        memo_match = re.search(r'(?:메모|비고)[\s:]*["\']?([^"\']+?)["\']?\s*(?:추가|등록|입력|$)', text, re.IGNORECASE)
+        if memo_match:
+            memo_content = memo_match.group(1).strip()
+        
+        # 패턴 2: "내용 메모 추가" (메모 앞에 내용)
+        if not memo_content:
+            memo_match = re.search(r'(?:방금|최근|이번)?\s*(?:꺼에?|작업에?|것에?)?\s*["\']?([^"\']+?)["\']?\s*(?:메모|비고)\s*(?:추가|등록|입력)', text, re.IGNORECASE)
+            if memo_match:
+                memo_content = memo_match.group(1).strip()
+        
+        # 패턴 3: intent_data에서 추출
+        if not memo_content and intent_data:
+            memo_content = intent_data.get("memo", "") or intent_data.get("content", "")
+        
+        # 메모 내용이 너무 짧거나 키워드만 있으면 무시
+        if memo_content and memo_content in ["방금", "최근", "이번", "꺼", "작업", "것"]:
+            memo_content = ""
         
         if not memo_content:
-            await nw_client.send_text_message(channel_id, "❓ 어떤 메모를 추가할까요?\n예: '방금꺼에 긴급 메모 추가'", channel_type)
+            await nw_client.send_text_message(
+                channel_id, 
+                "❓ 어떤 메모를 추가할까요?\n\n예시:\n• '긴급 메모 추가'\n• '방금꺼에 확인필요 메모 추가'\n• '메모: 재확인 필요'",
+                channel_type
+            )
             return
         
         # 최근 작업 또는 조건으로 찾기
