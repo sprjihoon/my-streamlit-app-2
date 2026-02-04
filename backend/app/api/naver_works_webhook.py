@@ -516,88 +516,264 @@ async def process_message(
     conv_manager = get_conversation_manager()
     
     text_lower = text.strip().lower()
+    existing_state = conv_manager.get_state(user_id)
+    has_pending_state = existing_state is not None and existing_state.get("last_question") is not None
     
-    # 인사/도움말 처리
-    greetings = ["안녕", "하이", "hi", "hello", "헬로", "ㅎㅇ"]
-    help_commands = ["도움말", "도움", "help", "?", "사용법"]
-    test_commands = ["테스트", "test", "핑", "ping"]
+    # ═══════════════════════════════════════════════════════════════════
+    # 1단계: 진행 중인 대화 상태 확인 (우선 처리)
+    # ═══════════════════════════════════════════════════════════════════
     
-    if any(g in text_lower for g in greetings):
-        try:
-            # 시간대별 인사말
-            hour = datetime.now().hour
-            if 5 <= hour < 12:
-                time_greeting = "좋은 아침이에요! ☀️"
-            elif 12 <= hour < 18:
-                time_greeting = "좋은 오후예요! 🌤️"
-            elif 18 <= hour < 22:
-                time_greeting = "수고하셨어요! 🌆"
-            else:
-                time_greeting = "늦은 시간까지 수고하세요! 🌙"
+    # 작업일지 조회 응답 대기 중
+    if existing_state and existing_state.get("last_question") == "📋 작업일지 조회":
+        pending = existing_state.get("pending_data", {})
+        start_date = pending.get("start_date")
+        end_date = pending.get("end_date")
+        period_name = pending.get("period_name")
+        
+        # AI로 의도 파악
+        intent_context = {
+            "last_question": "1번 텍스트로 보기, 2번 파일로 다운로드 중 선택",
+            "options": ["1: 텍스트로 보기", "2: 파일로 다운로드"],
+            "pending_data": pending
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        add_debug_log("summary_intent", data=intent_result)
+        
+        intent = intent_result.get("intent")
+        value = intent_result.get("value")
+        
+        if intent == "select_option" and value == "1":
+            # 텍스트로 출력
+            logs = get_work_logs_by_period(start_date, end_date)
+            by_vendor = {}
+            total_amount = 0
+            for log in logs:
+                vendor = log.get("업체명", "기타")
+                if vendor not in by_vendor:
+                    by_vendor[vendor] = []
+                by_vendor[vendor].append(log)
+                total_amount += log.get("합계", 0) or 0
             
-            # 사용자 이름이 있으면 포함
-            name_part = f"{user_name}님, " if user_name else ""
+            msg = f"📋 {period_name} 작업일지\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            for vendor, vlogs in by_vendor.items():
+                vendor_total = sum(l.get("합계", 0) or 0 for l in vlogs)
+                msg += f"📦 {vendor} ({len(vlogs)}건, {vendor_total:,}원)\n"
+                for log in vlogs[:10]:
+                    msg += f"  • {log.get('날짜', '-')} {log.get('분류', '-')} "
+                    if log.get('수량', 1) > 1:
+                        msg += f"{log.get('수량')}개 "
+                    msg += f"{log.get('합계', 0):,}원\n"
+                if len(vlogs) > 10:
+                    msg += f"  ... 외 {len(vlogs) - 10}건\n"
+                msg += "\n"
+            msg += f"━━━━━━━━━━━━━━━━━━━━\n📊 총 {len(logs)}건 | 💰 {total_amount:,}원"
             
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, msg, channel_type)
+            return
+            
+        elif intent == "select_option" and value == "2":
+            # 파일 다운로드 링크
+            import os
+            base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
+            download_url = f"{base_url}/work-log/export?start_date={start_date}&end_date={end_date}&format=excel"
+            
+            conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,
-                f"👋 {name_part}{time_greeting}\n"
-                f"작업일지봇이에요!\n\n"
-                f"📝 작업 내용을 입력하면 자동 저장해드려요.\n"
-                f"💬 '대화모드' 입력하면 자유롭게 대화할 수 있어요!",
+                f"📥 작업일지 다운로드\n\n📅 기간: {period_name}\n📊 건수: {pending.get('log_count', 0)}건\n💰 금액: {pending.get('total_amount', 0):,}원\n\n아래 링크를 클릭하세요:\n📎 {download_url}",
                 channel_type
             )
-        except Exception as e:
-            add_debug_log("greeting_send_error", error=str(e))
+            return
+    
+    # 취소 확인 대기 중
+    if existing_state and existing_state.get("last_question") == "🗑️ 취소 확인":
+        intent_context = {
+            "last_question": "삭제할까요? (예/아니오)",
+            "options": ["예: 삭제", "아니오: 유지"],
+            "pending_data": existing_state.get("pending_data", {})
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        add_debug_log("cancel_confirm_intent", data=intent_result)
+        
+        if intent_result.get("intent") == "confirm_yes":
+            pending_data = existing_state.get("pending_data", {})
+            log_id = pending_data.get("log_id")
+            log_info = pending_data.get("log_info", {})
+            
+            if log_id:
+                delete_work_log(log_id, 변경자=user_name, works_user_id=user_id)
+                conv_manager.clear_state(user_id)
+                await nw_client.send_text_message(
+                    channel_id,
+                    f"🚫 삭제완료!\n• 업체: {log_info.get('업체명', '-')}\n• 작업: {log_info.get('분류', '-')}\n• 금액: {log_info.get('합계', 0):,}원",
+                    channel_type
+                )
+            return
+        elif intent_result.get("intent") == "confirm_no":
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "✅ 취소가 취소되었습니다.", channel_type)
+            return
+    
+    # 경고 확인 대기 중
+    if existing_state and existing_state.get("last_question", "").startswith("⚠️"):
+        intent_context = {
+            "last_question": "경고가 있습니다. 그래도 저장할까요?",
+            "options": ["예: 저장", "아니오: 취소"],
+            "pending_data": existing_state.get("pending_data", {})
+        }
+        intent_result = await ai_parser.parse_intent(text, intent_context)
+        add_debug_log("warning_confirm_intent", data=intent_result)
+        
+        if intent_result.get("intent") == "confirm_yes":
+            data = existing_state.get("pending_data", {})
+            try:
+                record_id = save_work_log(data, user_id, user_name)
+                conv_manager.clear_state(user_id)
+                _recent_saves[user_id] = {
+                    "log_id": record_id,
+                    "expires_at": datetime.now().timestamp() + 30,
+                    "log_info": data
+                }
+                response_msg = generate_success_message(data, record_id)
+                await nw_client.send_text_message(channel_id, response_msg, channel_type)
+            except Exception as e:
+                await nw_client.send_text_message(channel_id, f"❌ 저장 오류: {str(e)}", channel_type)
+            return
+        elif intent_result.get("intent") == "confirm_no":
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, "🚫 저장하지 않았습니다.", channel_type)
+            return
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 2단계: AI로 메시지 의도 분류
+    # ═══════════════════════════════════════════════════════════════════
+    message_class = await ai_parser.classify_message(text, user_name, has_pending_state)
+    add_debug_log("message_classified", data=message_class)
+    
+    intent = message_class.get("intent", "chat")
+    intent_data = message_class.get("data", {})
+    confidence = message_class.get("confidence", 0.0)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 3단계: 의도별 처리
+    # ═══════════════════════════════════════════════════════════════════
+    
+    # 인사
+    if intent == "greeting":
+        hour = datetime.now().hour
+        if 5 <= hour < 12:
+            time_greeting = "좋은 아침이에요! ☀️"
+        elif 12 <= hour < 18:
+            time_greeting = "좋은 오후예요! 🌤️"
+        elif 18 <= hour < 22:
+            time_greeting = "수고하셨어요! 🌆"
+        else:
+            time_greeting = "늦은 시간까지 수고하세요! 🌙"
+        
+        name_part = f"{user_name}님, " if user_name else ""
+        await nw_client.send_text_message(
+            channel_id,
+            f"👋 {name_part}{time_greeting}\n작업일지봇이에요! 자유롭게 말씀하세요 😊",
+            channel_type
+        )
         return
     
-    if any(h in text_lower for h in help_commands):
-        try:
+    # 도움말
+    if intent == "help":
+        await nw_client.send_text_message(
+            channel_id,
+            "📚 작업일지봇 사용법\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            "✅ 작업 입력 (자연어 OK):\n"
+            "• 틸리언 1톤하차 3만원\n"
+            "• 나블리 양품화 20개 800원\n\n"
+            "📋 조회 (자연어 OK):\n"
+            "• 오늘 작업 정리해줘\n"
+            "• 지난주꺼 보여줘\n"
+            "• 1월 20일부터 25일까지\n\n"
+            "📌 기타:\n"
+            "• 방금꺼 취소/수정해줘\n\n"
+            "💡 편하게 말씀하세요!",
+            channel_type
+        )
+        return
+    
+    # 테스트
+    if intent == "test":
+        await nw_client.send_text_message(
+            channel_id,
+            f"🏓 퐁! 정상 작동 중!\n시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            channel_type
+        )
+        return
+    
+    # 대화모드 시작
+    if intent == "chat_mode_start":
+        conv_manager.set_state(user_id=user_id, channel_id=channel_id, pending_data={"chat_mode": True}, missing=[], last_question="대화모드")
+        await nw_client.send_text_message(
+            channel_id,
+            "💬 대화모드 시작! 무엇이든 물어보세요 😊\n\n📝 작업일지 형식은 자동 저장돼요!\n• '작업모드' 입력하면 종료",
+            channel_type
+        )
+        return
+    
+    # 대화모드 종료
+    if intent == "chat_mode_end":
+        conv_manager.clear_state(user_id)
+        await nw_client.send_text_message(channel_id, "📋 작업모드로 돌아왔습니다!", channel_type)
+        return
+    
+    # 취소 요청
+    if intent == "cancel":
+        recent_log = get_user_recent_log(user_id)
+        if recent_log:
+            conv_manager.set_state(
+                user_id=user_id, channel_id=channel_id,
+                pending_data={"cancel_mode": True, "log_id": recent_log["id"], "log_info": recent_log},
+                missing=[], last_question="🗑️ 취소 확인"
+            )
+            저장시간 = recent_log.get("저장시간", "")
+            try:
+                dt = datetime.fromisoformat(저장시간)
+                저장시간 = dt.strftime("%H:%M")
+            except:
+                pass
             await nw_client.send_text_message(
                 channel_id,
-                "📚 작업일지봇 사용법\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "✅ 작업 입력:\n"
-                "• A업체 1톤하차 50000원\n"
-                "• B업체 양품화 3개 10000원\n\n"
-                "📋 조회 명령어:\n"
-                "• 오늘 작업 정리해줘\n"
-                "• 이번주 작업 정리해줘\n"
-                "• 이번달 작업 정리해줘\n"
-                "• 1월 1일부터 1월 31일까지\n\n"
-                "📌 기타 명령어:\n"
-                "• 취소 / 방금거 취소해줘\n"
-                "• 수정 / 방금거 수정해줘\n"
-                "• 대화모드 (GPT와 자유 대화)\n\n"
-                "💡 업체명, 작업종류, 금액을 입력하면 자동 저장!",
+                f"🗑️ 이 작업을 삭제할까요?\n\n"
+                f"• 날짜: {recent_log.get('날짜', '-')}\n"
+                f"• 업체: {recent_log.get('업체명', '-')}\n"
+                f"• 작업: {recent_log.get('분류', '-')}\n"
+                f"• 금액: {recent_log.get('합계', 0):,}원\n"
+                f"• 저장시간: {저장시간}\n\n"
+                f"삭제하시겠어요?",
                 channel_type
             )
-        except Exception as e:
-            add_debug_log("help_send_error", error=str(e))
+        else:
+            await nw_client.send_text_message(channel_id, "🚫 삭제할 작업일지가 없습니다.", channel_type)
         return
     
-    if any(t in text_lower for t in test_commands):
-        try:
+    # 수정 요청
+    if intent == "edit":
+        recent = _recent_saves.get(user_id)
+        if recent and datetime.now().timestamp() < recent.get("expires_at", 0):
+            log_info = recent.get("log_info", {})
+            conv_manager.set_state(
+                user_id=user_id, channel_id=channel_id,
+                pending_data={"edit_mode": True, "log_id": recent.get("log_id"), "original": log_info},
+                missing=[], last_question="수정 대기"
+            )
             await nw_client.send_text_message(
                 channel_id,
-                f"🏓 퐁! 봇이 정상 작동 중입니다.\n시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"✏️ 수정할 내용을 입력해주세요.\n\n현재: {log_info.get('vendor', '-')} {log_info.get('work_type', '-')} {log_info.get('total', 0):,}원",
                 channel_type
             )
-        except Exception as e:
-            add_debug_log("test_send_error", error=str(e))
+        else:
+            await nw_client.send_text_message(channel_id, "✏️ 수정할 작업이 없습니다. (저장 후 30초 내)", channel_type)
         return
     
-    # 작업일지 정리/조회 명령어 (다양한 기간 지원)
-    # 작업일지 조회 관련 키워드
-    summary_keywords = [
-        "작업", "정리", "일지", "조회", "보여", "알려", "목록", "리스트",
-        "오늘", "어제", "이번주", "지난주", "이번달", "지난달", "저번달",
-        "월", "일", "부터", "까지"
-    ]
-    
-    # 작업일지 조회 요청인지 AI로 판단 (날짜 관련 키워드가 있거나 정리/조회 요청인 경우)
-    might_be_summary = any(k in text_lower for k in summary_keywords)
-    
-    if might_be_summary:
+    # 작업일지 조회
+    if intent == "work_log_query":
         # AI로 날짜 범위 파싱
         date_result = await ai_parser.parse_date_range(text)
         add_debug_log("date_range_parsed", data=date_result)
@@ -657,335 +833,9 @@ async def process_message(
                 )
                 return
     
-    # 작업일지 조회 응답 처리 (1: 텍스트, 2: 파일) - AI 의도 파악 사용
-    existing_state = conv_manager.get_state(user_id)
-    if existing_state and existing_state.get("last_question") == "📋 작업일지 조회":
-        pending = existing_state.get("pending_data", {})
-        start_date = pending.get("start_date")
-        end_date = pending.get("end_date")
-        period_name = pending.get("period_name")
-        
-        # AI로 의도 파악
-        intent_context = {
-            "last_question": "1번 텍스트로 보기, 2번 파일로 다운로드 중 선택",
-            "options": ["1: 텍스트로 보기", "2: 파일로 다운로드"],
-            "pending_data": pending
-        }
-        intent_result = await ai_parser.parse_intent(text, intent_context)
-        add_debug_log("intent_parsed", data=intent_result)
-        
-        intent = intent_result.get("intent")
-        value = intent_result.get("value")
-        
-        is_text_option = (intent == "select_option" and value == "1")
-        is_file_option = (intent == "select_option" and value == "2")
-        
-        if is_text_option:
-            # 텍스트로 출력
-            logs = get_work_logs_by_period(start_date, end_date)
-            
-            # 업체별로 그룹화
-            by_vendor = {}
-            total_amount = 0
-            for log in logs:
-                vendor = log.get("업체명", "기타")
-                if vendor not in by_vendor:
-                    by_vendor[vendor] = []
-                by_vendor[vendor].append(log)
-                total_amount += log.get("합계", 0) or 0
-            
-            msg = f"📋 {period_name} 작업일지\n"
-            msg += f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            
-            for vendor, vlogs in by_vendor.items():
-                vendor_total = sum(l.get("합계", 0) or 0 for l in vlogs)
-                msg += f"📦 {vendor} ({len(vlogs)}건, {vendor_total:,}원)\n"
-                for log in vlogs[:10]:  # 최대 10개만 표시
-                    msg += f"  • {log.get('날짜', '-')} {log.get('분류', '-')} "
-                    if log.get('수량', 1) > 1:
-                        msg += f"{log.get('수량')}개 "
-                    msg += f"{log.get('합계', 0):,}원\n"
-                if len(vlogs) > 10:
-                    msg += f"  ... 외 {len(vlogs) - 10}건\n"
-                msg += "\n"
-            
-            msg += f"━━━━━━━━━━━━━━━━━━━━\n"
-            msg += f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원"
-            
-            conv_manager.clear_state(user_id)
-            await nw_client.send_text_message(channel_id, msg, channel_type)
-            return
-            
-        elif is_file_option:
-            # 파일 다운로드 링크 제공
-            import os
-            base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
-            download_url = f"{base_url}/work-log/export?start_date={start_date}&end_date={end_date}&format=excel"
-            
-            conv_manager.clear_state(user_id)
-            await nw_client.send_text_message(
-                channel_id,
-                f"📥 작업일지 다운로드\n\n"
-                f"📅 기간: {period_name}\n"
-                f"📊 건수: {pending.get('log_count', 0)}건\n"
-                f"💰 금액: {pending.get('total_amount', 0):,}원\n\n"
-                f"아래 링크를 클릭하세요:\n"
-                f"📎 {download_url}",
-                channel_type
-            )
-            return
-    
-    # 대화모드 시작/종료
-    chat_mode_start = ["대화모드", "대화 모드", "챗모드", "chat mode", "chat"]
-    chat_mode_end = ["작업모드", "작업 모드", "종료", "대화모드 종료", "챗모드 종료"]
-    
-    existing_state = conv_manager.get_state(user_id)
-    is_chat_mode = existing_state and existing_state.get("pending_data", {}).get("chat_mode")
-    
-    if any(cmd == text_lower or cmd in text_lower for cmd in chat_mode_start) and not is_chat_mode:
-        conv_manager.set_state(
-            user_id=user_id,
-            channel_id=channel_id,
-            pending_data={"chat_mode": True},
-            missing=[],
-            last_question="대화모드"
-        )
-        try:
-            await nw_client.send_text_message(
-                channel_id,
-                "💬 대화모드가 시작되었습니다!\n\n"
-                "자유롭게 대화해보세요. 무엇이든 물어보세요 😊\n\n"
-                "📝 작업일지 형식으로 입력하면 자동 저장돼요!\n"
-                "예: '틸리언 1톤하차 3만원'\n\n"
-                "• 대화 종료 → '작업모드' 입력",
-                channel_type
-            )
-        except Exception as e:
-            add_debug_log("chat_mode_start_error", error=str(e))
-        return
-    
-    if any(cmd == text_lower or cmd in text_lower for cmd in chat_mode_end) and is_chat_mode:
-        conv_manager.clear_state(user_id)
-        try:
-            await nw_client.send_text_message(
-                channel_id,
-                "📋 작업모드로 돌아왔습니다!\n\n"
-                "작업일지를 입력해주세요.\n"
-                "예: 'A업체 1톤하차 50000원'",
-                channel_type
-            )
-        except Exception as e:
-            add_debug_log("chat_mode_end_error", error=str(e))
-        return
-    
-    # 대화모드 중이면 - 작업일지 형식 자동 감지 후 GPT 대화
-    if is_chat_mode:
-        add_debug_log("chat_mode_message", {"text": text})
-        
-        # 먼저 작업일지 형식인지 확인 (AI 파싱 시도)
-        try:
-            parse_result = await ai_parser.parse_message(text, None)
-            
-            # 파싱 성공하고 필수 정보가 있으면 작업일지로 처리
-            if parse_result.get("success"):
-                data = parse_result.get("data", {})
-                if data.get("vendor") and data.get("work_type") and data.get("unit_price"):
-                    add_debug_log("chat_mode_work_log_detected", data)
-                    
-                    # 대화모드 유지하면서 작업일지 저장 진행
-                    # (아래 작업일지 처리 로직으로 계속)
-                    pass  # 아래로 계속 진행
-                else:
-                    # 파싱은 됐지만 불완전 → GPT 대화
-                    chat_response = await ai_parser.chat_response(text, user_name)
-                    await nw_client.send_text_message(channel_id, chat_response, channel_type)
-                    return
-            else:
-                # 파싱 실패 → GPT 대화
-                chat_response = await ai_parser.chat_response(text, user_name)
-                await nw_client.send_text_message(channel_id, chat_response, channel_type)
-                return
-                
-        except Exception as e:
-            add_debug_log("chat_mode_parse_error", error=str(e))
-            # 파싱 에러 → GPT 대화
-            try:
-                chat_response = await ai_parser.chat_response(text, user_name)
-                await nw_client.send_text_message(channel_id, chat_response, channel_type)
-            except:
-                pass
-            return
-    
-    # 취소 명령 처리 (자연어 인식) - 시간 제한 없음, 확인 후 삭제
-    cancel_keywords = ["취소", "cancel", "삭제", "방금거", "직전", "되돌려", "되돌리", "undo"]
-    if any(k in text_lower for k in cancel_keywords) and any(w in text_lower for w in ["취소", "삭제", "되돌", "cancel", "undo"]):
-        # DB에서 사용자의 최근 작업일지 조회
-        recent_log = get_user_recent_log(user_id)
-        
-        if recent_log:
-            # 취소 확인 상태 저장
-            conv_manager.set_state(
-                user_id=user_id,
-                channel_id=channel_id,
-                pending_data={"cancel_mode": True, "log_id": recent_log["id"], "log_info": recent_log},
-                missing=[],
-                last_question="🗑️ 취소 확인"
-            )
-            
-            저장시간 = recent_log.get("저장시간", "")
-            if 저장시간:
-                try:
-                    dt = datetime.fromisoformat(저장시간)
-                    저장시간 = dt.strftime("%H:%M")
-                except:
-                    pass
-            
-            await nw_client.send_text_message(
-                channel_id,
-                f"🗑️ 이 작업을 삭제할까요?\n\n"
-                f"• 날짜: {recent_log.get('날짜', '-')}\n"
-                f"• 업체: {recent_log.get('업체명', '-')}\n"
-                f"• 작업: {recent_log.get('분류', '-')}\n"
-                f"• 수량: {recent_log.get('수량', 1)}개\n"
-                f"• 단가: {recent_log.get('단가', 0):,}원\n"
-                f"• 합계: {recent_log.get('합계', 0):,}원\n"
-                f"• 저장시간: {저장시간}\n\n"
-                f"삭제하시려면 '예', 취소하시려면 '아니오'를 입력하세요.",
-                channel_type
-            )
-        else:
-            await nw_client.send_text_message(
-                channel_id,
-                "🚫 삭제할 작업일지가 없습니다.",
-                channel_type
-            )
-        return
-    
-    # 수정 명령 처리
-    edit_keywords = ["수정", "변경", "바꿔", "고쳐", "edit", "modify"]
-    if any(k in text_lower for k in edit_keywords) and any(w in text_lower for w in ["방금", "직전", "아까"]):
-        recent = _recent_saves.get(user_id)
-        if recent and datetime.now().timestamp() < recent.get("expires_at", 0):
-            log_id = recent.get("log_id")
-            log_info = recent.get("log_info", {})
-            # 수정 모드 상태 저장
-            conv_manager.set_state(
-                user_id=user_id,
-                channel_id=channel_id,
-                pending_data={"edit_mode": True, "log_id": log_id, "original": log_info},
-                missing=[],
-                last_question="수정 대기"
-            )
-            await nw_client.send_text_message(
-                channel_id,
-                f"✏️ 수정할 내용을 입력해주세요.\n\n"
-                f"현재 저장된 내용:\n"
-                f"• 업체: {log_info.get('vendor', '-')}\n"
-                f"• 작업: {log_info.get('work_type', '-')}\n"
-                f"• 수량: {log_info.get('qty', 1)}개\n"
-                f"• 단가: {log_info.get('unit_price', 0):,}원\n"
-                f"• 합계: {log_info.get('total', 0):,}원\n\n"
-                f"예: 'A업체 2톤하차 50000원' (전체 내용 다시 입력)",
-                channel_type
-            )
-        else:
-            await nw_client.send_text_message(
-                channel_id,
-                "✏️ 수정할 작업이 없습니다. (저장 후 30초 내에만 수정 가능)",
-                channel_type
-            )
-        return
-    
-    # 확인 응답 처리 (취소/중복/경고) - AI 의도 파악 사용
-    existing_state = conv_manager.get_state(user_id)
-    last_question = existing_state.get("last_question", "") if existing_state else ""
-    
-    # 취소 확인 대기 중일 때
-    if last_question.startswith("🗑️ 취소"):
-        # AI로 의도 파악
-        intent_context = {
-            "last_question": "작업일지를 삭제할까요? (예/아니오)",
-            "options": ["예: 삭제", "아니오: 유지"],
-            "pending_data": existing_state.get("pending_data", {})
-        }
-        intent_result = await ai_parser.parse_intent(text, intent_context)
-        add_debug_log("cancel_intent", data=intent_result)
-        
-        if intent_result.get("intent") == "confirm_yes":
-            # 삭제 실행
-            pending_data = existing_state.get("pending_data", {})
-            log_id = pending_data.get("log_id")
-            log_info = pending_data.get("log_info", {})
-            
-            if log_id:
-                delete_work_log(log_id, 변경자=user_name, works_user_id=user_id)
-                conv_manager.clear_state(user_id)
-                await nw_client.send_text_message(
-                    channel_id,
-                    f"🚫 작업일지가 삭제되었습니다.\n"
-                    f"• 업체: {log_info.get('업체명', '-')}\n"
-                    f"• 작업: {log_info.get('분류', '-')}\n"
-                    f"• 금액: {log_info.get('합계', 0):,}원",
-                    channel_type
-                )
-            return
-        elif intent_result.get("intent") == "confirm_no":
-            conv_manager.clear_state(user_id)
-            await nw_client.send_text_message(
-                channel_id,
-                "✅ 취소가 취소되었습니다. 작업일지가 유지됩니다.",
-                channel_type
-            )
-            return
-    
-    # 중복 또는 경고 확인 대기 중일 때
-    if last_question.startswith("⚠️"):
-        # AI로 의도 파악
-        intent_context = {
-            "last_question": "경고가 있습니다. 그래도 저장할까요? (예/아니오)",
-            "options": ["예: 저장", "아니오: 취소"],
-            "pending_data": existing_state.get("pending_data", {})
-        }
-        intent_result = await ai_parser.parse_intent(text, intent_context)
-        add_debug_log("warning_intent", data=intent_result)
-        
-        if intent_result.get("intent") == "confirm_yes":
-            # 확인 후 저장
-            data = existing_state.get("pending_data", {})
-            try:
-                record_id = save_work_log(data, user_id, user_name)
-                conv_manager.clear_state(user_id)
-                
-                # 취소 가능 시간 설정 (30초)
-                _recent_saves[user_id] = {
-                    "log_id": record_id,
-                    "expires_at": datetime.now().timestamp() + 30,
-                    "log_info": {
-                        "vendor": data.get("vendor", ""),
-                        "work_type": data.get("work_type", ""),
-                        "qty": data.get("qty", 1),
-                        "unit_price": data.get("unit_price", 0),
-                        "total": data.get("qty", 1) * data.get("unit_price", 0),
-                    }
-                }
-                
-                response_msg = generate_success_message(data, record_id)
-                await nw_client.send_text_message(channel_id, response_msg, channel_type)
-            except Exception as e:
-                await nw_client.send_text_message(
-                    channel_id,
-                    f"❌ 저장 중 오류가 발생했습니다: {str(e)}",
-                    channel_type
-                )
-            return
-        elif intent_result.get("intent") == "confirm_no":
-            conv_manager.clear_state(user_id)
-            await nw_client.send_text_message(
-                channel_id,
-                "🚫 저장하지 않았습니다.",
-                channel_type
-            )
-            return
+    # ═══════════════════════════════════════════════════════════════════
+    # 4단계: 작업일지 입력 또는 일반 대화 처리
+    # ═══════════════════════════════════════════════════════════════════
     
     # AI 파싱
     try:

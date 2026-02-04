@@ -378,6 +378,96 @@ class AIParser:
         
         return response
     
+    async def classify_message(
+        self,
+        message: str,
+        user_name: Optional[str] = None,
+        has_pending_state: bool = False
+    ) -> Dict[str, Any]:
+        """
+        메시지의 의도를 종합적으로 분류
+        
+        Args:
+            message: 사용자 메시지
+            user_name: 사용자 이름
+            has_pending_state: 이전 대화 상태가 있는지
+        
+        Returns:
+            {"intent": "의도", "data": {...}, "confidence": 0.0-1.0}
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        classify_prompt = f"""사용자 메시지의 의도를 분류하세요.
+
+## 오늘 날짜: {today}
+## 사용자: {user_name or "알수없음"}
+## 이전 대화 상태 존재: {has_pending_state}
+
+## 사용자 메시지
+"{message}"
+
+## 의도 분류 (하나만 선택)
+
+1. "greeting" - 인사 (안녕, 하이, 반가워, 좋은아침 등)
+2. "help" - 도움말/사용법 요청 (도움말, 어떻게 써, 사용법, 뭐할수있어 등)
+3. "test" - 테스트/상태확인 (테스트, 퐁, 핑, 살아있어? 등)
+4. "work_log_query" - 작업일지 조회 요청 (오늘 작업 정리해줘, 이번주 작업, 1월 작업 보여줘 등)
+   - 날짜/기간이 포함되어야 함
+5. "work_log_entry" - 작업일지 입력 (업체명 + 작업종류 + 금액 형식)
+   - 예: "틸리언 1톤하차 3만원", "나블리 양품화 20개 800원"
+6. "cancel" - 취소 요청 (취소, 방금거 취소, 삭제해줘 등)
+7. "edit" - 수정 요청 (수정, 방금거 수정, 고쳐줘 등)
+8. "chat_mode_start" - 대화모드 시작 (대화모드, 챗모드, 대화하자 등)
+9. "chat_mode_end" - 대화모드 종료 (작업모드, 종료, 대화모드 끝 등)
+10. "confirm_yes" - 긍정 응답 (네, 응, 맞아, 그래, ㅇㅇ, 확인 등)
+11. "confirm_no" - 부정 응답 (아니, 아니오, 취소, ㄴㄴ, 안해 등)
+12. "select_option" - 옵션 선택 (1번, 2번, 텍스트로, 파일로 등)
+13. "chat" - 일반 대화/질문 (위 어느 것에도 해당 안됨)
+
+## 응답 형식 (JSON)
+{{
+  "intent": "의도",
+  "confidence": 0.0~1.0,
+  "reason": "판단 이유 (짧게)",
+  "data": {{
+    // intent별 추가 데이터
+    // work_log_query: {{"period_hint": "오늘/이번주/1월 등"}}
+    // work_log_entry: {{"has_vendor": true, "has_work_type": true, "has_price": true}}
+    // select_option: {{"value": "1" 또는 "2"}}
+  }}
+}}
+
+## 판단 규칙
+- "업체명 + 작업 + 금액" 형식이면 work_log_entry
+- "정리", "조회", "보여줘" + 날짜 표현이면 work_log_query
+- 짧은 인사말은 greeting
+- 애매하면 chat
+
+반드시 유효한 JSON만 출력하세요."""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "메시지 의도를 정확하게 분류하는 AI입니다. JSON만 출력합니다."},
+                    {"role": "user", "content": classify_prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                max_tokens=200
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            return result
+            
+        except Exception as e:
+            return {
+                "intent": "chat",
+                "confidence": 0.0,
+                "reason": f"Error: {str(e)}",
+                "data": {}
+            }
+
     async def parse_date_range(
         self,
         message: str,
