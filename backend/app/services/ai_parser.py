@@ -382,7 +382,8 @@ class AIParser:
         self,
         message: str,
         user_name: Optional[str] = None,
-        has_pending_state: bool = False
+        has_pending_state: bool = False,
+        current_mode: str = "work"  # "work" 또는 "chat"
     ) -> Dict[str, Any]:
         """
         메시지의 의도를 종합적으로 분류
@@ -391,17 +392,38 @@ class AIParser:
             message: 사용자 메시지
             user_name: 사용자 이름
             has_pending_state: 이전 대화 상태가 있는지
+            current_mode: 현재 모드 ("work" 또는 "chat")
         
         Returns:
             {"intent": "의도", "data": {...}, "confidence": 0.0-1.0}
         """
         today = datetime.now().strftime("%Y-%m-%d")
         
+        # 모드별 분류 안내
+        if current_mode == "chat":
+            mode_guide = """
+## ⚠️ 현재 대화모드입니다!
+대화모드에서는 다음만 가능합니다:
+- web_search: 외부 정보 검색, 회사/사람 정보, 뉴스 등
+- chat: 일반 대화, 질문
+- greeting, help, test: 인사, 도움말, 테스트
+- chat_mode_end, work_mode_start: 모드 전환
+
+작업일지 관련 의도(work_log_entry, search_query 등)는 선택하지 마세요!
+"정보", "알려줘", "뭐야" 등이 있으면 → web_search
+"""
+        else:
+            mode_guide = """
+## 현재 작업모드입니다.
+모든 의도 분류가 가능합니다.
+"""
+        
         classify_prompt = f"""사용자 메시지의 의도를 분류하세요.
 
 ## 오늘 날짜: {today}
 ## 사용자: {user_name or "알수없음"}
 ## 이전 대화 상태 존재: {has_pending_state}
+{mode_guide}
 
 ## 사용자 메시지
 "{message}"

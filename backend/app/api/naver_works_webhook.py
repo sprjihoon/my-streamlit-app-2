@@ -1022,8 +1022,15 @@ async def process_message(
     # ═══════════════════════════════════════════════════════════════════
     # 2단계: AI로 메시지 의도 분류
     # ═══════════════════════════════════════════════════════════════════
-    message_class = await ai_parser.classify_message(text, user_name, has_pending_state)
-    add_debug_log("message_classified", data=message_class)
+    # 현재 모드 확인
+    current_mode = "work"  # 기본값
+    if existing_state:
+        pending_data = existing_state.get("pending_data", {})
+        if pending_data.get("chat_mode"):
+            current_mode = "chat"
+    
+    message_class = await ai_parser.classify_message(text, user_name, has_pending_state, current_mode)
+    add_debug_log("message_classified", data={**message_class, "current_mode": current_mode})
     
     intent = message_class.get("intent", "chat")
     intent_data = message_class.get("data", {})
@@ -1141,7 +1148,7 @@ async def process_message(
     # ═══════════════════════════════════════════════════════════════════
     # 대화모드 체크 - 작업 관련 의도가 감지되면 작업모드 전환 안내
     # ═══════════════════════════════════════════════════════════════════
-    is_chat_mode = existing_state and existing_state.get("pending_data", {}).get("chat_mode")
+    is_chat_mode = (current_mode == "chat")
     work_intents = [
         "work_log_entry", "work_log_query", "cancel", "edit", 
         "search_query", "stats_query", "specific_edit", "specific_delete",
