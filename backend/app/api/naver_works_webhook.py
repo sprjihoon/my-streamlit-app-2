@@ -436,8 +436,9 @@ async def process_message(
                 channel_id,
                 "💬 대화모드가 시작되었습니다!\n\n"
                 "자유롭게 대화해보세요. 무엇이든 물어보세요 😊\n\n"
-                "• 작업일지 저장하려면 → '작업모드' 입력\n"
-                "• 또는 직접 '틸리언 1톤하차 3만원' 형식으로 입력",
+                "📝 작업일지 형식으로 입력하면 자동 저장돼요!\n"
+                "예: '틸리언 1톤하차 3만원'\n\n"
+                "• 대화 종료 → '작업모드' 입력",
                 channel_type
             )
         except Exception as e:
@@ -458,15 +459,43 @@ async def process_message(
             add_debug_log("chat_mode_end_error", error=str(e))
         return
     
-    # 대화모드 중이면 GPT 대화로 처리
+    # 대화모드 중이면 - 작업일지 형식 자동 감지 후 GPT 대화
     if is_chat_mode:
         add_debug_log("chat_mode_message", {"text": text})
+        
+        # 먼저 작업일지 형식인지 확인 (AI 파싱 시도)
         try:
-            chat_response = await ai_parser.chat_response(text, user_name)
-            await nw_client.send_text_message(channel_id, chat_response, channel_type)
+            parse_result = await ai_parser.parse_message(text, None)
+            
+            # 파싱 성공하고 필수 정보가 있으면 작업일지로 처리
+            if parse_result.get("success"):
+                data = parse_result.get("data", {})
+                if data.get("vendor") and data.get("work_type") and data.get("unit_price"):
+                    add_debug_log("chat_mode_work_log_detected", data)
+                    
+                    # 대화모드 유지하면서 작업일지 저장 진행
+                    # (아래 작업일지 처리 로직으로 계속)
+                    pass  # 아래로 계속 진행
+                else:
+                    # 파싱은 됐지만 불완전 → GPT 대화
+                    chat_response = await ai_parser.chat_response(text, user_name)
+                    await nw_client.send_text_message(channel_id, chat_response, channel_type)
+                    return
+            else:
+                # 파싱 실패 → GPT 대화
+                chat_response = await ai_parser.chat_response(text, user_name)
+                await nw_client.send_text_message(channel_id, chat_response, channel_type)
+                return
+                
         except Exception as e:
-            add_debug_log("chat_mode_response_error", error=str(e))
-        return
+            add_debug_log("chat_mode_parse_error", error=str(e))
+            # 파싱 에러 → GPT 대화
+            try:
+                chat_response = await ai_parser.chat_response(text, user_name)
+                await nw_client.send_text_message(channel_id, chat_response, channel_type)
+            except:
+                pass
+            return
     
     # 취소 명령 처리 (자연어 인식)
     cancel_keywords = ["취소", "cancel", "삭제", "방금거", "직전", "되돌려", "되돌리", "undo"]
