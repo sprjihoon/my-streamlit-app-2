@@ -556,15 +556,19 @@ async def process_message(
                 channel_id,
                 "📚 작업일지봇 사용법\n"
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "✅ 작업 입력 예시:\n"
+                "✅ 작업 입력:\n"
                 "• A업체 1톤하차 50000원\n"
-                "• B업체 양품화 3개 10000원\n"
-                "• C업체 바코드부착 100개 500원\n\n"
-                "📌 명령어:\n"
-                "• 취소 - 방금 저장한 작업 삭제 (30초 내)\n"
-                "• 도움말 - 사용법 보기\n\n"
-                "💡 업체명, 작업종류, 금액을 말씀해주시면\n"
-                "자동으로 인식해서 저장합니다!",
+                "• B업체 양품화 3개 10000원\n\n"
+                "📋 조회 명령어:\n"
+                "• 오늘 작업 정리해줘\n"
+                "• 이번주 작업 정리해줘\n"
+                "• 이번달 작업 정리해줘\n"
+                "• 1월 1일부터 1월 31일까지\n\n"
+                "📌 기타 명령어:\n"
+                "• 취소 / 방금거 취소해줘\n"
+                "• 수정 / 방금거 수정해줘\n"
+                "• 대화모드 (GPT와 자유 대화)\n\n"
+                "💡 업체명, 작업종류, 금액을 입력하면 자동 저장!",
                 channel_type
             )
         except Exception as e:
@@ -582,46 +586,100 @@ async def process_message(
             add_debug_log("test_send_error", error=str(e))
         return
     
-    # 오늘 작업일지 정리 명령어
-    summary_keywords = ["오늘", "정리", "요약", "리스트", "목록"]
-    if any(k in text_lower for k in ["오늘 작업", "작업 정리", "작업일지 정리", "오늘 정리", "작업 목록", "작업 리스트"]):
+    # 작업일지 정리/조회 명령어 (다양한 기간 지원)
+    import re
+    from datetime import timedelta
+    
+    summary_patterns = [
+        "오늘 작업", "작업 정리", "작업일지 정리", "오늘 정리", "작업 목록", "작업 리스트",
+        "이번주", "이번 주", "금주", "주간", "이번달", "이번 달", "월간", "한달",
+    ]
+    
+    # 날짜 범위 파싱 (예: "1월 1일부터 1월 31일까지", "2026-01-01부터 2026-01-31")
+    date_range_match = re.search(r'(\d{1,2}월\s*\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}).*?(부터|~).*?(\d{1,2}월\s*\d{1,2}일|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2})', text_lower)
+    
+    if any(k in text_lower for k in summary_patterns) or date_range_match:
         try:
-            today_logs = get_today_work_logs()
+            now = datetime.now()
             
-            if not today_logs:
+            # 기간 결정
+            if date_range_match:
+                # 날짜 범위 지정된 경우
+                def parse_date(date_str):
+                    date_str = date_str.strip()
+                    if '-' in date_str and len(date_str) == 10:
+                        return date_str
+                    elif '월' in date_str:
+                        match = re.match(r'(\d{1,2})월\s*(\d{1,2})일', date_str)
+                        if match:
+                            month, day = int(match.group(1)), int(match.group(2))
+                            return f"{now.year}-{month:02d}-{day:02d}"
+                    elif '/' in date_str:
+                        parts = date_str.split('/')
+                        if len(parts) == 2:
+                            return f"{now.year}-{int(parts[0]):02d}-{int(parts[1]):02d}"
+                    return None
+                
+                start_date = parse_date(date_range_match.group(1))
+                end_date = parse_date(date_range_match.group(3))
+                period_name = f"{start_date} ~ {end_date}"
+            elif any(k in text_lower for k in ["이번주", "이번 주", "금주", "주간"]):
+                # 이번 주 (월~일)
+                start_of_week = now - timedelta(days=now.weekday())
+                start_date = start_of_week.strftime("%Y-%m-%d")
+                end_date = now.strftime("%Y-%m-%d")
+                period_name = f"이번 주 ({start_date} ~ {end_date})"
+            elif any(k in text_lower for k in ["이번달", "이번 달", "월간", "한달"]):
+                # 이번 달
+                start_date = now.strftime("%Y-%m-01")
+                end_date = now.strftime("%Y-%m-%d")
+                period_name = f"이번 달 ({start_date} ~ {end_date})"
+            else:
+                # 오늘
+                start_date = now.strftime("%Y-%m-%d")
+                end_date = start_date
+                period_name = f"오늘 ({start_date})"
+            
+            # 기간별 작업일지 조회
+            logs = get_work_logs_by_period(start_date, end_date)
+            
+            if not logs:
                 await nw_client.send_text_message(
                     channel_id,
-                    "📋 오늘 작업일지가 없습니다.",
+                    f"📋 {period_name} 작업일지가 없습니다.",
                     channel_type
                 )
             else:
-                # 업체별로 그룹화
-                by_vendor = {}
-                total_amount = 0
-                for log in today_logs:
-                    vendor = log.get("업체명", "기타")
-                    if vendor not in by_vendor:
-                        by_vendor[vendor] = []
-                    by_vendor[vendor].append(log)
-                    total_amount += log.get("합계", 0) or 0
+                # 선택 옵션 제공
+                total_amount = sum(l.get("합계", 0) or 0 for l in logs)
                 
-                msg = f"📋 오늘 작업일지 ({datetime.now().strftime('%Y-%m-%d')})\n"
-                msg += f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                conv_manager.set_state(
+                    user_id=user_id,
+                    channel_id=channel_id,
+                    pending_data={
+                        "summary_mode": True,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "period_name": period_name,
+                        "log_count": len(logs),
+                        "total_amount": total_amount,
+                    },
+                    missing=[],
+                    last_question="📋 작업일지 조회"
+                )
                 
-                for vendor, logs in by_vendor.items():
-                    vendor_total = sum(l.get("합계", 0) or 0 for l in logs)
-                    msg += f"📦 {vendor} ({len(logs)}건, {vendor_total:,}원)\n"
-                    for log in logs:
-                        msg += f"  • {log.get('분류', '-')} "
-                        if log.get('수량', 1) > 1:
-                            msg += f"{log.get('수량')}개 "
-                        msg += f"{log.get('합계', 0):,}원\n"
-                    msg += "\n"
-                
-                msg += f"━━━━━━━━━━━━━━━━━━━━\n"
-                msg += f"📊 총 {len(today_logs)}건 | 💰 {total_amount:,}원"
-                
-                await nw_client.send_text_message(channel_id, msg, channel_type)
+                await nw_client.send_text_message(
+                    channel_id,
+                    f"📋 {period_name} 작업일지\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원\n\n"
+                    f"어떻게 보여드릴까요?\n"
+                    f"1️⃣ 텍스트로 보기\n"
+                    f"2️⃣ 파일로 다운로드 (링크)\n\n"
+                    f"'1' 또는 '2'를 입력해주세요.",
+                    channel_type
+                )
+            return
         except Exception as e:
             add_debug_log("summary_error", error=str(e))
             await nw_client.send_text_message(
@@ -630,6 +688,68 @@ async def process_message(
                 channel_type
             )
         return
+    
+    # 작업일지 조회 응답 처리 (1: 텍스트, 2: 파일)
+    if existing_state and existing_state.get("last_question") == "📋 작업일지 조회":
+        pending = existing_state.get("pending_data", {})
+        start_date = pending.get("start_date")
+        end_date = pending.get("end_date")
+        period_name = pending.get("period_name")
+        
+        if text_lower in ["1", "텍스트", "텍스트로"]:
+            # 텍스트로 출력
+            logs = get_work_logs_by_period(start_date, end_date)
+            
+            # 업체별로 그룹화
+            by_vendor = {}
+            total_amount = 0
+            for log in logs:
+                vendor = log.get("업체명", "기타")
+                if vendor not in by_vendor:
+                    by_vendor[vendor] = []
+                by_vendor[vendor].append(log)
+                total_amount += log.get("합계", 0) or 0
+            
+            msg = f"📋 {period_name} 작업일지\n"
+            msg += f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            for vendor, vlogs in by_vendor.items():
+                vendor_total = sum(l.get("합계", 0) or 0 for l in vlogs)
+                msg += f"📦 {vendor} ({len(vlogs)}건, {vendor_total:,}원)\n"
+                for log in vlogs[:10]:  # 최대 10개만 표시
+                    msg += f"  • {log.get('날짜', '-')} {log.get('분류', '-')} "
+                    if log.get('수량', 1) > 1:
+                        msg += f"{log.get('수량')}개 "
+                    msg += f"{log.get('합계', 0):,}원\n"
+                if len(vlogs) > 10:
+                    msg += f"  ... 외 {len(vlogs) - 10}건\n"
+                msg += "\n"
+            
+            msg += f"━━━━━━━━━━━━━━━━━━━━\n"
+            msg += f"📊 총 {len(logs)}건 | 💰 {total_amount:,}원"
+            
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(channel_id, msg, channel_type)
+            return
+            
+        elif text_lower in ["2", "파일", "다운로드", "파일로"]:
+            # 파일 다운로드 링크 제공
+            import os
+            base_url = os.getenv("BACKEND_URL", "https://my-streamlit-app-2-production.up.railway.app")
+            download_url = f"{base_url}/work-log/export?start_date={start_date}&end_date={end_date}&format=excel"
+            
+            conv_manager.clear_state(user_id)
+            await nw_client.send_text_message(
+                channel_id,
+                f"📥 작업일지 다운로드\n\n"
+                f"📅 기간: {period_name}\n"
+                f"📊 건수: {pending.get('log_count', 0)}건\n"
+                f"💰 금액: {pending.get('total_amount', 0):,}원\n\n"
+                f"아래 링크를 클릭하세요:\n"
+                f"📎 {download_url}",
+                channel_type
+            )
+            return
     
     # 대화모드 시작/종료
     chat_mode_start = ["대화모드", "대화 모드", "챗모드", "chat mode", "chat"]
