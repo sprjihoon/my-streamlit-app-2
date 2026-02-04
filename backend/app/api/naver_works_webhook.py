@@ -288,24 +288,116 @@ async def process_message(
             add_debug_log("test_send_error", error=str(e))
         return
     
-    # 취소 명령 처리 (최근 저장 삭제)
-    if text_lower in ["취소", "cancel", "삭제"]:
+    # 대화모드 시작/종료
+    chat_mode_start = ["대화모드", "대화 모드", "챗모드", "chat mode", "chat"]
+    chat_mode_end = ["작업모드", "작업 모드", "종료", "대화모드 종료", "챗모드 종료"]
+    
+    existing_state = conv_manager.get_state(user_id)
+    is_chat_mode = existing_state and existing_state.get("pending_data", {}).get("chat_mode")
+    
+    if any(cmd == text_lower or cmd in text_lower for cmd in chat_mode_start) and not is_chat_mode:
+        conv_manager.set_state(
+            user_id=user_id,
+            channel_id=channel_id,
+            pending_data={"chat_mode": True},
+            missing=[],
+            last_question="대화모드"
+        )
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                "💬 대화모드가 시작되었습니다!\n\n"
+                "자유롭게 대화해보세요. 무엇이든 물어보세요 😊\n\n"
+                "• 작업일지 저장하려면 → '작업모드' 입력\n"
+                "• 또는 직접 '틸리언 1톤하차 3만원' 형식으로 입력",
+                channel_type
+            )
+        except Exception as e:
+            add_debug_log("chat_mode_start_error", error=str(e))
+        return
+    
+    if any(cmd == text_lower or cmd in text_lower for cmd in chat_mode_end) and is_chat_mode:
+        conv_manager.clear_state(user_id)
+        try:
+            await nw_client.send_text_message(
+                channel_id,
+                "📋 작업모드로 돌아왔습니다!\n\n"
+                "작업일지를 입력해주세요.\n"
+                "예: 'A업체 1톤하차 50000원'",
+                channel_type
+            )
+        except Exception as e:
+            add_debug_log("chat_mode_end_error", error=str(e))
+        return
+    
+    # 대화모드 중이면 GPT 대화로 처리
+    if is_chat_mode:
+        add_debug_log("chat_mode_message", {"text": text})
+        try:
+            chat_response = await ai_parser.chat_response(text, user_name)
+            await nw_client.send_text_message(channel_id, chat_response, channel_type)
+        except Exception as e:
+            add_debug_log("chat_mode_response_error", error=str(e))
+        return
+    
+    # 취소 명령 처리 (자연어 인식)
+    cancel_keywords = ["취소", "cancel", "삭제", "방금거", "직전", "되돌려", "되돌리", "undo"]
+    if any(k in text_lower for k in cancel_keywords) and any(w in text_lower for w in ["취소", "삭제", "되돌", "cancel", "undo"]):
         # 최근 저장된 레코드 확인
         recent = _recent_saves.get(user_id)
         if recent and datetime.now().timestamp() < recent.get("expires_at", 0):
             log_id = recent.get("log_id")
+            log_info = recent.get("log_info", {})
             delete_work_log(log_id)
             del _recent_saves[user_id]
             await nw_client.send_text_message(
                 channel_id,
-                "🚫 방금 저장한 작업일지가 삭제되었습니다.",
+                f"🚫 방금 저장한 작업일지가 삭제되었습니다.\n"
+                f"• 업체: {log_info.get('vendor', '-')}\n"
+                f"• 작업: {log_info.get('work_type', '-')}\n"
+                f"• 금액: {log_info.get('total', 0):,}원",
                 channel_type
             )
         else:
             conv_manager.clear_state(user_id)
             await nw_client.send_text_message(
                 channel_id,
-                "🚫 취소되었습니다.",
+                "🚫 취소할 작업이 없습니다. (저장 후 30초 내에만 취소 가능)",
+                channel_type
+            )
+        return
+    
+    # 수정 명령 처리
+    edit_keywords = ["수정", "변경", "바꿔", "고쳐", "edit", "modify"]
+    if any(k in text_lower for k in edit_keywords) and any(w in text_lower for w in ["방금", "직전", "아까"]):
+        recent = _recent_saves.get(user_id)
+        if recent and datetime.now().timestamp() < recent.get("expires_at", 0):
+            log_id = recent.get("log_id")
+            log_info = recent.get("log_info", {})
+            # 수정 모드 상태 저장
+            conv_manager.set_state(
+                user_id=user_id,
+                channel_id=channel_id,
+                pending_data={"edit_mode": True, "log_id": log_id, "original": log_info},
+                missing=[],
+                last_question="수정 대기"
+            )
+            await nw_client.send_text_message(
+                channel_id,
+                f"✏️ 수정할 내용을 입력해주세요.\n\n"
+                f"현재 저장된 내용:\n"
+                f"• 업체: {log_info.get('vendor', '-')}\n"
+                f"• 작업: {log_info.get('work_type', '-')}\n"
+                f"• 수량: {log_info.get('qty', 1)}개\n"
+                f"• 단가: {log_info.get('unit_price', 0):,}원\n"
+                f"• 합계: {log_info.get('total', 0):,}원\n\n"
+                f"예: 'A업체 2톤하차 50000원' (전체 내용 다시 입력)",
+                channel_type
+            )
+        else:
+            await nw_client.send_text_message(
+                channel_id,
+                "✏️ 수정할 작업이 없습니다. (저장 후 30초 내에만 수정 가능)",
                 channel_type
             )
         return
@@ -394,17 +486,31 @@ async def process_message(
             )
             return
         
-        # 중복 없음 - 바로 저장
+        # 수정 모드인 경우 기존 레코드 삭제 후 새로 저장
+        if existing_state and existing_state.get("pending_data", {}).get("edit_mode"):
+            old_log_id = existing_state.get("pending_data", {}).get("log_id")
+            if old_log_id:
+                delete_work_log(old_log_id)
+                add_debug_log("edit_mode_deleted_old", {"old_log_id": old_log_id})
+        
+        # 저장
         try:
             record_id = save_work_log(data, user_id, user_name)
             
             # 대화 상태 초기화
             conv_manager.clear_state(user_id)
             
-            # 취소 가능 시간 설정 (30초)
+            # 취소/수정 가능 시간 설정 (30초) - log_info 포함
             _recent_saves[user_id] = {
                 "log_id": record_id,
-                "expires_at": datetime.now().timestamp() + 30
+                "expires_at": datetime.now().timestamp() + 30,
+                "log_info": {
+                    "vendor": data.get("vendor", ""),
+                    "work_type": data.get("work_type", ""),
+                    "qty": data.get("qty", 1),
+                    "unit_price": data.get("unit_price", 0),
+                    "total": data.get("qty", 1) * data.get("unit_price", 0),
+                }
             }
             
             # 확인 메시지 생성 및 전송
@@ -429,20 +535,33 @@ async def process_message(
         missing = parse_result.get("missing", [])
         question = parse_result.get("question", "")
         
-        # 아무것도 인식 못한 경우 기본 응답
+        # 아무것도 인식 못한 경우 - GPT 대화 모드
         if not data or (not data.get("vendor") and not data.get("work_type") and not data.get("unit_price")):
-            add_debug_log("no_data_parsed", {"original_text": text})
+            add_debug_log("no_data_parsed_chat_mode", {"original_text": text})
             try:
+                # GPT에게 자유 대화 요청
+                chat_response = await ai_parser.chat_response(text, user_name)
+                add_debug_log("chat_response", {"response": chat_response})
+                
                 await nw_client.send_text_message(
                     channel_id,
-                    f"🤖 메시지를 받았어요: \"{text[:50]}{'...' if len(text) > 50 else ''}\"\n\n"
-                    "작업일지를 저장하시려면 아래 형식으로 입력해주세요:\n"
-                    "예: 'A업체 1톤하차 50000원'\n\n"
-                    "'도움말'을 입력하면 자세한 사용법을 확인할 수 있어요.",
+                    chat_response,
                     channel_type
                 )
             except Exception as e:
-                add_debug_log("default_response_error", error=str(e))
+                add_debug_log("chat_response_error", error=str(e))
+                # GPT 대화 실패 시 기본 응답
+                try:
+                    await nw_client.send_text_message(
+                        channel_id,
+                        f"🤖 메시지를 받았어요!\n\n"
+                        "작업일지를 저장하시려면:\n"
+                        "예: 'A업체 1톤하차 50000원'\n\n"
+                        "'도움말'을 입력하면 사용법을 확인할 수 있어요.",
+                        channel_type
+                    )
+                except:
+                    pass
             return
         
         # 부분 인식 - 추가 정보 요청

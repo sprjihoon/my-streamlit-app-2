@@ -377,6 +377,61 @@ class AIParser:
             response += f"\n• 비고: {data['remark']}"
         
         return response
+    
+    async def chat_response(
+        self,
+        message: str,
+        user_name: Optional[str] = None
+    ) -> str:
+        """
+        일반 대화 응답 생성 (작업일지가 아닌 메시지에 대한 GPT 응답)
+        
+        Args:
+            message: 사용자 메시지
+            user_name: 사용자 이름
+        
+        Returns:
+            GPT 응답 메시지
+        """
+        chat_system_prompt = """당신은 물류센터에서 일하는 친절한 작업일지봇입니다.
+사용자와 자연스럽게 대화하면서 도움을 줍니다.
+
+## 성격
+- 친근하고 도움이 되는 말투
+- 간결하게 답변 (2-3문장 이내)
+- 이모지 적절히 사용
+- 한국어로 대화
+
+## 주요 기능 안내 (필요시)
+- 작업일지 저장: "A업체 1톤하차 50000원" 형식으로 입력
+- 취소: "취소", "방금거 취소해줘"
+- 수정: "방금거 수정해줘"
+- 도움말: "도움말"
+
+## 중요
+- 작업일지와 관련 없는 질문에도 친절하게 응답
+- 너무 길게 답변하지 않기
+- 물류/창고 관련 질문에 도움이 되도록"""
+
+        user_prompt = message
+        if user_name:
+            user_prompt = f"[{user_name}님의 메시지] {message}"
+        
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": chat_system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,  # 자연스러운 대화를 위해 약간 높게
+                max_tokens=200  # 짧은 응답
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            return f"🤖 잠시 오류가 발생했어요. 다시 말씀해주세요!"
 
 
 # 싱글톤 인스턴스
