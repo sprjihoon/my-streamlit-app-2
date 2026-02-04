@@ -1102,10 +1102,11 @@ async def process_message(
         await nw_client.send_text_message(
             channel_id,
             "💬 대화모드 시작!\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            "자유롭게 대화하거나 질문해주세요 😊\n"
+            "ChatGPT처럼 자유롭게 대화하세요! 🤖\n\n"
+            "• 무엇이든 물어보세요\n"
             "• 웹 검색: \"~에 대해 조사해줘\"\n"
-            "• 일반 대화: 궁금한 것 물어보기\n\n"
-            "📋 작업을 하려면 '작업모드'를 입력하세요",
+            "• 정보 요청: \"~가 뭐야?\"\n\n"
+            "📋 작업일지는 '작업모드'에서!",
             channel_type
         )
         return
@@ -1128,9 +1129,11 @@ async def process_message(
         await nw_client.send_text_message(
             channel_id,
             "📋 작업모드 시작!\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            "작업일지를 입력해주세요.\n"
-            "예: 틸리언 1톤하차 3만\n\n"
-            "💬 대화가 필요하면 '대화모드'를 입력하세요",
+            "✅ 입력: 틸리언 1톤하차 3만원\n"
+            "📊 조회: 오늘/이번주 작업 정리해줘\n"
+            "🔍 검색: 틸리언 작업 보여줘\n"
+            "📈 분석: 이번달 통계, 지난주 비교\n\n"
+            "💬 자유 대화는 '대화모드'를 입력하세요",
             channel_type
         )
         return
@@ -1950,33 +1953,21 @@ async def process_message(
         missing = parse_result.get("missing", [])
         question = parse_result.get("question", "")
         
-        # 아무것도 인식 못한 경우 - GPT 대화 모드
+        # 아무것도 인식 못한 경우 - 작업모드에서는 안내 메시지
         if not data or (not data.get("vendor") and not data.get("work_type") and not data.get("unit_price")):
-            add_debug_log("no_data_parsed_chat_mode", {"original_text": text})
-            try:
-                # GPT에게 자유 대화 요청
-                chat_response = await ai_parser.chat_response(text, user_name)
-                add_debug_log("chat_response", {"response": chat_response})
-                
-                await nw_client.send_text_message(
-                    channel_id,
-                    chat_response,
-                    channel_type
-                )
-            except Exception as e:
-                add_debug_log("chat_response_error", error=str(e))
-                # GPT 대화 실패 시 기본 응답
-                try:
-                    await nw_client.send_text_message(
-                        channel_id,
-                        f"🤖 메시지를 받았어요!\n\n"
-                        "작업일지를 저장하시려면:\n"
-                        "예: 'A업체 1톤하차 50000원'\n\n"
-                        "'도움말'을 입력하면 사용법을 확인할 수 있어요.",
-                        channel_type
-                    )
-                except:
-                    pass
+            add_debug_log("no_data_parsed_work_mode", {"original_text": text})
+            await nw_client.send_text_message(
+                channel_id,
+                "📋 작업모드입니다.\n\n"
+                "✅ 작업일지 입력: 업체명 작업 금액\n"
+                "   예: 틸리언 1톤하차 3만원\n\n"
+                "📊 조회/분석:\n"
+                "   • 오늘 작업 정리해줘\n"
+                "   • 틸리언 작업 보여줘\n"
+                "   • 이번달 통계\n\n"
+                "💬 자유 대화는 '대화모드'를 입력하세요!",
+                channel_type
+            )
             return
         
         # 부분 인식 - 추가 정보 요청
