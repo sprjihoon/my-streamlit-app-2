@@ -143,6 +143,9 @@ class NaverWorksClient:
             self._access_token = result["access_token"]
             # 토큰 만료 시간 설정 (기본 24시간)
             expires_in = result.get("expires_in", 86400)
+            # 문자열로 올 수 있으므로 int 변환
+            if isinstance(expires_in, str):
+                expires_in = int(expires_in)
             self._token_expires_at = current_time + expires_in
             
             return self._access_token
