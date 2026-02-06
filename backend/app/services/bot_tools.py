@@ -419,17 +419,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_invoice_stats",
-            "description": "인보이스(청구서) 통계를 조회합니다. 청구 기간(period) 기준으로 조회합니다. '청구금액', '인보이스', '매출' 관련 질문에 사용하세요. 작업일지 통계는 get_work_log_stats를 사용하세요.",
+            "description": "인보이스(청구서) 통계를 조회합니다. period_from(청구 시작일) 기준으로 조회합니다. '청구금액', '인보이스', '매출', '청구서' 관련 질문에 사용하세요.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "start_date": {
                         "type": "string",
-                        "description": "청구 기간 시작 날짜 (YYYY-MM-DD). 예: 1월이면 2026-01-01"
+                        "description": "조회 시작 날짜 (YYYY-MM-DD). 예: 1월이면 2026-01-01"
                     },
                     "end_date": {
                         "type": "string",
-                        "description": "청구 기간 종료 날짜 (YYYY-MM-DD). 예: 1월이면 2026-01-31"
+                        "description": "조회 종료 날짜 (YYYY-MM-DD). 예: 1월이면 2026-01-31"
                     },
                     "vendor": {
                         "type": "string",
@@ -1229,12 +1229,16 @@ def _get_invoice_stats(args: Dict, user_id: str, user_name: str) -> Dict:
     conditions = []
     params = []
     
-    # 날짜 조건 - 청구 기간(period_from, period_to) 기준으로 조회
-    if args.get("start_date"):
+    # 날짜 조건 - period_from이 지정 기간 내인 인보이스 조회
+    # 예: 1월 조회 → period_from이 2026-01-01 ~ 2026-01-31 사이인 인보이스
+    if args.get("start_date") and args.get("end_date"):
+        conditions.append("i.period_from BETWEEN ? AND ?")
+        params.extend([args["start_date"], args["end_date"]])
+    elif args.get("start_date"):
         conditions.append("i.period_from >= ?")
         params.append(args["start_date"])
-    if args.get("end_date"):
-        conditions.append("i.period_to <= ?")
+    elif args.get("end_date"):
+        conditions.append("i.period_from <= ?")
         params.append(args["end_date"])
     
     # 업체 조건
