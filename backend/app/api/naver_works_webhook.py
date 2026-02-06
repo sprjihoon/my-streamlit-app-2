@@ -1110,17 +1110,17 @@ async def process_message(
                     
                     if search_results:
                         search_context = "\n".join(search_results)
-                        chat_response = await ai_parser.generate_chat_response(
+                        chat_response = await ai_parser.chat_response(
                             f"다음 웹 검색 결과를 바탕으로 '{text}'에 대해 답변해주세요:\n\n{search_context}",
                             user_name
                         )
                     else:
-                        chat_response = await ai_parser.generate_chat_response(text, user_name)
+                        chat_response = await ai_parser.chat_response(text, user_name)
                 except Exception as e:
                     add_debug_log("web_search_error", error=str(e))
-                    chat_response = await ai_parser.generate_chat_response(text, user_name)
+                    chat_response = await ai_parser.chat_response(text, user_name)
             else:
-                chat_response = await ai_parser.generate_chat_response(text, user_name)
+                chat_response = await ai_parser.chat_response(text, user_name)
             
             add_debug_log("chat_response_success", {"response_length": len(chat_response)})
             await nw_client.send_text_message(channel_id, chat_response, channel_type)
@@ -1953,7 +1953,7 @@ async def process_message(
     if intent == "chat":
         add_debug_log("chat_intent_handler", {"text": text})
         try:
-            chat_response = await ai_parser.generate_chat_response(text, user_name)
+            chat_response = await ai_parser.chat_response(text, user_name)
             add_debug_log("chat_response", {"response": chat_response})
             await nw_client.send_text_message(channel_id, chat_response, channel_type)
         except Exception as e:
