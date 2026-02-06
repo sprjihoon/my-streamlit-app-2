@@ -1370,7 +1370,7 @@ def _log_work_history(
 
 
 def get_db_context_for_ai() -> str:
-    """AI에게 제공할 DB 컨텍스트 요약"""
+    """AI에게 제공할 DB 컨텍스트 요약 (작업일지 + 인보이스)"""
     try:
         today = datetime.now()
         month_start = today.replace(day=1).strftime("%Y-%m-%d")
@@ -1388,18 +1388,64 @@ def get_db_context_for_ai() -> str:
                    GROUP BY 분류 ORDER BY COUNT(*) DESC LIMIT 10"""
             ).fetchall() if r[0]]
             
-            # 이번달 통계
+            # 이번달 작업일지 통계
             stats = con.execute(
                 f"SELECT COUNT(*), COALESCE(SUM(합계), 0) FROM work_log WHERE 날짜 BETWEEN ? AND ?",
                 (month_start, month_end)
             ).fetchone()
+            
+            # 인보이스 총계
+            inv_total = con.execute(
+                "SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM invoices"
+            ).fetchone()
+            
+            # 이번달 인보이스
+            inv_month = con.execute(
+                "SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM invoices WHERE created_at >= ?",
+                (month_start,)
+            ).fetchone()
+            
+            # 업체별 인보이스 누적 (상위 5개)
+            inv_by_vendor = con.execute(
+                """SELECT v.vendor, COUNT(*) as cnt, SUM(i.total_amount) as total
+                   FROM invoices i
+                   LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                   WHERE v.vendor IS NOT NULL
+                   GROUP BY v.vendor ORDER BY total DESC LIMIT 5"""
+            ).fetchall()
+            
+            # 최근 인보이스 3건
+            recent_inv = con.execute(
+                """SELECT v.vendor, i.total_amount, i.period_from, i.period_to
+                   FROM invoices i
+                   LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                   ORDER BY i.created_at DESC LIMIT 3"""
+            ).fetchall()
         
-        context = f"""## 현재 DB 정보
-- 등록 업체: {', '.join(vendors[:10])}{'...' if len(vendors) > 10 else ''}
-- 자주 쓰는 작업: {', '.join(work_types)}
-- 이번달: {stats[0]}건, {stats[1]:,}원 ({month_start} ~ {month_end})
-- 오늘: {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})"""
+        # 컨텍스트 구성
+        context_lines = [
+            "## 현재 DB 정보",
+            f"- 등록 업체: {', '.join(vendors[:10])}{'...' if len(vendors) > 10 else ''}",
+            f"- 자주 쓰는 작업: {', '.join(work_types)}",
+            f"- 이번달 작업일지: {stats[0]}건, {stats[1]:,}원 ({month_start} ~ {month_end})",
+            f"- 오늘: {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})",
+            "",
+            "## 인보이스 정보",
+            f"- 전체 인보이스: {inv_total[0]}건, 총 {inv_total[1]:,.0f}원",
+            f"- 이번달 인보이스: {inv_month[0]}건, {inv_month[1]:,.0f}원"
+        ]
         
-        return context
+        if inv_by_vendor:
+            context_lines.append("- 업체별 누적 (상위):")
+            for v in inv_by_vendor:
+                context_lines.append(f"  • {v[0]}: {v[1]}건, {v[2]:,.0f}원")
+        
+        if recent_inv:
+            context_lines.append("- 최근 인보이스:")
+            for r in recent_inv:
+                period = f"{r[2]} ~ {r[3]}" if r[2] and r[3] else ""
+                context_lines.append(f"  • {r[0]}: {r[1]:,.0f}원 ({period})")
+        
+        return "\n".join(context_lines)
     except Exception as e:
         return f"## DB 정보 로드 오류: {e}"

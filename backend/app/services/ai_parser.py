@@ -430,7 +430,23 @@ class AIParser:
                 tool_result = execute_tool(tool_name, tool_args, user_id, user_name)
                 
                 # 도구 결과를 GPT에게 전달하여 최종 응답 생성
-                messages.append(assistant_message)
+                # assistant_message를 딕셔너리로 변환 (Pydantic 직렬화 오류 방지)
+                assistant_msg_dict = {
+                    "role": "assistant",
+                    "content": assistant_message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        }
+                        for tc in assistant_message.tool_calls
+                    ] if assistant_message.tool_calls else None
+                }
+                messages.append(assistant_msg_dict)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
