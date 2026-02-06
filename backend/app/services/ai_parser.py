@@ -58,6 +58,168 @@ def get_vendor_aliases() -> Dict[str, str]:
     return alias_map
 
 
+def get_db_context() -> Dict[str, Any]:
+    """
+    AI에게 제공할 DB 컨텍스트 정보를 조회합니다.
+    - 등록된 업체 목록
+    - 자주 사용하는 작업 종류
+    - 최근 통계 (이번달)
+    - 단가 범위 정보
+    
+    Returns:
+        DB 컨텍스트 딕셔너리
+    """
+    context = {
+        "vendors": [],
+        "work_types": [],
+        "this_month_stats": {},
+        "recent_entries": [],
+        "price_ranges": {}
+    }
+    
+    try:
+        with get_connection() as con:
+            today = datetime.now()
+            month_start = today.replace(day=1).strftime("%Y-%m-%d")
+            month_end = today.strftime("%Y-%m-%d")
+            
+            # 1. 등록된 업체 목록 (활성 상태)
+            vendor_rows = con.execute(
+                "SELECT vendor FROM vendors WHERE active != 'NO' OR active IS NULL ORDER BY vendor"
+            ).fetchall()
+            context["vendors"] = [r[0] for r in vendor_rows if r[0]]
+            
+            # 2. 자주 사용하는 작업 종류 (상위 20개)
+            work_type_rows = con.execute(
+                """SELECT 분류, COUNT(*) as cnt FROM work_log 
+                   WHERE 분류 IS NOT NULL 
+                   GROUP BY 분류 ORDER BY cnt DESC LIMIT 20"""
+            ).fetchall()
+            context["work_types"] = [r[0] for r in work_type_rows if r[0]]
+            
+            # 3. 이번달 통계
+            stats = con.execute(
+                """SELECT 
+                    COUNT(*) as total_count,
+                    COALESCE(SUM(합계), 0) as total_amount,
+                    COUNT(DISTINCT 업체명) as vendor_count,
+                    COUNT(DISTINCT 분류) as work_type_count
+                   FROM work_log 
+                   WHERE 날짜 BETWEEN ? AND ?""",
+                (month_start, month_end)
+            ).fetchone()
+            
+            context["this_month_stats"] = {
+                "period": f"{month_start} ~ {month_end}",
+                "total_count": stats[0] or 0,
+                "total_amount": stats[1] or 0,
+                "vendor_count": stats[2] or 0,
+                "work_type_count": stats[3] or 0
+            }
+            
+            # 4. 업체별 이번달 요약 (상위 10개)
+            vendor_stats = con.execute(
+                """SELECT 업체명, COUNT(*) as cnt, SUM(합계) as total
+                   FROM work_log 
+                   WHERE 날짜 BETWEEN ? AND ? AND 업체명 IS NOT NULL
+                   GROUP BY 업체명 ORDER BY total DESC LIMIT 10""",
+                (month_start, month_end)
+            ).fetchall()
+            context["vendor_stats"] = [
+                {"vendor": r[0], "count": r[1], "amount": r[2]} 
+                for r in vendor_stats
+            ]
+            
+            # 5. 최근 입력 5건
+            recent = con.execute(
+                """SELECT 날짜, 업체명, 분류, 단가, 수량, 합계 
+                   FROM work_log 
+                   ORDER BY id DESC LIMIT 5"""
+            ).fetchall()
+            context["recent_entries"] = [
+                {"날짜": r[0], "업체명": r[1], "분류": r[2], "단가": r[3], "수량": r[4], "합계": r[5]}
+                for r in recent
+            ]
+            
+            # 6. 업체+작업종류별 평균 단가 (자주 사용하는 조합)
+            price_info = con.execute(
+                """SELECT 업체명, 분류, 
+                    AVG(단가) as avg_price, 
+                    MIN(단가) as min_price, 
+                    MAX(단가) as max_price,
+                    COUNT(*) as cnt
+                   FROM work_log 
+                   WHERE 단가 > 0 AND 업체명 IS NOT NULL AND 분류 IS NOT NULL
+                   GROUP BY 업체명, 분류 
+                   HAVING cnt >= 3
+                   ORDER BY cnt DESC LIMIT 20"""
+            ).fetchall()
+            context["price_ranges"] = [
+                {
+                    "vendor": r[0], 
+                    "work_type": r[1], 
+                    "avg": int(r[2]) if r[2] else 0,
+                    "min": r[3],
+                    "max": r[4],
+                    "count": r[5]
+                }
+                for r in price_info
+            ]
+            
+    except Exception as e:
+        print(f"Warning: Could not load DB context: {e}")
+    
+    return context
+
+
+def format_db_context_for_ai(context: Dict[str, Any]) -> str:
+    """
+    DB 컨텍스트를 AI 프롬프트용 문자열로 포맷팅
+    """
+    lines = ["## 📊 현재 DB 정보"]
+    
+    # 등록 업체
+    if context.get("vendors"):
+        vendors = context["vendors"][:15]  # 최대 15개
+        lines.append(f"\n### 등록된 업체 ({len(context['vendors'])}개)")
+        lines.append(", ".join(vendors))
+        if len(context["vendors"]) > 15:
+            lines.append(f"... 외 {len(context['vendors']) - 15}개")
+    
+    # 작업 종류
+    if context.get("work_types"):
+        work_types = context["work_types"][:15]
+        lines.append(f"\n### 자주 사용하는 작업 종류")
+        lines.append(", ".join(work_types))
+    
+    # 이번달 통계
+    stats = context.get("this_month_stats", {})
+    if stats.get("total_count"):
+        lines.append(f"\n### 이번달 통계 ({stats.get('period', '')})")
+        lines.append(f"- 총 {stats['total_count']}건, {stats['total_amount']:,}원")
+        lines.append(f"- 활동 업체: {stats['vendor_count']}개")
+    
+    # 업체별 이번달 요약
+    if context.get("vendor_stats"):
+        lines.append(f"\n### 업체별 이번달 실적 (상위)")
+        for v in context["vendor_stats"][:5]:
+            lines.append(f"- {v['vendor']}: {v['count']}건, {v['amount']:,}원")
+    
+    # 최근 입력
+    if context.get("recent_entries"):
+        lines.append(f"\n### 최근 입력")
+        for e in context["recent_entries"][:3]:
+            lines.append(f"- {e['날짜']} {e['업체명']} {e['분류']} {e['합계']:,}원")
+    
+    # 단가 참고 정보
+    if context.get("price_ranges"):
+        lines.append(f"\n### 단가 참고 (자주 사용하는 조합)")
+        for p in context["price_ranges"][:5]:
+            lines.append(f"- {p['vendor']} {p['work_type']}: 평균 {p['avg']:,}원 ({p['min']:,}~{p['max']:,})")
+    
+    return "\n".join(lines)
+
+
 def normalize_text(text: str) -> str:
     """텍스트 정규화 (공백 제거 + 유니코드 정규화 + 소문자)"""
     if not text:
@@ -176,6 +338,11 @@ class AIParser:
         self._alias_cache: Optional[Dict[str, str]] = None
         self._alias_cache_time: Optional[datetime] = None
         self._cache_ttl_seconds = 300  # 5분마다 새로고침
+        
+        # DB 컨텍스트 캐시
+        self._db_context_cache: Optional[Dict[str, Any]] = None
+        self._db_context_cache_time: Optional[datetime] = None
+        self._db_context_ttl_seconds = 120  # 2분마다 새로고침
     
     def _get_alias_map(self) -> Dict[str, str]:
         """별칭 매핑 가져오기 (캐시 사용)"""
@@ -189,6 +356,24 @@ class AIParser:
             self._alias_cache_time = now
         
         return self._alias_cache or {}
+    
+    def _get_db_context(self) -> Dict[str, Any]:
+        """DB 컨텍스트 가져오기 (캐시 사용)"""
+        now = datetime.now()
+        
+        # 캐시가 없거나 만료됐으면 새로 로드
+        if (self._db_context_cache is None or
+            self._db_context_cache_time is None or
+            (now - self._db_context_cache_time).seconds > self._db_context_ttl_seconds):
+            self._db_context_cache = get_db_context()
+            self._db_context_cache_time = now
+        
+        return self._db_context_cache or {}
+    
+    def _get_db_context_string(self) -> str:
+        """DB 컨텍스트를 AI 프롬프트용 문자열로 반환"""
+        context = self._get_db_context()
+        return format_db_context_for_ai(context)
     
     def _map_vendor_alias(self, vendor_name: str) -> str:
         """
@@ -393,7 +578,8 @@ class AIParser:
         self,
         message: str,
         user_name: Optional[str] = None,
-        has_pending_state: bool = False
+        has_pending_state: bool = False,
+        include_db_context: bool = True
     ) -> Dict[str, Any]:
         """
         메시지의 의도를 종합적으로 분류
@@ -402,17 +588,25 @@ class AIParser:
             message: 사용자 메시지
             user_name: 사용자 이름
             has_pending_state: 이전 대화 상태가 있는지
+            include_db_context: DB 컨텍스트 포함 여부
         
         Returns:
             {"intent": "의도", "data": {...}, "confidence": 0.0-1.0}
         """
         today = datetime.now().strftime("%Y-%m-%d")
         
+        # DB 컨텍스트 가져오기
+        db_context_str = ""
+        if include_db_context:
+            db_context_str = self._get_db_context_string()
+        
         classify_prompt = f"""사용자 메시지의 의도를 분류하세요.
 
 ## 오늘 날짜: {today}
 ## 사용자: {user_name or "알수없음"}
 ## 이전 대화 상태 존재: {has_pending_state}
+
+{db_context_str}
 
 ## 사용자 메시지
 "{message}"
@@ -1203,7 +1397,8 @@ class AIParser:
     async def chat_response(
         self,
         message: str,
-        user_name: Optional[str] = None
+        user_name: Optional[str] = None,
+        include_db_context: bool = True
     ) -> str:
         """
         일반 대화 응답 생성 (작업일지가 아닌 메시지에 대한 GPT 응답)
@@ -1211,11 +1406,17 @@ class AIParser:
         Args:
             message: 사용자 메시지
             user_name: 사용자 이름
+            include_db_context: DB 컨텍스트 포함 여부
         
         Returns:
             GPT 응답 메시지
         """
-        chat_system_prompt = """당신은 물류센터에서 일하는 친절한 작업일지봇입니다.
+        # DB 컨텍스트 가져오기
+        db_context_str = ""
+        if include_db_context:
+            db_context_str = self._get_db_context_string()
+        
+        chat_system_prompt = f"""당신은 물류센터에서 일하는 친절한 작업일지봇입니다.
 사용자와 자연스럽게 대화하면서 도움을 줍니다.
 
 ## 성격
@@ -1230,10 +1431,14 @@ class AIParser:
 - 수정: "방금거 수정해줘"
 - 도움말: "도움말"
 
+{db_context_str}
+
 ## 중요
 - 작업일지와 관련 없는 질문에도 친절하게 응답
-- 너무 길게 답변하지 않기
-- 물류/창고 관련 질문에 도움이 되도록"""
+- DB 정보를 참고하여 데이터 관련 질문에 구체적으로 답변
+- 너무 길게 답변하지 않기 (5문장 이내)
+- 물류/창고 관련 질문에 도움이 되도록
+- 업체명, 통계 등 DB 정보 관련 질문에는 위 정보를 활용해서 답변"""
 
         user_prompt = message
         if user_name:
@@ -1247,7 +1452,7 @@ class AIParser:
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.7,  # 자연스러운 대화를 위해 약간 높게
-                max_tokens=200  # 짧은 응답
+                max_tokens=300  # 조금 더 긴 응답 허용
             )
             
             return response.choices[0].message.content
