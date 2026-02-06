@@ -295,37 +295,6 @@ async def get_work_log_stats(
     }
 
 
-@router.get("/{log_id}")
-async def get_work_log(log_id: int):
-    """작업일지 상세 조회"""
-    ensure_work_log_columns()
-    
-    with get_connection() as con:
-        row = con.execute(
-            "SELECT * FROM work_log WHERE id = ?", (log_id,)
-        ).fetchone()
-        
-        if not row:
-            raise HTTPException(status_code=404, detail="작업일지를 찾을 수 없습니다.")
-        
-        cols = [c[0] for c in con.execute("PRAGMA table_info(work_log);").fetchall()]
-        data = dict(zip(cols, row))
-    
-    return {
-        "id": data.get('id'),
-        "날짜": data.get('날짜'),
-        "업체명": data.get('업체명'),
-        "분류": data.get('분류'),
-        "단가": data.get('단가'),
-        "수량": data.get('수량'),
-        "합계": data.get('합계'),
-        "비고1": data.get('비고1'),
-        "작성자": data.get('작성자'),
-        "저장시간": str(data['저장시간']) if data.get('저장시간') else None,
-        "출처": data.get('출처'),
-    }
-
-
 @router.post("")
 async def create_work_log(log: WorkLogCreate):
     """작업일지 생성"""
@@ -550,3 +519,38 @@ async def export_work_logs(
                 "Content-Disposition": f"attachment; filename=work_log_{start_date}_{end_date}.xlsx"
             }
         )
+
+
+# ─────────────────────────────────────
+# /{log_id} 엔드포인트는 /export, /check-duplicate 보다 뒤에 위치해야 함
+# ─────────────────────────────────────
+
+@router.get("/{log_id}")
+async def get_work_log(log_id: int):
+    """작업일지 상세 조회"""
+    ensure_work_log_columns()
+    
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT * FROM work_log WHERE id = ?", (log_id,)
+        ).fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="작업일지를 찾을 수 없습니다.")
+        
+        cols = [c[0] for c in con.execute("PRAGMA table_info(work_log);").fetchall()]
+        data = dict(zip(cols, row))
+    
+    return {
+        "id": data.get('id'),
+        "날짜": data.get('날짜'),
+        "업체명": data.get('업체명'),
+        "분류": data.get('분류'),
+        "단가": data.get('단가'),
+        "수량": data.get('수량'),
+        "합계": data.get('합계'),
+        "비고1": data.get('비고1'),
+        "작성자": data.get('작성자'),
+        "저장시간": str(data['저장시간']) if data.get('저장시간') else None,
+        "출처": data.get('출처'),
+    }
