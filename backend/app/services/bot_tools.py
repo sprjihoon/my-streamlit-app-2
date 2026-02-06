@@ -1279,6 +1279,12 @@ def _get_invoice_stats(args: Dict, user_id: str, user_name: str) -> Dict:
         # 결과 구성
         result = {
             "success": True,
+            "query_params": {
+                "start_date": args.get("start_date"),
+                "end_date": args.get("end_date"),
+                "vendor": args.get("vendor"),
+                "where_clause": where_clause
+            },
             "total_count": total_stats[0] or 0,
             "total_amount": total_stats[1] or 0,
             "by_vendor": [
