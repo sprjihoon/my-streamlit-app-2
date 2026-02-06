@@ -417,6 +417,34 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_invoice_stats",
+            "description": "인보이스(청구서) 통계를 조회합니다. 기간별, 업체별 청구금액을 조회할 수 있습니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {
+                        "type": "string",
+                        "description": "시작 날짜 (YYYY-MM-DD)"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "종료 날짜 (YYYY-MM-DD)"
+                    },
+                    "vendor": {
+                        "type": "string",
+                        "description": "특정 업체만 조회"
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "상위 N개 업체만 조회 (기본: 10)"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": "웹에서 정보를 검색합니다 (외부 정보 조회용).",
             "parameters": {
@@ -487,6 +515,7 @@ def execute_tool(
         "get_undo_history": _get_undo_history,
         "undo_action": _undo_action,
         "get_dashboard_url": _get_dashboard_url,
+        "get_invoice_stats": _get_invoice_stats,
         "web_search": _web_search,
         "get_help": _get_help,
     }
@@ -1149,6 +1178,96 @@ def _get_dashboard_url(args: Dict, user_id: str, user_name: str) -> Dict:
         },
         "message": f"대시보드: {base_url}"
     }
+
+
+def _get_invoice_stats(args: Dict, user_id: str, user_name: str) -> Dict:
+    """인보이스 통계 조회"""
+    conditions = []
+    params = []
+    
+    # 날짜 조건
+    if args.get("start_date"):
+        conditions.append("i.created_at >= ?")
+        params.append(args["start_date"])
+    if args.get("end_date"):
+        conditions.append("i.created_at <= ?")
+        params.append(args["end_date"] + " 23:59:59")
+    
+    # 업체 조건
+    if args.get("vendor"):
+        conditions.append("v.vendor LIKE ?")
+        params.append(f"%{args['vendor']}%")
+    
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    top_n = args.get("top_n", 10)
+    
+    try:
+        with get_connection() as con:
+            # 전체 통계
+            total_stats = con.execute(f"""
+                SELECT COUNT(*), COALESCE(SUM(i.total_amount), 0)
+                FROM invoices i
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                WHERE {where_clause}
+            """, params).fetchone()
+            
+            # 업체별 통계 (상위 N개)
+            vendor_stats = con.execute(f"""
+                SELECT v.vendor, COUNT(*) as cnt, SUM(i.total_amount) as total
+                FROM invoices i
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                WHERE {where_clause} AND v.vendor IS NOT NULL
+                GROUP BY v.vendor
+                ORDER BY total DESC
+                LIMIT ?
+            """, params + [top_n]).fetchall()
+            
+            # 최근 인보이스 5건
+            recent = con.execute(f"""
+                SELECT v.vendor, i.total_amount, i.period_from, i.period_to, i.created_at
+                FROM invoices i
+                LEFT JOIN vendors v ON i.vendor_id = v.vendor_id
+                WHERE {where_clause}
+                ORDER BY i.created_at DESC
+                LIMIT 5
+            """, params).fetchall()
+        
+        # 결과 구성
+        result = {
+            "success": True,
+            "total_count": total_stats[0] or 0,
+            "total_amount": total_stats[1] or 0,
+            "by_vendor": [
+                {"vendor": r[0], "count": r[1], "amount": r[2] or 0}
+                for r in vendor_stats
+            ],
+            "recent": [
+                {
+                    "vendor": r[0],
+                    "amount": r[1] or 0,
+                    "period": f"{r[2]} ~ {r[3]}" if r[2] and r[3] else "",
+                    "created": r[4]
+                }
+                for r in recent
+            ]
+        }
+        
+        # 상위 업체 정보
+        if vendor_stats:
+            top_vendor = vendor_stats[0]
+            result["top_vendor"] = {
+                "name": top_vendor[0],
+                "count": top_vendor[1],
+                "amount": top_vendor[2] or 0
+            }
+            result["message"] = f"청구금액 1위: {top_vendor[0]} ({top_vendor[2]:,.0f}원, {top_vendor[1]}건)"
+        else:
+            result["message"] = "조건에 맞는 인보이스가 없습니다."
+        
+        return result
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def _web_search(args: Dict, user_id: str, user_name: str) -> Dict:
