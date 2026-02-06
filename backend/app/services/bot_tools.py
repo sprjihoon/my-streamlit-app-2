@@ -701,13 +701,36 @@ def _delete_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
 
 
 def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
-    """작업일지 검색"""
+    """작업일지 검색 (업체 별칭 지원)"""
     conditions = []
     params = []
     
     if args.get("vendor"):
-        conditions.append("업체명 LIKE ?")
-        params.append(f"%{args['vendor']}%")
+        vendor_search = args['vendor']
+        # 별칭 테이블에서 실제 업체명 찾기
+        with get_connection() as con:
+            # aliases에서 검색
+            alias_rows = con.execute(
+                "SELECT DISTINCT vendor FROM aliases WHERE alias LIKE ? OR vendor LIKE ?",
+                (f"%{vendor_search}%", f"%{vendor_search}%")
+            ).fetchall()
+            # vendors에서도 검색
+            vendor_rows = con.execute(
+                "SELECT vendor FROM vendors WHERE vendor LIKE ? OR name LIKE ?",
+                (f"%{vendor_search}%", f"%{vendor_search}%")
+            ).fetchall()
+        
+        # 찾은 모든 업체명으로 검색
+        all_vendors = set([r[0] for r in alias_rows if r[0]] + [r[0] for r in vendor_rows if r[0]])
+        all_vendors.add(vendor_search)  # 원본 검색어도 포함
+        
+        if len(all_vendors) == 1:
+            conditions.append("업체명 LIKE ?")
+            params.append(f"%{list(all_vendors)[0]}%")
+        else:
+            vendor_conditions = " OR ".join(["업체명 LIKE ?" for _ in all_vendors])
+            conditions.append(f"({vendor_conditions})")
+            params.extend([f"%{v}%" for v in all_vendors])
     if args.get("work_type"):
         conditions.append("분류 LIKE ?")
         params.append(f"%{args['work_type']}%")
@@ -756,7 +779,7 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
 
 
 def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
-    """작업일지 통계"""
+    """작업일지 통계 (업체 별칭 지원)"""
     conditions = []
     params = []
     
@@ -767,8 +790,28 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
         conditions.append("날짜 <= ?")
         params.append(args["end_date"])
     if args.get("vendor"):
-        conditions.append("업체명 LIKE ?")
-        params.append(f"%{args['vendor']}%")
+        vendor_search = args['vendor']
+        # 별칭 테이블에서 실제 업체명 찾기
+        with get_connection() as con:
+            alias_rows = con.execute(
+                "SELECT DISTINCT vendor FROM aliases WHERE alias LIKE ? OR vendor LIKE ?",
+                (f"%{vendor_search}%", f"%{vendor_search}%")
+            ).fetchall()
+            vendor_rows = con.execute(
+                "SELECT vendor FROM vendors WHERE vendor LIKE ? OR name LIKE ?",
+                (f"%{vendor_search}%", f"%{vendor_search}%")
+            ).fetchall()
+        
+        all_vendors = set([r[0] for r in alias_rows if r[0]] + [r[0] for r in vendor_rows if r[0]])
+        all_vendors.add(vendor_search)
+        
+        if len(all_vendors) == 1:
+            conditions.append("업체명 LIKE ?")
+            params.append(f"%{list(all_vendors)[0]}%")
+        else:
+            vendor_conditions = " OR ".join(["업체명 LIKE ?" for _ in all_vendors])
+            conditions.append(f"({vendor_conditions})")
+            params.extend([f"%{v}%" for v in all_vendors])
     
     where_clause = " AND ".join(conditions) if conditions else "1=1"
     
