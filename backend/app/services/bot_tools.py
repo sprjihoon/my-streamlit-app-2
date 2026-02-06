@@ -418,17 +418,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_invoice_stats",
-            "description": "인보이스(청구서) 통계를 조회합니다. 기간별, 업체별 청구금액을 조회할 수 있습니다.",
+            "description": "인보이스(청구서) 통계를 조회합니다. 청구 기간(period) 기준으로 조회합니다. '청구금액', '인보이스', '매출' 관련 질문에 사용하세요. 작업일지 통계는 get_work_log_stats를 사용하세요.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "start_date": {
                         "type": "string",
-                        "description": "시작 날짜 (YYYY-MM-DD)"
+                        "description": "청구 기간 시작 날짜 (YYYY-MM-DD). 예: 1월이면 2026-01-01"
                     },
                     "end_date": {
                         "type": "string",
-                        "description": "종료 날짜 (YYYY-MM-DD)"
+                        "description": "청구 기간 종료 날짜 (YYYY-MM-DD). 예: 1월이면 2026-01-31"
                     },
                     "vendor": {
                         "type": "string",
@@ -1181,17 +1181,17 @@ def _get_dashboard_url(args: Dict, user_id: str, user_name: str) -> Dict:
 
 
 def _get_invoice_stats(args: Dict, user_id: str, user_name: str) -> Dict:
-    """인보이스 통계 조회"""
+    """인보이스 통계 조회 (청구 기간 기준)"""
     conditions = []
     params = []
     
-    # 날짜 조건
+    # 날짜 조건 - 청구 기간(period_from, period_to) 기준으로 조회
     if args.get("start_date"):
-        conditions.append("i.created_at >= ?")
+        conditions.append("i.period_from >= ?")
         params.append(args["start_date"])
     if args.get("end_date"):
-        conditions.append("i.created_at <= ?")
-        params.append(args["end_date"] + " 23:59:59")
+        conditions.append("i.period_to <= ?")
+        params.append(args["end_date"])
     
     # 업체 조건
     if args.get("vendor"):
