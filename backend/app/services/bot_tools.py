@@ -165,23 +165,24 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_work_log_stats",
-            "description": "작업일지 통계를 조회합니다 (총 건수, 총액, 업체별, 작업별 통계).",
+            "description": "작업일지 통계를 조회합니다 (총 건수, 총액, 업체별, 작업별 통계). 반드시 start_date와 end_date를 지정하세요! 1월이면 2026-01-01 ~ 2026-01-31",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "start_date": {
                         "type": "string",
-                        "description": "시작 날짜 (YYYY-MM-DD)"
+                        "description": "시작 날짜 (YYYY-MM-DD). 필수! 예: 1월이면 2026-01-01"
                     },
                     "end_date": {
                         "type": "string",
-                        "description": "종료 날짜 (YYYY-MM-DD)"
+                        "description": "종료 날짜 (YYYY-MM-DD). 필수! 예: 1월이면 2026-01-31"
                     },
                     "vendor": {
                         "type": "string",
                         "description": "특정 업체만 조회"
                     }
-                }
+                },
+                "required": ["start_date", "end_date"]
             }
         }
     },
@@ -1543,27 +1544,18 @@ def get_db_context_for_ai() -> str:
         
         # 컨텍스트 구성
         context_lines = [
-            "## 현재 DB 정보",
+            "## 현재 DB 정보 (참고용, 특정 기간 조회는 반드시 도구 호출!)",
             f"- 등록 업체: {', '.join(vendors[:10])}{'...' if len(vendors) > 10 else ''}",
             f"- 자주 쓰는 작업: {', '.join(work_types)}",
-            f"- 이번달 작업일지: {stats[0]}건, {stats[1]:,}원 ({month_start} ~ {month_end})",
+            f"- 이번달({month_start}~{month_end}) 작업일지: {stats[0]}건, {stats[1]:,}원",
             f"- 오늘: {today.strftime('%Y-%m-%d')} ({today.strftime('%A')})",
             "",
-            "## 인보이스 정보",
-            f"- 전체 인보이스: {inv_total[0]}건, 총 {inv_total[1]:,.0f}원",
-            f"- 이번달 인보이스: {inv_month[0]}건, {inv_month[1]:,.0f}원"
+            "## 인보이스 정보 (전체 누적, 특정 기간은 get_invoice_stats 호출!)",
+            f"- 전체 누적 인보이스: {inv_total[0]}건, 총 {inv_total[1]:,.0f}원",
+            "",
+            "⚠️ 특정 월/기간 데이터 요청 시: 반드시 get_work_log_stats 또는 get_invoice_stats 호출!",
+            "⚠️ 이 컨텍스트 데이터를 특정 기간 답변에 사용하지 마세요!"
         ]
-        
-        if inv_by_vendor:
-            context_lines.append("- 업체별 누적 (상위):")
-            for v in inv_by_vendor:
-                context_lines.append(f"  • {v[0]}: {v[1]}건, {v[2]:,.0f}원")
-        
-        if recent_inv:
-            context_lines.append("- 최근 인보이스:")
-            for r in recent_inv:
-                period = f"{r[2]} ~ {r[3]}" if r[2] and r[3] else ""
-                context_lines.append(f"  • {r[0]}: {r[1]:,.0f}원 ({period})")
         
         return "\n".join(context_lines)
     except Exception as e:
