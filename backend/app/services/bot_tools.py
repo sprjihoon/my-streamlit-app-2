@@ -560,37 +560,34 @@ def _save_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
         # 공백 제거한 버전도 준비
         vendor_normalized = vendor.replace(" ", "").replace("　", "")
         
-        # 1. 정확히 일치하는 업체 검색 (vendors + aliases)
+        # 1. 정확히 일치하는 업체 검색 (vendors 테이블 + aliases 테이블)
+        # aliases 테이블: alias, file_type, vendor (vendor는 문자열)
         vendor_check = con.execute(
-            """SELECT v.vendor FROM vendors v WHERE LOWER(v.vendor) = LOWER(?)
+            """SELECT vendor FROM vendors WHERE LOWER(vendor) = LOWER(?)
                UNION
-               SELECT v.vendor FROM aliases a 
-               JOIN vendors v ON a.vendor_id = v.vendor_id 
-               WHERE LOWER(a.alias) = LOWER(?)""",
+               SELECT vendor FROM aliases WHERE LOWER(alias) = LOWER(?)""",
             (vendor, vendor)
         ).fetchone()
         
         # 2. 정확히 일치 없으면 → 공백 제거 후 검색
         if not vendor_check:
             vendor_check = con.execute(
-                """SELECT v.vendor FROM vendors v 
-                   WHERE REPLACE(LOWER(v.vendor), ' ', '') = LOWER(?)
+                """SELECT vendor FROM vendors 
+                   WHERE REPLACE(LOWER(vendor), ' ', '') = LOWER(?)
                    UNION
-                   SELECT v.vendor FROM aliases a 
-                   JOIN vendors v ON a.vendor_id = v.vendor_id 
-                   WHERE REPLACE(LOWER(a.alias), ' ', '') = LOWER(?)""",
+                   SELECT vendor FROM aliases 
+                   WHERE REPLACE(LOWER(alias), ' ', '') = LOWER(?)""",
                 (vendor_normalized, vendor_normalized)
             ).fetchone()
         
         # 3. 여전히 없으면 → 부분 일치 검색 (결과가 1개면 자동 선택)
         if not vendor_check:
             partial_matches = con.execute(
-                """SELECT DISTINCT v.vendor FROM vendors v 
-                   WHERE v.vendor LIKE ? OR v.vendor LIKE ?
+                """SELECT DISTINCT vendor FROM vendors 
+                   WHERE vendor LIKE ? OR vendor LIKE ?
                    UNION
-                   SELECT DISTINCT v.vendor FROM aliases a 
-                   JOIN vendors v ON a.vendor_id = v.vendor_id 
-                   WHERE a.alias LIKE ? OR a.alias LIKE ?""",
+                   SELECT DISTINCT vendor FROM aliases 
+                   WHERE alias LIKE ? OR alias LIKE ?""",
                 (f"%{vendor}%", f"%{vendor_normalized}%", f"%{vendor}%", f"%{vendor_normalized}%")
             ).fetchall()
             
