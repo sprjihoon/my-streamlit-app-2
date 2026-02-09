@@ -19,6 +19,7 @@ from io import BytesIO
 
 from backend.app.services import get_naver_works_client, get_ai_parser
 from backend.app.services.bot_tools import execute_tool
+from backend.app.services.conversation_state import get_conversation_manager
 from logic.db import get_connection
 from backend.app.api.logs import add_log
 
@@ -101,13 +102,22 @@ async def process_message(
         await nw_client.send_text_message(channel_id, f"❌ AI 초기화 오류: {str(e)}", channel_type)
         return
     
-    # 메시지 처리 (대화 상태 관리는 ai_parser 내부에서 처리)
+    # 대화 이력 조회
+    conv_manager = get_conversation_manager()
+    conversation_history = conv_manager.get_history(user_id, limit=6)
+    
+    # 사용자 메시지를 이력에 추가
+    user_msg_content = f"[{user_name}] {text}" if user_name else text
+    conv_manager.add_message(user_id, channel_id, "user", user_msg_content)
+    
+    # 메시지 처리 (대화 이력 전달)
     try:
         result = await ai_parser.process_message(
             message=text,
             user_id=user_id,
             user_name=user_name,
-            channel_id=channel_id
+            channel_id=channel_id,
+            conversation_history=conversation_history
         )
         
         add_debug_log("process_result", {
@@ -119,6 +129,8 @@ async def process_message(
         response = result.get("response", "")
         
         if response:
+            # 응답을 이력에 저장
+            conv_manager.add_message(user_id, channel_id, "assistant", response)
             await nw_client.send_text_message(channel_id, response, channel_type)
         else:
             await nw_client.send_text_message(channel_id, "🤖 응답을 생성하지 못했습니다.", channel_type)

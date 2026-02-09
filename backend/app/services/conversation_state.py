@@ -17,6 +17,8 @@ class ConversationStateManager:
     
     # 대화 상태 만료 시간 (5분)
     EXPIRE_SECONDS = 300
+    # 대화 이력 최대 개수
+    MAX_HISTORY = 10
     
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
@@ -28,7 +30,7 @@ class ConversationStateManager:
         self._ensure_table()
     
     def _ensure_table(self):
-        """대화 상태 테이블 생성"""
+        """대화 상태 및 이력 테이블 생성"""
         with sqlite3.connect(self.db_path) as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS conversation_states (
@@ -39,6 +41,17 @@ class ConversationStateManager:
                     last_question TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     expires_at TIMESTAMP
+                )
+            """)
+            # 대화 이력 테이블
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    channel_id TEXT,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             con.commit()
@@ -141,6 +154,71 @@ class ConversationStateManager:
             )
             con.commit()
             return cursor.rowcount
+    
+    # ─────────────────────────────────────
+    # 대화 이력 관리
+    # ─────────────────────────────────────
+    
+    def add_message(self, user_id: str, channel_id: str, role: str, content: str) -> None:
+        """
+        대화 메시지 추가
+        
+        Args:
+            user_id: 사용자 ID
+            channel_id: 채널 ID
+            role: 역할 (user/assistant)
+            content: 메시지 내용
+        """
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                """INSERT INTO conversation_history (user_id, channel_id, role, content)
+                   VALUES (?, ?, ?, ?)""",
+                (user_id, channel_id, role, content)
+            )
+            
+            # 오래된 이력 정리 (최근 N개만 유지)
+            con.execute(
+                """DELETE FROM conversation_history 
+                   WHERE user_id = ? AND id NOT IN (
+                       SELECT id FROM conversation_history 
+                       WHERE user_id = ? 
+                       ORDER BY created_at DESC LIMIT ?
+                   )""",
+                (user_id, user_id, self.MAX_HISTORY * 2)
+            )
+            con.commit()
+    
+    def get_history(self, user_id: str, limit: int = None) -> list:
+        """
+        사용자의 최근 대화 이력 조회
+        
+        Args:
+            user_id: 사용자 ID
+            limit: 최대 개수 (기본: MAX_HISTORY)
+        
+        Returns:
+            대화 이력 리스트 [{"role": "user/assistant", "content": "..."}]
+        """
+        if limit is None:
+            limit = self.MAX_HISTORY
+            
+        with sqlite3.connect(self.db_path) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute(
+                """SELECT role, content FROM conversation_history 
+                   WHERE user_id = ? 
+                   ORDER BY created_at DESC LIMIT ?""",
+                (user_id, limit)
+            ).fetchall()
+            
+            # 시간순으로 정렬 (오래된 것부터)
+            return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+    
+    def clear_history(self, user_id: str) -> None:
+        """대화 이력 삭제"""
+        with sqlite3.connect(self.db_path) as con:
+            con.execute("DELETE FROM conversation_history WHERE user_id = ?", (user_id,))
+            con.commit()
 
 
 # 싱글톤 인스턴스
