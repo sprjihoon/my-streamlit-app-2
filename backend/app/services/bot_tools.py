@@ -263,6 +263,15 @@ TOOLS = [
                         "type": "integer",
                         "description": "새 수량"
                     },
+                    "new_remark": {
+                        "type": "string",
+                        "description": "새 비고/메모 (기존 비고에 추가하거나 교체)"
+                    },
+                    "append_remark": {
+                        "type": "boolean",
+                        "description": "true면 기존 비고에 추가, false면 교체 (기본: true)",
+                        "default": True
+                    },
                     "update_recent": {
                         "type": "boolean",
                         "description": "사용자의 가장 최근 작업일지 수정 (true면 조건 무시)",
@@ -974,6 +983,10 @@ def _update_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
             "단가": row[4], "수량": row[5], "합계": row[6]
         }
         
+        # 기존 비고 조회
+        remark_row = con.execute("SELECT 비고1 FROM work_log WHERE id = ?", (log_id,)).fetchone()
+        old_remark = remark_row[0] if remark_row and remark_row[0] else ""
+        
         # 업데이트 필드 구성
         updates = []
         update_params = []
@@ -990,6 +1003,21 @@ def _update_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
         if args.get("new_qty"):
             updates.append("수량 = ?")
             update_params.append(args["new_qty"])
+        
+        # 비고 수정 처리
+        if args.get("new_remark"):
+            new_remark = args["new_remark"]
+            append_remark = args.get("append_remark", True)  # 기본값: 기존에 추가
+            
+            if append_remark and old_remark:
+                # 기존 비고에 추가
+                final_remark = f"{old_remark}, {new_remark}"
+            else:
+                # 교체
+                final_remark = new_remark
+            
+            updates.append("비고1 = ?")
+            update_params.append(final_remark)
         
         if not updates:
             return {"success": False, "error": "수정할 내용이 없습니다."}
@@ -1018,12 +1046,18 @@ def _update_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
     # 이력 기록
     _log_work_history(log_id, "update", new_data, user_name, "수정", user_id)
     
+    # 응답 메시지 구성
+    message = f"수정완료! {new_data['업체명']} {new_data['분류']} {new_data['합계']:,}원"
+    if args.get("new_remark"):
+        message += f" (비고: {args['new_remark']})"
+    
     return {
         "success": True,
         "log_id": log_id,
         "old_data": old_data,
         "new_data": new_data,
-        "message": f"수정완료! {new_data['업체명']} {new_data['분류']} {new_data['합계']:,}원"
+        "remark_updated": args.get("new_remark"),
+        "message": message
     }
 
 
