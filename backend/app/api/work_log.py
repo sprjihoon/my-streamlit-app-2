@@ -11,6 +11,7 @@ from datetime import datetime
 import pandas as pd
 
 from logic.db import get_connection
+from backend.app.api.logs import add_log
 
 router = APIRouter(prefix="/work-log", tags=["work-log"])
 
@@ -314,6 +315,17 @@ async def create_work_log(log: WorkLogCreate):
         con.commit()
         log_id = cursor.lastrowid
     
+    # 활동 로그 기록
+    출처_label = {"bot": "봇", "excel": "엑셀", "manual": "수동"}.get(log.출처, log.출처)
+    add_log(
+        action_type="작업일지_생성",
+        target_type="work_log",
+        target_id=str(log_id),
+        target_name=f"{log.업체명} {log.분류}",
+        user_nickname=log.작성자 or "시스템",
+        details=f"날짜: {log.날짜}, 합계: {합계:,}원 ({출처_label})"
+    )
+    
     return {
         "success": True,
         "id": log_id,
@@ -335,29 +347,39 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
         if not existing:
             raise HTTPException(status_code=404, detail="작업일지를 찾을 수 없습니다.")
         
+        # 컬럼 정보 가져오기 (수정 전 데이터 기록용)
+        cols = [c[0] for c in con.execute("PRAGMA table_info(work_log);").fetchall()]
+        existing_data = dict(zip(cols, existing))
+        
         # 업데이트할 필드 구성
         update_fields = []
         params = []
+        changed_fields = []
         
         if log.날짜 is not None:
             update_fields.append("날짜 = ?")
             params.append(log.날짜)
+            changed_fields.append(f"날짜: {existing_data.get('날짜')} → {log.날짜}")
         
         if log.업체명 is not None:
             update_fields.append("업체명 = ?")
             params.append(log.업체명)
+            changed_fields.append(f"업체명: {existing_data.get('업체명')} → {log.업체명}")
         
         if log.분류 is not None:
             update_fields.append("분류 = ?")
             params.append(log.분류)
+            changed_fields.append(f"분류: {existing_data.get('분류')} → {log.분류}")
         
         if log.단가 is not None:
             update_fields.append("단가 = ?")
             params.append(log.단가)
+            changed_fields.append(f"단가: {existing_data.get('단가'):,}원 → {log.단가:,}원")
         
         if log.수량 is not None:
             update_fields.append("수량 = ?")
             params.append(log.수량)
+            changed_fields.append(f"수량: {existing_data.get('수량')} → {log.수량}")
         
         if log.비고1 is not None:
             update_fields.append("비고1 = ?")
@@ -365,10 +387,8 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
         
         # 합계 재계산
         if log.단가 is not None or log.수량 is not None:
-            cols = [c[0] for c in con.execute("PRAGMA table_info(work_log);").fetchall()]
-            data = dict(zip(cols, existing))
-            new_단가 = log.단가 if log.단가 is not None else data.get('단가', 0)
-            new_수량 = log.수량 if log.수량 is not None else data.get('수량', 1)
+            new_단가 = log.단가 if log.단가 is not None else existing_data.get('단가', 0)
+            new_수량 = log.수량 if log.수량 is not None else existing_data.get('수량', 1)
             update_fields.append("합계 = ?")
             params.append(new_단가 * new_수량)
         
@@ -380,6 +400,16 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
         con.execute(query, params)
         con.commit()
     
+    # 활동 로그 기록
+    add_log(
+        action_type="작업일지_수정",
+        target_type="work_log",
+        target_id=str(log_id),
+        target_name=f"{log.업체명 or existing_data.get('업체명')} {log.분류 or existing_data.get('분류')}",
+        user_nickname="웹",
+        details=", ".join(changed_fields) if changed_fields else "수정됨"
+    )
+    
     return {"success": True, "message": "작업일지가 수정되었습니다."}
 
 
@@ -387,16 +417,31 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
 async def delete_work_log(log_id: int):
     """작업일지 삭제"""
     with get_connection() as con:
-        # 존재 확인
+        # 삭제 전 데이터 조회 (로그용)
         existing = con.execute(
-            "SELECT id FROM work_log WHERE id = ?", (log_id,)
+            "SELECT id, 날짜, 업체명, 분류, 합계 FROM work_log WHERE id = ?", (log_id,)
         ).fetchone()
         
         if not existing:
             raise HTTPException(status_code=404, detail="작업일지를 찾을 수 없습니다.")
         
+        날짜 = existing[1]
+        업체명 = existing[2]
+        분류 = existing[3]
+        합계 = existing[4] or 0
+        
         con.execute("DELETE FROM work_log WHERE id = ?", (log_id,))
         con.commit()
+    
+    # 활동 로그 기록
+    add_log(
+        action_type="작업일지_삭제",
+        target_type="work_log",
+        target_id=str(log_id),
+        target_name=f"{업체명} {분류}",
+        user_nickname="웹",
+        details=f"날짜: {날짜}, 합계: {합계:,}원"
+    )
     
     return {"success": True, "message": "작업일지가 삭제되었습니다."}
 
