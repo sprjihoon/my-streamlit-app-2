@@ -473,12 +473,36 @@ class AIParser:
                 # 일반 도구 처리
                 # ─────────────────────────────────────
                 
-                # 저장 성공 시 대화 상태 클리어
-                if tool_name == "save_work_log":
-                    self.conv_manager.clear_state(user_id)
-                
                 # 도구 실행
                 tool_result = execute_tool(tool_name, tool_args, user_id, user_name)
+                
+                # 저장 성공 시에만 대화 상태 클리어
+                if tool_name == "save_work_log" and tool_result.get("success"):
+                    self.conv_manager.clear_state(user_id)
+                
+                # 업체명 검증 실패 시 - 데이터 저장 후 다시 물어보기
+                if tool_name == "save_work_log" and tool_result.get("unknown_vendor"):
+                    # 기존 입력 데이터를 대화 상태에 저장 (업체명 제외)
+                    pending_data = {
+                        k: v for k, v in tool_args.items()
+                        if k in ["work_type", "unit_price", "qty", "date", "remark"] and v
+                    }
+                    self.conv_manager.set_state(
+                        user_id=user_id,
+                        channel_id=channel_id or "",
+                        pending_data=pending_data,
+                        missing=["vendor"],
+                        last_question="어느 업체 작업인가요?"
+                    )
+                    
+                    similar = tool_result.get("similar_vendors", [])
+                    suggestion = f"\n비슷한 업체: {', '.join(similar)}" if similar else ""
+                    return {
+                        "response": f"❓ '{tool_result['unknown_vendor']}'은(는) 등록되지 않은 업체입니다.{suggestion}\n\n어느 업체 작업인가요?",
+                        "tool_called": tool_name,
+                        "tool_result": tool_result,
+                        "waiting_for_info": True
+                    }
                 
                 # 도구 결과를 GPT에게 전달하여 최종 응답 생성
                 # assistant_message를 딕셔너리로 변환 (Pydantic 직렬화 오류 방지)
