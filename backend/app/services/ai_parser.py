@@ -90,7 +90,7 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - 정보가 부족하면 ask_missing_info 호출하여 물어보기
 - "취소", "삭제", "지워줘" 등은 delete_work_log (delete_recent=true)
 - "수정", "고쳐줘", "바꿔줘" 등은 update_work_log (update_recent=true)
-- 도움말/사용법 요청은 get_help 호출
+- **"도움말", "사용법", "사용방법", "어떻게 써", "뭐할수있어", "help"** → get_help 호출!
 - 조회/검색은 search_work_logs 또는 get_work_log_stats
 - 일반 대화나 인사는 도구 호출 없이 직접 응답
 
