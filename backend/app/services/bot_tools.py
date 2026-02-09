@@ -557,7 +557,10 @@ def _save_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
     
     # 업체명 검증 - 등록된 업체인지 확인
     with get_connection() as con:
-        # vendors 테이블 또는 aliases 테이블에서 업체명 검색
+        # 공백 제거한 버전도 준비
+        vendor_normalized = vendor.replace(" ", "").replace("　", "")
+        
+        # 1. 정확히 일치하는 업체 검색 (vendors + aliases)
         vendor_check = con.execute(
             """SELECT v.vendor FROM vendors v WHERE LOWER(v.vendor) = LOWER(?)
                UNION
@@ -566,6 +569,34 @@ def _save_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
                WHERE LOWER(a.alias) = LOWER(?)""",
             (vendor, vendor)
         ).fetchone()
+        
+        # 2. 정확히 일치 없으면 → 공백 제거 후 검색
+        if not vendor_check:
+            vendor_check = con.execute(
+                """SELECT v.vendor FROM vendors v 
+                   WHERE REPLACE(LOWER(v.vendor), ' ', '') = LOWER(?)
+                   UNION
+                   SELECT v.vendor FROM aliases a 
+                   JOIN vendors v ON a.vendor_id = v.vendor_id 
+                   WHERE REPLACE(LOWER(a.alias), ' ', '') = LOWER(?)""",
+                (vendor_normalized, vendor_normalized)
+            ).fetchone()
+        
+        # 3. 여전히 없으면 → 부분 일치 검색 (결과가 1개면 자동 선택)
+        if not vendor_check:
+            partial_matches = con.execute(
+                """SELECT DISTINCT v.vendor FROM vendors v 
+                   WHERE v.vendor LIKE ? OR v.vendor LIKE ?
+                   UNION
+                   SELECT DISTINCT v.vendor FROM aliases a 
+                   JOIN vendors v ON a.vendor_id = v.vendor_id 
+                   WHERE a.alias LIKE ? OR a.alias LIKE ?""",
+                (f"%{vendor}%", f"%{vendor_normalized}%", f"%{vendor}%", f"%{vendor_normalized}%")
+            ).fetchall()
+            
+            if len(partial_matches) == 1:
+                # 부분 일치가 1개면 자동 선택
+                vendor_check = partial_matches[0]
         
         if not vendor_check:
             # 유사한 업체명 제안
