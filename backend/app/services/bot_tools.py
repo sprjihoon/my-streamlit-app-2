@@ -546,6 +546,40 @@ def _save_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
     if not vendor or not work_type or not unit_price:
         return {"success": False, "error": "업체명, 작업종류, 단가는 필수입니다."}
     
+    # 업체명 검증 - 등록된 업체인지 확인
+    with get_connection() as con:
+        # vendors 테이블 또는 aliases 테이블에서 업체명 검색
+        vendor_check = con.execute(
+            """SELECT v.vendor FROM vendors v WHERE LOWER(v.vendor) = LOWER(?)
+               UNION
+               SELECT v.vendor FROM aliases a 
+               JOIN vendors v ON a.vendor_id = v.vendor_id 
+               WHERE LOWER(a.alias) = LOWER(?)""",
+            (vendor, vendor)
+        ).fetchone()
+        
+        if not vendor_check:
+            # 유사한 업체명 제안
+            similar = con.execute(
+                """SELECT vendor FROM vendors 
+                   WHERE vendor LIKE ? OR vendor LIKE ? 
+                   LIMIT 5""",
+                (f"%{vendor}%", f"%{vendor[:2]}%")
+            ).fetchall()
+            
+            similar_names = [r[0] for r in similar] if similar else []
+            suggestion = f" 비슷한 업체: {', '.join(similar_names)}" if similar_names else ""
+            
+            return {
+                "success": False, 
+                "error": f"'{vendor}'은(는) 등록되지 않은 업체입니다.{suggestion}",
+                "unknown_vendor": vendor,
+                "similar_vendors": similar_names
+            }
+        
+        # 정식 업체명으로 변환 (별칭으로 입력한 경우)
+        vendor = vendor_check[0]
+    
     total = unit_price * qty
     저장시간 = datetime.now().isoformat()
     
