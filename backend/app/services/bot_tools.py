@@ -34,11 +34,11 @@ TOOLS = [
                     },
                     "unit_price": {
                         "type": "integer",
-                        "description": "단가 (원 단위, 예: 30000)"
+                        "description": "단가 = 1개당 금액(원). '개당 100원'이면 100, '3만원'이면 30000. 합계가 아닌 개당 금액!"
                     },
                     "qty": {
                         "type": "integer",
-                        "description": "수량 (기본값: 1)",
+                        "description": "수량(건수/개수). '88개'면 88. 기본값 1",
                         "default": 1
                     },
                     "date": {

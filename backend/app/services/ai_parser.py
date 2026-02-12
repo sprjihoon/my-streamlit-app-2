@@ -49,6 +49,15 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - "만원" → 10000
 - "5천원" → 5000
 
+## ⚠️ 단가·수량 해석 규칙 (매우 중요!)
+- **단가(unit_price)** = **1개당 금액** (한 건당, 개당). 합계가 아님!
+- **수량(qty)** = 건수, 개수. "88개" → qty=88
+- **합계** = 단가 × 수량 (봇이 자동 계산하므로 save_work_log에 넣지 않음)
+- "이중라벨 88개, 개당 100원" → work_type="이중라벨", qty=88, **unit_price=100** (합계 8,800원)
+- "50개 200원" → qty=50, unit_price=200 (합계 10,000원)
+- "개당 100원" / "1개에 100원" / "100원/개" → **항상 unit_price=100**
+- 잘못된 예: "88개 개당 100원"인데 unit_price=8800 넣으면 안 됨! (8800은 합계이므로 단가가 아님)
+
 ## 날짜 해석 규칙
 - "오늘" → {today}
 - "어제" → {yesterday}
@@ -376,6 +385,7 @@ class AIParser:
                 messages=messages,
                 tools=extended_tools,
                 tool_choice="auto",
+                parallel_tool_calls=False,
                 temperature=0.3
             )
             
@@ -383,26 +393,23 @@ class AIParser:
             
             # 도구 호출이 있는 경우
             if assistant_message.tool_calls:
-                tool_call = assistant_message.tool_calls[0]
-                tool_name = tool_call.function.name
-                tool_args = json.loads(tool_call.function.arguments)
-                
-                # 업체명 별칭 매핑 적용
-                if "vendor" in tool_args:
-                    tool_args["vendor"] = self._map_vendor_alias(tool_args["vendor"])
+                # 첫 번째 도구만 특수 처리(조기 반환) — 여러 개일 수 있으므로 나머지는 모두 실행 후 tool 메시지로 응답해야 함
+                tool_call_first = assistant_message.tool_calls[0]
+                tool_name_first = tool_call_first.function.name
+                tool_args_first = json.loads(tool_call_first.function.arguments)
+                if "vendor" in tool_args_first:
+                    tool_args_first["vendor"] = self._map_vendor_alias(tool_args_first["vendor"])
                 
                 # ─────────────────────────────────────
-                # 특수 도구 처리: ask_missing_info
+                # 특수 도구 처리: ask_missing_info (첫 번째만, 조기 반환)
                 # ─────────────────────────────────────
-                if tool_name == "ask_missing_info":
-                    # 불완전한 정보 저장
+                if tool_name_first == "ask_missing_info":
                     pending_data = {
-                        k: v for k, v in tool_args.items()
+                        k: v for k, v in tool_args_first.items()
                         if k in ["vendor", "work_type", "unit_price", "qty", "date", "remark"] and v
                     }
-                    missing = tool_args.get("missing", [])
-                    question = tool_args.get("question", "추가 정보를 알려주세요.")
-                    
+                    missing = tool_args_first.get("missing", [])
+                    question = tool_args_first.get("question", "추가 정보를 알려주세요.")
                     self.conv_manager.set_state(
                         user_id=user_id,
                         channel_id=channel_id or "",
@@ -410,81 +417,72 @@ class AIParser:
                         missing=missing,
                         last_question=question
                     )
-                    
                     return {
                         "response": f"❓ {question}",
-                        "tool_called": tool_name,
+                        "tool_called": tool_name_first,
                         "tool_result": {"pending_data": pending_data, "missing": missing},
                         "waiting_for_info": True
                     }
                 
                 # ─────────────────────────────────────
-                # 특수 도구 처리: complete_pending_entry
+                # 특수 도구 처리: complete_pending_entry (첫 번째만, 조기 반환)
                 # ─────────────────────────────────────
-                if tool_name == "complete_pending_entry":
+                if tool_name_first == "complete_pending_entry":
                     if not pending_state:
                         return {
                             "response": "🤔 이전 대화 내용을 찾을 수 없어요. 처음부터 다시 말씀해주세요.",
-                            "tool_called": tool_name,
+                            "tool_called": tool_name_first,
                             "tool_result": None
                         }
-                    
-                    # 기존 데이터와 새 데이터 병합
                     merged_data = pending_state.get("pending_data", {}).copy()
-                    for key, value in tool_args.items():
+                    for key, value in tool_args_first.items():
                         if value:
                             if key == "vendor":
                                 value = self._map_vendor_alias(value)
                             merged_data[key] = value
-                    
-                    # 대화 상태 클리어
                     self.conv_manager.clear_state(user_id)
-                    
-                    # 필수 필드 확인
                     required = ["vendor", "work_type", "unit_price"]
                     still_missing = [f for f in required if not merged_data.get(f)]
-                    
                     if still_missing:
                         field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가"}
                         missing_kr = [field_names[f] for f in still_missing]
                         return {
                             "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
-                            "tool_called": tool_name,
+                            "tool_called": tool_name_first,
                             "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
                         }
-                    
-                    # save_work_log 실행
                     tool_result = execute_tool("save_work_log", merged_data, user_id, user_name)
-                    
                     if tool_result.get("success"):
                         return {
                             "response": f"✅ {tool_result.get('message', '저장완료!')}",
                             "tool_called": "save_work_log",
                             "tool_result": tool_result
                         }
-                    else:
-                        return {
-                            "response": f"❌ 저장 실패: {tool_result.get('error', '알 수 없는 오류')}",
-                            "tool_called": "save_work_log",
-                            "tool_result": tool_result
-                        }
+                    return {
+                        "response": f"❌ 저장 실패: {tool_result.get('error', '알 수 없는 오류')}",
+                        "tool_called": "save_work_log",
+                        "tool_result": tool_result
+                    }
                 
                 # ─────────────────────────────────────
-                # 일반 도구 처리
+                # 모든 tool_calls 실행 (각 tool_call_id마다 응답 메시지 필요)
                 # ─────────────────────────────────────
+                tool_results_by_id = []
+                for tc in assistant_message.tool_calls:
+                    tname = tc.function.name
+                    targs = json.loads(tc.function.arguments)
+                    if "vendor" in targs:
+                        targs["vendor"] = self._map_vendor_alias(targs["vendor"])
+                    one_result = execute_tool(tname, targs, user_id, user_name)
+                    tool_results_by_id.append((tc.id, tname, one_result))
                 
-                # 도구 실행
-                tool_result = execute_tool(tool_name, tool_args, user_id, user_name)
-                
-                # 저장 성공 시에만 대화 상태 클리어
-                if tool_name == "save_work_log" and tool_result.get("success"):
+                # 첫 번째가 save_work_log인 경우 상태/업체 검증 처리
+                first_id, first_name, first_result = tool_results_by_id[0]
+                if first_name == "save_work_log" and first_result.get("success"):
                     self.conv_manager.clear_state(user_id)
-                
-                # 업체명 검증 실패 시 - 데이터 저장 후 다시 물어보기
-                if tool_name == "save_work_log" and tool_result.get("unknown_vendor"):
-                    # 기존 입력 데이터를 대화 상태에 저장 (업체명 제외)
+                if first_name == "save_work_log" and first_result.get("unknown_vendor"):
                     pending_data = {
-                        k: v for k, v in tool_args.items()
+                        k: v for k, v in tool_args_first.items()
                         if k in ["work_type", "unit_price", "qty", "date", "remark"] and v
                     }
                     self.conv_manager.set_state(
@@ -494,18 +492,16 @@ class AIParser:
                         missing=["vendor"],
                         last_question="어느 업체 작업인가요?"
                     )
-                    
-                    similar = tool_result.get("similar_vendors", [])
+                    similar = first_result.get("similar_vendors", [])
                     suggestion = f"\n비슷한 업체: {', '.join(similar)}" if similar else ""
                     return {
-                        "response": f"❓ '{tool_result['unknown_vendor']}'은(는) 등록되지 않은 업체입니다.{suggestion}\n\n어느 업체 작업인가요?",
-                        "tool_called": tool_name,
-                        "tool_result": tool_result,
+                        "response": f"❓ '{first_result['unknown_vendor']}'은(는) 등록되지 않은 업체입니다.{suggestion}\n\n어느 업체 작업인가요?",
+                        "tool_called": first_name,
+                        "tool_result": first_result,
                         "waiting_for_info": True
                     }
                 
-                # 도구 결과를 GPT에게 전달하여 최종 응답 생성
-                # assistant_message를 딕셔너리로 변환 (Pydantic 직렬화 오류 방지)
+                # assistant 메시지 + 모든 tool_call_id에 대한 tool 메시지 추가 후 최종 응답 생성
                 assistant_msg_dict = {
                     "role": "assistant",
                     "content": assistant_message.content,
@@ -522,13 +518,13 @@ class AIParser:
                     ] if assistant_message.tool_calls else None
                 }
                 messages.append(assistant_msg_dict)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(tool_result, ensure_ascii=False)
-                })
+                for tool_call_id, _tname, tool_result in tool_results_by_id:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": json.dumps(tool_result, ensure_ascii=False)
+                    })
                 
-                # 최종 응답 생성
                 final_response = await self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -537,8 +533,8 @@ class AIParser:
                 
                 return {
                     "response": final_response.choices[0].message.content,
-                    "tool_called": tool_name,
-                    "tool_result": tool_result
+                    "tool_called": first_name,
+                    "tool_result": first_result
                 }
             
             # 도구 호출 없이 직접 응답

@@ -374,7 +374,9 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
         if log.단가 is not None:
             update_fields.append("단가 = ?")
             params.append(log.단가)
-            changed_fields.append(f"단가: {existing_data.get('단가'):,}원 → {log.단가:,}원")
+            old_단가 = existing_data.get('단가')
+            old_str = f"{old_단가:,}원" if old_단가 is not None else "-"
+            changed_fields.append(f"단가: {old_str} → {log.단가:,}원")
         
         if log.수량 is not None:
             update_fields.append("수량 = ?")
