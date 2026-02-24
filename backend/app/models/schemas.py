@@ -158,6 +158,58 @@ class ShippingStatsResponse(BaseModel):
 
 
 # ─────────────────────────────────────
+# 가견적 계산
+# ─────────────────────────────────────
+class WorkLogEntry(BaseModel):
+    """작업일지 항목 (분류/의류 등)."""
+    분류: str = Field(..., description="분류명 (예: 의류)")
+    수량: int = Field(..., ge=0)
+    단가: int = Field(..., ge=0)
+
+
+class EstimateCalculateRequest(BaseModel):
+    """가견적 계산 요청."""
+    # 수신처 (PDF/저장 시 견적서에 반영)
+    company_name: Optional[str] = Field(default="", description="업체명")
+    contact: Optional[str] = Field(default="", description="연락처")
+    email: Optional[str] = Field(default="", description="이메일")
+    # 출고
+    monthly_outbound: int = Field(..., ge=0, description="월 출고건수")
+    rate_type: str = Field(default="표준", description="택배 요금제 (표준/A)")
+    zone_ratios: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="구간별 비율 (극소, 소, 중, 대, 특대, 특특대). 합 1.0. 없으면 극소 100%"
+    )
+    # 반품
+    return_count: int = Field(default=0, ge=0, description="반품 건수")
+    # 선택
+    inbound_qty: Optional[int] = Field(default=None, ge=0)
+    combined_over_qty: Optional[int] = Field(default=None, ge=0, description="합포장 2개 초과 수량")
+    remote_count: Optional[int] = Field(default=None, ge=0, description="도서산간 건수")
+    work_log_entries: Optional[List[WorkLogEntry]] = Field(default_factory=list)
+
+
+class EstimateCalculateResponse(BaseModel):
+    """가견적 계산 응답."""
+    success: bool = True
+    items: List[InvoiceItem] = Field(default_factory=list)
+    total_amount: int = 0
+    company_name: str = ""
+    contact: str = ""
+    email: str = ""
+    warnings: List[str] = Field(default_factory=list)
+
+
+class EstimateExportPdfRequest(BaseModel):
+    """견적서 PDF 출력 요청 (입력값 반영)."""
+    company_name: str = Field(default="", description="업체명")
+    contact: str = Field(default="", description="연락처")
+    email: str = Field(default="", description="이메일")
+    items: List[InvoiceItem] = Field(..., description="견적 항목")
+    total_amount: int = Field(..., ge=0)
+
+
+# ─────────────────────────────────────
 # 업로드
 # ─────────────────────────────────────
 class UploadResponse(BaseModel):

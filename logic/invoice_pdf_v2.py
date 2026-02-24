@@ -196,14 +196,24 @@ class BillingInvoicePDF:
         stamp_holder: str = "",
         manager: str = "",
         company_name: str = "",
+        recipient_contact: str = "",
+        recipient_email: str = "",
+        doc_title: str = "",
     ):
-        """청구서 PDF 생성"""
+        """청구서/견적서 PDF 생성. doc_title 비우면 '물류대행 서비스 대금청구서'."""
         
         # 1. 제목
-        self._add_title_section(doc_number, invoice_date, stamp_holder, manager)
+        self._add_title_section(
+            doc_number, invoice_date, stamp_holder, manager,
+            doc_title=doc_title or "물류대행 서비스 대금청구서",
+        )
         
-        # 2. 수신/건명
-        self._add_recipient_section(recipient_name, title)
+        # 2. 수신/연락처/이메일/건명
+        self._add_recipient_section(
+            recipient_name, title,
+            recipient_contact=recipient_contact,
+            recipient_email=recipient_email,
+        )
         
         # 3. 공급자 정보
         self._add_supplier_section(supplier_info)
@@ -223,7 +233,14 @@ class BillingInvoicePDF:
         # PDF 빌드
         self.doc.build(self.elements)
     
-    def _add_title_section(self, doc_number: str, invoice_date: str, stamp_holder: str, manager: str):
+    def _add_title_section(
+        self,
+        doc_number: str,
+        invoice_date: str,
+        stamp_holder: str,
+        manager: str,
+        doc_title: str = "물류대행 서비스 대금청구서",
+    ):
         """제목 및 문서번호 섹션"""
         
         # 담당/대표 정보 (오른쪽 상단)
@@ -239,7 +256,7 @@ class BillingInvoicePDF:
             [
                 [
                     "",
-                    Paragraph("<b>물류대행 서비스 대금청구서</b>", self.title_style),
+                    Paragraph(f"<b>{doc_title}</b>", self.title_style),
                     Paragraph(right_info, self.small_style),
                 ]
             ],
@@ -278,21 +295,35 @@ class BillingInvoicePDF:
         self.elements.append(meta_table)
         self.elements.append(Spacer(1, 2 * mm))
     
-    def _add_recipient_section(self, recipient_name: str, title: str):
-        """수신/건명 섹션"""
-        table = Table(
+    def _add_recipient_section(
+        self,
+        recipient_name: str,
+        title: str,
+        recipient_contact: str = "",
+        recipient_email: str = "",
+    ):
+        """수신/연락처/이메일/건명 섹션 (연락처·이메일 있으면 추가 행 표시)"""
+        rows = [
             [
-                [
-                    Paragraph("<b>수신</b>", self.header_style),
-                    Paragraph(recipient_name, self.body_style),
-                ],
-                [
-                    Paragraph("<b>건명</b>", self.header_style),
-                    Paragraph(title, self.body_style),
-                ],
+                Paragraph("<b>수신</b>", self.header_style),
+                Paragraph(recipient_name or "-", self.body_style),
             ],
-            colWidths=[25 * mm, 145 * mm],
-        )
+        ]
+        if recipient_contact:
+            rows.append([
+                Paragraph("<b>연락처</b>", self.header_style),
+                Paragraph(recipient_contact, self.body_style),
+            ])
+        if recipient_email:
+            rows.append([
+                Paragraph("<b>이메일</b>", self.header_style),
+                Paragraph(recipient_email, self.body_style),
+            ])
+        rows.append([
+            Paragraph("<b>건명</b>", self.header_style),
+            Paragraph(title, self.body_style),
+        ])
+        table = Table(rows, colWidths=[25 * mm, 145 * mm])
         table.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
             ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
@@ -552,6 +583,9 @@ def create_billing_invoice_pdf(
     stamp_holder: str = "",
     manager: str = "",
     company_name: str = "",
+    recipient_contact: str = "",
+    recipient_email: str = "",
+    doc_title: str = "",
 ) -> bytes:
     """
     물류대행 서비스 대금청구서 PDF 생성.
@@ -559,7 +593,7 @@ def create_billing_invoice_pdf(
     Args:
         invoice_id: 인보이스 ID (문서번호로 사용)
         invoice_date: 청구일자 (YYYY-MM-DD)
-        recipient_name: 수신자명
+        recipient_name: 수신자명 (업체명 등)
         title: 건명
         supplier_info: 공급자 정보 {사업자번호, 상호, 소재지, 업태, 종목}
         items: 항목 리스트 [{항목, 수량, 단가, 금액, 비고}, ...]
@@ -568,6 +602,8 @@ def create_billing_invoice_pdf(
         stamp_holder: 대표자명
         manager: 담당자명 (인보이스 확정자)
         company_name: 회사명 (하단에 표시)
+        recipient_contact: 수신자 연락처 (견적서 등에서 사용)
+        recipient_email: 수신자 이메일 (견적서 등에서 사용)
     
     Returns:
         PDF 바이트 데이터
@@ -590,6 +626,9 @@ def create_billing_invoice_pdf(
         stamp_holder=stamp_holder,
         manager=manager,
         company_name=company_name,
+        recipient_contact=recipient_contact,
+        recipient_email=recipient_email,
+        doc_title=doc_title,
     )
     
     buffer.seek(0)

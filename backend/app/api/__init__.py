@@ -13,6 +13,7 @@ from .insights import router as insights_router
 from .invoices import router as invoices_router
 from .auth import router as auth_router
 from .logs import router as logs_router
+from .estimate import router as estimate_router
 
 __all__ = [
     "health_router",
@@ -24,5 +25,6 @@ __all__ = [
     "invoices_router",
     "auth_router",
     "logs_router",
+    "estimate_router",
 ]
 

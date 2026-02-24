@@ -14,7 +14,7 @@ logic/ 모듈을 감싸는 얇은 API 레이어.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api import health_router, calculate_router, upload_router, vendors_router, rates_router, insights_router, invoices_router, auth_router, logs_router
+from backend.app.api import health_router, calculate_router, upload_router, vendors_router, rates_router, insights_router, invoices_router, auth_router, logs_router, estimate_router
 from backend.app.api.settings import router as settings_router
 from backend.app.api.vendor_charges import router as vendor_charges_router
 from backend.app.api.storage import router as storage_router
@@ -56,6 +56,7 @@ app.include_router(vendor_charges_router)
 app.include_router(storage_router)
 app.include_router(naver_works_router)
 app.include_router(work_log_router)
+app.include_router(estimate_router)
 
 
 # 루트 엔드포인트

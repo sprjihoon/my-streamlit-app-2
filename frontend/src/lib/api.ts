@@ -87,6 +87,69 @@ export async function calculateInvoice(params: {
   });
 }
 
+/** 가견적 항목 타입 */
+export interface EstimateItem {
+  항목: string;
+  수량: number;
+  단가: number;
+  금액: number;
+  비고?: string;
+}
+
+/**
+ * 가견적 계산
+ */
+export async function calculateEstimate(params: {
+  company_name?: string;
+  contact?: string;
+  email?: string;
+  monthly_outbound: number;
+  rate_type?: string;
+  zone_ratios?: Record<string, number>;
+  return_count?: number;
+  inbound_qty?: number;
+  combined_over_qty?: number;
+  remote_count?: number;
+  work_log_entries?: Array<{ 분류: string; 수량: number; 단가: number }>;
+}) {
+  return fetchApi<{
+    success: boolean;
+    items: EstimateItem[];
+    total_amount: number;
+    company_name: string;
+    contact: string;
+    email: string;
+    warnings: string[];
+  }>('/estimate', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+/**
+ * 견적서 PDF 출력 (업체명·연락처·이메일 반영)
+ * @returns Blob (PDF)
+ */
+export async function exportEstimatePdf(body: {
+  company_name: string;
+  contact: string;
+  email: string;
+  items: EstimateItem[];
+  total_amount: number;
+}): Promise<Blob> {
+  const url = `${API_BASE}/estimate/export/pdf`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `PDF export failed: ${response.status}`);
+  }
+  return response.blob();
+}
+
 /**
  * 택배요금 계산
  */
