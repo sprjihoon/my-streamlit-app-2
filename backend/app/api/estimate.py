@@ -210,6 +210,21 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "금액": return_count * unit,
                     "비고": "",
                 })
+                # 3-1. 반품 택배비 (실제 청구됨 → 견적은 택배 구간별 비율 중 최대 비율 구간 단가 적용)
+                if zone_rates and zone_ratios:
+                    max_zone = max(zone_ratios.keys(), key=lambda z: zone_ratios.get(z, 0))
+                    return_courier_fee = next(
+                        (int(z.get("요금", 0)) for z in zone_rates if z.get("구간") == max_zone),
+                        0,
+                    )
+                    if return_courier_fee > 0:
+                        items.append({
+                            "항목": f"반품 택배비 ({max_zone})",
+                            "수량": return_count,
+                            "단가": return_courier_fee,
+                            "금액": return_count * return_courier_fee,
+                            "비고": "최대 비율 구간 단가 적용",
+                        })
 
             # 4. 입고검수 (입고수량)
             inbound_qty = req.inbound_qty or 0
@@ -223,7 +238,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "비고": "",
                 })
 
-            # 5. 합포장 (출고건 대비 %)
+            # 5. 합포장 (출고건 대비 %, 평균 수량 기반: 건수 × (평균 수량 - 2) × 단가)
             combined_pct = getattr(req, "combined_percentage", None)
             if combined_pct is None:
                 combined_pct = 0
@@ -231,12 +246,19 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
             combined_avg_qty = getattr(req, "combined_avg_qty", None)
             if combined_over_qty > 0:
                 unit = _get_out_extra_unit(con, "합포장")
-                remark = f"평균 {combined_avg_qty}개/건" if (combined_avg_qty is not None and combined_avg_qty > 0) else ""
+                if unit <= 0:
+                    unit = 100
+                if combined_avg_qty is not None and combined_avg_qty > 2:
+                    chargeable_qty = combined_over_qty * (combined_avg_qty - 2)
+                    remark = f"평균 {combined_avg_qty}개/건, 2개 초과분"
+                else:
+                    chargeable_qty = combined_over_qty
+                    remark = f"평균 {combined_avg_qty}개/건" if (combined_avg_qty is not None and combined_avg_qty > 0) else ""
                 items.append({
                     "항목": "합포장 (2개 초과/개)",
-                    "수량": combined_over_qty,
+                    "수량": chargeable_qty,
                     "단가": unit,
-                    "금액": combined_over_qty * unit,
+                    "금액": chargeable_qty * unit,
                     "비고": remark,
                 })
 
@@ -375,24 +397,43 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                         "비고": "",
                     })
 
-            # 10-1. 보관료 (PLT 기준): 1 PLT당 SKU > 2이면 중량랙 적용
+            # 10-1. 보관료 (PLT 3만원 기본): 1 PLT당 SKU > 2이면 2 PLT당 1 중량랙 + 나머지 PLT
             storage_plt = getattr(req, "storage_plt", None)
             sku_count = getattr(req, "sku_count", None)
             if storage_plt and storage_plt > 0:
+                plt_unit = _get_storage_unit(con, "PLT")
+                if plt_unit <= 0:
+                    plt_unit = 30000
                 if sku_count is not None and sku_count > 0 and (sku_count / storage_plt) > 2:
-                    storage_item_name = "중량랙"
-                    storage_remark = "1 PLT당 SKU 2개 초과 → 중량랙 적용"
+                    # 2 PLT당 1 중량랙, 나머지는 PLT
+                    weight_rack_qty = storage_plt // 2
+                    plt_qty = storage_plt % 2
+                    weight_rack_unit = _get_storage_unit(con, "중량랙")
+                    if weight_rack_unit <= 0:
+                        weight_rack_unit = 60000
+                    if weight_rack_qty > 0:
+                        items.append({
+                            "항목": "보관료 (중량랙)",
+                            "수량": weight_rack_qty,
+                            "단가": weight_rack_unit,
+                            "금액": weight_rack_qty * weight_rack_unit,
+                            "비고": "1 PLT당 SKU 2개 초과 시 2 PLT당 1 중량랙",
+                        })
+                    if plt_qty > 0:
+                        items.append({
+                            "항목": "보관료 (PLT)",
+                            "수량": plt_qty,
+                            "단가": plt_unit,
+                            "금액": plt_qty * plt_unit,
+                            "비고": "나머지 PLT",
+                        })
                 else:
-                    storage_item_name = "PLT"
-                    storage_remark = "보관량 PLT 기준"
-                unit = _get_storage_unit(con, storage_item_name)
-                if unit > 0:
                     items.append({
-                        "항목": f"보관료 ({storage_item_name})",
+                        "항목": "보관료 (PLT)",
                         "수량": storage_plt,
-                        "단가": unit,
-                        "금액": storage_plt * unit,
-                        "비고": storage_remark,
+                        "단가": plt_unit,
+                        "금액": storage_plt * plt_unit,
+                        "비고": "보관량 PLT 기준",
                     })
 
             # 11. 작업일지 (의류 등)

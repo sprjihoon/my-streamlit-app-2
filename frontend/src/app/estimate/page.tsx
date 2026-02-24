@@ -39,7 +39,6 @@ export default function EstimatePage() {
   const [needVideoOut, setNeedVideoOut] = useState(false);
   const [needVideoRet, setNeedVideoRet] = useState(false);
   // 화장품/기타: 박스 입고 vs 개당 입고
-  const [inboundType, setInboundType] = useState<'box' | 'piece'>('piece');
   // 보관: PLT 기준, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용
   const [storagePlt, setStoragePlt] = useState<number | ''>('');
   const [skuCount, setSkuCount] = useState<number | ''>('');
@@ -101,7 +100,6 @@ export default function EstimatePage() {
         need_void_work: needVoidWork,
         need_video_out: needVideoOut,
         need_video_ret: needVideoRet,
-        inbound_type: (brandType === 'beauty' || brandType === 'etc') ? inboundType : undefined,
         storage_plt: storagePlt === '' ? undefined : Number(storagePlt),
         sku_count: skuCount === '' ? undefined : Number(skuCount),
         extra_work_entries: extraWorkEntries.filter((e) => e.item_name.trim() && e.qty > 0),
@@ -302,19 +300,6 @@ export default function EstimatePage() {
           </div>
         </div>
         <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
-          {(brandType === 'beauty' || brandType === 'etc') && (
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고 방식</label>
-              <select
-                value={inboundType}
-                onChange={(e) => setInboundType(e.target.value as 'box' | 'piece')}
-                style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, minWidth: 160 }}
-              >
-                <option value="piece">개당 입고</option>
-                <option value="box">박스 입고</option>
-              </select>
-            </div>
-          )}
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>PP 봉투</label>
             <select
