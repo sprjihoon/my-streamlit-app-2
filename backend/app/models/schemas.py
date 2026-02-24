@@ -184,8 +184,9 @@ class EstimateCalculateRequest(BaseModel):
     return_percentage: Optional[float] = Field(default=0, ge=0, le=100, description="반품 비율 (%)")
     # 입고수량
     inbound_qty: Optional[int] = Field(default=None, ge=0, description="입고수량")
-    # 합포장: 출고건 대비 % (0~100)
+    # 합포장: 출고건 대비 % (0~100), 평균 수량(건당 개수, 선택)
     combined_percentage: Optional[float] = Field(default=0, ge=0, le=100, description="합포장 비율 (%)")
+    combined_avg_qty: Optional[int] = Field(default=None, ge=0, description="합포장 평균 수량 (건당 개수)")
     # 브랜드유형: 패션(fashion) / 뷰티(beauty) / 기타(etc)
     brand_type: Optional[str] = Field(default="etc", description="브랜드유형: fashion, beauty, etc")
     # 패션 선택 시 양품화 작업 필요 여부 (입고수량 × 500원)

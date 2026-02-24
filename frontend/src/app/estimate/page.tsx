@@ -28,6 +28,7 @@ export default function EstimatePage() {
   const [returnPercentage, setReturnPercentage] = useState(0);
   const [inboundQty, setInboundQty] = useState<number | ''>('');
   const [combinedPercentage, setCombinedPercentage] = useState(0);
+  const [combinedAvgQty, setCombinedAvgQty] = useState<number | ''>('');
   const [brandType, setBrandType] = useState<'fashion' | 'beauty' | 'etc'>('etc');
   const [needQualityWork, setNeedQualityWork] = useState(false);
   const [ppBagProvider, setPpBagProvider] = useState<'brand' | 'ours'>('brand');
@@ -46,11 +47,6 @@ export default function EstimatePage() {
   // 청구서 항목 목록 (추가 작업 선택용)
   const [chargeableItems, setChargeableItems] = useState<Array<{ item_name: string; unit_price: number; source: string }>>([]);
   const [extraWorkEntries, setExtraWorkEntries] = useState<Array<{ item_name: string; qty: number }>>([]);
-
-  // 작업일지 (의류 등)
-  const [workLogEntries, setWorkLogEntries] = useState<Array<{ 분류: string; 수량: number; 단가: number }>>([
-    { 분류: '의류', 수량: 0, 단가: 0 },
-  ]);
 
   useEffect(() => {
     getChargeableItems()
@@ -95,6 +91,7 @@ export default function EstimatePage() {
         return_percentage: returnPercentage,
         inbound_qty: inboundQty === '' ? undefined : Number(inboundQty),
         combined_percentage: combinedPercentage,
+        combined_avg_qty: combinedAvgQty === '' ? undefined : Number(combinedAvgQty),
         brand_type: brandType,
         need_quality_work: brandType === 'fashion' ? needQualityWork : false,
         pp_bag_provider: ppBagProvider,
@@ -108,7 +105,6 @@ export default function EstimatePage() {
         storage_plt: storagePlt === '' ? undefined : Number(storagePlt),
         sku_count: skuCount === '' ? undefined : Number(skuCount),
         extra_work_entries: extraWorkEntries.filter((e) => e.item_name.trim() && e.qty > 0),
-        work_log_entries: workLogEntries.filter((e) => e.분류.trim() && (e.수량 > 0 || e.단가 > 0)),
       });
       setResult({
         items: data.items,
@@ -156,13 +152,6 @@ export default function EstimatePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'PDF 출력 실패');
     }
-  }
-
-  function addWorkLogRow() {
-    setWorkLogEntries((prev) => [...prev, { 분류: '', 수량: 0, 단가: 0 }]);
-  }
-  function removeWorkLogRow(i: number) {
-    setWorkLogEntries((prev) => prev.filter((_, idx) => idx !== i));
   }
 
   return (
@@ -274,6 +263,18 @@ export default function EstimatePage() {
               style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             />
             <span style={{ fontSize: '0.75rem', color: '#666' }}>출고건 대비 %</span>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>합포장 평균 수량</label>
+            <input
+              type="number"
+              min={0}
+              value={combinedAvgQty}
+              onChange={(e) => setCombinedAvgQty(e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="0"
+              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            />
+            <span style={{ fontSize: '0.75rem', color: '#666' }}>건당 개수</span>
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>보관량 (PLT)</label>
@@ -469,62 +470,6 @@ export default function EstimatePage() {
           style={{ padding: '0.5rem 1rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', cursor: 'pointer' }}
         >
           + 추가 작업 행
-        </button>
-      </Card>
-
-      <Card title="📝 작업일지 (의류 등)" style={{ marginBottom: '1rem' }}>
-        {workLogEntries.map((row, i) => (
-          <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <input
-              type="text"
-              placeholder="분류 (예: 의류)"
-              value={row.분류}
-              onChange={(e) => {
-                const next = [...workLogEntries];
-                next[i] = { ...next[i], 분류: e.target.value };
-                setWorkLogEntries(next);
-              }}
-              style={{ width: 120, padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            />
-            <input
-              type="number"
-              min={0}
-              placeholder="수량"
-              value={row.수량 || ''}
-              onChange={(e) => {
-                const next = [...workLogEntries];
-                next[i] = { ...next[i], 수량: Number(e.target.value) || 0 };
-                setWorkLogEntries(next);
-              }}
-              style={{ width: 80, padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            />
-            <input
-              type="number"
-              min={0}
-              placeholder="단가"
-              value={row.단가 || ''}
-              onChange={(e) => {
-                const next = [...workLogEntries];
-                next[i] = { ...next[i], 단가: Number(e.target.value) || 0 };
-                setWorkLogEntries(next);
-              }}
-              style={{ width: 100, padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            />
-            <button
-              type="button"
-              onClick={() => removeWorkLogRow(i)}
-              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', cursor: 'pointer' }}
-            >
-              삭제
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={addWorkLogRow}
-          style={{ padding: '0.5rem 1rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', cursor: 'pointer' }}
-        >
-          + 행 추가
         </button>
       </Card>
 

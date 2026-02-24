@@ -228,14 +228,16 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
             if combined_pct is None:
                 combined_pct = 0
             combined_over_qty = int(round(req.monthly_outbound * combined_pct / 100)) if combined_pct else 0
+            combined_avg_qty = getattr(req, "combined_avg_qty", None)
             if combined_over_qty > 0:
                 unit = _get_out_extra_unit(con, "합포장")
+                remark = f"평균 {combined_avg_qty}개/건" if (combined_avg_qty is not None and combined_avg_qty > 0) else ""
                 items.append({
                     "항목": "합포장 (2개 초과/개)",
                     "수량": combined_over_qty,
                     "단가": unit,
                     "금액": combined_over_qty * unit,
-                    "비고": "",
+                    "비고": remark,
                 })
 
             # 6. 양품화 (패션 + 필요 시): 입고수량 × 500원

@@ -118,6 +118,7 @@ export async function calculateEstimate(params: {
   return_percentage?: number;
   inbound_qty?: number;
   combined_percentage?: number;
+  combined_avg_qty?: number;
   brand_type?: 'fashion' | 'beauty' | 'etc';
   need_quality_work?: boolean;
   pp_bag_provider?: 'brand' | 'ours';
