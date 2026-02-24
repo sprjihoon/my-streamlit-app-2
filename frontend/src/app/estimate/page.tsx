@@ -208,20 +208,34 @@ export default function EstimatePage() {
 
       <Card title="📊 견적 조건" style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>월 출고건수</label>
-            <input
-              type="number"
-              min={0}
-              value={monthlyOutbound}
-              onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배 요금제</label>
-            <div style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', color: '#555' }}>
-              표준
+          <div style={{ display: 'flex', gap: '1rem', gridColumn: '1 / -1' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>월 출고건수</label>
+              <input
+                type="number"
+                min={0}
+                value={monthlyOutbound}
+                onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)}
+                style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배 요금제</label>
+              <div style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', color: '#555' }}>
+                표준
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>브랜드유형</label>
+              <select
+                value={brandType}
+                onChange={(e) => setBrandType(e.target.value as 'fashion' | 'beauty' | 'etc')}
+                style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+              >
+                <option value="fashion">패션</option>
+                <option value="beauty">뷰티</option>
+                <option value="etc">기타</option>
+              </select>
             </div>
           </div>
           <div>
@@ -285,18 +299,6 @@ export default function EstimatePage() {
             />
             <span style={{ fontSize: '0.75rem', color: '#666' }}>1 PLT당 SKU 2개 초과 시 중량랙 적용</span>
           </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>브랜드유형</label>
-            <select
-              value={brandType}
-              onChange={(e) => setBrandType(e.target.value as 'fashion' | 'beauty' | 'etc')}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            >
-              <option value="fashion">패션</option>
-              <option value="beauty">뷰티</option>
-              <option value="etc">기타</option>
-            </select>
-          </div>
         </div>
         {(brandType === 'beauty' || brandType === 'etc') && (
           <div style={{ marginTop: '1rem' }}>
@@ -319,7 +321,7 @@ export default function EstimatePage() {
                 checked={needQualityWork}
                 onChange={(e) => setNeedQualityWork(e.target.checked)}
               />
-              <span>양품화 작업 필요 (입고수량 × 500원, 기본양품화 최저비용)</span>
+              <span>양품화 작업 필요</span>
             </label>
           </div>
         )}
@@ -353,7 +355,7 @@ export default function EstimatePage() {
                 checked={needTexWork}
                 onChange={(e) => setNeedTexWork(e.target.checked)}
               />
-              <span>텍작업 필요 (150원/건)</span>
+              <span>텍작업(고리텍, 텍건, 등)</span>
             </label>
           </div>
           <div>
