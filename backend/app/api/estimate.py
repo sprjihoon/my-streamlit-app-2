@@ -28,11 +28,11 @@ BASIC_SHIPPING_UNIT = 900
 
 # 구간 기본 비율 (합 1.0) - zone_ratios 없을 때
 DEFAULT_ZONE_RATIOS = {
-    "극소": 0.30,
-    "소": 0.40,
-    "중": 0.20,
-    "대": 0.07,
-    "특대": 0.02,
+    "극소": 0.70,
+    "소": 0.20,
+    "중": 0.07,
+    "대": 0.01,
+    "특대": 0.01,
     "특특대": 0.01,
 }
 
@@ -76,6 +76,12 @@ def _get_material_unit(con, item_name: str) -> int:
         "PP 봉투 중형": 80,
         "택배 봉투 소형": 80,
         "택배 봉투 대형": 120,
+        "박스 극소형": 200,
+        "박스 소형": 300,
+        "박스 중형": 500,
+        "박스 대형": 800,
+        "박스 특대": 1200,
+        "박스 특특대": 1500,
     }
     return defaults.get(item_name, 0)
 
@@ -262,11 +268,11 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "비고": remark,
                 })
 
-            # 6. 양품화 (패션 + 필요 시): 입고수량 × 500원
+            # 6. 양품화 (패션 + 체크 시): 입고수량 × 500원 (기본양품화 비용)
             brand_type = (getattr(req, "brand_type", None) or "etc").strip().lower()
             need_quality = getattr(req, "need_quality_work", False)
             if brand_type == "fashion" and need_quality and inbound_qty > 0:
-                unit = _get_out_extra_unit(con, "양품화")
+                unit = _get_out_extra_unit(con, "양품화") or 500
                 if unit <= 0:
                     unit = 500
                 items.append({
@@ -274,50 +280,83 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "입고수량 × 500원/건",
+                    "비고": "입고수량 × 500원",
                 })
 
-            # 7. PP 봉투 (우리 쪽 사용 시): 입고수량 × 단가
+            # 7. PP 봉투 (패션 + 풀필먼트 공용 포장재 사용 시): 입고수량 × 70원
             pp_provider = (getattr(req, "pp_bag_provider", None) or "brand").strip().lower()
-            if pp_provider == "ours" and inbound_qty > 0:
-                unit = _get_material_unit(con, "PP 봉투 중형")
+            if brand_type == "fashion" and pp_provider == "ours" and inbound_qty > 0:
+                unit = 70  # 풀필먼트 공용 포장재 단가
                 items.append({
                     "항목": "PP 봉투",
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "",
+                    "비고": "풀필먼트 공용 70원",
                 })
 
-            # 8. 택배 봉투 (우리 쪽 사용 시): 구간별 수량 × 택배 봉투 단가
+            # 청구서 로직과 동일: 택배 봉투는 극소(소형 50)/소(중형 70)/중(대형 170)만, 그 이후(대/특대/특특대)는 박스
             mailer_provider = (getattr(req, "mailer_provider", None) or "brand").strip().lower()
-            if mailer_provider == "ours" and zone_counts:
-                # 극소 → 택배 봉투 소형, 소/중 → 택배 봉투 대형
-                small_qty = zone_counts.get("극소", 0)
-                if small_qty > 0:
-                    unit = _get_material_unit(con, "택배 봉투 소형")
-                    items.append({
-                        "항목": "택배 봉투 소형",
-                        "수량": small_qty,
-                        "단가": unit,
-                        "금액": small_qty * unit,
-                        "비고": "",
-                    })
-                mid_qty = zone_counts.get("소", 0) + zone_counts.get("중", 0)
-                if mid_qty > 0:
-                    unit = _get_material_unit(con, "택배 봉투 대형")
-                    items.append({
-                        "항목": "택배 봉투 대형",
-                        "수량": mid_qty,
-                        "단가": unit,
-                        "금액": mid_qty * unit,
-                        "비고": "",
-                    })
+            courier_box_provider = getattr(req, "courier_box_provider", None) or "brand"
+            courier_box_provider = str(courier_box_provider).strip().lower()
 
-            # 9. 텍작업 (150원/건)
+            # 8. 택배 봉투 (패션 + 풀필먼트 공용): 극소 50원(소형), 소 70원(중형), 중 170원(대형) — 대/특대/특특대는 봉투 없음
+            if brand_type == "fashion" and mailer_provider == "ours" and zone_counts:
+                _MAILER_BAG_UNIT = {"극소": 50, "소": 70, "중": 170}  # 봉투 소형/중형/대형
+                for zone_label in ("극소", "소", "중"):
+                    qty = zone_counts.get(zone_label, 0)
+                    if qty > 0:
+                        unit = _MAILER_BAG_UNIT[zone_label]
+                        size_name = "소형" if zone_label == "극소" else ("중형" if zone_label == "소" else "대형")
+                        items.append({
+                            "항목": f"택배 봉투 ({zone_label})",
+                            "수량": qty,
+                            "단가": unit,
+                            "금액": qty * unit,
+                            "비고": f"풀필먼트 공용 봉투 {size_name} {unit}원",
+                        })
+
+            # 8-1. 택배박스 (패션 + 풀필먼트 공용): 대/특대/특특대만
+            if brand_type == "fashion" and courier_box_provider == "ours" and zone_counts:
+                _BOX_ITEM = {"대": "박스 대형", "특대": "박스 특대", "특특대": "박스 특특대"}
+                for zone_label in ("대", "특대", "특특대"):
+                    qty = zone_counts.get(zone_label, 0)
+                    if qty > 0:
+                        box_item = _BOX_ITEM[zone_label]
+                        unit = _get_material_unit(con, box_item)
+                        if unit <= 0:
+                            unit = {"대": 800, "특대": 1200, "특특대": 1500}.get(zone_label, 800)
+                        items.append({
+                            "항목": f"택배박스 ({zone_label})",
+                            "수량": qty,
+                            "단가": unit,
+                            "금액": qty * unit,
+                            "비고": "풀필먼트 공용 구간별 박스",
+                        })
+
+            # 8-2. 뷰티/기타: 풀필먼트 공용 시 전부 구간별 박스 (봉투 없음)
+            _ALL_BOX_ITEM = {"극소": "박스 극소형", "소": "박스 소형", "중": "박스 중형", "대": "박스 대형", "특대": "박스 특대", "특특대": "박스 특특대"}
+            _ALL_BOX_DEFAULT = {"극소": 200, "소": 300, "중": 500, "대": 800, "특대": 1200, "특특대": 1500}
+            if brand_type in ("beauty", "etc") and zone_counts:
+                use_ours = (pp_provider == "ours" or mailer_provider == "ours" or courier_box_provider == "ours")
+                if use_ours:
+                    for zone_label in ("극소", "소", "중", "대", "특대", "특특대"):
+                        qty = zone_counts.get(zone_label, 0)
+                        if qty > 0:
+                            box_item = _ALL_BOX_ITEM[zone_label]
+                            unit = _get_material_unit(con, box_item) or _ALL_BOX_DEFAULT[zone_label]
+                            items.append({
+                                "항목": f"택배박스 ({zone_label})",
+                                "수량": qty,
+                                "단가": unit,
+                                "금액": qty * unit,
+                                "비고": "뷰티/기타 전부 박스",
+                            })
+
+            # 9. 텍작업: 입고수량 × 150원
             need_tex = getattr(req, "need_tex_work", False)
             if need_tex and inbound_qty > 0:
-                unit = _get_out_extra_unit(con, "텍작업")
+                unit = _get_out_extra_unit(con, "텍작업") or 150
                 if unit <= 0:
                     unit = 150
                 items.append({
@@ -325,13 +364,13 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "",
+                    "비고": "입고수량 × 150원",
                 })
 
-            # 9-1. 바코드 부착 (입고수량 × 단가)
+            # 9-1. 바코드 부착: 입고수량 × 150원
             need_barcode = getattr(req, "need_barcode_attach", False)
             if need_barcode and inbound_qty > 0:
-                unit = _get_out_extra_unit(con, "바코드 부착")
+                unit = _get_out_extra_unit(con, "바코드 부착") or 150
                 if unit <= 0:
                     unit = 150
                 items.append({
@@ -339,43 +378,49 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "",
+                    "비고": "입고수량 × 150원",
                 })
 
-            # 9-2. 완충작업 (출고건 × 단가)
+            # 9-2. 완충작업: 출고건수 × 100원
             need_void = getattr(req, "need_void_work", False)
             if need_void and req.monthly_outbound > 0:
-                unit = _get_out_extra_unit(con, "완충작업")
+                unit = _get_out_extra_unit(con, "완충작업") or 100
+                if unit <= 0:
+                    unit = 100
                 items.append({
                     "항목": "완충작업",
                     "수량": req.monthly_outbound,
                     "단가": unit,
                     "금액": req.monthly_outbound * unit,
-                    "비고": "",
+                    "비고": "출고건수 × 100원",
                 })
 
-            # 9-3. 출고영상촬영 (출고건 × 단가)
+            # 9-3. 출고영상촬영: 출고건수 × 200원
             need_video_out = getattr(req, "need_video_out", False)
             if need_video_out and req.monthly_outbound > 0:
-                unit = _get_out_extra_unit(con, "출고영상촬영")
+                unit = _get_out_extra_unit(con, "출고영상촬영") or 200
+                if unit <= 0:
+                    unit = 200
                 items.append({
                     "항목": "출고영상촬영",
                     "수량": req.monthly_outbound,
                     "단가": unit,
                     "금액": req.monthly_outbound * unit,
-                    "비고": "",
+                    "비고": "출고건수 × 200원",
                 })
 
-            # 9-4. 반품영상촬영 (반품건 × 단가)
+            # 9-4. 반품영상촬영: 반품수량 × 400원
             need_video_ret = getattr(req, "need_video_ret", False)
             if need_video_ret and return_count > 0:
-                unit = _get_out_extra_unit(con, "반품영상촬영")
+                unit = _get_out_extra_unit(con, "반품영상촬영") or 400
+                if unit <= 0:
+                    unit = 400
                 items.append({
                     "항목": "반품영상촬영",
                     "수량": return_count,
                     "단가": unit,
                     "금액": return_count * unit,
-                    "비고": "",
+                    "비고": "반품수량 × 400원",
                 })
 
             # 10. 추가 작업 (청구서 항목 중 선택, 단가 API 조회)

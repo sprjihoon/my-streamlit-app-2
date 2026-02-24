@@ -183,7 +183,7 @@ class EstimateCalculateRequest(BaseModel):
     # 반품: 전체 출고건 대비 % (0~100)
     return_percentage: Optional[float] = Field(default=0, ge=0, le=100, description="반품 비율 (%)")
     # 입고수량
-    inbound_qty: Optional[int] = Field(default=None, ge=0, description="입고수량")
+    inbound_qty: int = Field(default=0, ge=0, description="입고수량 (필수)")
     # 합포장: 출고건 대비 % (0~100), 평균 수량(건당 개수, 선택)
     combined_percentage: Optional[float] = Field(default=0, ge=0, le=100, description="합포장 비율 (%)")
     combined_avg_qty: Optional[int] = Field(default=None, ge=0, description="합포장 평균 수량 (건당 개수)")
@@ -195,6 +195,7 @@ class EstimateCalculateRequest(BaseModel):
     pp_bag_provider: Optional[str] = Field(default="brand", description="PP 봉투: brand, ours")
     # 택배 봉투: brand=브랜드 제공(비용 없음), ours=우리 쪽(구간별 단가)
     mailer_provider: Optional[str] = Field(default="brand", description="택배 봉투: brand, ours")
+    courier_box_provider: Optional[str] = Field(default="brand", description="택배박스: brand, ours")
     # 텍작업 150원/건 필요 여부 (입고수량 × 150원)
     need_tex_work: Optional[bool] = Field(default=False, description="텍작업 필요")
     # 바코드 부착 필요 여부 (입고수량 × 단가)

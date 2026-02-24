@@ -23,16 +23,17 @@ export default function EstimatePage() {
   // 택배 요금제: 견적에서는 표준만 적용
   const rateType = '표준';
   const [zoneRatios, setZoneRatios] = useState<Record<string, number>>({
-    극소: 30, 소: 40, 중: 20, 대: 7, 특대: 2, 특특대: 1,
+    극소: 70, 소: 20, 중: 7, 대: 1, 특대: 1, 특특대: 1,
   });
   const [returnPercentage, setReturnPercentage] = useState(0);
-  const [inboundQty, setInboundQty] = useState<number | ''>('');
+  const [inboundQty, setInboundQty] = useState(0);
   const [combinedPercentage, setCombinedPercentage] = useState(0);
   const [combinedAvgQty, setCombinedAvgQty] = useState<number | ''>('');
-  const [brandType, setBrandType] = useState<'fashion' | 'beauty' | 'etc'>('etc');
+  const [brandType, setBrandType] = useState<'fashion' | 'beauty' | 'etc'>('fashion');
   const [needQualityWork, setNeedQualityWork] = useState(false);
   const [ppBagProvider, setPpBagProvider] = useState<'brand' | 'ours'>('brand');
   const [mailerProvider, setMailerProvider] = useState<'brand' | 'ours'>('brand');
+  const [courierBoxProvider, setCourierBoxProvider] = useState<'brand' | 'ours'>('brand');
   const [needTexWork, setNeedTexWork] = useState(false);
   const [needBarcodeAttach, setNeedBarcodeAttach] = useState(false);
   const [needVoidWork, setNeedVoidWork] = useState(false);
@@ -87,13 +88,14 @@ export default function EstimatePage() {
         rate_type: rateType,
         zone_ratios: zoneRatiosToDecimal(),
         return_percentage: returnPercentage,
-        inbound_qty: inboundQty === '' ? undefined : Number(inboundQty),
+        inbound_qty: Number(inboundQty) || 0,
         combined_percentage: combinedPercentage,
         combined_avg_qty: combinedAvgQty === '' ? undefined : Number(combinedAvgQty),
         brand_type: brandType,
         need_quality_work: brandType === 'fashion' ? needQualityWork : false,
         pp_bag_provider: ppBagProvider,
         mailer_provider: mailerProvider,
+        courier_box_provider: courierBoxProvider,
         need_tex_work: needTexWork,
         need_barcode_attach: needBarcodeAttach,
         need_void_work: needVoidWork,
@@ -238,17 +240,6 @@ export default function EstimatePage() {
             <span style={{ fontSize: '0.75rem', color: '#666' }}>전체 출고건 대비 %</span>
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고수량 (선택)</label>
-            <input
-              type="number"
-              min={0}
-              value={inboundQty}
-              onChange={(e) => setInboundQty(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="0"
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            />
-          </div>
-          <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>합포장 비율 (%)</label>
             <input
               type="number"
@@ -272,6 +263,17 @@ export default function EstimatePage() {
               style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             />
             <span style={{ fontSize: '0.75rem', color: '#666' }}>건당 개수</span>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고수량</label>
+            <input
+              type="number"
+              min={0}
+              value={inboundQty}
+              onChange={(e) => setInboundQty(Number(e.target.value) || 0)}
+              placeholder="0"
+              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            />
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>보관량 (PLT)</label>
@@ -315,6 +317,17 @@ export default function EstimatePage() {
             <select
               value={mailerProvider}
               onChange={(e) => setMailerProvider(e.target.value as 'brand' | 'ours')}
+              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            >
+              <option value="brand">브랜드 제공</option>
+              <option value="ours">풀필먼트 공용 포장재 사용</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배박스</label>
+            <select
+              value={courierBoxProvider}
+              onChange={(e) => setCourierBoxProvider(e.target.value as 'brand' | 'ours')}
               style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             >
               <option value="brand">브랜드 제공</option>

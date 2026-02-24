@@ -123,6 +123,7 @@ export async function calculateEstimate(params: {
   need_quality_work?: boolean;
   pp_bag_provider?: 'brand' | 'ours';
   mailer_provider?: 'brand' | 'ours';
+  courier_box_provider?: 'brand' | 'ours';
   need_tex_work?: boolean;
   need_barcode_attach?: boolean;
   need_void_work?: boolean;
