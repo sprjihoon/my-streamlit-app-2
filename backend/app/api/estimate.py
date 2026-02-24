@@ -76,6 +76,21 @@ def _get_material_unit(con, item_name: str) -> int:
     return defaults.get(item_name, 0)
 
 
+def _get_storage_unit(con, item_name: str) -> int:
+    """storage_rates 테이블에서 보관료 단가 조회 (견적용)."""
+    try:
+        row = con.execute(
+            "SELECT unit_price FROM storage_rates WHERE item_name = ?",
+            (item_name,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+    except Exception:
+        pass
+    defaults = {"PLT": 30000, "중량랙": 60000}
+    return defaults.get(item_name, 0)
+
+
 def _get_shipping_zone_rates(con, rate_type: str) -> List[Dict[str, Any]]:
     """shipping_zone에서 요금제별 구간·요금 조회."""
     try:
@@ -138,11 +153,8 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
     """
     items: List[Dict[str, Any]] = []
     warnings: List[str] = []
-    rate_type = (req.rate_type or "표준").strip()
-    if rate_type.upper() == "A":
-        rate_type = "A"
-    else:
-        rate_type = "표준"
+    # 견적에서는 택배 요금제 무조건 표준만 적용
+    rate_type = "표준"
 
     try:
         with get_connection() as con:
@@ -230,11 +242,11 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                 if unit <= 0:
                     unit = 500
                 items.append({
-                    "항목": "양품화 작업",
+                    "항목": "양품화 작업 (기본양품화 최저비용)",
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "",
+                    "비고": "입고수량 × 500원/건",
                 })
 
             # 7. PP 봉투 (우리 쪽 사용 시): 입고수량 × 단가
@@ -305,6 +317,26 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                         "단가": unit,
                         "금액": qty * unit,
                         "비고": "",
+                    })
+
+            # 10-1. 보관료 (PLT 기준): 1 PLT당 SKU > 2이면 중량랙 적용
+            storage_plt = getattr(req, "storage_plt", None)
+            sku_count = getattr(req, "sku_count", None)
+            if storage_plt and storage_plt > 0:
+                if sku_count is not None and sku_count > 0 and (sku_count / storage_plt) > 2:
+                    storage_item_name = "중량랙"
+                    storage_remark = "1 PLT당 SKU 2개 초과 → 중량랙 적용"
+                else:
+                    storage_item_name = "PLT"
+                    storage_remark = "보관량 PLT 기준"
+                unit = _get_storage_unit(con, storage_item_name)
+                if unit > 0:
+                    items.append({
+                        "항목": f"보관료 ({storage_item_name})",
+                        "수량": storage_plt,
+                        "단가": unit,
+                        "금액": storage_plt * unit,
+                        "비고": storage_remark,
                     })
 
             # 11. 작업일지 (의류 등)

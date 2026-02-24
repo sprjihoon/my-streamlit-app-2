@@ -20,7 +20,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "save_work_log",
-            "description": "작업일지를 저장합니다. 업체명, 작업종류, 단가는 필수입니다.",
+            "description": "작업일지를 저장합니다. 업체명, 작업종류, 단가는 필수. 단가=1개당 금액만 넣을 것. 예: 88개 개당 100원 → unit_price=100, qty=88 (합계 8800). unit_price에 8800 넣지 말 것.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -776,6 +776,8 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
     conditions = []
     params = []
     
+    vendor_query = args.get("vendor")
+    vendor_resolved = None
     if args.get("vendor"):
         vendor_search = args['vendor']
         # 별칭 테이블에서 실제 업체명 찾기
@@ -790,7 +792,11 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
                 "SELECT vendor FROM vendors WHERE vendor LIKE ? OR name LIKE ?",
                 (f"%{vendor_search}%", f"%{vendor_search}%")
             ).fetchall()
-        
+        # 조회 시 사용한 검색어 → 실제 정식 업체명 (봇 응답용)
+        if alias_rows:
+            vendor_resolved = alias_rows[0][0]
+        elif vendor_rows:
+            vendor_resolved = vendor_rows[0][0]
         # 찾은 모든 업체명으로 검색
         all_vendors = set([r[0] for r in alias_rows if r[0]] + [r[0] for r in vendor_rows if r[0]])
         all_vendors.add(vendor_search)  # 원본 검색어도 포함
@@ -840,13 +846,18 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
         
         total_amount = sum(l["합계"] or 0 for l in logs)
     
-    return {
+    result = {
         "success": True,
         "count": len(logs),
         "total_amount": total_amount,
         "logs": logs,
         "message": f"검색결과: {len(logs)}건, 총 {total_amount:,}원"
     }
+    if vendor_query:
+        result["vendor_query"] = vendor_query
+    if vendor_resolved:
+        result["vendor_resolved"] = vendor_resolved
+    return result
 
 
 def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
@@ -860,6 +871,8 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
     if args.get("end_date"):
         conditions.append("날짜 <= ?")
         params.append(args["end_date"])
+    vendor_query = args.get("vendor")
+    vendor_resolved = None
     if args.get("vendor"):
         vendor_search = args['vendor']
         # 별칭 테이블에서 실제 업체명 찾기
@@ -872,7 +885,10 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
                 "SELECT vendor FROM vendors WHERE vendor LIKE ? OR name LIKE ?",
                 (f"%{vendor_search}%", f"%{vendor_search}%")
             ).fetchall()
-        
+        if alias_rows:
+            vendor_resolved = alias_rows[0][0]
+        elif vendor_rows:
+            vendor_resolved = vendor_rows[0][0]
         all_vendors = set([r[0] for r in alias_rows if r[0]] + [r[0] for r in vendor_rows if r[0]])
         all_vendors.add(vendor_search)
         
@@ -909,7 +925,7 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
             params
         ).fetchall()
     
-    return {
+    result = {
         "success": True,
         "total_count": total_row[0] or 0,
         "total_amount": total_row[1] or 0,
@@ -917,6 +933,11 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
         "by_work_type": [{"work_type": w[0], "count": w[1], "amount": w[2]} for w in by_work_type],
         "message": f"통계: {total_row[0]}건, 총 {total_row[1]:,}원"
     }
+    if vendor_query:
+        result["vendor_query"] = vendor_query
+    if vendor_resolved:
+        result["vendor_resolved"] = vendor_resolved
+    return result
 
 
 def _compare_periods(args: Dict, user_id: str, user_name: str) -> Dict:

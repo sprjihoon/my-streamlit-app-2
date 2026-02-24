@@ -58,6 +58,9 @@ export default function WorkLogPage() {
     비고1: '',
   });
 
+  // 편집 저장 중
+  const [editSaving, setEditSaving] = useState(false);
+
   // 삭제 확인 모달
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -158,13 +161,27 @@ export default function WorkLogPage() {
   const handleSaveEdit = async () => {
     if (!editingLog) return;
 
+    setEditSaving(true);
+    setMessage(null);
     try {
-      await updateWorkLog(editingLog.id, editForm);
+      await updateWorkLog(editingLog.id, {
+        날짜: editForm.날짜 || undefined,
+        업체명: editForm.업체명 || undefined,
+        분류: editForm.분류 || undefined,
+        단가: editForm.단가,
+        수량: editForm.수량,
+        비고1: editForm.비고1,
+      });
       setMessage({ type: 'success', text: '작업일지가 수정되었습니다.' });
       setEditingLog(null);
-      loadData();
+      await loadData();
     } catch (err) {
-      setMessage({ type: 'error', text: err instanceof Error ? err.message : '수정에 실패했습니다.' });
+      setMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : '수정에 실패했습니다.',
+      });
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -882,29 +899,33 @@ export default function WorkLogPage() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
               <button
                 onClick={() => setEditingLog(null)}
+                disabled={editSaving}
                 style={{
                   padding: '0.5rem 1rem',
                   backgroundColor: '#6b7280',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: 'pointer',
+                  cursor: editSaving ? 'not-allowed' : 'pointer',
+                  opacity: editSaving ? 0.7 : 1,
                 }}
               >
                 취소
               </button>
               <button
                 onClick={handleSaveEdit}
+                disabled={editSaving}
                 style={{
                   padding: '0.5rem 1rem',
                   backgroundColor: '#2563eb',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: 'pointer',
+                  cursor: editSaving ? 'not-allowed' : 'pointer',
+                  opacity: editSaving ? 0.7 : 1,
                 }}
               >
-                저장
+                {editSaving ? '저장 중...' : '저장'}
               </button>
             </div>
           </div>

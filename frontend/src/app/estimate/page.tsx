@@ -20,7 +20,8 @@ export default function EstimatePage() {
 
   // 견적 조건
   const [monthlyOutbound, setMonthlyOutbound] = useState(1000);
-  const [rateType, setRateType] = useState<'표준' | 'A'>('표준');
+  // 택배 요금제: 견적에서는 표준만 적용
+  const rateType = '표준';
   const [zoneRatios, setZoneRatios] = useState<Record<string, number>>({
     극소: 30, 소: 40, 중: 20, 대: 7, 특대: 2, 특특대: 1,
   });
@@ -34,6 +35,9 @@ export default function EstimatePage() {
   const [needTexWork, setNeedTexWork] = useState(false);
   // 화장품/기타: 박스 입고 vs 개당 입고
   const [inboundType, setInboundType] = useState<'box' | 'piece'>('piece');
+  // 보관: PLT 기준, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용
+  const [storagePlt, setStoragePlt] = useState<number | ''>('');
+  const [skuCount, setSkuCount] = useState<number | ''>('');
 
   // 청구서 항목 목록 (추가 작업 선택용)
   const [chargeableItems, setChargeableItems] = useState<Array<{ item_name: string; unit_price: number; source: string }>>([]);
@@ -93,6 +97,8 @@ export default function EstimatePage() {
         mailer_provider: mailerProvider,
         need_tex_work: needTexWork,
         inbound_type: (brandType === 'beauty' || brandType === 'etc') ? inboundType : undefined,
+        storage_plt: storagePlt === '' ? undefined : Number(storagePlt),
+        sku_count: skuCount === '' ? undefined : Number(skuCount),
         extra_work_entries: extraWorkEntries.filter((e) => e.item_name.trim() && e.qty > 0),
         work_log_entries: workLogEntries.filter((e) => e.분류.trim() && (e.수량 > 0 || e.단가 > 0)),
       });
@@ -206,14 +212,9 @@ export default function EstimatePage() {
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배 요금제</label>
-            <select
-              value={rateType}
-              onChange={(e) => setRateType(e.target.value as '표준' | 'A')}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            >
-              <option value="표준">표준</option>
-              <option value="A">A</option>
-            </select>
+            <div style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', color: '#555' }}>
+              표준 (견적은 표준 요금제만 적용)
+            </div>
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>반품 비율 (%)</label>
@@ -253,6 +254,30 @@ export default function EstimatePage() {
             <span style={{ fontSize: '0.75rem', color: '#666' }}>출고건 대비 %</span>
           </div>
           <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>보관량 (PLT)</label>
+            <input
+              type="number"
+              min={0}
+              value={storagePlt}
+              onChange={(e) => setStoragePlt(e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="0"
+              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            />
+            <span style={{ fontSize: '0.75rem', color: '#666' }}>PLT 기준</span>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>SKU 수</label>
+            <input
+              type="number"
+              min={0}
+              value={skuCount}
+              onChange={(e) => setSkuCount(e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="0"
+              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            />
+            <span style={{ fontSize: '0.75rem', color: '#666' }}>1 PLT당 SKU 2개 초과 시 중량랙 적용</span>
+          </div>
+          <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>브랜드유형</label>
             <select
               value={brandType}
@@ -286,7 +311,7 @@ export default function EstimatePage() {
                 checked={needQualityWork}
                 onChange={(e) => setNeedQualityWork(e.target.checked)}
               />
-              <span>양품화 작업 필요 (입고수량 × 500원)</span>
+              <span>양품화 작업 필요 (입고수량 × 500원, 기본양품화 최저비용)</span>
             </label>
           </div>
         )}
@@ -299,7 +324,7 @@ export default function EstimatePage() {
               style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             >
               <option value="brand">브랜드 제공</option>
-              <option value="ours">우리 쪽 사용</option>
+              <option value="ours">풀필먼트 공용 포장재 사용</option>
             </select>
           </div>
           <div>
@@ -310,7 +335,7 @@ export default function EstimatePage() {
               style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             >
               <option value="brand">브랜드 제공</option>
-              <option value="ours">우리 쪽 사용</option>
+              <option value="ours">풀필먼트 공용 포장재 사용</option>
             </select>
           </div>
           <div>

@@ -124,6 +124,8 @@ export async function calculateEstimate(params: {
   mailer_provider?: 'brand' | 'ours';
   need_tex_work?: boolean;
   inbound_type?: 'box' | 'piece';
+  storage_plt?: number;
+  sku_count?: number;
   extra_work_entries?: Array<{ item_name: string; qty: number }>;
   work_log_entries?: Array<{ 분류: string; 수량: number; 단가: number }>;
 }) {
