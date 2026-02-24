@@ -180,12 +180,29 @@ class EstimateCalculateRequest(BaseModel):
         default=None,
         description="구간별 비율 (극소, 소, 중, 대, 특대, 특특대). 합 1.0. 없으면 극소 100%"
     )
-    # 반품
-    return_count: int = Field(default=0, ge=0, description="반품 건수")
-    # 선택
-    inbound_qty: Optional[int] = Field(default=None, ge=0)
-    combined_over_qty: Optional[int] = Field(default=None, ge=0, description="합포장 2개 초과 수량")
-    remote_count: Optional[int] = Field(default=None, ge=0, description="도서산간 건수")
+    # 반품: 전체 출고건 대비 % (0~100)
+    return_percentage: Optional[float] = Field(default=0, ge=0, le=100, description="반품 비율 (%)")
+    # 입고수량
+    inbound_qty: Optional[int] = Field(default=None, ge=0, description="입고수량")
+    # 합포장: 출고건 대비 % (0~100)
+    combined_percentage: Optional[float] = Field(default=0, ge=0, le=100, description="합포장 비율 (%)")
+    # 브랜드유형: 패션(fashion) / 뷰티(beauty) / 기타(etc)
+    brand_type: Optional[str] = Field(default="etc", description="브랜드유형: fashion, beauty, etc")
+    # 패션 선택 시 양품화 작업 필요 여부 (입고수량 × 500원)
+    need_quality_work: Optional[bool] = Field(default=False, description="양품화 작업 필요 (패션일 때)")
+    # PP 봉투: brand=브랜드 제공(비용 없음), ours=우리 쪽(입고수량×단가)
+    pp_bag_provider: Optional[str] = Field(default="brand", description="PP 봉투: brand, ours")
+    # 택배 봉투: brand=브랜드 제공(비용 없음), ours=우리 쪽(구간별 단가)
+    mailer_provider: Optional[str] = Field(default="brand", description="택배 봉투: brand, ours")
+    # 텍작업 150원/건 필요 여부 (입고수량 × 150원)
+    need_tex_work: Optional[bool] = Field(default=False, description="텍작업 필요")
+    # 화장품/기타 선택 시: box=박스 입고, piece=개당 입고
+    inbound_type: Optional[str] = Field(default="piece", description="입고 방식: box(박스 입고), piece(개당 입고)")
+    # 추가 작업: 청구서 항목 중 선택 + 수량 (단가는 API에서 조회)
+    extra_work_entries: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="추가 작업 [{ item_name: str, qty: int }, ...]"
+    )
     work_log_entries: Optional[List[WorkLogEntry]] = Field(default_factory=list)
 
 

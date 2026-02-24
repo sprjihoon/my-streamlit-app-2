@@ -97,6 +97,15 @@ export interface EstimateItem {
 }
 
 /**
+ * 견적 추가 작업용 청구서 항목 목록 (out_extra + material_rates)
+ */
+export async function getChargeableItems() {
+  return fetchApi<{ items: Array<{ item_name: string; unit_price: number; source: string }> }>(
+    '/estimate/chargeable-items'
+  );
+}
+
+/**
  * 가견적 계산
  */
 export async function calculateEstimate(params: {
@@ -106,10 +115,16 @@ export async function calculateEstimate(params: {
   monthly_outbound: number;
   rate_type?: string;
   zone_ratios?: Record<string, number>;
-  return_count?: number;
+  return_percentage?: number;
   inbound_qty?: number;
-  combined_over_qty?: number;
-  remote_count?: number;
+  combined_percentage?: number;
+  brand_type?: 'fashion' | 'beauty' | 'etc';
+  need_quality_work?: boolean;
+  pp_bag_provider?: 'brand' | 'ours';
+  mailer_provider?: 'brand' | 'ours';
+  need_tex_work?: boolean;
+  inbound_type?: 'box' | 'piece';
+  extra_work_entries?: Array<{ item_name: string; qty: number }>;
   work_log_entries?: Array<{ 분류: string; 수량: number; 단가: number }>;
 }) {
   return fetchApi<{

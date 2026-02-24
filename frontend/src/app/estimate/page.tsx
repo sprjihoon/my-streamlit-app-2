@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
-import { calculateEstimate, exportEstimatePdf, type EstimateItem } from '@/lib/api';
+import { calculateEstimate, exportEstimatePdf, getChargeableItems, type EstimateItem } from '@/lib/api';
 
 const ZONE_LABELS = ['극소', '소', '중', '대', '특대', '특특대'];
 
@@ -24,15 +24,31 @@ export default function EstimatePage() {
   const [zoneRatios, setZoneRatios] = useState<Record<string, number>>({
     극소: 30, 소: 40, 중: 20, 대: 7, 특대: 2, 특특대: 1,
   });
-  const [returnCount, setReturnCount] = useState(0);
+  const [returnPercentage, setReturnPercentage] = useState(0);
   const [inboundQty, setInboundQty] = useState<number | ''>('');
-  const [combinedOverQty, setCombinedOverQty] = useState<number | ''>('');
-  const [remoteCount, setRemoteCount] = useState<number | ''>('');
+  const [combinedPercentage, setCombinedPercentage] = useState(0);
+  const [brandType, setBrandType] = useState<'fashion' | 'beauty' | 'etc'>('etc');
+  const [needQualityWork, setNeedQualityWork] = useState(false);
+  const [ppBagProvider, setPpBagProvider] = useState<'brand' | 'ours'>('brand');
+  const [mailerProvider, setMailerProvider] = useState<'brand' | 'ours'>('brand');
+  const [needTexWork, setNeedTexWork] = useState(false);
+  // 화장품/기타: 박스 입고 vs 개당 입고
+  const [inboundType, setInboundType] = useState<'box' | 'piece'>('piece');
+
+  // 청구서 항목 목록 (추가 작업 선택용)
+  const [chargeableItems, setChargeableItems] = useState<Array<{ item_name: string; unit_price: number; source: string }>>([]);
+  const [extraWorkEntries, setExtraWorkEntries] = useState<Array<{ item_name: string; qty: number }>>([]);
 
   // 작업일지 (의류 등)
   const [workLogEntries, setWorkLogEntries] = useState<Array<{ 분류: string; 수량: number; 단가: number }>>([
     { 분류: '의류', 수량: 0, 단가: 0 },
   ]);
+
+  useEffect(() => {
+    getChargeableItems()
+      .then((res) => setChargeableItems(res.items || []))
+      .catch(() => setChargeableItems([]));
+  }, []);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,10 +84,16 @@ export default function EstimatePage() {
         monthly_outbound: monthlyOutbound,
         rate_type: rateType,
         zone_ratios: zoneRatiosToDecimal(),
-        return_count: returnCount,
+        return_percentage: returnPercentage,
         inbound_qty: inboundQty === '' ? undefined : Number(inboundQty),
-        combined_over_qty: combinedOverQty === '' ? undefined : Number(combinedOverQty),
-        remote_count: remoteCount === '' ? undefined : Number(remoteCount),
+        combined_percentage: combinedPercentage,
+        brand_type: brandType,
+        need_quality_work: brandType === 'fashion' ? needQualityWork : false,
+        pp_bag_provider: ppBagProvider,
+        mailer_provider: mailerProvider,
+        need_tex_work: needTexWork,
+        inbound_type: (brandType === 'beauty' || brandType === 'etc') ? inboundType : undefined,
+        extra_work_entries: extraWorkEntries.filter((e) => e.item_name.trim() && e.qty > 0),
         work_log_entries: workLogEntries.filter((e) => e.분류.trim() && (e.수량 > 0 || e.단가 > 0)),
       });
       setResult({
@@ -194,17 +216,20 @@ export default function EstimatePage() {
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>반품 건수</label>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>반품 비율 (%)</label>
             <input
               type="number"
               min={0}
-              value={returnCount}
-              onChange={(e) => setReturnCount(Number(e.target.value) || 0)}
+              max={100}
+              value={returnPercentage}
+              onChange={(e) => setReturnPercentage(Number(e.target.value) || 0)}
+              placeholder="0"
               style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             />
+            <span style={{ fontSize: '0.75rem', color: '#666' }}>전체 출고건 대비 %</span>
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고검수 수량 (선택)</label>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고수량 (선택)</label>
             <input
               type="number"
               min={0}
@@ -215,26 +240,88 @@ export default function EstimatePage() {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>합포장 초과 수량 (선택)</label>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>합포장 비율 (%)</label>
             <input
               type="number"
               min={0}
-              value={combinedOverQty}
-              onChange={(e) => setCombinedOverQty(e.target.value === '' ? '' : Number(e.target.value))}
+              max={100}
+              value={combinedPercentage}
+              onChange={(e) => setCombinedPercentage(Number(e.target.value) || 0)}
               placeholder="0"
               style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
             />
+            <span style={{ fontSize: '0.75rem', color: '#666' }}>출고건 대비 %</span>
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>도서산간 건수 (선택)</label>
-            <input
-              type="number"
-              min={0}
-              value={remoteCount}
-              onChange={(e) => setRemoteCount(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="0"
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>브랜드유형</label>
+            <select
+              value={brandType}
+              onChange={(e) => setBrandType(e.target.value as 'fashion' | 'beauty' | 'etc')}
               style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-            />
+            >
+              <option value="fashion">패션</option>
+              <option value="beauty">뷰티</option>
+              <option value="etc">기타</option>
+            </select>
+          </div>
+        </div>
+        {(brandType === 'beauty' || brandType === 'etc') && (
+          <div style={{ marginTop: '1rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고 방식</label>
+            <select
+              value={inboundType}
+              onChange={(e) => setInboundType(e.target.value as 'box' | 'piece')}
+              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, minWidth: 160 }}
+            >
+              <option value="piece">개당 입고</option>
+              <option value="box">박스 입고</option>
+            </select>
+          </div>
+        )}
+        {brandType === 'fashion' && (
+          <div style={{ marginTop: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={needQualityWork}
+                onChange={(e) => setNeedQualityWork(e.target.checked)}
+              />
+              <span>양품화 작업 필요 (입고수량 × 500원)</span>
+            </label>
+          </div>
+        )}
+        <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>PP 봉투</label>
+            <select
+              value={ppBagProvider}
+              onChange={(e) => setPpBagProvider(e.target.value as 'brand' | 'ours')}
+              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            >
+              <option value="brand">브랜드 제공</option>
+              <option value="ours">우리 쪽 사용</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배 봉투</label>
+            <select
+              value={mailerProvider}
+              onChange={(e) => setMailerProvider(e.target.value as 'brand' | 'ours')}
+              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            >
+              <option value="brand">브랜드 제공</option>
+              <option value="ours">우리 쪽 사용</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
+              <input
+                type="checkbox"
+                checked={needTexWork}
+                onChange={(e) => setNeedTexWork(e.target.checked)}
+              />
+              <span>텍작업 필요 (150원/건)</span>
+            </label>
           </div>
         </div>
         <div style={{ marginTop: '1rem' }}>
@@ -256,6 +343,58 @@ export default function EstimatePage() {
             ))}
           </div>
         </div>
+      </Card>
+
+      <Card title="➕ 추가 작업 (청구서 항목 중 선택, 단가 자동 반영)" style={{ marginBottom: '1rem' }}>
+        <p style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.75rem' }}>
+          아래 목록은 요금표 관리에 등록된 항목입니다. 항목 선택 후 수량만 입력하면 단가가 자동 적용됩니다.
+        </p>
+        {extraWorkEntries.map((row, i) => (
+          <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+            <select
+              value={row.item_name}
+              onChange={(e) => {
+                const next = [...extraWorkEntries];
+                next[i] = { ...next[i], item_name: e.target.value };
+                setExtraWorkEntries(next);
+              }}
+              style={{ minWidth: 180, padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            >
+              <option value="">항목 선택</option>
+              {chargeableItems.map((c) => (
+                <option key={c.item_name} value={c.item_name}>
+                  {c.item_name} (₩{formatNumber(c.unit_price)}/단위)
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min={0}
+              placeholder="수량"
+              value={row.qty || ''}
+              onChange={(e) => {
+                const next = [...extraWorkEntries];
+                next[i] = { ...next[i], qty: Number(e.target.value) || 0 };
+                setExtraWorkEntries(next);
+              }}
+              style={{ width: 90, padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            />
+            <button
+              type="button"
+              onClick={() => setExtraWorkEntries((prev) => prev.filter((_, idx) => idx !== i))}
+              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', cursor: 'pointer' }}
+            >
+              삭제
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => setExtraWorkEntries((prev) => [...prev, { item_name: '', qty: 0 }])}
+          style={{ padding: '0.5rem 1rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', cursor: 'pointer' }}
+        >
+          + 추가 작업 행
+        </button>
       </Card>
 
       <Card title="📝 작업일지 (의류 등)" style={{ marginBottom: '1rem' }}>

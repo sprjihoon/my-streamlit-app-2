@@ -52,6 +52,26 @@ def _get_out_extra_unit(con, item_name: str) -> int:
         "합포장": 100,
         "도서산간": 0,
         "반품회수": 1100,
+        "양품화": 500,
+        "텍작업": 150,
+    }
+    return defaults.get(item_name, 0)
+
+
+def _get_material_unit(con, item_name: str) -> int:
+    """material_rates 테이블에서 단가 조회."""
+    try:
+        row = con.execute(
+            "SELECT 단가 FROM material_rates WHERE 항목 = ?", (item_name,)
+        ).fetchone()
+        if row:
+            return int(float(row[0]))
+    except Exception:
+        pass
+    defaults = {
+        "PP 봉투 중형": 80,
+        "택배 봉투 소형": 80,
+        "택배 봉투 대형": 120,
     }
     return defaults.get(item_name, 0)
 
@@ -66,6 +86,46 @@ def _get_shipping_zone_rates(con, rate_type: str) -> List[Dict[str, Any]]:
         return df.to_dict("records")
     except Exception:
         return []
+
+
+@router.get("/chargeable-items")
+async def get_chargeable_items():
+    """
+    견적 추가 작업용 청구서 항목 목록 (out_extra + material_rates).
+    항목명·단가를 반환하여 프론트에서 선택 후 수량만 입력하면 됨.
+    """
+    result: List[Dict[str, Any]] = []
+    try:
+        with get_connection() as con:
+            try:
+                df_extra = pd.read_sql("SELECT * FROM out_extra ORDER BY 1", con)
+                cols = list(df_extra.columns)
+                name_col = next((c for c in cols if "항목" in str(c)), cols[0] if cols else None)
+                price_col = next((c for c in cols if "단가" in str(c)), cols[1] if len(cols) > 1 else None)
+                for _, row in df_extra.iterrows():
+                    result.append({
+                        "item_name": str(row.get(name_col, "")),
+                        "unit_price": int(float(row.get(price_col, 0))),
+                        "source": "out_extra",
+                    })
+            except Exception:
+                pass
+            try:
+                df_mat = pd.read_sql("SELECT * FROM material_rates ORDER BY 1", con)
+                cols = list(df_mat.columns)
+                name_col = next((c for c in cols if "항목" in str(c)), cols[0] if cols else None)
+                price_col = next((c for c in cols if "단가" in str(c)), cols[1] if len(cols) > 1 else None)
+                for _, row in df_mat.iterrows():
+                    result.append({
+                        "item_name": str(row.get(name_col, "")),
+                        "unit_price": int(float(row.get(price_col, 0))),
+                        "source": "material_rates",
+                    })
+            except Exception:
+                pass
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"items": result}
 
 
 @router.post("", response_model=EstimateCalculateResponse)
@@ -96,19 +156,21 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "비고": "",
                 })
 
-            # 2. 택배요금 (구간별)
+            # 2. 택배요금 (구간별) + 구간별 수량 저장 (택배 봉투용)
             zone_ratios = req.zone_ratios or {"극소": 1.0}
             total_ratio = sum(zone_ratios.values())
             if total_ratio <= 0:
                 zone_ratios = DEFAULT_ZONE_RATIOS.copy()
                 total_ratio = 1.0
             zone_rates = _get_shipping_zone_rates(con, rate_type)
+            zone_counts: Dict[str, int] = {}
             if zone_rates and req.monthly_outbound > 0:
                 for z in zone_rates:
                     label = z.get("구간", "")
                     fee = int(z.get("요금", 0))
                     ratio = zone_ratios.get(label, 0) / total_ratio
                     count = int(round(req.monthly_outbound * ratio))
+                    zone_counts[label] = count
                     if count > 0:
                         items.append({
                             "항목": f"택배요금 ({label})",
@@ -118,52 +180,134 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                             "비고": "",
                         })
 
-            # 3. 반품 회수비
-            if req.return_count > 0:
+            # 3. 반품 회수비 (출고건 대비 %)
+            return_pct = getattr(req, "return_percentage", None)
+            if return_pct is None:
+                return_pct = 0
+            return_count = int(round(req.monthly_outbound * return_pct / 100)) if return_pct else 0
+            if return_count > 0:
                 unit = _get_out_extra_unit(con, "반품회수")
                 items.append({
                     "항목": "반품 회수비",
-                    "수량": req.return_count,
+                    "수량": return_count,
                     "단가": unit,
-                    "금액": req.return_count * unit,
+                    "금액": return_count * unit,
                     "비고": "",
                 })
 
-            # 4. 입고검수
-            if req.inbound_qty and req.inbound_qty > 0:
+            # 4. 입고검수 (입고수량)
+            inbound_qty = req.inbound_qty or 0
+            if inbound_qty > 0:
                 unit = _get_out_extra_unit(con, "입고검수")
                 items.append({
                     "항목": "입고검수",
-                    "수량": req.inbound_qty,
+                    "수량": inbound_qty,
                     "단가": unit,
-                    "금액": req.inbound_qty * unit,
+                    "금액": inbound_qty * unit,
                     "비고": "",
                 })
 
-            # 5. 합포장
-            if req.combined_over_qty and req.combined_over_qty > 0:
+            # 5. 합포장 (출고건 대비 %)
+            combined_pct = getattr(req, "combined_percentage", None)
+            if combined_pct is None:
+                combined_pct = 0
+            combined_over_qty = int(round(req.monthly_outbound * combined_pct / 100)) if combined_pct else 0
+            if combined_over_qty > 0:
                 unit = _get_out_extra_unit(con, "합포장")
                 items.append({
                     "항목": "합포장 (2개 초과/개)",
-                    "수량": req.combined_over_qty,
+                    "수량": combined_over_qty,
                     "단가": unit,
-                    "금액": req.combined_over_qty * unit,
+                    "금액": combined_over_qty * unit,
                     "비고": "",
                 })
 
-            # 6. 도서산간
-            if req.remote_count and req.remote_count > 0:
-                unit = _get_out_extra_unit(con, "도서산간")
-                if unit > 0:
+            # 6. 양품화 (패션 + 필요 시): 입고수량 × 500원
+            brand_type = (getattr(req, "brand_type", None) or "etc").strip().lower()
+            need_quality = getattr(req, "need_quality_work", False)
+            if brand_type == "fashion" and need_quality and inbound_qty > 0:
+                unit = _get_out_extra_unit(con, "양품화")
+                if unit <= 0:
+                    unit = 500
+                items.append({
+                    "항목": "양품화 작업",
+                    "수량": inbound_qty,
+                    "단가": unit,
+                    "금액": inbound_qty * unit,
+                    "비고": "",
+                })
+
+            # 7. PP 봉투 (우리 쪽 사용 시): 입고수량 × 단가
+            pp_provider = (getattr(req, "pp_bag_provider", None) or "brand").strip().lower()
+            if pp_provider == "ours" and inbound_qty > 0:
+                unit = _get_material_unit(con, "PP 봉투 중형")
+                items.append({
+                    "항목": "PP 봉투",
+                    "수량": inbound_qty,
+                    "단가": unit,
+                    "금액": inbound_qty * unit,
+                    "비고": "",
+                })
+
+            # 8. 택배 봉투 (우리 쪽 사용 시): 구간별 수량 × 택배 봉투 단가
+            mailer_provider = (getattr(req, "mailer_provider", None) or "brand").strip().lower()
+            if mailer_provider == "ours" and zone_counts:
+                # 극소 → 택배 봉투 소형, 소/중 → 택배 봉투 대형
+                small_qty = zone_counts.get("극소", 0)
+                if small_qty > 0:
+                    unit = _get_material_unit(con, "택배 봉투 소형")
                     items.append({
-                        "항목": "도서산간",
-                        "수량": req.remote_count,
+                        "항목": "택배 봉투 소형",
+                        "수량": small_qty,
                         "단가": unit,
-                        "금액": req.remote_count * unit,
+                        "금액": small_qty * unit,
+                        "비고": "",
+                    })
+                mid_qty = zone_counts.get("소", 0) + zone_counts.get("중", 0)
+                if mid_qty > 0:
+                    unit = _get_material_unit(con, "택배 봉투 대형")
+                    items.append({
+                        "항목": "택배 봉투 대형",
+                        "수량": mid_qty,
+                        "단가": unit,
+                        "금액": mid_qty * unit,
                         "비고": "",
                     })
 
-            # 7. 작업일지 (의류 등)
+            # 9. 텍작업 (150원/건)
+            need_tex = getattr(req, "need_tex_work", False)
+            if need_tex and inbound_qty > 0:
+                unit = _get_out_extra_unit(con, "텍작업")
+                if unit <= 0:
+                    unit = 150
+                items.append({
+                    "항목": "텍작업",
+                    "수량": inbound_qty,
+                    "단가": unit,
+                    "금액": inbound_qty * unit,
+                    "비고": "",
+                })
+
+            # 10. 추가 작업 (청구서 항목 중 선택, 단가 API 조회)
+            extra_entries = getattr(req, "extra_work_entries", None) or []
+            for ent in extra_entries:
+                name = (ent.get("item_name") or ent.get("항목") or "").strip()
+                qty = int(ent.get("qty") or ent.get("수량") or 0)
+                if not name or qty <= 0:
+                    continue
+                unit = _get_out_extra_unit(con, name)
+                if unit <= 0:
+                    unit = _get_material_unit(con, name)
+                if unit > 0:
+                    items.append({
+                        "항목": name,
+                        "수량": qty,
+                        "단가": unit,
+                        "금액": qty * unit,
+                        "비고": "",
+                    })
+
+            # 11. 작업일지 (의류 등)
             if req.work_log_entries:
                 for w in req.work_log_entries:
                     qty = max(0, w.수량)
