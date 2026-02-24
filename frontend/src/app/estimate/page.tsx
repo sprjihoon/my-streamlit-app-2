@@ -301,32 +301,20 @@ export default function EstimatePage() {
             <span style={{ fontSize: '0.75rem', color: '#666' }}>1 PLT당 SKU 2개 초과 시 중량랙 적용</span>
           </div>
         </div>
-        {(brandType === 'beauty' || brandType === 'etc') && (
-          <div style={{ marginTop: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고 방식</label>
-            <select
-              value={inboundType}
-              onChange={(e) => setInboundType(e.target.value as 'box' | 'piece')}
-              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, minWidth: 160 }}
-            >
-              <option value="piece">개당 입고</option>
-              <option value="box">박스 입고</option>
-            </select>
-          </div>
-        )}
-        {brandType === 'fashion' && (
-          <div style={{ marginTop: '1rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={needQualityWork}
-                onChange={(e) => setNeedQualityWork(e.target.checked)}
-              />
-              <span>양품화 작업 필요</span>
-            </label>
-          </div>
-        )}
-        <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
+          {(brandType === 'beauty' || brandType === 'etc') && (
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>입고 방식</label>
+              <select
+                value={inboundType}
+                onChange={(e) => setInboundType(e.target.value as 'box' | 'piece')}
+                style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, minWidth: 160 }}
+              >
+                <option value="piece">개당 입고</option>
+                <option value="box">박스 입고</option>
+              </select>
+            </div>
+          )}
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>PP 봉투</label>
             <select
@@ -349,56 +337,34 @@ export default function EstimatePage() {
               <option value="ours">풀필먼트 공용 포장재 사용</option>
             </select>
           </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
-              <input
-                type="checkbox"
-                checked={needTexWork}
-                onChange={(e) => setNeedTexWork(e.target.checked)}
-              />
-              <span>텍작업(고리텍, 텍건, 등)</span>
+        </div>
+        <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+          {brandType === 'fashion' && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={needQualityWork} onChange={(e) => setNeedQualityWork(e.target.checked)} />
+              <span>양품화 작업 필요</span>
             </label>
-          </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
-              <input
-                type="checkbox"
-                checked={needBarcodeAttach}
-                onChange={(e) => setNeedBarcodeAttach(e.target.checked)}
-              />
-              <span>바코드 부착</span>
-            </label>
-          </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
-              <input
-                type="checkbox"
-                checked={needVoidWork}
-                onChange={(e) => setNeedVoidWork(e.target.checked)}
-              />
-              <span>완충작업</span>
-            </label>
-          </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
-              <input
-                type="checkbox"
-                checked={needVideoOut}
-                onChange={(e) => setNeedVideoOut(e.target.checked)}
-              />
-              <span>출고영상촬영</span>
-            </label>
-          </div>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
-              <input
-                type="checkbox"
-                checked={needVideoRet}
-                onChange={(e) => setNeedVideoRet(e.target.checked)}
-              />
-              <span>반품영상촬영</span>
-            </label>
-          </div>
+          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={needTexWork} onChange={(e) => setNeedTexWork(e.target.checked)} />
+            <span>텍작업(고리텍, 텍건, 등)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={needBarcodeAttach} onChange={(e) => setNeedBarcodeAttach(e.target.checked)} />
+            <span>바코드 부착</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={needVoidWork} onChange={(e) => setNeedVoidWork(e.target.checked)} />
+            <span>완충작업</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={needVideoOut} onChange={(e) => setNeedVideoOut(e.target.checked)} />
+            <span>출고영상촬영</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={needVideoRet} onChange={(e) => setNeedVideoRet(e.target.checked)} />
+            <span>반품영상촬영</span>
+          </label>
         </div>
         <div style={{ marginTop: '1rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>택배 구간별 비율 (%)</label>
