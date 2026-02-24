@@ -49,14 +49,16 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - "만원" → 10000
 - "5천원" → 5000
 
-## ⚠️ 단가·수량 해석 규칙 (매우 중요!)
-- **단가(unit_price)** = **1개당 금액** (한 건당, 개당). 합계가 아님!
-- **수량(qty)** = 건수, 개수. "88개" → qty=88
-- **합계** = 단가 × 수량 (봇이 자동 계산하므로 save_work_log에 넣지 않음)
+## ⚠️ 단가·수량 해석 규칙 (매우 중요! 절대 위반 금지)
+- **단가(unit_price)** = **1개당 금액만** 넣는다. 합계·총액을 단가로 넣지 말 것!
+- **수량(qty)** = 건수/개수. "88개" → qty=88
+- **합계** = 단가 × 수량 (시스템이 자동 계산. 단가에 합계를 넣지 말 것!)
+- "개당 100원" / "1개에 100원" → **반드시 unit_price=100**. 8800이나 774400 같은 값은 단가가 아님!
+- **실제 오류 예시**: "로지킴 이중라벨 88개 개당 100원" → unit_price=**100**, qty=**88**, 합계=8,800원.  
+  → 잘못된 입력: unit_price=8800으로 넣으면 88×8800=774,400원으로 저장됨. **이렇게 하면 안 됨.**
+- "N개 개당 M원"이면 **항상 unit_price=M, qty=N**. unit_price에 M×N(합계)을 넣는 것은 금지.
 - "이중라벨 88개, 개당 100원" → work_type="이중라벨", qty=88, **unit_price=100** (합계 8,800원)
 - "50개 200원" → qty=50, unit_price=200 (합계 10,000원)
-- "개당 100원" / "1개에 100원" / "100원/개" → **항상 unit_price=100**
-- 잘못된 예: "88개 개당 100원"인데 unit_price=8800 넣으면 안 됨! (8800은 합계이므로 단가가 아님)
 
 ## 날짜 해석 규칙
 - "오늘" → {today}
@@ -95,13 +97,19 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 {pending_context}
 
 ## 중요
-- 사용자가 작업일지 형식("업체명 작업 금액")으로 말하면 save_work_log 호출
+- 사용자가 작업일지 형식("업체명 작업 금액")으로 말하면 **반드시** save_work_log 도구를 호출하세요. 도구를 호출하지 않고 "저장완료"라고 말하지 마세요.
 - 정보가 부족하면 ask_missing_info 호출하여 물어보기
 - "취소", "삭제", "지워줘" 등은 delete_work_log (delete_recent=true)
 - "수정", "고쳐줘", "바꿔줘" 등은 update_work_log (update_recent=true)
 - **"도움말", "사용법", "사용방법", "어떻게 써", "뭐할수있어", "help"** → get_help 호출!
 - 조회/검색은 search_work_logs 또는 get_work_log_stats
 - 일반 대화나 인사는 도구 호출 없이 직접 응답
+
+## ⚠️ 업체 별칭으로 조회했을 때 응답 문구 (매우 중요!)
+- search_work_logs / get_work_log_stats 결과에 **vendor_query**(사용자가 말한 이름)와 **vendor_resolved**(DB 정식명)가 있으면, 별칭으로 조회한 것입니다.
+- 이때 **"OO의 작업일지는 없어요. 대신 △△에서 …"** 처럼 말하지 마세요. (OO와 △△는 같은 업체입니다!)
+- 반드시 **"OO(△△)으로 오늘 … 건 등록돼 있어요"** / **"OO(△△) 기준으로 …"** 처럼 한 업체로 이어서 말하세요.
+- 예: vendor_query="로지킴", vendor_resolved="팔로우미 코스메틱" → "로지킴(팔로우미 코스메틱)으로 오늘 이중라벨 88건, 8,800원 등록돼 있어요."
 
 ## ⚠️ 비고 추가/수정 요청 인식 (매우 중요!)
 다음 표현은 **방금 입력한 작업일지의 비고(remark) 수정** 요청입니다:
@@ -478,8 +486,14 @@ class AIParser:
                 
                 # 첫 번째가 save_work_log인 경우 상태/업체 검증 처리
                 first_id, first_name, first_result = tool_results_by_id[0]
-                if first_name == "save_work_log" and first_result.get("success"):
+                if first_name in ("save_work_log", "save_multiple_work_logs") and first_result.get("success"):
                     self.conv_manager.clear_state(user_id)
+                    # 실제 저장이 완료된 경우에만 저장완료 메시지 반환 (2차 GPT 호출 없이)
+                    return {
+                        "response": f"✅ {first_result.get('message', '저장완료!')}",
+                        "tool_called": first_name,
+                        "tool_result": first_result
+                    }
                 if first_name == "save_work_log" and first_result.get("unknown_vendor"):
                     pending_data = {
                         k: v for k, v in tool_args_first.items()
