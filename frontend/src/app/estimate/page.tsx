@@ -33,6 +33,10 @@ export default function EstimatePage() {
   const [ppBagProvider, setPpBagProvider] = useState<'brand' | 'ours'>('brand');
   const [mailerProvider, setMailerProvider] = useState<'brand' | 'ours'>('brand');
   const [needTexWork, setNeedTexWork] = useState(false);
+  const [needBarcodeAttach, setNeedBarcodeAttach] = useState(false);
+  const [needVoidWork, setNeedVoidWork] = useState(false);
+  const [needVideoOut, setNeedVideoOut] = useState(false);
+  const [needVideoRet, setNeedVideoRet] = useState(false);
   // 화장품/기타: 박스 입고 vs 개당 입고
   const [inboundType, setInboundType] = useState<'box' | 'piece'>('piece');
   // 보관: PLT 기준, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용
@@ -96,6 +100,10 @@ export default function EstimatePage() {
         pp_bag_provider: ppBagProvider,
         mailer_provider: mailerProvider,
         need_tex_work: needTexWork,
+        need_barcode_attach: needBarcodeAttach,
+        need_void_work: needVoidWork,
+        need_video_out: needVideoOut,
+        need_video_ret: needVideoRet,
         inbound_type: (brandType === 'beauty' || brandType === 'etc') ? inboundType : undefined,
         storage_plt: storagePlt === '' ? undefined : Number(storagePlt),
         sku_count: skuCount === '' ? undefined : Number(skuCount),
@@ -213,7 +221,7 @@ export default function EstimatePage() {
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배 요금제</label>
             <div style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', color: '#555' }}>
-              표준 (견적은 표준 요금제만 적용)
+              표준
             </div>
           </div>
           <div>
@@ -346,6 +354,46 @@ export default function EstimatePage() {
                 onChange={(e) => setNeedTexWork(e.target.checked)}
               />
               <span>텍작업 필요 (150원/건)</span>
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
+              <input
+                type="checkbox"
+                checked={needBarcodeAttach}
+                onChange={(e) => setNeedBarcodeAttach(e.target.checked)}
+              />
+              <span>바코드 부착</span>
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
+              <input
+                type="checkbox"
+                checked={needVoidWork}
+                onChange={(e) => setNeedVoidWork(e.target.checked)}
+              />
+              <span>완충작업</span>
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
+              <input
+                type="checkbox"
+                checked={needVideoOut}
+                onChange={(e) => setNeedVideoOut(e.target.checked)}
+              />
+              <span>출고영상촬영</span>
+            </label>
+          </div>
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1.75rem' }}>
+              <input
+                type="checkbox"
+                checked={needVideoRet}
+                onChange={(e) => setNeedVideoRet(e.target.checked)}
+              />
+              <span>반품영상촬영</span>
             </label>
           </div>
         </div>

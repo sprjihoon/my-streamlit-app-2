@@ -196,6 +196,14 @@ class EstimateCalculateRequest(BaseModel):
     mailer_provider: Optional[str] = Field(default="brand", description="택배 봉투: brand, ours")
     # 텍작업 150원/건 필요 여부 (입고수량 × 150원)
     need_tex_work: Optional[bool] = Field(default=False, description="텍작업 필요")
+    # 바코드 부착 필요 여부 (입고수량 × 단가)
+    need_barcode_attach: Optional[bool] = Field(default=False, description="바코드 부착 필요")
+    # 완충작업 (출고건 × 단가)
+    need_void_work: Optional[bool] = Field(default=False, description="완충작업 필요")
+    # 출고영상촬영 (출고건 × 단가)
+    need_video_out: Optional[bool] = Field(default=False, description="출고영상촬영 필요")
+    # 반품영상촬영 (반품건 × 단가)
+    need_video_ret: Optional[bool] = Field(default=False, description="반품영상촬영 필요")
     # 화장품/기타 선택 시: box=박스 입고, piece=개당 입고
     inbound_type: Optional[str] = Field(default="piece", description="입고 방식: box(박스 입고), piece(개당 입고)")
     # 보관: PLT 기준 보관량, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용

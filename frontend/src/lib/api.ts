@@ -123,6 +123,10 @@ export async function calculateEstimate(params: {
   pp_bag_provider?: 'brand' | 'ours';
   mailer_provider?: 'brand' | 'ours';
   need_tex_work?: boolean;
+  need_barcode_attach?: boolean;
+  need_void_work?: boolean;
+  need_video_out?: boolean;
+  need_video_ret?: boolean;
   inbound_type?: 'box' | 'piece';
   storage_plt?: number;
   sku_count?: number;

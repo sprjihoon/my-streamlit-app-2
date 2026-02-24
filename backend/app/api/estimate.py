@@ -54,6 +54,10 @@ def _get_out_extra_unit(con, item_name: str) -> int:
         "반품회수": 1100,
         "양품화": 500,
         "텍작업": 150,
+        "바코드 부착": 150,
+        "완충작업": 100,
+        "출고영상촬영": 200,
+        "반품영상촬영": 400,
     }
     return defaults.get(item_name, 0)
 
@@ -297,6 +301,56 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
+                    "비고": "",
+                })
+
+            # 9-1. 바코드 부착 (입고수량 × 단가)
+            need_barcode = getattr(req, "need_barcode_attach", False)
+            if need_barcode and inbound_qty > 0:
+                unit = _get_out_extra_unit(con, "바코드 부착")
+                if unit <= 0:
+                    unit = 150
+                items.append({
+                    "항목": "바코드 부착",
+                    "수량": inbound_qty,
+                    "단가": unit,
+                    "금액": inbound_qty * unit,
+                    "비고": "",
+                })
+
+            # 9-2. 완충작업 (출고건 × 단가)
+            need_void = getattr(req, "need_void_work", False)
+            if need_void and req.monthly_outbound > 0:
+                unit = _get_out_extra_unit(con, "완충작업")
+                items.append({
+                    "항목": "완충작업",
+                    "수량": req.monthly_outbound,
+                    "단가": unit,
+                    "금액": req.monthly_outbound * unit,
+                    "비고": "",
+                })
+
+            # 9-3. 출고영상촬영 (출고건 × 단가)
+            need_video_out = getattr(req, "need_video_out", False)
+            if need_video_out and req.monthly_outbound > 0:
+                unit = _get_out_extra_unit(con, "출고영상촬영")
+                items.append({
+                    "항목": "출고영상촬영",
+                    "수량": req.monthly_outbound,
+                    "단가": unit,
+                    "금액": req.monthly_outbound * unit,
+                    "비고": "",
+                })
+
+            # 9-4. 반품영상촬영 (반품건 × 단가)
+            need_video_ret = getattr(req, "need_video_ret", False)
+            if need_video_ret and return_count > 0:
+                unit = _get_out_extra_unit(con, "반품영상촬영")
+                items.append({
+                    "항목": "반품영상촬영",
+                    "수량": return_count,
+                    "단가": unit,
+                    "금액": return_count * unit,
                     "비고": "",
                 })
 
