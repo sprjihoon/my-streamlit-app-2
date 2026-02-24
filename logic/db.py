@@ -220,6 +220,18 @@ DDL_SQL = textwrap.dedent(
         created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    /* 물류 견적서 목록 */
+    CREATE TABLE IF NOT EXISTS estimates(
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_name TEXT DEFAULT '',
+        contact      TEXT DEFAULT '',
+        email        TEXT DEFAULT '',
+        total_amount INTEGER DEFAULT 0,
+        brand_type   TEXT DEFAULT 'fashion',
+        items_json   TEXT DEFAULT '[]',
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     """
 )
 

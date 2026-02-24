@@ -1,14 +1,15 @@
 """
-backend/app/api/estimate.py - 가견적 계산 및 PDF 출력 API
+backend/app/api/estimate.py - 물류 견적 계산 및 PDF 출력 API
 ────────────────────────────────────────────────────────
 입력: 업체명, 연락처, 이메일, 월 출고건, 구간 비율, 반품건 등
 출력: 견적 항목 리스트, PDF 출력 시 수신처 정보 반영
 """
 
-from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 import pandas as pd
+import json
 from datetime import datetime
 
 from logic.db import get_connection
@@ -18,6 +19,9 @@ from backend.app.models import (
     EstimateCalculateRequest,
     EstimateCalculateResponse,
     EstimateExportPdfRequest,
+    EstimateSaveRequest,
+    EstimateListItem,
+    EstimateListResponse,
     InvoiceItem,
 )
 
@@ -157,7 +161,7 @@ async def get_chargeable_items():
 @router.post("/", response_model=EstimateCalculateResponse)
 async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculateResponse:
     """
-    가견적 계산.
+    물류 견적 계산.
     월 출고건, 구간 비율, 반품건 등으로 견적 항목을 계산합니다.
     업체명·연락처·이메일은 응답에 그대로 포함되어 PDF/저장 시 사용합니다.
     """
@@ -334,11 +338,11 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                             "비고": "풀필먼트 공용 구간별 박스",
                         })
 
-            # 8-2. 뷰티/기타: 풀필먼트 공용 시 전부 구간별 박스 (봉투 없음)
+            # 8-2. 뷰티/기타: PP/택배 봉투 미적용, 택배박스만 구간별 반영 (플래그는 택배박스만 적용)
             _ALL_BOX_ITEM = {"극소": "박스 극소형", "소": "박스 소형", "중": "박스 중형", "대": "박스 대형", "특대": "박스 특대", "특특대": "박스 특특대"}
             _ALL_BOX_DEFAULT = {"극소": 200, "소": 300, "중": 500, "대": 800, "특대": 1200, "특특대": 1500}
             if brand_type in ("beauty", "etc") and zone_counts:
-                use_ours = (pp_provider == "ours" or mailer_provider == "ours" or courier_box_provider == "ours")
+                use_ours = (courier_box_provider == "ours")
                 if use_ours:
                     for zone_label in ("극소", "소", "중", "대", "특대", "특특대"):
                         qty = zone_counts.get(zone_label, 0)
@@ -512,6 +516,91 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/save")
+async def save_estimate(body: EstimateSaveRequest):
+    """견적서를 DB에 저장 (목록 관리용)."""
+    try:
+        with get_connection() as con:
+            con.execute(
+                """
+                INSERT INTO estimates (company_name, contact, email, total_amount, brand_type, items_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    body.company_name or "",
+                    body.contact or "",
+                    body.email or "",
+                    body.total_amount,
+                    (body.brand_type or "fashion").strip().lower(),
+                    json.dumps([it.model_dump() for it in body.items], ensure_ascii=False),
+                ),
+            )
+            con.commit()
+            row = con.execute("SELECT last_insert_rowid()").fetchone()
+            estimate_id = row[0] if row else None
+        return {"id": estimate_id, "message": "저장되었습니다."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/list")
+async def list_estimates(
+    date_from: Optional[str] = Query(None, description="시작일 YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="종료일 YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+):
+    """견적서 목록 (날짜 필터, 10/30/50 단위 페이징). page_size는 10, 30, 50 권장."""
+    try:
+        with get_connection() as con:
+            tables = [row[0] for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='estimates'"
+            ).fetchall()]
+            if not tables:
+                return EstimateListResponse(items=[], total=0, page=page, page_size=page_size)
+
+            where = "1=1"
+            params: List[Any] = []
+            if date_from:
+                where += " AND date(created_at) >= ?"
+                params.append(date_from)
+            if date_to:
+                where += " AND date(created_at) <= ?"
+                params.append(date_to)
+
+            count_row = con.execute(
+                f"SELECT COUNT(*) FROM estimates WHERE {where}", params
+            ).fetchone()
+            total = count_row[0] if count_row else 0
+
+            offset = (page - 1) * page_size
+            list_params = list(params) + [page_size, offset]
+            rows = con.execute(
+                f"""
+                SELECT id, company_name, contact, email, total_amount, brand_type, created_at
+                FROM estimates WHERE {where}
+                ORDER BY id DESC LIMIT ? OFFSET ?
+                """,
+                list_params,
+            ).fetchall()
+
+            items = [
+                EstimateListItem(
+                    id=r[0],
+                    company_name=r[1] or "",
+                    contact=r[2] or "",
+                    email=r[3] or "",
+                    total_amount=int(r[4]) if r[4] is not None else 0,
+                    brand_type=r[5] or "fashion",
+                    created_at=r[6].strftime("%Y-%m-%d %H:%M") if hasattr(r[6], "strftime") else str(r[6] or ""),
+                )
+                for r in rows
+            ]
+        return EstimateListResponse(items=items, total=total, page=page, page_size=page_size)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/export/pdf")
 async def export_estimate_pdf(body: EstimateExportPdfRequest):
     """
@@ -583,6 +672,10 @@ async def export_estimate_pdf(body: EstimateExportPdfRequest):
         title = "물류대행 서비스 견적서"
         payment_deadline = ""
 
+        # 저장 시 담당자: 패션=장성령, 뷰티/기타=장명찬 (하드코딩)
+        brand_type = (getattr(body, "brand_type", None) or "fashion").strip().lower()
+        manager = "장성령" if brand_type == "fashion" else "장명찬"
+
         items_for_pdf = [
             {"항목": it.항목, "수량": it.수량, "단가": it.단가, "금액": it.금액, "비고": it.비고 or ""}
             for it in body.items
@@ -598,7 +691,7 @@ async def export_estimate_pdf(body: EstimateExportPdfRequest):
             payment_deadline=payment_deadline,
             bank_info=bank_info,
             stamp_holder=representative,
-            manager=representative,
+            manager=manager,
             company_name=company_display_name,
             recipient_contact=body.contact or "",
             recipient_email=body.email or "",

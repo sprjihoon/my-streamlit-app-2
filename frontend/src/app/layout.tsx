@@ -26,6 +26,7 @@ const NAV_ITEMS = [
   { href: '/rates', label: '💰 요금표 관리' },
   { href: '/invoice', label: '📊 인보이스 계산' },
   { href: '/estimate', label: '📄 견적서 만들기' },
+  { href: '/estimate-list', label: '📑 견적서 목록' },
   { href: '/invoice-list', label: '📜 인보이스 목록' },
   { href: '/insights', label: '📈 데이터 인사이트' },
 ];

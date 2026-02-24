@@ -87,7 +87,7 @@ export async function calculateInvoice(params: {
   });
 }
 
-/** 가견적 항목 타입 */
+/** 물류 견적 항목 타입 */
 export interface EstimateItem {
   항목: string;
   수량: number;
@@ -106,7 +106,7 @@ export async function getChargeableItems() {
 }
 
 /**
- * 가견적 계산
+ * 물류 견적 계산
  */
 export async function calculateEstimate(params: {
   company_name?: string;
@@ -158,6 +158,7 @@ export async function exportEstimatePdf(body: {
   email: string;
   items: EstimateItem[];
   total_amount: number;
+  brand_type?: string;
 }): Promise<Blob> {
   const url = `${API_BASE}/estimate/export/pdf`;
   const response = await fetch(url, {

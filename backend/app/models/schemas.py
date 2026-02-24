@@ -158,7 +158,7 @@ class ShippingStatsResponse(BaseModel):
 
 
 # ─────────────────────────────────────
-# 가견적 계산
+# 물류 견적 계산
 # ─────────────────────────────────────
 class WorkLogEntry(BaseModel):
     """작업일지 항목 (분류/의류 등)."""
@@ -168,7 +168,7 @@ class WorkLogEntry(BaseModel):
 
 
 class EstimateCalculateRequest(BaseModel):
-    """가견적 계산 요청."""
+    """물류 견적 계산 요청."""
     # 수신처 (PDF/저장 시 견적서에 반영)
     company_name: Optional[str] = Field(default="", description="업체명")
     contact: Optional[str] = Field(default="", description="연락처")
@@ -218,7 +218,7 @@ class EstimateCalculateRequest(BaseModel):
 
 
 class EstimateCalculateResponse(BaseModel):
-    """가견적 계산 응답."""
+    """물류 견적 계산 응답."""
     success: bool = True
     items: List[InvoiceItem] = Field(default_factory=list)
     total_amount: int = 0
@@ -235,6 +235,36 @@ class EstimateExportPdfRequest(BaseModel):
     email: str = Field(default="", description="이메일")
     items: List[InvoiceItem] = Field(..., description="견적 항목")
     total_amount: int = Field(..., ge=0)
+    brand_type: Optional[str] = Field(default="fashion", description="브랜드유형: fashion=장성령, beauty/etc=장명찬")
+
+
+class EstimateSaveRequest(BaseModel):
+    """견적서 저장 요청 (목록 관리용)."""
+    company_name: str = Field(default="", description="업체명")
+    contact: str = Field(default="", description="연락처")
+    email: str = Field(default="", description="이메일")
+    items: List[InvoiceItem] = Field(..., description="견적 항목")
+    total_amount: int = Field(..., ge=0)
+    brand_type: Optional[str] = Field(default="fashion")
+
+
+class EstimateListItem(BaseModel):
+    """견적서 목록 한 건."""
+    id: int
+    company_name: str
+    contact: str
+    email: str
+    total_amount: int
+    brand_type: str
+    created_at: str
+
+
+class EstimateListResponse(BaseModel):
+    """견적서 목록 응답 (날짜 필터, 페이징)."""
+    items: List[EstimateListItem]
+    total: int
+    page: int
+    page_size: int
 
 
 # ─────────────────────────────────────
