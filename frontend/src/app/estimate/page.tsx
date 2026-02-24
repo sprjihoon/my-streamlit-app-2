@@ -38,7 +38,6 @@ export default function EstimatePage() {
   const [needVoidWork, setNeedVoidWork] = useState(false);
   const [needVideoOut, setNeedVideoOut] = useState(false);
   const [needVideoRet, setNeedVideoRet] = useState(false);
-  // 화장품/기타: 박스 입고 vs 개당 입고
   // 보관: PLT 기준, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용
   const [storagePlt, setStoragePlt] = useState<number | ''>('');
   const [skuCount, setSkuCount] = useState<number | ''>('');

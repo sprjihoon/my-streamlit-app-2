@@ -128,7 +128,6 @@ export async function calculateEstimate(params: {
   need_void_work?: boolean;
   need_video_out?: boolean;
   need_video_ret?: boolean;
-  inbound_type?: 'box' | 'piece';
   storage_plt?: number;
   sku_count?: number;
   extra_work_entries?: Array<{ item_name: string; qty: number }>;

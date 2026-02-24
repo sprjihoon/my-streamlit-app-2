@@ -205,8 +205,6 @@ class EstimateCalculateRequest(BaseModel):
     need_video_out: Optional[bool] = Field(default=False, description="출고영상촬영 필요")
     # 반품영상촬영 (반품건 × 단가)
     need_video_ret: Optional[bool] = Field(default=False, description="반품영상촬영 필요")
-    # 화장품/기타 선택 시: box=박스 입고, piece=개당 입고
-    inbound_type: Optional[str] = Field(default="piece", description="입고 방식: box(박스 입고), piece(개당 입고)")
     # 보관: PLT 기준 보관량, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용
     storage_plt: Optional[int] = Field(default=None, ge=0, description="보관량 (PLT 기준)")
     sku_count: Optional[int] = Field(default=None, ge=0, description="SKU 수")
