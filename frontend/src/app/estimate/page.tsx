@@ -210,16 +210,6 @@ export default function EstimatePage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
           <div style={{ display: 'flex', gap: '1rem', gridColumn: '1 / -1' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>월 출고건수</label>
-              <input
-                type="number"
-                min={0}
-                value={monthlyOutbound}
-                onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)}
-                style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
               <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>택배 요금제</label>
               <div style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4, background: '#f5f5f5', color: '#555' }}>
                 표준
@@ -237,6 +227,16 @@ export default function EstimatePage() {
                 <option value="etc">기타</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>월 출고건수</label>
+            <input
+              type="number"
+              min={0}
+              value={monthlyOutbound}
+              onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)}
+              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}
+            />
           </div>
           <div>
             <label style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 500 }}>반품 비율 (%)</label>
