@@ -61,6 +61,7 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - "50개 200원" → qty=50, unit_price=200 (합계 10,000원)
 
 ## 날짜 해석 규칙
+- **날짜를 사용자가 말하지 않으면 → 오늘({today})로 저장. 날짜를 물어보지 마세요.**
 - "오늘" → {today}
 - "어제" → {yesterday}
 - "이번주" → 이번 주 월요일 ~ 오늘
@@ -74,12 +75,14 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - 한국어로 응답
 
 ## 불완전 정보 처리 (매우 중요!)
-작업일지 입력 시 필수 정보: **업체명, 작업종류, 단가**
+작업일지 입력 시 필수 정보: **업체명, 작업종류, 단가** (날짜·수량·비고는 필수 아님)
+- **날짜**: 사용자가 말하지 않으면 **오늘**로 저장. 날짜를 물어보지 마세요. ask_missing_info에 missing: ["date"] 넣지 마세요.
 - "틸리언 하차" (단가 없음) → ask_missing_info 호출 (missing: ["unit_price"])
 - "3만원" (업체/작업 없음) → ask_missing_info 호출 (missing: ["vendor", "work_type"])
 - "하차 3만원" (업체 없음) → ask_missing_info 호출 (missing: ["vendor"])
 
 ⚠️ 불완전한 정보로 save_work_log를 호출하지 마세요! 먼저 ask_missing_info로 부족한 정보를 물어보세요.
+⚠️ 업체명·작업종류·단가만 있으면 바로 save_work_log 호출. 날짜/수량 없어도 날짜=오늘, 수량=1로 저장됨.
 
 ## ⚠️ 업체명 규칙 (매우 중요!)
 - 업체명은 DB에 등록된 업체만 사용 가능! (DB 컨텍스트의 "등록 업체" 목록 참고)
@@ -330,7 +333,7 @@ class AIParser:
                 "type": "function",
                 "function": {
                     "name": "ask_missing_info",
-                    "description": "작업일지 저장에 필요한 정보가 부족할 때 사용자에게 물어봅니다. 부족한 정보를 물어보면서 이미 파악한 정보는 저장합니다.",
+                    "description": "작업일지 저장에 필요한 정보가 부족할 때 사용자에게 물어봅니다. 부족한 정보를 물어보면서 이미 파악한 정보는 저장합니다. 날짜는 물어보지 마세요(미입력 시 오늘로 저장).",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -338,12 +341,12 @@ class AIParser:
                             "work_type": {"type": "string", "description": "파악된 작업종류 (없으면 생략)"},
                             "unit_price": {"type": "integer", "description": "파악된 단가 (없으면 생략)"},
                             "qty": {"type": "integer", "description": "파악된 수량 (없으면 생략)"},
-                            "date": {"type": "string", "description": "파악된 날짜 (없으면 생략)"},
+                            "date": {"type": "string", "description": "파악된 날짜 (없으면 생략, 물어보지 말 것)"},
                             "remark": {"type": "string", "description": "파악된 비고 (없으면 생략)"},
                             "missing": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "누락된 필드 목록 (vendor, work_type, unit_price 중)"
+                                "description": "누락된 필드 목록. vendor, work_type, unit_price 중에서만. date는 넣지 마세요."
                             },
                             "question": {"type": "string", "description": "사용자에게 물어볼 질문"}
                         },
