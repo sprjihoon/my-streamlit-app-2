@@ -427,40 +427,40 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "비고": "",
                 })
 
-            # 9-5. 스티커 부착: 출고건수 × 100원
+            # 9-5. 스티커 부착: 1건 100원 (1장당 비용발생)
             need_sticker = getattr(req, "need_sticker_attach", False)
-            if need_sticker and req.monthly_outbound > 0:
+            if need_sticker:
                 unit = 100
                 items.append({
                     "항목": "스티커 부착",
-                    "수량": req.monthly_outbound,
+                    "수량": 1,
                     "단가": unit,
-                    "금액": req.monthly_outbound * unit,
-                    "비고": "",
+                    "금액": unit,
+                    "비고": "1장당 비용발생",
                 })
 
-            # 9-6. 리플릿 동봉: 출고건수 × 100원
+            # 9-6. 리플릿 동봉: 1건 100원 (1장당 비용발생)
             need_leaflet = getattr(req, "need_leaflet_insert", False)
-            if need_leaflet and req.monthly_outbound > 0:
+            if need_leaflet:
                 unit = 100
                 items.append({
                     "항목": "리플릿 동봉",
-                    "수량": req.monthly_outbound,
+                    "수량": 1,
                     "단가": unit,
-                    "금액": req.monthly_outbound * unit,
-                    "비고": "",
+                    "금액": unit,
+                    "비고": "1장당 비용발생",
                 })
 
-            # 9-7. B2B동봉서류부착: 출고건수 × 1000원
+            # 9-7. B2B동봉서류부착: 1건 1000원 (1장당 비용발생)
             need_b2b = getattr(req, "need_b2b_document", False)
-            if need_b2b and req.monthly_outbound > 0:
+            if need_b2b:
                 unit = 1000
                 items.append({
                     "항목": "B2B동봉서류부착",
-                    "수량": req.monthly_outbound,
+                    "수량": 1,
                     "단가": unit,
-                    "금액": req.monthly_outbound * unit,
-                    "비고": "",
+                    "금액": unit,
+                    "비고": "1장당 비용발생",
                 })
 
             # 10. 추가 작업 (청구서 항목 중 선택, 단가 API 조회)
