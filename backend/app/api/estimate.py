@@ -245,7 +245,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "박스입고/개별분류검수 등 방식별 상담 필요",
+                    "비고": "박스입고/개별분류검수 등 상담필요",
                 })
 
             # 5. 합포장 (출고건 대비 %, 평균 수량 기반: 건수 × (평균 수량 - 2) × 단가)
@@ -446,36 +446,26 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                         "비고": "",
                     })
 
-            # 10-1. 보관료 (PLT 3만원 기본): 1 PLT당 SKU > 2이면 2 PLT당 1 중량랙 + 나머지 PLT
+            # 10-1. 보관료: 1 PLT당 SKU > 2이면 전체 PLT를 중량랙으로 변환
             storage_plt = getattr(req, "storage_plt", None)
             sku_count = getattr(req, "sku_count", None)
             if storage_plt and storage_plt > 0:
                 plt_unit = _get_storage_unit(con, "PLT")
                 if plt_unit <= 0:
                     plt_unit = 30000
+                weight_rack_unit = _get_storage_unit(con, "중량랙")
+                if weight_rack_unit <= 0:
+                    weight_rack_unit = 60000
+                
                 if sku_count is not None and sku_count > 0 and (sku_count / storage_plt) > 2:
-                    # 2 PLT당 1 중량랙, 나머지는 PLT
-                    weight_rack_qty = storage_plt // 2
-                    plt_qty = storage_plt % 2
-                    weight_rack_unit = _get_storage_unit(con, "중량랙")
-                    if weight_rack_unit <= 0:
-                        weight_rack_unit = 60000
-                    if weight_rack_qty > 0:
-                        items.append({
-                            "항목": "보관료 (중량랙)",
-                            "수량": weight_rack_qty,
-                            "단가": weight_rack_unit,
-                            "금액": weight_rack_qty * weight_rack_unit,
-                            "비고": "1 PLT당 SKU 2개 초과 시 2 PLT당 1 중량랙",
-                        })
-                    if plt_qty > 0:
-                        items.append({
-                            "항목": "보관료 (PLT)",
-                            "수량": plt_qty,
-                            "단가": plt_unit,
-                            "금액": plt_qty * plt_unit,
-                            "비고": "나머지 PLT",
-                        })
+                    # 1 PLT당 SKU 2개 초과 시 전체 PLT를 중량랙으로 변환
+                    items.append({
+                        "항목": "보관료 (중량랙)",
+                        "수량": storage_plt,
+                        "단가": weight_rack_unit,
+                        "금액": storage_plt * weight_rack_unit,
+                        "비고": f"1 PLT당 SKU {sku_count / storage_plt:.1f}개 (2개 초과)",
+                    })
                 else:
                     items.append({
                         "항목": "보관료 (PLT)",
