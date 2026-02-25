@@ -446,7 +446,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                         "비고": "",
                     })
 
-            # 10-1. 보관료: 1 PLT당 SKU > 2이면 전체 PLT를 중량랙으로 변환
+            # 10-1. 보관료: 1 PLT당 SKU > 2이면 중량랙으로 변환 (중량랙 1개 = 2 PLT 적재)
             storage_plt = getattr(req, "storage_plt", None)
             sku_count = getattr(req, "sku_count", None)
             if storage_plt and storage_plt > 0:
@@ -458,13 +458,15 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     weight_rack_unit = 60000
                 
                 if sku_count is not None and sku_count > 0 and (sku_count / storage_plt) > 2:
-                    # 1 PLT당 SKU 2개 초과 시 전체 PLT를 중량랙으로 변환
+                    # 1 PLT당 SKU 2개 초과 시 중량랙으로 변환 (중량랙 1개 = 2 PLT 적재 가능)
+                    import math
+                    weight_rack_qty = math.ceil(storage_plt / 2)
                     items.append({
                         "항목": "보관료 (중량랙)",
-                        "수량": storage_plt,
+                        "수량": weight_rack_qty,
                         "단가": weight_rack_unit,
-                        "금액": storage_plt * weight_rack_unit,
-                        "비고": f"1 PLT당 SKU {sku_count / storage_plt:.1f}개 (2개 초과)",
+                        "금액": weight_rack_qty * weight_rack_unit,
+                        "비고": f"PLT {storage_plt}개 → 중량랙 {weight_rack_qty}개 (1 PLT당 SKU {sku_count / storage_plt:.1f}개)",
                     })
                 else:
                     items.append({
