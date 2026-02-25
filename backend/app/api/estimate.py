@@ -805,10 +805,6 @@ async def export_estimate_pdf(body: EstimateExportPdfRequest):
         }
         representative = "장지훈"
         company_display_name = "스프링풀필먼트"
-        else:
-            supplier_info = {"사업자번호": "", "상호": "", "소재지": "", "업태": "", "종목": ""}
-            representative = ""
-            company_display_name = ""
 
         estimate_date = datetime.now().strftime("%Y-%m-%d")
         recipient_name = (body.company_name or "").strip() or "(업체명)"
