@@ -62,7 +62,7 @@ def _ensure_settings_table():
             con.execute("""
                 INSERT INTO company_settings (id, company_name, business_number, address, 
                     business_type, business_item, bank_name, account_holder, account_number, representative)
-                VALUES (1, '틸리언', '766-55-00323', '대구시 동구 첨단로8길 8 씨제이빌딩302호',
+                VALUES (1, '스프링풀필먼트', '766-55-00323', '대구시 동구 첨단로8길 8 씨제이빌딩302호',
                     '서비스', '포장 및 충전업', '카카오뱅크', '장지훈', '3333-02-9946468', '장지훈')
             """)
             con.commit()
