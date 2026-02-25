@@ -408,24 +408,32 @@ export default function EstimatePage() {
 
         {/* 택배 구간별 비율 */}
         <div style={{ marginTop: '1rem' }}>
-          <div style={{ ...labelStyle, marginBottom: 8 }}>
+          <div style={{ ...labelStyle, marginBottom: 12 }}>
             택배 구간별 비율
             <span style={{ fontWeight: 400, fontSize: '0.72rem', color: zoneTotal === 100 ? '#39ff14' : '#ef4444', marginLeft: 8 }}>
               합계 {zoneTotal}%
             </span>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {ZONE_LABELS.map((label) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#1a1a1a', borderRadius: 8, padding: '4px 8px', minWidth: 90, flex: '1 1 auto', border: '1px solid #333' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 500, minWidth: 28, color: '#d1d5db' }}>{label}</span>
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 500, minWidth: 32, color: '#d1d5db' }}>{label}</span>
                 <input
-                  type="number" min={0} max={100} step={1}
-                  style={{ width: 48, padding: '0.3rem', border: '1px solid #333', borderRadius: 6, fontSize: '0.82rem', textAlign: 'center', background: '#222', color: '#e5e5e5' }}
-                  value={zoneRatios[label] || ''}
-                  onChange={(e) => handleZoneRatioChange(label, Number(e.target.value) || 0)}
-                  onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }}
+                  type="range" min={0} max={100} step={1}
+                  value={zoneRatios[label] || 0}
+                  onChange={(e) => handleZoneRatioChange(label, Number(e.target.value))}
+                  style={{
+                    flex: 1,
+                    height: 6,
+                    borderRadius: 3,
+                    background: `linear-gradient(to right, #39ff14 0%, #39ff14 ${zoneRatios[label] || 0}%, #333 ${zoneRatios[label] || 0}%, #333 100%)`,
+                    appearance: 'none',
+                    cursor: 'pointer',
+                  }}
                 />
-                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>%</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600, minWidth: 40, textAlign: 'right', color: '#39ff14' }}>
+                  {zoneRatios[label] || 0}%
+                </span>
               </div>
             ))}
           </div>
