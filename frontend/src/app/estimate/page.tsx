@@ -26,7 +26,7 @@ export default function EstimatePage() {
   const [returnPercentage, setReturnPercentage] = useState(0);
   const [inboundQty, setInboundQty] = useState(0);
   const [combinedPercentage, setCombinedPercentage] = useState(0);
-  const [combinedAvgQty, setCombinedAvgQty] = useState<number | ''>('');
+  const [combinedAvgQty, setCombinedAvgQty] = useState(0);
   const [brandType, setBrandType] = useState<'fashion' | 'beauty' | 'etc'>('fashion');
   const [needQualityWork, setNeedQualityWork] = useState(false);
   const [ppBagProvider, setPpBagProvider] = useState<'brand' | 'ours'>('brand');
@@ -37,8 +37,8 @@ export default function EstimatePage() {
   const [needVoidWork, setNeedVoidWork] = useState(false);
   const [needVideoOut, setNeedVideoOut] = useState(false);
   const [needVideoRet, setNeedVideoRet] = useState(false);
-  const [storagePlt, setStoragePlt] = useState<number | ''>('');
-  const [skuCount, setSkuCount] = useState<number | ''>('');
+  const [storagePlt, setStoragePlt] = useState(0);
+  const [skuCount, setSkuCount] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -320,35 +320,35 @@ export default function EstimatePage() {
           </div>
           <div>
             <label style={labelStyle}>월 출고건수</label>
-            <input style={inputStyle} type="number" min={0} value={monthlyOutbound || ''} onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)} />
+            <input style={inputStyle} type="number" min={0} step={1} value={monthlyOutbound || ''} onChange={(e) => setMonthlyOutbound(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} />
           </div>
           <div>
             <label style={labelStyle}>반품 비율 (%)</label>
-            <input style={inputStyle} type="number" min={0} max={100} value={returnPercentage || ''} onChange={(e) => setReturnPercentage(Number(e.target.value) || 0)} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} max={100} step={1} value={returnPercentage || ''} onChange={(e) => setReturnPercentage(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>전체 출고건 대비 %</div>
           </div>
           <div>
             <label style={labelStyle}>합포장 비율 (%)</label>
-            <input style={inputStyle} type="number" min={0} max={100} value={combinedPercentage || ''} onChange={(e) => setCombinedPercentage(Number(e.target.value) || 0)} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} max={100} step={1} value={combinedPercentage || ''} onChange={(e) => setCombinedPercentage(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>출고건 대비 %</div>
           </div>
           <div>
             <label style={labelStyle}>합포장 평균 수량</label>
-            <input style={inputStyle} type="number" min={0} value={combinedAvgQty} onChange={(e) => setCombinedAvgQty(e.target.value === '' ? '' : Number(e.target.value))} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} step={1} value={combinedAvgQty || ''} onChange={(e) => setCombinedAvgQty(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>건당 개수</div>
           </div>
           <div>
             <label style={labelStyle}>입고수량</label>
-            <input style={inputStyle} type="number" min={0} value={inboundQty || ''} onChange={(e) => setInboundQty(Number(e.target.value) || 0)} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} step={1} value={inboundQty || ''} onChange={(e) => setInboundQty(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
           </div>
           <div>
             <label style={labelStyle}>보관량 (PLT)</label>
-            <input style={inputStyle} type="number" min={0} value={storagePlt} onChange={(e) => setStoragePlt(e.target.value === '' ? '' : Number(e.target.value))} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} step={1} value={storagePlt || ''} onChange={(e) => setStoragePlt(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>PLT 기준</div>
           </div>
           <div>
             <label style={labelStyle}>SKU 수</label>
-            <input style={inputStyle} type="number" min={0} value={skuCount} onChange={(e) => setSkuCount(e.target.value === '' ? '' : Number(e.target.value))} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} step={1} value={skuCount || ''} onChange={(e) => setSkuCount(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>1 PLT당 SKU 2개 초과 → 중량랙</div>
           </div>
         </div>
