@@ -28,6 +28,7 @@ from .tabs.mapping_manager_tab import MappingManagerTab
 from .tabs.mapped_suppliers_tab import MappedSuppliersTab
 from .tabs.shipping_insight_tab import ShippingInsightTab
 from .tabs.invoice_all_tab import InvoiceAllTab
+from .tabs.estimate_tab import EstimateTab
 
 
 class InvoiceListWidget(QWidget):
@@ -104,6 +105,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(RateManagerTab(self), "Rate Manager")
         tabs.addTab(InvoiceListWidget(self), "Invoice List")
         tabs.addTab(InvoiceAllTab(self), "Invoice All")
+        tabs.addTab(EstimateTab(self), "견적서 관리")
         tabs.addTab(ShippingInsightTab(self), "Shipping Insight")
 
         self.setCentralWidget(tabs)

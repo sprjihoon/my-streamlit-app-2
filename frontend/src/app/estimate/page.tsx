@@ -190,36 +190,37 @@ export default function EstimatePage() {
     }
   }
 
-  /* ─── 공통 스타일 ─── */
+  /* ─── 공통 스타일 (다크 테마) ─── */
   const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '0.6rem 0.75rem', border: '1px solid #d1d5db',
+    width: '100%', padding: '0.6rem 0.75rem', border: '1px solid #333',
     borderRadius: 8, fontSize: '0.9rem', transition: 'border-color .2s',
-    outline: 'none', background: '#fff',
+    outline: 'none', background: '#1a1a1a', color: '#e5e5e5',
   };
   const labelStyle: React.CSSProperties = {
-    display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.82rem', color: '#374151',
+    display: 'block', marginBottom: 4, fontWeight: 600, fontSize: '0.82rem', color: '#d1d5db',
   };
   const selectStyle: React.CSSProperties = { ...inputStyle, appearance: 'auto' as const };
   const sectionStyle: React.CSSProperties = {
-    background: '#fff', borderRadius: 12, padding: '1.25rem',
-    boxShadow: '0 1px 3px rgba(0,0,0,.08)', marginBottom: '1rem',
+    background: '#111', borderRadius: 12, padding: '1.25rem',
+    boxShadow: '0 1px 3px rgba(0,0,0,.3)', marginBottom: '1rem',
+    border: '1px solid #222',
   };
   const sectionTitle: React.CSSProperties = {
-    fontSize: '1rem', fontWeight: 700, color: '#1f2937', marginBottom: '1rem',
-    paddingBottom: 8, borderBottom: '2px solid #e5e7eb',
+    fontSize: '1rem', fontWeight: 700, color: '#e5e5e5', marginBottom: '1rem',
+    paddingBottom: 8, borderBottom: '2px solid #333',
   };
   const gridTwo: React.CSSProperties = {
     display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem',
   };
   const chipLabel: React.CSSProperties = {
     display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
-    borderRadius: 20, border: '1px solid #d1d5db', cursor: 'pointer',
-    fontSize: '0.82rem', background: '#f9fafb', transition: 'all .15s',
+    borderRadius: 20, border: '1px solid #333', cursor: 'pointer',
+    fontSize: '0.82rem', background: '#1a1a1a', color: '#9ca3af', transition: 'all .15s',
   };
   const chipChecked: React.CSSProperties = {
-    ...chipLabel, background: '#ecfdf5', borderColor: '#39ff14', color: '#16a34a',
+    ...chipLabel, background: '#0d2a0d', borderColor: '#39ff14', color: '#39ff14',
   };
-  const hint: React.CSSProperties = { fontSize: '0.72rem', color: '#9ca3af', marginTop: 2 };
+  const hint: React.CSSProperties = { fontSize: '0.72rem', color: '#6b7280', marginTop: 2 };
 
   const zoneTotal = Object.values(zoneRatios).reduce((a, b) => a + (Number(b) || 0), 0);
 
@@ -267,7 +268,7 @@ export default function EstimatePage() {
         <div style={gridTwo}>
           <div>
             <label style={labelStyle}>택배 요금제</label>
-            <div style={{ ...inputStyle, background: '#f3f4f6', color: '#6b7280' }}>표준(우체국택배)</div>
+            <div style={{ ...inputStyle, background: '#222', color: '#9ca3af' }}>표준(우체국택배)</div>
           </div>
           <div>
             <label style={labelStyle}>브랜드유형</label>
@@ -381,22 +382,22 @@ export default function EstimatePage() {
         <div style={{ marginTop: '1rem' }}>
           <div style={{ ...labelStyle, marginBottom: 8 }}>
             택배 구간별 비율
-            <span style={{ fontWeight: 400, fontSize: '0.72rem', color: zoneTotal === 100 ? '#16a34a' : '#ef4444', marginLeft: 8 }}>
+            <span style={{ fontWeight: 400, fontSize: '0.72rem', color: zoneTotal === 100 ? '#39ff14' : '#ef4444', marginLeft: 8 }}>
               합계 {zoneTotal}%
             </span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ZONE_LABELS.map((label) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f9fafb', borderRadius: 8, padding: '4px 8px', minWidth: 90, flex: '1 1 auto' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 500, minWidth: 28 }}>{label}</span>
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#1a1a1a', borderRadius: 8, padding: '4px 8px', minWidth: 90, flex: '1 1 auto', border: '1px solid #333' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 500, minWidth: 28, color: '#d1d5db' }}>{label}</span>
                 <input
                   type="number" min={0} max={100} step={1}
-                  style={{ width: 48, padding: '0.3rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', textAlign: 'center' }}
+                  style={{ width: 48, padding: '0.3rem', border: '1px solid #333', borderRadius: 6, fontSize: '0.82rem', textAlign: 'center', background: '#222', color: '#e5e5e5' }}
                   value={zoneRatios[label] || ''}
                   onChange={(e) => setZoneRatios((prev) => ({ ...prev, [label]: Math.ceil(Number(e.target.value)) || 0 }))}
                   onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }}
                 />
-                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>%</span>
+                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>%</span>
               </div>
             ))}
           </div>
@@ -430,21 +431,21 @@ export default function EstimatePage() {
             </div>
 
             <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', color: '#e5e5e5' }}>
                 <thead>
-                  <tr style={{ background: '#ecfdf5' }}>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>항목</th>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>수량</th>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>단가</th>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>금액</th>
+                  <tr style={{ background: '#0d2a0d' }}>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #39ff14', color: '#39ff14' }}>항목</th>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14', color: '#39ff14' }}>수량</th>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14', color: '#39ff14' }}>단가</th>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14', color: '#39ff14' }}>금액</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.items.map((item, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #d1fae5' }}>
+                    <tr key={i} style={{ borderBottom: '1px solid #222' }}>
                       <td style={{ padding: '0.5rem' }}>
                         {item.항목}
-                        {item.비고 && <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>{item.비고}</div>}
+                        {item.비고 && <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>{item.비고}</div>}
                       </td>
                       <td style={{ padding: '0.5rem', textAlign: 'right' }}>{fmt(item.수량)}</td>
                       <td style={{ padding: '0.5rem', textAlign: 'right' }}>₩{fmt(item.단가)}</td>
@@ -453,9 +454,9 @@ export default function EstimatePage() {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ background: '#ecfdf5' }}>
-                    <td colSpan={3} style={{ padding: '0.6rem 0.5rem', fontWeight: 700 }}>합계</td>
-                    <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>₩{fmt(result.total_amount)}</td>
+                  <tr style={{ background: '#0d2a0d' }}>
+                    <td colSpan={3} style={{ padding: '0.6rem 0.5rem', fontWeight: 700, color: '#e5e5e5' }}>합계</td>
+                    <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#39ff14' }}>₩{fmt(result.total_amount)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -463,21 +464,12 @@ export default function EstimatePage() {
           </div>
 
           {/* 하단 액션 버튼 */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-            <button
-              onClick={handlePreviewPdf}
-              style={{
-                flex: 1, minWidth: 140, padding: '0.75rem', border: '2px solid #39ff14', borderRadius: 10,
-                background: '#000', color: '#39ff14', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              PDF 미리보기
-            </button>
+          <div style={{ marginBottom: '0.75rem' }}>
             <button
               onClick={handleSaveAndDownload}
               disabled={saving}
               style={{
-                flex: 1, minWidth: 140, padding: '0.75rem', border: 'none', borderRadius: 10,
+                width: '100%', padding: '0.75rem', border: 'none', borderRadius: 10,
                 background: saving ? '#a3e635' : '#22c55e',
                 color: '#000', fontSize: '0.9rem', fontWeight: 600,
                 cursor: saving ? 'not-allowed' : 'pointer',
