@@ -795,21 +795,16 @@ async def export_estimate_pdf(body: EstimateExportPdfRequest):
                         '서비스', '포장 및 충전업', '카카오뱅크', '장지훈', '3333-02-9946468', '장지훈')
                 """)
                 con.commit()
-            company_row = con.execute("""
-                SELECT company_name, business_number, address, business_type, business_item,
-                       bank_name, account_holder, account_number, representative
-                FROM company_settings WHERE id = 1
-            """).fetchone()
-        if company_row:
-            supplier_info = {
-                "사업자번호": company_row[1] or "",
-                "상호": company_row[0] or "",
-                "소재지": company_row[2] or "",
-                "업태": company_row[3] or "",
-                "종목": company_row[4] or "",
-            }
-            representative = company_row[8] or ""
-            company_display_name = company_row[0] or ""
+        # 견적서 PDF는 스프링풀필먼트 정보 하드코딩
+        supplier_info = {
+            "사업자번호": "766-55-00323",
+            "상호": "스프링풀필먼트",
+            "소재지": "대구시 동구 안심로 188 2층, 3층",
+            "업태": "서비스",
+            "종목": "포장 및 충전업",
+        }
+        representative = "장지훈"
+        company_display_name = "스프링풀필먼트"
         else:
             supplier_info = {"사업자번호": "", "상호": "", "소재지": "", "업태": "", "종목": ""}
             representative = ""
