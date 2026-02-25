@@ -33,7 +33,7 @@ async function fetchApi<T>(
     const msg = e instanceof Error ? e.message : String(e);
     if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
       throw new Error(
-        `서버에 연결할 수 없습니다. 백엔드가 실행 중인지 확인해 주세요. (${API_BASE})`
+        `서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.`
       );
     }
     throw e;
