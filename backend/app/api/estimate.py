@@ -245,7 +245,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "",
+                    "비고": "박스입고/개별분류검수 등 방식별 상담 필요",
                 })
 
             # 5. 합포장 (출고건 대비 %, 평균 수량 기반: 건수 × (평균 수량 - 2) × 단가)
@@ -639,6 +639,61 @@ async def get_estimate_detail(estimate_id: int):
                 "items": items,
                 "created_at": row[7].strftime("%Y-%m-%d %H:%M") if hasattr(row[7], "strftime") else str(row[7] or ""),
             }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{estimate_id}")
+async def update_estimate(estimate_id: int, body: EstimateSaveRequest):
+    """견적서 수정 (업체명, 연락처, 이메일, 총액, 브랜드유형, 항목)."""
+    try:
+        with get_connection() as con:
+            existing = con.execute(
+                "SELECT id FROM estimates WHERE id = ?", (estimate_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"견적서 #{estimate_id}를 찾을 수 없습니다.")
+
+            con.execute(
+                """
+                UPDATE estimates
+                SET company_name = ?, contact = ?, email = ?, total_amount = ?, brand_type = ?, items_json = ?
+                WHERE id = ?
+                """,
+                (
+                    body.company_name or "",
+                    body.contact or "",
+                    body.email or "",
+                    body.total_amount,
+                    (body.brand_type or "fashion").strip().lower(),
+                    json.dumps([it.model_dump() for it in body.items], ensure_ascii=False),
+                    estimate_id,
+                ),
+            )
+            con.commit()
+        return {"id": estimate_id, "message": "수정되었습니다."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{estimate_id}")
+async def delete_estimate(estimate_id: int):
+    """견적서 삭제."""
+    try:
+        with get_connection() as con:
+            existing = con.execute(
+                "SELECT id FROM estimates WHERE id = ?", (estimate_id,)
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail=f"견적서 #{estimate_id}를 찾을 수 없습니다.")
+
+            con.execute("DELETE FROM estimates WHERE id = ?", (estimate_id,))
+            con.commit()
+        return {"id": estimate_id, "message": "삭제되었습니다."}
     except HTTPException:
         raise
     except Exception as e:
