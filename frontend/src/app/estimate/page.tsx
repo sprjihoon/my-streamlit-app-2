@@ -368,7 +368,7 @@ export default function EstimatePage() {
               합계 {zoneTotal}%
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
             {ZONE_LABELS.map((label) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f9fafb', borderRadius: 8, padding: '4px 8px' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 500, minWidth: 28 }}>{label}</span>
