@@ -207,17 +207,17 @@ export default function EstimatePage() {
   const zoneTotal = Object.values(zoneRatios).reduce((a, b) => a + (Number(b) || 0), 0);
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto', padding: '1rem' }}>
+    <div style={{ maxWidth: 640, margin: '0 auto', padding: '1rem', background: '#000', minHeight: '100vh' }}>
       {/* 히어로 헤더 */}
       <div style={{
-        background: 'linear-gradient(135deg, #1e3a5f 0%, #3b82f6 100%)',
+        background: 'linear-gradient(135deg, #0d4a2e 0%, #39ff14 100%)',
         borderRadius: 16, padding: '2rem 1.5rem', marginBottom: '1.25rem',
-        color: '#fff', textAlign: 'center',
+        color: '#000', textAlign: 'center',
       }}>
         <h1 style={{ fontSize: '1.35rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>
           스프링풀필먼트 견적확인하기
         </h1>
-        <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', opacity: 0.85 }}>
+        <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem', opacity: 0.75, color: '#000' }}>
           조건을 입력하면 실시간으로 물류 비용을 산출해 드립니다
         </p>
       </div>
@@ -368,9 +368,9 @@ export default function EstimatePage() {
               합계 {zoneTotal}%
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ZONE_LABELS.map((label) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f9fafb', borderRadius: 8, padding: '4px 8px' }}>
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f9fafb', borderRadius: 8, padding: '4px 8px', minWidth: 90, flex: '1 1 auto' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 500, minWidth: 28 }}>{label}</span>
                 <input
                   type="number" min={0} max={100} step={1}
