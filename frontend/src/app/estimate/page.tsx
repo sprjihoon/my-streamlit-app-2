@@ -375,7 +375,7 @@ export default function EstimatePage() {
                 <input
                   type="number" min={0} max={100}
                   style={{ width: 48, padding: '0.3rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', textAlign: 'center' }}
-                  value={zoneRatios[label] ?? 0}
+                  value={zoneRatios[label] || ''}
                   onChange={(e) => setZoneRatios((prev) => ({ ...prev, [label]: Number(e.target.value) || 0 }))}
                 />
                 <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>%</span>
