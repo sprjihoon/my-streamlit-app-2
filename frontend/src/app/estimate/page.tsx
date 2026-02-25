@@ -65,6 +65,23 @@ export default function EstimatePage() {
   async function handleCalculate() {
     setError(null);
     setSuccess(null);
+
+    // 필수 입력값 검증
+    if (!companyName.trim()) {
+      setError('업체명을 입력해 주세요.');
+      return;
+    }
+    if (!email.trim()) {
+      setError('이메일 주소를 입력해 주세요.');
+      return;
+    }
+    // 이메일 형식 검증
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('올바른 이메일 형식을 입력해 주세요.');
+      return;
+    }
+
     setLoading(true);
     try {
       const data = await calculateEstimate({
@@ -200,7 +217,7 @@ export default function EstimatePage() {
     fontSize: '0.82rem', background: '#f9fafb', transition: 'all .15s',
   };
   const chipChecked: React.CSSProperties = {
-    ...chipLabel, background: '#eff6ff', borderColor: '#3b82f6', color: '#1d4ed8',
+    ...chipLabel, background: '#ecfdf5', borderColor: '#39ff14', color: '#16a34a',
   };
   const hint: React.CSSProperties = { fontSize: '0.72rem', color: '#9ca3af', marginTop: 2 };
 
@@ -210,7 +227,7 @@ export default function EstimatePage() {
     <div style={{ maxWidth: 640, margin: '0 auto', padding: '1rem', background: '#000', minHeight: '100vh' }}>
       {/* 히어로 헤더 */}
       <div style={{
-        background: 'linear-gradient(135deg, #0d4a2e 0%, #39ff14 100%)',
+        background: '#39ff14',
         borderRadius: 16, padding: '2rem 1.5rem', marginBottom: '1.25rem',
         color: '#000', textAlign: 'center',
       }}>
@@ -230,7 +247,7 @@ export default function EstimatePage() {
         <div style={sectionTitle}>수신처 정보</div>
         <div style={gridTwo}>
           <div>
-            <label style={labelStyle}>업체명</label>
+            <label style={labelStyle}>업체명 <span style={{ color: '#ef4444' }}>*</span></label>
             <input style={inputStyle} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="업체명" />
           </div>
           <div>
@@ -239,7 +256,7 @@ export default function EstimatePage() {
           </div>
         </div>
         <div style={{ marginTop: '0.75rem' }}>
-          <label style={labelStyle}>이메일</label>
+          <label style={labelStyle}>이메일 <span style={{ color: '#ef4444' }}>*</span></label>
           <input style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" />
         </div>
       </div>
@@ -392,9 +409,9 @@ export default function EstimatePage() {
         disabled={loading}
         style={{
           width: '100%', padding: '0.85rem', border: 'none', borderRadius: 10,
-          background: loading ? '#93c5fd' : 'linear-gradient(135deg, #2563eb, #3b82f6)',
-          color: '#fff', fontSize: '1rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
-          boxShadow: '0 2px 8px rgba(59,130,246,.35)', transition: 'all .2s', marginBottom: '1rem',
+          background: loading ? '#a3e635' : '#39ff14',
+          color: '#000', fontSize: '1rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
+          boxShadow: '0 2px 8px rgba(57,255,20,.35)', transition: 'all .2s', marginBottom: '1rem',
         }}
       >
         {loading ? <Loading /> : '견적 계산하기'}
@@ -403,11 +420,11 @@ export default function EstimatePage() {
       {/* 결과 */}
       {result && (
         <>
-          <div style={{ ...sectionStyle, border: '2px solid #3b82f6' }}>
+          <div style={{ ...sectionStyle, border: '2px solid #39ff14' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div style={sectionTitle}>견적 결과</div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#1d4ed8' }}>₩{fmt(result.total_amount)}</div>
+                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#39ff14' }}>₩{fmt(result.total_amount)}</div>
                 <div style={{ fontSize: '0.72rem', color: '#6b7280' }}>월 예상 비용 (VAT 별도)</div>
               </div>
             </div>
@@ -415,16 +432,16 @@ export default function EstimatePage() {
             <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                 <thead>
-                  <tr style={{ background: '#f1f5f9' }}>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0' }}>항목</th>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0' }}>수량</th>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0' }}>단가</th>
-                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0' }}>금액</th>
+                  <tr style={{ background: '#ecfdf5' }}>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>항목</th>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>수량</th>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>단가</th>
+                    <th style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #39ff14' }}>금액</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.items.map((item, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <tr key={i} style={{ borderBottom: '1px solid #d1fae5' }}>
                       <td style={{ padding: '0.5rem' }}>
                         {item.항목}
                         {item.비고 && <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>{item.비고}</div>}
@@ -436,9 +453,9 @@ export default function EstimatePage() {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ background: '#eff6ff' }}>
+                  <tr style={{ background: '#ecfdf5' }}>
                     <td colSpan={3} style={{ padding: '0.6rem 0.5rem', fontWeight: 700 }}>합계</td>
-                    <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>₩{fmt(result.total_amount)}</td>
+                    <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>₩{fmt(result.total_amount)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -450,8 +467,8 @@ export default function EstimatePage() {
             <button
               onClick={handlePreviewPdf}
               style={{
-                flex: 1, minWidth: 140, padding: '0.75rem', border: '2px solid #3b82f6', borderRadius: 10,
-                background: '#fff', color: '#3b82f6', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
+                flex: 1, minWidth: 140, padding: '0.75rem', border: '2px solid #39ff14', borderRadius: 10,
+                background: '#000', color: '#39ff14', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
               }}
             >
               PDF 미리보기
@@ -461,10 +478,10 @@ export default function EstimatePage() {
               disabled={saving}
               style={{
                 flex: 1, minWidth: 140, padding: '0.75rem', border: 'none', borderRadius: 10,
-                background: saving ? '#93c5fd' : 'linear-gradient(135deg, #f59e0b, #f97316)',
-                color: '#fff', fontSize: '0.9rem', fontWeight: 600,
+                background: saving ? '#a3e635' : '#22c55e',
+                color: '#000', fontSize: '0.9rem', fontWeight: 600,
                 cursor: saving ? 'not-allowed' : 'pointer',
-                boxShadow: '0 2px 8px rgba(249,115,22,.3)',
+                boxShadow: '0 2px 8px rgba(34,197,94,.3)',
               }}
             >
               {saving ? '저장 중…' : '저장 및 다운로드'}
@@ -477,8 +494,8 @@ export default function EstimatePage() {
               download="스프링풀필먼트_표준가격표.pdf"
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                width: '100%', padding: '0.65rem', border: '1px solid #d1d5db', borderRadius: 10,
-                background: '#f9fafb', color: '#374151', fontSize: '0.85rem', fontWeight: 500,
+                width: '100%', padding: '0.65rem', border: '1px solid #39ff14', borderRadius: 10,
+                background: '#111', color: '#39ff14', fontSize: '0.85rem', fontWeight: 500,
                 textDecoration: 'none', cursor: 'pointer', transition: 'all .15s',
               }}
             >

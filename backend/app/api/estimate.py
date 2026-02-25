@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 
 from logic.db import get_connection
-from logic.invoice_pdf_v2 import create_billing_invoice_pdf
+from logic.estimate_pdf import create_estimate_pdf
 
 from backend.app.models import (
     EstimateCalculateRequest,
@@ -601,6 +601,50 @@ async def list_estimates(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/detail/{estimate_id}")
+async def get_estimate_detail(estimate_id: int):
+    """견적서 상세 조회 (ID로 조회, items_json 포함)."""
+    try:
+        with get_connection() as con:
+            tables = [row[0] for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='estimates'"
+            ).fetchall()]
+            if not tables:
+                raise HTTPException(status_code=404, detail="견적서 테이블이 없습니다.")
+
+            row = con.execute(
+                """
+                SELECT id, company_name, contact, email, total_amount, brand_type, items_json, created_at
+                FROM estimates WHERE id = ?
+                """,
+                (estimate_id,),
+            ).fetchone()
+
+            if not row:
+                raise HTTPException(status_code=404, detail=f"견적서 #{estimate_id}를 찾을 수 없습니다.")
+
+            items_json = row[6] or "[]"
+            try:
+                items = json.loads(items_json)
+            except json.JSONDecodeError:
+                items = []
+
+            return {
+                "id": row[0],
+                "company_name": row[1] or "",
+                "contact": row[2] or "",
+                "email": row[3] or "",
+                "total_amount": int(row[4]) if row[4] is not None else 0,
+                "brand_type": row[5] or "fashion",
+                "items": items,
+                "created_at": row[7].strftime("%Y-%m-%d %H:%M") if hasattr(row[7], "strftime") else str(row[7] or ""),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/export/pdf")
 async def export_estimate_pdf(body: EstimateExportPdfRequest):
     """
@@ -651,28 +695,20 @@ async def export_estimate_pdf(body: EstimateExportPdfRequest):
                 "업태": company_row[3] or "",
                 "종목": company_row[4] or "",
             }
-            bank_info = {
-                "은행명": company_row[5] or "",
-                "예금주": company_row[6] or "",
-                "계좌번호": company_row[7] or "",
-            }
             representative = company_row[8] or ""
             company_display_name = company_row[0] or ""
         else:
             supplier_info = {"사업자번호": "", "상호": "", "소재지": "", "업태": "", "종목": ""}
-            bank_info = {"은행명": "", "예금주": "", "계좌번호": ""}
             representative = ""
             company_display_name = ""
 
-        invoice_date = datetime.now().strftime("%Y-%m-%d")
-        doc_number = f"EST-{invoice_date.replace('-', '')}"
+        estimate_date = datetime.now().strftime("%Y-%m-%d")
         recipient_name = (body.company_name or "").strip() or "(업체명)"
         if recipient_name != "(업체명)" and not recipient_name.endswith(" 귀하"):
             recipient_name = f"{recipient_name} 귀하"
-        title = "물류대행 서비스 견적서"
-        payment_deadline = ""
+        title = "물류대행 서비스 견적"
 
-        # 저장 시 담당자: 패션=장성령, 뷰티/기타=장명찬 (하드코딩)
+        # 담당자: 패션=장성령, 뷰티/기타=장명찬
         brand_type = (getattr(body, "brand_type", None) or "fashion").strip().lower()
         manager = "장성령" if brand_type == "fashion" else "장명찬"
 
@@ -681,24 +717,21 @@ async def export_estimate_pdf(body: EstimateExportPdfRequest):
             for it in body.items
         ]
 
-        pdf_bytes = create_billing_invoice_pdf(
-            invoice_id=0,
-            invoice_date=invoice_date,
+        pdf_bytes = create_estimate_pdf(
+            estimate_date=estimate_date,
             recipient_name=recipient_name,
             title=title,
             supplier_info=supplier_info,
             items=items_for_pdf,
-            payment_deadline=payment_deadline,
-            bank_info=bank_info,
             stamp_holder=representative,
             manager=manager,
             company_name=company_display_name,
             recipient_contact=body.contact or "",
             recipient_email=body.email or "",
-            doc_title="물류대행 서비스 견적서",
+            validity_days=15,
         )
 
-        filename = f"estimate_{invoice_date}.pdf"
+        filename = f"estimate_{estimate_date}.pdf"
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
