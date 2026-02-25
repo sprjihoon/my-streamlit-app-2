@@ -284,7 +284,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "입고수량 × 500원",
+                    "비고": "",
                 })
 
             # 7. PP 봉투 (패션 + 풀필먼트 공용 포장재 사용 시): 입고수량 × 70원
@@ -368,7 +368,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "입고수량 × 150원",
+                    "비고": "",
                 })
 
             # 9-1. 바코드 부착: 입고수량 × 150원
@@ -382,7 +382,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": inbound_qty,
                     "단가": unit,
                     "금액": inbound_qty * unit,
-                    "비고": "입고수량 × 150원",
+                    "비고": "",
                 })
 
             # 9-2. 완충작업: 출고건수 × 100원
@@ -396,7 +396,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": req.monthly_outbound,
                     "단가": unit,
                     "금액": req.monthly_outbound * unit,
-                    "비고": "출고건수 × 100원",
+                    "비고": "",
                 })
 
             # 9-3. 출고영상촬영: 출고건수 × 200원
@@ -410,7 +410,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": req.monthly_outbound,
                     "단가": unit,
                     "금액": req.monthly_outbound * unit,
-                    "비고": "출고건수 × 200원",
+                    "비고": "",
                 })
 
             # 9-4. 반품영상촬영: 반품수량 × 400원
@@ -424,7 +424,7 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "수량": return_count,
                     "단가": unit,
                     "금액": return_count * unit,
-                    "비고": "반품수량 × 400원",
+                    "비고": "",
                 })
 
             # 10. 추가 작업 (청구서 항목 중 선택, 단가 API 조회)
