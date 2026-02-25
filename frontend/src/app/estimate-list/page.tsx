@@ -56,9 +56,13 @@ export default function EstimateListPage() {
   const [editContact, setEditContact] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editBrandType, setEditBrandType] = useState('fashion');
+  const [editItems, setEditItems] = useState<EstimateItem[]>([]);
 
   // 삭제 확인
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
+  // PDF 다운로드 로딩
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
     loadEstimates();
@@ -104,6 +108,7 @@ export default function EstimateListPage() {
       setEditContact(data.contact);
       setEditEmail(data.email);
       setEditBrandType(data.brand_type);
+      setEditItems(data.items.map(item => ({ ...item })));
     } catch (err) {
       setError(err instanceof Error ? err.message : '상세 로드 실패');
       setSelectedId(null);
@@ -116,11 +121,55 @@ export default function EstimateListPage() {
     setSelectedId(null);
     setDetail(null);
     setIsEditing(false);
+    setEditItems([]);
+  }
+
+  function startEditing() {
+    if (detail) {
+      setEditItems(detail.items.map(item => ({ ...item })));
+      setIsEditing(true);
+    }
+  }
+
+  function cancelEditing() {
+    if (detail) {
+      setEditItems(detail.items.map(item => ({ ...item })));
+    }
+    setIsEditing(false);
+  }
+
+  function updateEditItem(index: number, field: keyof EstimateItem, value: string | number) {
+    setEditItems(prev => {
+      const newItems = [...prev];
+      if (field === '항목' || field === '비고') {
+        newItems[index] = { ...newItems[index], [field]: value as string };
+      } else {
+        const numValue = typeof value === 'string' ? parseInt(value) || 0 : value;
+        newItems[index] = { ...newItems[index], [field]: numValue };
+        if (field === '수량' || field === '단가') {
+          newItems[index].금액 = newItems[index].수량 * newItems[index].단가;
+        }
+      }
+      return newItems;
+    });
+  }
+
+  function addEditItem() {
+    setEditItems(prev => [...prev, { 항목: '', 수량: 0, 단가: 0, 금액: 0, 비고: '' }]);
+  }
+
+  function removeEditItem(index: number) {
+    setEditItems(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function getEditTotalAmount() {
+    return editItems.reduce((sum, item) => sum + (item.금액 || 0), 0);
   }
 
   async function handleSaveEdit() {
     if (!detail) return;
     try {
+      const totalAmount = getEditTotalAmount();
       const res = await fetch(`${API_BASE}/estimate/${detail.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -129,8 +178,8 @@ export default function EstimateListPage() {
           contact: editContact,
           email: editEmail,
           brand_type: editBrandType,
-          items: detail.items,
-          total_amount: detail.total_amount,
+          items: editItems,
+          total_amount: totalAmount,
         }),
       });
       if (!res.ok) throw new Error('수정 실패');
@@ -156,6 +205,40 @@ export default function EstimateListPage() {
     }
   }
 
+  async function handleDownloadPdf() {
+    if (!detail) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/estimate/export/pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: detail.company_name,
+          contact: detail.contact,
+          email: detail.email,
+          items: detail.items,
+          total_amount: detail.total_amount,
+          brand_type: detail.brand_type,
+        }),
+      });
+      if (!res.ok) throw new Error('PDF 생성 실패');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `견적서_${detail.company_name || 'estimate'}_${detail.created_at.split(' ')[0]}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      setSuccess('PDF가 다운로드되었습니다.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PDF 다운로드 실패');
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const inputStyle: React.CSSProperties = {
@@ -165,6 +248,10 @@ export default function EstimateListPage() {
   const btnStyle: React.CSSProperties = {
     padding: '0.5rem 1rem', border: 'none', borderRadius: 8,
     fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', transition: 'all .15s',
+  };
+  const smallInputStyle: React.CSSProperties = {
+    padding: '0.35rem 0.5rem', border: '1px solid #d1d5db', borderRadius: 6,
+    fontSize: '0.8rem', outline: 'none', background: '#fff',
   };
 
   return (
@@ -384,7 +471,7 @@ export default function EstimateListPage() {
           alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
         }}>
           <div style={{
-            background: '#fff', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh',
+            background: '#fff', borderRadius: 16, maxWidth: 800, width: '100%', maxHeight: '90vh',
             overflow: 'hidden', display: 'flex', flexDirection: 'column',
             boxShadow: '0 20px 40px rgba(0,0,0,.2)',
           }}>
@@ -486,38 +573,107 @@ export default function EstimateListPage() {
 
                   {/* 견적 항목 */}
                   <div style={{ marginBottom: '1rem' }}>
-                    <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>
-                      견적 항목
-                    </h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                      <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', margin: 0 }}>
+                        견적 항목
+                      </h3>
+                      {isEditing && (
+                        <button
+                          onClick={addEditItem}
+                          style={{
+                            padding: '4px 12px', fontSize: '0.75rem', fontWeight: 600,
+                            background: '#10b981', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
+                          }}
+                        >
+                          + 항목 추가
+                        </button>
+                      )}
+                    </div>
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                         <thead>
                           <tr style={{ background: '#f1f5f9' }}>
-                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>항목</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>수량</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>단가</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>금액</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>비고</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 120 }}>항목</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 80 }}>수량</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 80 }}>단가</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>금액</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>비고</th>
+                            {isEditing && <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #e2e8f0', width: 50 }}></th>}
                           </tr>
                         </thead>
                         <tbody>
-                          {detail.items.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '0.5rem' }}>{item.항목}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right' }}>{fmt(item.수량)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right' }}>₩{fmt(item.단가)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>₩{fmt(item.금액)}</td>
-                              <td style={{ padding: '0.5rem', color: '#6b7280', fontSize: '0.78rem' }}>{item.비고 || ''}</td>
-                            </tr>
-                          ))}
+                          {isEditing ? (
+                            editItems.map((item, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '0.4rem' }}>
+                                  <input
+                                    type="text"
+                                    value={item.항목}
+                                    onChange={(e) => updateEditItem(idx, '항목', e.target.value)}
+                                    style={{ ...smallInputStyle, width: '100%' }}
+                                    placeholder="항목명"
+                                  />
+                                </td>
+                                <td style={{ padding: '0.4rem' }}>
+                                  <input
+                                    type="number"
+                                    value={item.수량}
+                                    onChange={(e) => updateEditItem(idx, '수량', e.target.value)}
+                                    style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '0.4rem' }}>
+                                  <input
+                                    type="number"
+                                    value={item.단가}
+                                    onChange={(e) => updateEditItem(idx, '단가', e.target.value)}
+                                    style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 600, color: '#1d4ed8' }}>
+                                  ₩{fmt(item.금액)}
+                                </td>
+                                <td style={{ padding: '0.4rem' }}>
+                                  <input
+                                    type="text"
+                                    value={item.비고 || ''}
+                                    onChange={(e) => updateEditItem(idx, '비고', e.target.value)}
+                                    style={{ ...smallInputStyle, width: '100%' }}
+                                    placeholder="비고"
+                                  />
+                                </td>
+                                <td style={{ padding: '0.4rem', textAlign: 'center' }}>
+                                  <button
+                                    onClick={() => removeEditItem(idx)}
+                                    style={{
+                                      padding: '2px 8px', fontSize: '0.7rem', fontWeight: 600,
+                                      background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 4, cursor: 'pointer',
+                                    }}
+                                  >
+                                    삭제
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            detail.items.map((item, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '0.5rem' }}>{item.항목}</td>
+                                <td style={{ padding: '0.5rem', textAlign: 'right' }}>{fmt(item.수량)}</td>
+                                <td style={{ padding: '0.5rem', textAlign: 'right' }}>₩{fmt(item.단가)}</td>
+                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>₩{fmt(item.금액)}</td>
+                                <td style={{ padding: '0.5rem', color: '#6b7280', fontSize: '0.78rem' }}>{item.비고 || ''}</td>
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                         <tfoot>
                           <tr style={{ background: '#f8fafc' }}>
                             <td colSpan={3} style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700 }}>합계</td>
                             <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>
-                              ₩{fmt(detail.total_amount)}
+                              ₩{fmt(isEditing ? getEditTotalAmount() : detail.total_amount)}
                             </td>
-                            <td></td>
+                            <td colSpan={isEditing ? 2 : 1}></td>
                           </tr>
                         </tfoot>
                       </table>
@@ -535,51 +691,68 @@ export default function EstimateListPage() {
             {detail && (
               <div style={{
                 padding: '1rem 1.25rem', borderTop: '1px solid #e2e8f0',
-                display: 'flex', gap: 8, justifyContent: 'flex-end',
+                display: 'flex', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap',
               }}>
-                {isEditing ? (
-                  <>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {!isEditing && (
                     <button
-                      onClick={() => setIsEditing(false)}
+                      onClick={handleDownloadPdf}
+                      disabled={pdfLoading}
                       style={{
-                        padding: '0.6rem 1.25rem', border: '1px solid #d1d5db', borderRadius: 8,
-                        background: '#fff', color: '#374151', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                        padding: '0.6rem 1.25rem', border: '2px solid #3b82f6', borderRadius: 8,
+                        background: '#fff', color: '#3b82f6', fontSize: '0.85rem', fontWeight: 600,
+                        cursor: pdfLoading ? 'not-allowed' : 'pointer', opacity: pdfLoading ? 0.6 : 1,
                       }}
                     >
-                      취소
+                      {pdfLoading ? 'PDF 생성 중...' : 'PDF 다운로드'}
                     </button>
-                    <button
-                      onClick={handleSaveEdit}
-                      style={{
-                        padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
-                        background: '#10b981', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                      }}
-                    >
-                      저장
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setDeleteConfirmId(detail.id)}
-                      style={{
-                        padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
-                        background: '#ef4444', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                      }}
-                    >
-                      삭제
-                    </button>
-                    <button
-                      onClick={() => setIsEditing(true)}
-                      style={{
-                        padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
-                        background: '#f59e0b', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                      }}
-                    >
-                      수정
-                    </button>
-                  </>
-                )}
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {isEditing ? (
+                    <>
+                      <button
+                        onClick={cancelEditing}
+                        style={{
+                          padding: '0.6rem 1.25rem', border: '1px solid #d1d5db', borderRadius: 8,
+                          background: '#fff', color: '#374151', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={handleSaveEdit}
+                        style={{
+                          padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
+                          background: '#10b981', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        저장
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setDeleteConfirmId(detail.id)}
+                        style={{
+                          padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
+                          background: '#ef4444', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        삭제
+                      </button>
+                      <button
+                        onClick={startEditing}
+                        style={{
+                          padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
+                          background: '#f59e0b', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        수정
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
