@@ -250,7 +250,7 @@ export default function EstimatePage() {
         <div style={gridTwo}>
           <div>
             <label style={labelStyle}>택배 요금제</label>
-            <div style={{ ...inputStyle, background: '#f3f4f6', color: '#6b7280' }}>표준</div>
+            <div style={{ ...inputStyle, background: '#f3f4f6', color: '#6b7280' }}>표준(우체국택배)</div>
           </div>
           <div>
             <label style={labelStyle}>브랜드유형</label>
@@ -262,16 +262,16 @@ export default function EstimatePage() {
           </div>
           <div>
             <label style={labelStyle}>월 출고건수</label>
-            <input style={inputStyle} type="number" min={0} value={monthlyOutbound} onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)} />
+            <input style={inputStyle} type="number" min={0} value={monthlyOutbound || ''} onChange={(e) => setMonthlyOutbound(Number(e.target.value) || 0)} />
           </div>
           <div>
             <label style={labelStyle}>반품 비율 (%)</label>
-            <input style={inputStyle} type="number" min={0} max={100} value={returnPercentage} onChange={(e) => setReturnPercentage(Number(e.target.value) || 0)} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} max={100} value={returnPercentage || ''} onChange={(e) => setReturnPercentage(Number(e.target.value) || 0)} placeholder="0" />
             <div style={hint}>전체 출고건 대비 %</div>
           </div>
           <div>
             <label style={labelStyle}>합포장 비율 (%)</label>
-            <input style={inputStyle} type="number" min={0} max={100} value={combinedPercentage} onChange={(e) => setCombinedPercentage(Number(e.target.value) || 0)} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} max={100} value={combinedPercentage || ''} onChange={(e) => setCombinedPercentage(Number(e.target.value) || 0)} placeholder="0" />
             <div style={hint}>출고건 대비 %</div>
           </div>
           <div>
@@ -281,7 +281,7 @@ export default function EstimatePage() {
           </div>
           <div>
             <label style={labelStyle}>입고수량</label>
-            <input style={inputStyle} type="number" min={0} value={inboundQty} onChange={(e) => setInboundQty(Number(e.target.value) || 0)} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} value={inboundQty || ''} onChange={(e) => setInboundQty(Number(e.target.value) || 0)} placeholder="0" />
           </div>
           <div>
             <label style={labelStyle}>보관량 (PLT)</label>
@@ -373,10 +373,11 @@ export default function EstimatePage() {
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f9fafb', borderRadius: 8, padding: '4px 8px' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 500, minWidth: 28 }}>{label}</span>
                 <input
-                  type="number" min={0} max={100}
+                  type="number" min={0} max={100} step={1}
                   style={{ width: 48, padding: '0.3rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', textAlign: 'center' }}
                   value={zoneRatios[label] || ''}
-                  onChange={(e) => setZoneRatios((prev) => ({ ...prev, [label]: Number(e.target.value) || 0 }))}
+                  onChange={(e) => setZoneRatios((prev) => ({ ...prev, [label]: Math.ceil(Number(e.target.value)) || 0 }))}
+                  onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }}
                 />
                 <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>%</span>
               </div>
