@@ -37,6 +37,9 @@ export default function EstimatePage() {
   const [needVoidWork, setNeedVoidWork] = useState(false);
   const [needVideoOut, setNeedVideoOut] = useState(false);
   const [needVideoRet, setNeedVideoRet] = useState(false);
+  const [needStickerAttach, setNeedStickerAttach] = useState(false);
+  const [needLeafletInsert, setNeedLeafletInsert] = useState(false);
+  const [needB2bDocument, setNeedB2bDocument] = useState(false);
   const [storagePlt, setStoragePlt] = useState(0);
   const [skuCount, setSkuCount] = useState(0);
 
@@ -150,6 +153,9 @@ export default function EstimatePage() {
         need_void_work: needVoidWork,
         need_video_out: needVideoOut,
         need_video_ret: needVideoRet,
+        need_sticker_attach: needStickerAttach,
+        need_leaflet_insert: needLeafletInsert,
+        need_b2b_document: needB2bDocument,
         storage_plt: storagePlt || undefined,
         sku_count: skuCount || undefined,
       });
@@ -328,7 +334,7 @@ export default function EstimatePage() {
           </div>
           <div>
             <label style={labelStyle}>반품 비율 (%)</label>
-            <input style={inputStyle} type="number" min={0} max={100} step={1} value={returnPercentage || ''} onChange={(e) => setReturnPercentage(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} max={100} step={1} value={returnPercentage || ''} onChange={(e) => setReturnPercentage(Math.min(100, Math.ceil(Number(e.target.value)) || 0))} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>전체 출고건 대비 %</div>
           </div>
           <div>
@@ -418,6 +424,18 @@ export default function EstimatePage() {
             <label style={needVideoRet ? chipChecked : chipLabel}>
               <input type="checkbox" checked={needVideoRet} onChange={(e) => setNeedVideoRet(e.target.checked)} style={{ display: 'none' }} />
               반품영상촬영
+            </label>
+            <label style={needStickerAttach ? chipChecked : chipLabel}>
+              <input type="checkbox" checked={needStickerAttach} onChange={(e) => setNeedStickerAttach(e.target.checked)} style={{ display: 'none' }} />
+              스티커 부착
+            </label>
+            <label style={needLeafletInsert ? chipChecked : chipLabel}>
+              <input type="checkbox" checked={needLeafletInsert} onChange={(e) => setNeedLeafletInsert(e.target.checked)} style={{ display: 'none' }} />
+              리플릿 동봉
+            </label>
+            <label style={needB2bDocument ? chipChecked : chipLabel}>
+              <input type="checkbox" checked={needB2bDocument} onChange={(e) => setNeedB2bDocument(e.target.checked)} style={{ display: 'none' }} />
+              B2B동봉서류부착
             </label>
           </div>
         </div>

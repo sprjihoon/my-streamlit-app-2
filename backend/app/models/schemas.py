@@ -206,6 +206,12 @@ class EstimateCalculateRequest(BaseModel):
     need_video_out: Optional[bool] = Field(default=False, description="출고영상촬영 필요")
     # 반품영상촬영 (반품건 × 단가)
     need_video_ret: Optional[bool] = Field(default=False, description="반품영상촬영 필요")
+    # 스티커 부착 (출고건 × 100원)
+    need_sticker_attach: Optional[bool] = Field(default=False, description="스티커 부착 필요")
+    # 리플릿 동봉 (출고건 × 100원)
+    need_leaflet_insert: Optional[bool] = Field(default=False, description="리플릿 동봉 필요")
+    # B2B동봉서류부착 (출고건 × 1000원)
+    need_b2b_document: Optional[bool] = Field(default=False, description="B2B동봉서류부착 필요")
     # 보관: PLT 기준 보관량, SKU 수. 1 PLT당 SKU > 2이면 중량랙 적용
     storage_plt: Optional[int] = Field(default=None, ge=0, description="보관량 (PLT 기준)")
     sku_count: Optional[int] = Field(default=None, ge=0, description="SKU 수")

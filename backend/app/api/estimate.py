@@ -427,6 +427,42 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
                     "비고": "",
                 })
 
+            # 9-5. 스티커 부착: 출고건수 × 100원
+            need_sticker = getattr(req, "need_sticker_attach", False)
+            if need_sticker and req.monthly_outbound > 0:
+                unit = 100
+                items.append({
+                    "항목": "스티커 부착",
+                    "수량": req.monthly_outbound,
+                    "단가": unit,
+                    "금액": req.monthly_outbound * unit,
+                    "비고": "",
+                })
+
+            # 9-6. 리플릿 동봉: 출고건수 × 100원
+            need_leaflet = getattr(req, "need_leaflet_insert", False)
+            if need_leaflet and req.monthly_outbound > 0:
+                unit = 100
+                items.append({
+                    "항목": "리플릿 동봉",
+                    "수량": req.monthly_outbound,
+                    "단가": unit,
+                    "금액": req.monthly_outbound * unit,
+                    "비고": "",
+                })
+
+            # 9-7. B2B동봉서류부착: 출고건수 × 1000원
+            need_b2b = getattr(req, "need_b2b_document", False)
+            if need_b2b and req.monthly_outbound > 0:
+                unit = 1000
+                items.append({
+                    "항목": "B2B동봉서류부착",
+                    "수량": req.monthly_outbound,
+                    "단가": unit,
+                    "금액": req.monthly_outbound * unit,
+                    "비고": "",
+                })
+
             # 10. 추가 작업 (청구서 항목 중 선택, 단가 API 조회)
             extra_entries = getattr(req, "extra_work_entries", None) or []
             for ent in extra_entries:
