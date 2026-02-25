@@ -64,26 +64,39 @@ export default function EstimatePage() {
 
   function handleZoneRatioChange(changedLabel: string, newValue: number) {
     setZoneRatios((prev) => {
-      const updated = { ...prev, [changedLabel]: Math.max(0, Math.ceil(newValue)) };
-      const total = Object.values(updated).reduce((a, b) => a + (Number(b) || 0), 0);
+      const oldValue = prev[changedLabel] || 0;
+      const clampedValue = Math.max(0, Math.min(100, Math.ceil(newValue)));
+      const diff = clampedValue - oldValue; // 양수면 증가, 음수면 감소
       
-      if (total <= 100) {
-        return updated;
-      }
+      if (diff === 0) return prev;
       
-      const excess = total - 100;
-      const otherLabels = ZONE_LABELS.filter(l => l !== changedLabel);
+      const updated = { ...prev, [changedLabel]: clampedValue };
       
-      const sortedOthers = otherLabels
-        .map(l => ({ label: l, value: updated[l] || 0 }))
-        .sort((a, b) => a.value - b.value);
+      // 다른 구간들 중 값이 있는 것들만 (내림차순 정렬)
+      const otherLabels = ZONE_LABELS
+        .filter(l => l !== changedLabel)
+        .sort((a, b) => (updated[b] || 0) - (updated[a] || 0));
       
-      let remaining = excess;
-      for (const item of sortedOthers) {
+      // 조정할 차이 (증가했으면 다른 곳에서 빼야 하고, 감소했으면 다른 곳에 더해야 함)
+      let remaining = Math.abs(diff);
+      
+      for (const label of otherLabels) {
         if (remaining <= 0) break;
-        const deduction = Math.min(item.value, remaining);
-        updated[item.label] = item.value - deduction;
-        remaining -= deduction;
+        
+        const currentValue = updated[label] || 0;
+        
+        if (diff > 0) {
+          // 현재 구간이 증가 → 다른 구간에서 빼기
+          const deduction = Math.min(currentValue, remaining);
+          updated[label] = currentValue - deduction;
+          remaining -= deduction;
+        } else {
+          // 현재 구간이 감소 → 다른 구간에 더하기 (최대 100까지)
+          const maxAdd = 100 - currentValue;
+          const addition = Math.min(maxAdd, remaining);
+          updated[label] = currentValue + addition;
+          remaining -= addition;
+        }
       }
       
       return updated;
@@ -268,7 +281,6 @@ export default function EstimatePage() {
         </p>
       </div>
 
-      {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
       {/* 수신처 */}
@@ -439,6 +451,17 @@ export default function EstimatePage() {
           </div>
         </div>
       </div>
+
+      {/* 필수 입력 에러 메시지 */}
+      {error && (
+        <div style={{
+          padding: '0.75rem 1rem', marginBottom: '0.75rem', borderRadius: 8,
+          background: '#2d1f1f', border: '1px solid #ef4444', color: '#fca5a5',
+          fontSize: '0.85rem', textAlign: 'center',
+        }}>
+          {error}
+        </div>
+      )}
 
       {/* 견적 계산 버튼 */}
       <button
