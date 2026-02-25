@@ -180,7 +180,7 @@ export default function RootLayout({
           <title>{isPublicPage ? '견적서 만들기' : '로그인'} - 청구서 관리 시스템</title>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
-        <body>{children}</body>
+        <body style={isPublicPage ? { background: '#000', minHeight: '100vh' } : undefined}>{children}</body>
       </html>
     );
   }
