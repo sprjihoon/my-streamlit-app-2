@@ -6,7 +6,7 @@ import { Alert } from '@/components/Alert';
 import { calculateEstimate, exportEstimatePdf, type EstimateItem } from '@/lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const ZONE_LABELS = ['극소', '소', '중', '대', '특대', '특특대'];
+const ZONE_LABELS = ['극소', '소', '중', '대'];
 const BRAND_LABEL: Record<string, string> = { fashion: '패션', beauty: '뷰티', etc: '기타' };
 
 function fmt(n: number) {
@@ -21,7 +21,7 @@ export default function EstimatePage() {
   const [monthlyOutbound, setMonthlyOutbound] = useState(1000);
   const rateType = '표준';
   const [zoneRatios, setZoneRatios] = useState<Record<string, number>>({
-    극소: 70, 소: 20, 중: 7, 대: 1, 특대: 1, 특특대: 1,
+    극소: 70, 소: 20, 중: 7, 대: 3,
   });
   const [returnPercentage, setReturnPercentage] = useState(0);
   const [inboundQty, setInboundQty] = useState(0);
