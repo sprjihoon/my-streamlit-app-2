@@ -36,7 +36,26 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: '/:path*',
+        // 견적서 페이지는 iframe 허용 (워드프레스 등 외부 삽입용)
+        source: '/estimate',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'ALLOWALL',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'origin-when-cross-origin',
+          },
+        ],
+      },
+      {
+        // 그 외 페이지는 iframe 차단
+        source: '/((?!estimate).*)',
         headers: [
           {
             key: 'X-Frame-Options',

@@ -60,9 +60,10 @@ export default function RootLayout({
 
   // 로그인 페이지는 레이아웃 적용 안함
   const isLoginPage = pathname === '/login';
+  const isPublicPage = pathname === '/estimate';
 
   useEffect(() => {
-    if (isLoginPage) {
+    if (isLoginPage || isPublicPage) {
       setLoading(false);
       return;
     }
@@ -171,12 +172,12 @@ export default function RootLayout({
     }
   }
 
-  // 로그인 페이지
-  if (isLoginPage) {
+  // 로그인 페이지 또는 공개 페이지 (사이드바 없이)
+  if (isLoginPage || isPublicPage) {
     return (
       <html lang="ko">
         <head>
-          <title>로그인 - 청구서 관리 시스템</title>
+          <title>{isPublicPage ? '견적서 만들기' : '로그인'} - 청구서 관리 시스템</title>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
         <body>{children}</body>
