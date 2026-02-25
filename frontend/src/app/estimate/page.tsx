@@ -62,6 +62,34 @@ export default function EstimatePage() {
     return out;
   }
 
+  function handleZoneRatioChange(changedLabel: string, newValue: number) {
+    setZoneRatios((prev) => {
+      const updated = { ...prev, [changedLabel]: Math.max(0, Math.ceil(newValue)) };
+      const total = Object.values(updated).reduce((a, b) => a + (Number(b) || 0), 0);
+      
+      if (total <= 100) {
+        return updated;
+      }
+      
+      const excess = total - 100;
+      const otherLabels = ZONE_LABELS.filter(l => l !== changedLabel);
+      
+      const sortedOthers = otherLabels
+        .map(l => ({ label: l, value: updated[l] || 0 }))
+        .sort((a, b) => a.value - b.value);
+      
+      let remaining = excess;
+      for (const item of sortedOthers) {
+        if (remaining <= 0) break;
+        const deduction = Math.min(item.value, remaining);
+        updated[item.label] = item.value - deduction;
+        remaining -= deduction;
+      }
+      
+      return updated;
+    });
+  }
+
   async function handleCalculate() {
     setError(null);
     setSuccess(null);
@@ -394,7 +422,7 @@ export default function EstimatePage() {
                   type="number" min={0} max={100} step={1}
                   style={{ width: 48, padding: '0.3rem', border: '1px solid #333', borderRadius: 6, fontSize: '0.82rem', textAlign: 'center', background: '#222', color: '#e5e5e5' }}
                   value={zoneRatios[label] || ''}
-                  onChange={(e) => setZoneRatios((prev) => ({ ...prev, [label]: Math.ceil(Number(e.target.value)) || 0 }))}
+                  onChange={(e) => handleZoneRatioChange(label, Number(e.target.value) || 0)}
                   onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }}
                 />
                 <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>%</span>
