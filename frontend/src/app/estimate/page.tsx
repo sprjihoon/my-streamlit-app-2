@@ -64,34 +64,38 @@ export default function EstimatePage() {
 
   function handleZoneRatioChange(changedLabel: string, newValue: number) {
     setZoneRatios((prev) => {
-      const oldValue = prev[changedLabel] || 0;
       const clampedValue = Math.max(0, Math.min(100, Math.ceil(newValue)));
-      const diff = clampedValue - oldValue; // 양수면 증가, 음수면 감소
       
-      if (diff === 0) return prev;
-      
+      // 변경된 값 먼저 설정
       const updated = { ...prev, [changedLabel]: clampedValue };
       
-      // 다른 구간들 중 값이 있는 것들만 (내림차순 정렬)
-      const otherLabels = ZONE_LABELS
-        .filter(l => l !== changedLabel)
-        .sort((a, b) => (updated[b] || 0) - (updated[a] || 0));
+      // 다른 구간들의 현재 합계
+      const otherLabels = ZONE_LABELS.filter(l => l !== changedLabel);
+      const otherSum = otherLabels.reduce((sum, l) => sum + (updated[l] || 0), 0);
       
-      // 조정할 차이 (증가했으면 다른 곳에서 빼야 하고, 감소했으면 다른 곳에 더해야 함)
+      // 목표: 전체 합계가 100이 되어야 함
+      const targetOtherSum = 100 - clampedValue;
+      const diff = targetOtherSum - otherSum; // 양수면 다른 곳에 더해야 함, 음수면 빼야 함
+      
+      if (diff === 0) return updated;
+      
+      // 다른 구간들을 값 기준 내림차순 정렬 (가장 큰 값부터 조정)
+      const sortedOtherLabels = [...otherLabels].sort((a, b) => (updated[b] || 0) - (updated[a] || 0));
+      
       let remaining = Math.abs(diff);
       
-      for (const label of otherLabels) {
+      for (const label of sortedOtherLabels) {
         if (remaining <= 0) break;
         
         const currentValue = updated[label] || 0;
         
-        if (diff > 0) {
-          // 현재 구간이 증가 → 다른 구간에서 빼기
+        if (diff < 0) {
+          // 다른 구간에서 빼야 함
           const deduction = Math.min(currentValue, remaining);
           updated[label] = currentValue - deduction;
           remaining -= deduction;
         } else {
-          // 현재 구간이 감소 → 다른 구간에 더하기 (최대 100까지)
+          // 다른 구간에 더해야 함 (최대 100까지)
           const maxAdd = 100 - currentValue;
           const addition = Math.min(maxAdd, remaining);
           updated[label] = currentValue + addition;
