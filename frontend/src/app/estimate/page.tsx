@@ -139,7 +139,7 @@ export default function EstimatePage() {
         return_percentage: returnPercentage,
         inbound_qty: Number(inboundQty) || 0,
         combined_percentage: combinedPercentage,
-        combined_avg_qty: combinedAvgQty === '' ? undefined : Number(combinedAvgQty),
+        combined_avg_qty: combinedAvgQty || undefined,
         brand_type: brandType,
         need_quality_work: brandType === 'fashion' ? needQualityWork : false,
         pp_bag_provider: ppBagProvider,
@@ -150,8 +150,8 @@ export default function EstimatePage() {
         need_void_work: needVoidWork,
         need_video_out: needVideoOut,
         need_video_ret: needVideoRet,
-        storage_plt: storagePlt === '' ? undefined : Number(storagePlt),
-        sku_count: skuCount === '' ? undefined : Number(skuCount),
+        storage_plt: storagePlt || undefined,
+        sku_count: skuCount || undefined,
       });
       setResult({
         items: data.items,
