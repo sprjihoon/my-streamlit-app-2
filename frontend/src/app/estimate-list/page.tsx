@@ -18,6 +18,18 @@ interface EstimateRow {
   created_at: string;
 }
 
+interface EstimateItem {
+  항목: string;
+  수량: number;
+  단가: number;
+  금액: number;
+  비고?: string;
+}
+
+interface EstimateDetail extends EstimateRow {
+  items: EstimateItem[];
+}
+
 function fmt(n: number) {
   return n.toLocaleString('ko-KR');
 }
@@ -31,6 +43,22 @@ export default function EstimateListPage() {
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // 상세/수정 모달
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<EstimateDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+
+  // 수정 폼 상태
+  const [editCompanyName, setEditCompanyName] = useState('');
+  const [editContact, setEditContact] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editBrandType, setEditBrandType] = useState('fashion');
+
+  // 삭제 확인
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   useEffect(() => {
     loadEstimates();
@@ -63,9 +91,73 @@ export default function EstimateListPage() {
     loadEstimates();
   }
 
+  async function loadDetail(id: number) {
+    setSelectedId(id);
+    setDetailLoading(true);
+    setIsEditing(false);
+    try {
+      const res = await fetch(`${API_BASE}/estimate/detail/${id}`);
+      if (!res.ok) throw new Error('상세 로드 실패');
+      const data: EstimateDetail = await res.json();
+      setDetail(data);
+      setEditCompanyName(data.company_name);
+      setEditContact(data.contact);
+      setEditEmail(data.email);
+      setEditBrandType(data.brand_type);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '상세 로드 실패');
+      setSelectedId(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function closeModal() {
+    setSelectedId(null);
+    setDetail(null);
+    setIsEditing(false);
+  }
+
+  async function handleSaveEdit() {
+    if (!detail) return;
+    try {
+      const res = await fetch(`${API_BASE}/estimate/${detail.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: editCompanyName,
+          contact: editContact,
+          email: editEmail,
+          brand_type: editBrandType,
+          items: detail.items,
+          total_amount: detail.total_amount,
+        }),
+      });
+      if (!res.ok) throw new Error('수정 실패');
+      setSuccess('견적서가 수정되었습니다.');
+      setIsEditing(false);
+      loadEstimates();
+      loadDetail(detail.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '수정 실패');
+    }
+  }
+
+  async function handleDelete(id: number) {
+    try {
+      const res = await fetch(`${API_BASE}/estimate/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('삭제 실패');
+      setSuccess('견적서가 삭제되었습니다.');
+      setDeleteConfirmId(null);
+      closeModal();
+      loadEstimates();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '삭제 실패');
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  /* ─── 스타일 ─── */
   const inputStyle: React.CSSProperties = {
     padding: '0.5rem 0.65rem', border: '1px solid #d1d5db', borderRadius: 8,
     fontSize: '0.85rem', outline: 'none', background: '#fff',
@@ -76,12 +168,13 @@ export default function EstimateListPage() {
   };
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '1rem' }}>
+    <div style={{ maxWidth: 1000, margin: '0 auto', padding: '1rem' }}>
       <h1 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', color: '#1f2937' }}>
         견적서 목록
       </h1>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
       {/* 필터 바 */}
       <div style={{
@@ -136,6 +229,7 @@ export default function EstimateListPage() {
                   <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>연락처</th>
                   <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>유형</th>
                   <th style={{ padding: '0.7rem 0.6rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>총액</th>
+                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -155,6 +249,28 @@ export default function EstimateListPage() {
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 600 }}>₩{fmt(row.total_amount)}</td>
+                    <td style={{ padding: '0.6rem', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                        <button
+                          onClick={() => loadDetail(row.id)}
+                          style={{
+                            padding: '4px 10px', fontSize: '0.75rem', fontWeight: 500,
+                            background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
+                          }}
+                        >
+                          상세
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmId(row.id)}
+                          style={{
+                            padding: '4px 10px', fontSize: '0.75rem', fontWeight: 500,
+                            background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
+                          }}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -216,6 +332,256 @@ export default function EstimateListPage() {
                 다음
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 삭제 확인 모달 */}
+      {deleteConfirmId !== null && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, padding: '1.5rem', maxWidth: 360, width: '100%',
+            boxShadow: '0 20px 40px rgba(0,0,0,.2)',
+          }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1rem', color: '#1f2937' }}>
+              삭제 확인
+            </h3>
+            <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '1.5rem' }}>
+              견적서 #{deleteConfirmId}를 삭제하시겠습니까?<br />
+              이 작업은 되돌릴 수 없습니다.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                style={{
+                  flex: 1, padding: '0.65rem', border: '1px solid #d1d5db', borderRadius: 8,
+                  background: '#fff', color: '#374151', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirmId)}
+                style={{
+                  flex: 1, padding: '0.65rem', border: 'none', borderRadius: 8,
+                  background: '#ef4444', color: '#fff', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 상세/수정 모달 */}
+      {selectedId !== null && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, maxWidth: 700, width: '100%', maxHeight: '90vh',
+            overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 20px 40px rgba(0,0,0,.2)',
+          }}>
+            {/* 헤더 */}
+            <div style={{
+              padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+            }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
+                견적서 #{selectedId} {isEditing ? '수정' : '상세'}
+              </h2>
+              <button
+                onClick={closeModal}
+                style={{
+                  background: 'rgba(255,255,255,.2)', border: 'none', borderRadius: 8,
+                  padding: '6px 12px', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                닫기
+              </button>
+            </div>
+
+            {/* 본문 */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem' }}>
+              {detailLoading ? (
+                <div style={{ padding: '3rem', textAlign: 'center' }}><Loading /></div>
+              ) : detail ? (
+                <>
+                  {/* 기본 정보 */}
+                  <div style={{
+                    background: '#f8fafc', borderRadius: 12, padding: '1rem', marginBottom: '1rem',
+                  }}>
+                    <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>
+                      기본 정보
+                    </h3>
+                    {isEditing ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>업체명</label>
+                          <input
+                            type="text"
+                            value={editCompanyName}
+                            onChange={(e) => setEditCompanyName(e.target.value)}
+                            style={{ ...inputStyle, width: '100%' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>연락처</label>
+                          <input
+                            type="text"
+                            value={editContact}
+                            onChange={(e) => setEditContact(e.target.value)}
+                            style={{ ...inputStyle, width: '100%' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>이메일</label>
+                          <input
+                            type="email"
+                            value={editEmail}
+                            onChange={(e) => setEditEmail(e.target.value)}
+                            style={{ ...inputStyle, width: '100%' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>브랜드 유형</label>
+                          <select
+                            value={editBrandType}
+                            onChange={(e) => setEditBrandType(e.target.value)}
+                            style={{ ...inputStyle, width: '100%', appearance: 'auto' as const }}
+                          >
+                            <option value="fashion">패션</option>
+                            <option value="beauty">뷰티</option>
+                            <option value="etc">기타</option>
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
+                        <div><span style={{ color: '#6b7280' }}>업체명:</span> <strong>{detail.company_name || '-'}</strong></div>
+                        <div><span style={{ color: '#6b7280' }}>연락처:</span> <strong>{detail.contact || '-'}</strong></div>
+                        <div><span style={{ color: '#6b7280' }}>이메일:</span> <strong>{detail.email || '-'}</strong></div>
+                        <div>
+                          <span style={{ color: '#6b7280' }}>유형:</span>{' '}
+                          <span style={{
+                            display: 'inline-block', padding: '2px 10px', borderRadius: 12,
+                            fontSize: '0.75rem', fontWeight: 600,
+                            background: detail.brand_type === 'fashion' ? '#dbeafe' : detail.brand_type === 'beauty' ? '#fce7f3' : '#f3f4f6',
+                            color: detail.brand_type === 'fashion' ? '#1d4ed8' : detail.brand_type === 'beauty' ? '#be185d' : '#374151',
+                          }}>
+                            {BRAND_LABEL[detail.brand_type] || detail.brand_type}
+                          </span>
+                        </div>
+                        <div><span style={{ color: '#6b7280' }}>생성일:</span> <strong>{detail.created_at}</strong></div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 견적 항목 */}
+                  <div style={{ marginBottom: '1rem' }}>
+                    <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>
+                      견적 항목
+                    </h3>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9' }}>
+                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>항목</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>수량</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>단가</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>금액</th>
+                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0' }}>비고</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.items.map((item, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '0.5rem' }}>{item.항목}</td>
+                              <td style={{ padding: '0.5rem', textAlign: 'right' }}>{fmt(item.수량)}</td>
+                              <td style={{ padding: '0.5rem', textAlign: 'right' }}>₩{fmt(item.단가)}</td>
+                              <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>₩{fmt(item.금액)}</td>
+                              <td style={{ padding: '0.5rem', color: '#6b7280', fontSize: '0.78rem' }}>{item.비고 || ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: '#f8fafc' }}>
+                            <td colSpan={3} style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700 }}>합계</td>
+                            <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>
+                              ₩{fmt(detail.total_amount)}
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#9ca3af', padding: '2rem' }}>
+                  데이터를 불러올 수 없습니다.
+                </div>
+              )}
+            </div>
+
+            {/* 푸터 버튼 */}
+            {detail && (
+              <div style={{
+                padding: '1rem 1.25rem', borderTop: '1px solid #e2e8f0',
+                display: 'flex', gap: 8, justifyContent: 'flex-end',
+              }}>
+                {isEditing ? (
+                  <>
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      style={{
+                        padding: '0.6rem 1.25rem', border: '1px solid #d1d5db', borderRadius: 8,
+                        background: '#fff', color: '#374151', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={handleSaveEdit}
+                      style={{
+                        padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
+                        background: '#10b981', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      저장
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setDeleteConfirmId(detail.id)}
+                      style={{
+                        padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
+                        background: '#ef4444', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      삭제
+                    </button>
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      style={{
+                        padding: '0.6rem 1.25rem', border: 'none', borderRadius: 8,
+                        background: '#f59e0b', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      수정
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
