@@ -1,5 +1,5 @@
 'use client';
-
+/* v2 - type fix */
 import { useState } from 'react';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
