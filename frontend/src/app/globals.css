@@ -385,3 +385,23 @@ tr:hover {
   }
 }
 
+/* 견적 페이지 다크 테마 - number input 스피너 */
+.estimate-dark input[type="number"]::-webkit-inner-spin-button,
+.estimate-dark input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #333;
+  border-left: 1px solid #444;
+  opacity: 1;
+  cursor: pointer;
+}
+
+.estimate-dark input[type="number"] {
+  -moz-appearance: textfield;
+  color-scheme: dark;
+}
+
+.estimate-dark select {
+  color-scheme: dark;
+}
+

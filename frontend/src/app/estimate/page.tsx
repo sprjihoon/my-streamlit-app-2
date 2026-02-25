@@ -225,7 +225,7 @@ export default function EstimatePage() {
   const zoneTotal = Object.values(zoneRatios).reduce((a, b) => a + (Number(b) || 0), 0);
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto', padding: '1rem', background: '#000', minHeight: '100vh' }}>
+    <div className="estimate-dark" style={{ maxWidth: 640, margin: '0 auto', padding: '1rem', background: '#000', minHeight: '100vh' }}>
       {/* 히어로 헤더 */}
       <div style={{
         background: '#39ff14',
