@@ -520,11 +520,14 @@ async def calculate_estimate(req: EstimateCalculateRequest) -> EstimateCalculate
 async def save_estimate(body: EstimateSaveRequest):
     """견적서를 DB에 저장 (목록 관리용)."""
     try:
+        from zoneinfo import ZoneInfo
+        kst_now = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S")
+        
         with get_connection() as con:
             con.execute(
                 """
-                INSERT INTO estimates (company_name, contact, email, total_amount, brand_type, items_json)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO estimates (company_name, contact, email, total_amount, brand_type, items_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     body.company_name or "",
@@ -533,6 +536,7 @@ async def save_estimate(body: EstimateSaveRequest):
                     body.total_amount,
                     (body.brand_type or "fashion").strip().lower(),
                     json.dumps([it.model_dump() for it in body.items], ensure_ascii=False),
+                    kst_now,
                 ),
             )
             con.commit()

@@ -367,7 +367,25 @@ def ensure_tables() -> None:
 # 5. 날짜/시간 유틸
 # ─────────────────────────────────────
 def now_str(fmt: str = DATE_FMT) -> str:
-    return dt.datetime.now().strftime(fmt)
+    """한국 시간(KST) 기준 현재 시각 문자열 반환."""
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.datetime.now(ZoneInfo("Asia/Seoul")).strftime(fmt)
+    except ImportError:
+        import pytz
+        kst = pytz.timezone("Asia/Seoul")
+        return dt.datetime.now(kst).strftime(fmt)
+
+
+def now_kst() -> dt.datetime:
+    """한국 시간(KST) 기준 현재 datetime 객체 반환."""
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.datetime.now(ZoneInfo("Asia/Seoul"))
+    except ImportError:
+        import pytz
+        kst = pytz.timezone("Asia/Seoul")
+        return dt.datetime.now(kst)
 
 
 # ─────────────────────────────────────
