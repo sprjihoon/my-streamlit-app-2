@@ -333,7 +333,7 @@ export default function EstimatePage() {
           </div>
           <div>
             <label style={labelStyle}>합포장 비율 (%)</label>
-            <input style={inputStyle} type="number" min={0} max={100} step={1} value={combinedPercentage || ''} onChange={(e) => setCombinedPercentage(Math.ceil(Number(e.target.value)) || 0)} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
+            <input style={inputStyle} type="number" min={0} max={100} step={1} value={combinedPercentage || ''} onChange={(e) => setCombinedPercentage(Math.min(100, Math.ceil(Number(e.target.value)) || 0))} onKeyDown={(e) => { if (e.key === '.') e.preventDefault(); }} placeholder="0" />
             <div style={hint}>출고건 대비 %</div>
           </div>
           <div>
