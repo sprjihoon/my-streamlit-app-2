@@ -25,6 +25,7 @@ interface Stats {
   hourly_stats: { hour: string; count: number }[];
   referrer_stats: { source: string; count: number }[];
   location_stats: { location: string; count: number }[];
+  utm_campaign_stats: { campaign: string; count: number }[];
 }
 
 interface VisitorLog {
@@ -48,6 +49,9 @@ interface VisitorLog {
   timezone: string;
   session_id: string;
   created_at: string;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
 }
 
 interface CalculateLog {
@@ -345,6 +349,25 @@ export default function EstimateAnalyticsPage() {
                   )}
                 </div>
 
+                {/* UTM 캠페인 통계 */}
+                <div style={cardStyle}>
+                  <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginTop: 0, marginBottom: '0.75rem' }}>캠페인별 유입</h3>
+                  {stats.utm_campaign_stats.length === 0 ? (
+                    <div style={{ color: '#9ca3af', fontSize: '0.85rem' }}>데이터 없음</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {stats.utm_campaign_stats.map((item, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.85rem', color: '#374151', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.campaign}
+                          </span>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#a855f7' }}>{fmt(item.count)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* 브랜드 타입별 계산 */}
                 <div style={cardStyle}>
                   <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginTop: 0, marginBottom: '0.75rem' }}>브랜드 타입별 계산</h3>
@@ -460,11 +483,37 @@ export default function EstimateAnalyticsPage() {
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>브라우저</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>디바이스</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>모바일</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>접속경로</th>
+                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>유입경로</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {visitors.map((v) => (
+                    {visitors.map((v) => {
+                      const getSourceDisplay = () => {
+                        if (v.utm_source) {
+                          const src = v.utm_source.toLowerCase();
+                          if (src === 'instagram') return { name: 'Instagram', color: '#e4405f' };
+                          if (src === 'youtube') return { name: 'YouTube', color: '#ff0000' };
+                          if (src === 'naver') return { name: 'Naver', color: '#03c75a' };
+                          if (src === 'google') return { name: 'Google', color: '#4285f4' };
+                          if (src === 'facebook') return { name: 'Facebook', color: '#1877f2' };
+                          if (src === 'kakao' || src === 'kakaotalk') return { name: 'KakaoTalk', color: '#fee500', textColor: '#3c1e1e' };
+                          if (src === 'tiktok') return { name: 'TikTok', color: '#000000' };
+                          return { name: v.utm_source, color: '#a855f7' };
+                        }
+                        if (v.referrer) {
+                          const ref = v.referrer.toLowerCase();
+                          if (ref.includes('instagram')) return { name: 'Instagram', color: '#e4405f' };
+                          if (ref.includes('youtube')) return { name: 'YouTube', color: '#ff0000' };
+                          if (ref.includes('naver')) return { name: 'Naver', color: '#03c75a' };
+                          if (ref.includes('google')) return { name: 'Google', color: '#4285f4' };
+                          if (ref.includes('facebook')) return { name: 'Facebook', color: '#1877f2' };
+                          if (ref.includes('kakao')) return { name: 'KakaoTalk', color: '#fee500', textColor: '#3c1e1e' };
+                          return { name: '기타', color: '#6b7280' };
+                        }
+                        return { name: '직접 접속', color: '#9ca3af' };
+                      };
+                      const source = getSourceDisplay();
+                      return (
                       <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', color: '#6b7280' }}>{v.created_at}</td>
                         <td style={{ padding: '0.6rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{v.ip_address}</td>
@@ -495,11 +544,17 @@ export default function EstimateAnalyticsPage() {
                             <span style={{ color: '#9ca3af' }}>-</span>
                           )}
                         </td>
-                        <td style={{ padding: '0.6rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#6b7280' }} title={v.referrer}>
-                          {v.referrer || '직접 접속'}
+                        <td style={{ padding: '0.6rem' }} title={v.utm_campaign ? `캠페인: ${v.utm_campaign}` : v.referrer || ''}>
+                          <span style={{
+                            display: 'inline-block', padding: '2px 8px', borderRadius: 10,
+                            fontSize: '0.75rem', fontWeight: 600,
+                            background: source.color,
+                            color: source.textColor || '#fff',
+                          }}>{source.name}</span>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

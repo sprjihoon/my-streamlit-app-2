@@ -32,6 +32,11 @@ class VisitorLogRequest(BaseModel):
     is_mobile: Optional[bool] = None
     inner_width: Optional[int] = None
     inner_height: Optional[int] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
 
 
 class CalculateLogRequest(BaseModel):
@@ -70,6 +75,11 @@ def _ensure_tables(con):
             is_mobile INTEGER,
             inner_width INTEGER,
             inner_height INTEGER,
+            utm_source TEXT,
+            utm_medium TEXT,
+            utm_campaign TEXT,
+            utm_content TEXT,
+            utm_term TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -88,6 +98,26 @@ def _ensure_tables(con):
         pass
     try:
         con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN inner_height INTEGER")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN utm_source TEXT")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN utm_medium TEXT")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN utm_campaign TEXT")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN utm_content TEXT")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN utm_term TEXT")
     except Exception:
         pass
     con.execute("""
@@ -240,8 +270,9 @@ async def log_visit(body: VisitorLogRequest, request: Request):
                 (ip_address, country, region, city, page_url, referrer, user_agent, 
                  os, browser, device_type, screen_width, screen_height, language, 
                  timezone, platform, vendor, session_id, is_touch_device, is_mobile,
-                 inner_width, inner_height, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 inner_width, inner_height, utm_source, utm_medium, utm_campaign,
+                 utm_content, utm_term, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ip_address, country, region, city,
@@ -253,6 +284,8 @@ async def log_visit(body: VisitorLogRequest, request: Request):
                     1 if body.is_touch_device else 0,
                     1 if body.is_mobile else 0,
                     body.inner_width, body.inner_height,
+                    body.utm_source, body.utm_medium, body.utm_campaign,
+                    body.utm_content, body.utm_term,
                     kst_now,
                 ),
             )
@@ -429,24 +462,50 @@ async def get_stats(
                 params_visit
             ).fetchall()
             
-            # Referrer 통계 (접속 경로)
+            # Referrer 통계 (접속 경로) - UTM 소스 우선, 없으면 referrer 분석
             referrer_stats = con.execute(
                 f"""
                 SELECT 
                     CASE 
+                        WHEN utm_source IS NOT NULL AND utm_source != '' THEN 
+                            CASE 
+                                WHEN LOWER(utm_source) = 'instagram' THEN 'Instagram'
+                                WHEN LOWER(utm_source) = 'youtube' THEN 'YouTube'
+                                WHEN LOWER(utm_source) = 'naver' THEN 'Naver'
+                                WHEN LOWER(utm_source) = 'google' THEN 'Google'
+                                WHEN LOWER(utm_source) = 'facebook' THEN 'Facebook'
+                                WHEN LOWER(utm_source) = 'kakao' OR LOWER(utm_source) = 'kakaotalk' THEN 'KakaoTalk'
+                                WHEN LOWER(utm_source) = 'tiktok' THEN 'TikTok'
+                                WHEN LOWER(utm_source) = 'twitter' OR LOWER(utm_source) = 'x' THEN 'X(Twitter)'
+                                ELSE utm_source
+                            END
                         WHEN referrer IS NULL OR referrer = '' THEN '직접 접속'
                         WHEN referrer LIKE '%google%' THEN 'Google'
                         WHEN referrer LIKE '%naver%' THEN 'Naver'
                         WHEN referrer LIKE '%daum%' THEN 'Daum'
+                        WHEN referrer LIKE '%youtube%' THEN 'YouTube'
                         WHEN referrer LIKE '%instagram%' THEN 'Instagram'
                         WHEN referrer LIKE '%facebook%' THEN 'Facebook'
                         WHEN referrer LIKE '%kakao%' THEN 'KakaoTalk'
-                        ELSE referrer
+                        WHEN referrer LIKE '%tiktok%' THEN 'TikTok'
+                        WHEN referrer LIKE '%twitter%' OR referrer LIKE '%x.com%' THEN 'X(Twitter)'
+                        ELSE '기타'
                     END as source,
                     COUNT(*) as cnt
                 FROM estimate_visitor_logs 
                 WHERE {where_visit}
-                GROUP BY source ORDER BY cnt DESC LIMIT 10
+                GROUP BY source ORDER BY cnt DESC LIMIT 15
+                """,
+                params_visit
+            ).fetchall()
+            
+            # UTM 캠페인별 통계
+            utm_campaign_stats = con.execute(
+                f"""
+                SELECT utm_campaign, COUNT(*) as cnt
+                FROM estimate_visitor_logs 
+                WHERE {where_visit} AND utm_campaign IS NOT NULL AND utm_campaign != ''
+                GROUP BY utm_campaign ORDER BY cnt DESC LIMIT 10
                 """,
                 params_visit
             ).fetchall()
@@ -510,6 +569,7 @@ async def get_stats(
                 "hourly_stats": [{"hour": r[0], "count": r[1]} for r in hourly_stats],
                 "referrer_stats": [{"source": r[0], "count": r[1]} for r in referrer_stats],
                 "location_stats": [{"location": r[0], "count": r[1]} for r in location_stats],
+                "utm_campaign_stats": [{"campaign": r[0], "count": r[1]} for r in utm_campaign_stats],
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -552,7 +612,8 @@ async def list_visitors(
                 SELECT id, ip_address, country, region, city, page_url, referrer,
                        os, browser, device_type, screen_width, screen_height,
                        language, timezone, session_id, created_at,
-                       is_touch_device, is_mobile, inner_width, inner_height
+                       is_touch_device, is_mobile, inner_width, inner_height,
+                       utm_source, utm_medium, utm_campaign
                 FROM estimate_visitor_logs 
                 WHERE {where}
                 ORDER BY id DESC LIMIT ? OFFSET ?
@@ -582,6 +643,9 @@ async def list_visitors(
                     "is_mobile": bool(r[17]) if r[17] is not None else None,
                     "inner_width": r[18],
                     "inner_height": r[19],
+                    "utm_source": r[20],
+                    "utm_medium": r[21],
+                    "utm_campaign": r[22],
                 }
                 for r in rows
             ]

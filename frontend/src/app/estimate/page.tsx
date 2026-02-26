@@ -72,6 +72,14 @@ export default function EstimatePage() {
         const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         const isMobile = isTouchDevice && window.innerWidth < 768;
         
+        // UTM 파라미터 추출
+        const urlParams = new URLSearchParams(window.location.search);
+        const utmSource = urlParams.get('utm_source') || null;
+        const utmMedium = urlParams.get('utm_medium') || null;
+        const utmCampaign = urlParams.get('utm_campaign') || null;
+        const utmContent = urlParams.get('utm_content') || null;
+        const utmTerm = urlParams.get('utm_term') || null;
+        
         await fetch(`${API_BASE}/estimate-analytics/visit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -90,6 +98,11 @@ export default function EstimatePage() {
             is_mobile: isMobile,
             inner_width: window.innerWidth,
             inner_height: window.innerHeight,
+            utm_source: utmSource,
+            utm_medium: utmMedium,
+            utm_campaign: utmCampaign,
+            utm_content: utmContent,
+            utm_term: utmTerm,
           }),
         });
       } catch {
