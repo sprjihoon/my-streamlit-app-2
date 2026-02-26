@@ -24,6 +24,7 @@ interface Stats {
   daily_calculations: { date: string; count: number }[];
   hourly_stats: { hour: string; count: number }[];
   referrer_stats: { source: string; count: number }[];
+  location_stats: { location: string; count: number }[];
 }
 
 interface VisitorLog {
@@ -325,6 +326,25 @@ export default function EstimateAnalyticsPage() {
                   )}
                 </div>
 
+                {/* 접속 지역 통계 */}
+                <div style={cardStyle}>
+                  <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginTop: 0, marginBottom: '0.75rem' }}>접속 지역</h3>
+                  {stats.location_stats.length === 0 ? (
+                    <div style={{ color: '#9ca3af', fontSize: '0.85rem' }}>데이터 없음</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {stats.location_stats.map((item, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.85rem', color: '#374151' }}>
+                            {item.location}
+                          </span>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#06b6d4' }}>{fmt(item.count)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* 브랜드 타입별 계산 */}
                 <div style={cardStyle}>
                   <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', marginTop: 0, marginBottom: '0.75rem' }}>브랜드 타입별 계산</h3>
@@ -435,11 +455,11 @@ export default function EstimateAnalyticsPage() {
                     <tr style={{ background: '#f8fafc' }}>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>일시</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>IP</th>
+                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>위치</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>OS</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>브라우저</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>디바이스</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>모바일</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>화면</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>접속경로</th>
                     </tr>
                   </thead>
@@ -448,6 +468,15 @@ export default function EstimateAnalyticsPage() {
                       <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', color: '#6b7280' }}>{v.created_at}</td>
                         <td style={{ padding: '0.6rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{v.ip_address}</td>
+                        <td style={{ padding: '0.6rem', fontSize: '0.8rem' }}>
+                          {v.country || v.region || v.city ? (
+                            <span title={[v.country, v.region, v.city].filter(Boolean).join(', ')}>
+                              {v.city || v.region || v.country || '-'}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#9ca3af' }}>-</span>
+                          )}
+                        </td>
                         <td style={{ padding: '0.6rem' }}>{v.os}</td>
                         <td style={{ padding: '0.6rem' }}>{v.browser}</td>
                         <td style={{ padding: '0.6rem', textAlign: 'center' }}>{v.device_type}</td>
@@ -466,7 +495,6 @@ export default function EstimateAnalyticsPage() {
                             <span style={{ color: '#9ca3af' }}>-</span>
                           )}
                         </td>
-                        <td style={{ padding: '0.6rem', fontSize: '0.8rem', color: '#6b7280' }}>{v.inner_width || v.screen_width}x{v.inner_height || v.screen_height}</td>
                         <td style={{ padding: '0.6rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#6b7280' }} title={v.referrer}>
                           {v.referrer || '직접 접속'}
                         </td>

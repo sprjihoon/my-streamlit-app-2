@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from datetime import datetime
 import json
+import httpx
 
 from logic.db import get_connection
 
@@ -183,6 +184,28 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+async def _get_ip_location(ip_address: str) -> Dict[str, str]:
+    """IP 주소로 위치 정보 조회 (ip-api.com 무료 API 사용)"""
+    result = {"country": "", "region": "", "city": ""}
+    
+    if not ip_address or ip_address in ("unknown", "127.0.0.1", "localhost", "::1"):
+        return result
+    
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get(f"http://ip-api.com/json/{ip_address}?lang=ko")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("status") == "success":
+                    result["country"] = data.get("country", "")
+                    result["region"] = data.get("regionName", "")
+                    result["city"] = data.get("city", "")
+    except Exception:
+        pass
+    
+    return result
+
+
 @router.post("/visit")
 async def log_visit(body: VisitorLogRequest, request: Request):
     """
@@ -196,10 +219,11 @@ async def log_visit(body: VisitorLogRequest, request: Request):
         ip_address = _get_client_ip(request)
         ua_info = _parse_user_agent(body.user_agent or "")
         
-        # IP 기반 위치 정보 (간단한 처리, 실제로는 외부 API 필요)
-        country = ""
-        region = ""
-        city = ""
+        # IP 기반 위치 정보 조회
+        location = await _get_ip_location(ip_address)
+        country = location["country"]
+        region = location["region"]
+        city = location["city"]
         
         # 터치 기반 모바일 판별이 있으면 그것을 우선 사용
         device_type = ua_info["device_type"]
@@ -440,6 +464,24 @@ async def get_stats(
                 params_visit
             ).fetchone()
             
+            # 지역별 통계
+            location_stats = con.execute(
+                f"""
+                SELECT 
+                    CASE 
+                        WHEN city IS NOT NULL AND city != '' THEN city
+                        WHEN region IS NOT NULL AND region != '' THEN region
+                        WHEN country IS NOT NULL AND country != '' THEN country
+                        ELSE '알 수 없음'
+                    END as location,
+                    COUNT(*) as cnt
+                FROM estimate_visitor_logs 
+                WHERE {where_visit}
+                GROUP BY location ORDER BY cnt DESC LIMIT 10
+                """,
+                params_visit
+            ).fetchall()
+            
             return {
                 "summary": {
                     "total_visits": visit_count,
@@ -467,6 +509,7 @@ async def get_stats(
                 "daily_calculations": [{"date": r[0], "count": r[1]} for r in daily_calcs],
                 "hourly_stats": [{"hour": r[0], "count": r[1]} for r in hourly_stats],
                 "referrer_stats": [{"source": r[0], "count": r[1]} for r in referrer_stats],
+                "location_stats": [{"location": r[0], "count": r[1]} for r in location_stats],
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
