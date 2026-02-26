@@ -24,11 +24,18 @@ const NAV_ITEMS = [
   { href: '/mapping', label: '🔗 업체 매핑 관리' },
   { href: '/vendors', label: '📋 매핑 리스트' },
   { href: '/rates', label: '💰 요금표 관리' },
+  { href: '/insights', label: '📈 데이터 인사이트' },
+];
+
+const INVOICE_NAV_ITEMS = [
   { href: '/invoice', label: '📊 인보이스 계산' },
+  { href: '/invoice-list', label: '📜 인보이스 목록' },
+];
+
+const ESTIMATE_NAV_ITEMS = [
   { href: '/estimate', label: '📄 견적서 만들기' },
   { href: '/estimate-list', label: '📑 견적서 목록' },
-  { href: '/invoice-list', label: '📜 인보이스 목록' },
-  { href: '/insights', label: '📈 데이터 인사이트' },
+  { href: '/estimate-analytics', label: '📊 견적서 분석' },
 ];
 
 const ADMIN_NAV_ITEMS = [
@@ -310,10 +317,34 @@ export default function RootLayout({
                 </Link>
               ))}
               
+              {/* 인보이스 그룹 */}
+              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>인보이스</div>
+              {INVOICE_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={pathname === item.href ? 'active' : ''}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              
+              {/* 견적서 그룹 */}
+              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>견적서</div>
+              {ESTIMATE_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={pathname === item.href ? 'active' : ''}
+                >
+                  {item.label}
+                </Link>
+              ))}
+              
               {/* 관리자 전용 메뉴 */}
               {user?.is_admin && (
                 <>
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', margin: '0.5rem 0' }} />
+                  <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>관리자</div>
                   {ADMIN_NAV_ITEMS.map((item) => (
                     <Link
                       key={item.href}

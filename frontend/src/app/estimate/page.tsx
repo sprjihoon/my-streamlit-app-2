@@ -1,11 +1,25 @@
 'use client';
 /* v2 - type fix */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
 import { calculateEstimate, exportEstimatePdf, type EstimateItem } from '@/lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+function generateSessionId(): string {
+  return 'sess_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+}
+
+function getOrCreateSessionId(): string {
+  if (typeof window === 'undefined') return '';
+  let sessionId = sessionStorage.getItem('estimate_session_id');
+  if (!sessionId) {
+    sessionId = generateSessionId();
+    sessionStorage.setItem('estimate_session_id', sessionId);
+  }
+  return sessionId;
+}
 const ZONE_LABELS = ['극소', '소', '중', '대'];
 const BRAND_LABEL: Record<string, string> = { fashion: '패션', beauty: '뷰티', etc: '기타' };
 
@@ -42,6 +56,49 @@ export default function EstimatePage() {
   const [needB2bDocument, setNeedB2bDocument] = useState(false);
   const [storagePlt, setStoragePlt] = useState(0);
   const [skuCount, setSkuCount] = useState(0);
+  
+  const visitLoggedRef = useRef(false);
+
+  // 페이지 접속 시 방문 로그 전송
+  useEffect(() => {
+    if (visitLoggedRef.current) return;
+    visitLoggedRef.current = true;
+    
+    const sessionId = getOrCreateSessionId();
+    
+    const logVisit = async () => {
+      try {
+        // 터치 지원 여부로 모바일 판별
+        const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const isMobile = isTouchDevice && window.innerWidth < 768;
+        
+        await fetch(`${API_BASE}/estimate-analytics/visit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            page_url: window.location.href,
+            referrer: document.referrer || null,
+            user_agent: navigator.userAgent,
+            screen_width: window.screen.width,
+            screen_height: window.screen.height,
+            language: navigator.language,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            platform: navigator.platform,
+            vendor: navigator.vendor,
+            session_id: sessionId,
+            is_touch_device: isTouchDevice,
+            is_mobile: isMobile,
+            inner_width: window.innerWidth,
+            inner_height: window.innerHeight,
+          }),
+        });
+      } catch {
+        // 로그 실패해도 무시
+      }
+    };
+    
+    logVisit();
+  }, []);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -159,6 +216,44 @@ export default function EstimatePage() {
         storage_plt: storagePlt || undefined,
         sku_count: skuCount || undefined,
       });
+      
+      // 견적 계산 완료 후 바로 서버에 저장
+      try {
+        await fetch(`${API_BASE}/estimate/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: data.company_name || companyName,
+            contact: data.contact || contact,
+            email: data.email || email,
+            items: data.items,
+            total_amount: data.total_amount,
+            brand_type: brandType,
+          }),
+        });
+      } catch {
+        // 저장 실패해도 견적 결과는 표시
+      }
+      
+      // 견적 계산 로그 전송
+      try {
+        const sessionId = getOrCreateSessionId();
+        await fetch(`${API_BASE}/estimate-analytics/calculate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: data.company_name || companyName,
+            email: data.email || email,
+            brand_type: brandType,
+            monthly_outbound: monthlyOutbound,
+            total_amount: data.total_amount,
+            session_id: sessionId,
+          }),
+        });
+      } catch {
+        // 로그 실패해도 무시
+      }
+      
       setResult({
         items: data.items,
         total_amount: data.total_amount,
