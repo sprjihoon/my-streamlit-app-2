@@ -75,14 +75,20 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - 한국어로 응답
 
 ## 불완전 정보 처리 (매우 중요!)
-작업일지 입력 시 필수 정보: **업체명, 작업종류, 단가** (날짜·수량·비고는 필수 아님)
-- **날짜**: 사용자가 말하지 않으면 **오늘**로 저장. 날짜를 물어보지 마세요. ask_missing_info에 missing: ["date"] 넣지 마세요.
-- "틸리언 하차" (단가 없음) → ask_missing_info 호출 (missing: ["unit_price"])
-- "3만원" (업체/작업 없음) → ask_missing_info 호출 (missing: ["vendor", "work_type"])
-- "하차 3만원" (업체 없음) → ask_missing_info 호출 (missing: ["vendor"])
+작업일지 입력 시 **필수 정보 3개**: **업체명, 작업종류, 단가**
+- **날짜**: 필수 아님! 미입력 시 **오늘**로 자동 저장. ❌ 절대 물어보지 마세요!
+- **수량**: 필수 아님! 미입력 시 **1**로 자동 저장. ❌ 절대 물어보지 마세요!
+- **비고**: 필수 아님! 미입력 시 빈 값으로 저장.
+
+### 예시
+- "틸리언 하차" (단가 없음) → ask_missing_info (missing: ["unit_price"])
+- "3만원" (업체/작업 없음) → ask_missing_info (missing: ["vendor", "work_type"])
+- "하차 3만원" (업체 없음) → ask_missing_info (missing: ["vendor"])
+- "로지킴 3톤하차 70박스 입고 박스당 1000원" → **바로 save_work_log 호출!** (업체명=로지킴, 작업=3톤하차/입고, 수량=70, 단가=1000 모두 있음)
 
 ⚠️ 불완전한 정보로 save_work_log를 호출하지 마세요! 먼저 ask_missing_info로 부족한 정보를 물어보세요.
 ⚠️ 업체명·작업종류·단가만 있으면 바로 save_work_log 호출. 날짜/수량 없어도 날짜=오늘, 수량=1로 저장됨.
+⚠️ ask_missing_info의 missing 배열에는 vendor, work_type, unit_price만 넣을 수 있음. date, qty 넣으면 안 됨!
 
 ## ⚠️ 업체명 규칙 (매우 중요!)
 - 업체명은 DB에 등록된 업체만 사용 가능! (DB 컨텍스트의 "등록 업체" 목록 참고)
@@ -98,6 +104,16 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 
 ## 이전 대화 맥락
 {pending_context}
+
+## ⚠️ 불완전 정보 후속 처리 (매우 중요!)
+이전 대화에서 ask_missing_info로 정보를 물어본 상태라면:
+- 사용자가 **업체명만** 답하면 → complete_pending_entry 호출 (vendor만 전달)
+- 사용자가 **단가만** 답하면 → complete_pending_entry 호출 (unit_price만 전달)
+- 사용자가 **작업종류만** 답하면 → complete_pending_entry 호출 (work_type만 전달)
+- **절대로** save_work_log를 직접 호출하지 마세요! 이전 정보가 사라집니다!
+- 예: 이전에 "2박스 입고 1000원"을 물어봤고, 사용자가 "하이비오"라고 답하면
+  → complete_pending_entry(vendor="하이비오") 호출
+  → 시스템이 자동으로 qty=2, work_type=입고, unit_price=1000과 병합
 
 ## 중요
 - 사용자가 작업일지 형식("업체명 작업 금액")으로 말하면 **반드시** save_work_log 도구를 호출하세요. 도구를 호출하지 않고 "저장완료"라고 말하지 마세요.
@@ -203,33 +219,44 @@ class AIParser:
         missing = state.get("missing", [])
         last_question = state.get("last_question", "")
         
-        if not pending_data:
+        if not pending_data and not missing:
             return ""
         
         parts = []
-        parts.append("⚠️ 이전 대화에서 불완전한 작업일지 정보가 있습니다:")
+        parts.append("🚨🚨🚨 [중요] 이전 대화에서 불완전한 작업일지 정보가 대기 중입니다! 🚨🚨🚨")
+        parts.append("")
+        parts.append("📦 이미 파악된 정보:")
         
         if pending_data.get("vendor"):
-            parts.append(f"  - 업체명: {pending_data['vendor']}")
+            parts.append(f"  ✓ 업체명: {pending_data['vendor']}")
         if pending_data.get("work_type"):
-            parts.append(f"  - 작업종류: {pending_data['work_type']}")
+            parts.append(f"  ✓ 작업종류: {pending_data['work_type']}")
         if pending_data.get("unit_price"):
-            parts.append(f"  - 단가: {pending_data['unit_price']:,}원")
+            parts.append(f"  ✓ 단가: {pending_data['unit_price']:,}원")
         if pending_data.get("qty"):
-            parts.append(f"  - 수량: {pending_data['qty']}")
+            parts.append(f"  ✓ 수량: {pending_data['qty']}개")
         if pending_data.get("date"):
-            parts.append(f"  - 날짜: {pending_data['date']}")
+            parts.append(f"  ✓ 날짜: {pending_data['date']}")
+        if pending_data.get("remark"):
+            parts.append(f"  ✓ 비고: {pending_data['remark']}")
         
         if missing:
             field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가", "qty": "수량"}
             missing_kr = [field_names.get(m, m) for m in missing]
-            parts.append(f"  - 누락된 정보: {', '.join(missing_kr)}")
+            parts.append(f"")
+            parts.append(f"❓ 누락된 정보: {', '.join(missing_kr)}")
         
         if last_question:
-            parts.append(f"  - 마지막 질문: {last_question}")
+            parts.append(f"📝 마지막 질문: {last_question}")
         
         parts.append("")
-        parts.append("사용자가 누락된 정보(예: '3만원', '틸리언')를 제공하면 기존 정보와 합쳐서 complete_pending_entry를 호출하세요.")
+        parts.append("⚠️ 사용자가 누락된 정보를 답하면:")
+        parts.append("  → 반드시 complete_pending_entry 호출! (새로 추가된 정보만 전달)")
+        parts.append("  → save_work_log 직접 호출 금지! (이미 파악된 정보가 사라짐)")
+        parts.append("")
+        parts.append("예시: 사용자가 '하이비오'라고 답하면")
+        parts.append("  → complete_pending_entry(vendor='하이비오') 호출")
+        parts.append("  → 시스템이 위의 이미 파악된 정보와 자동 병합")
         
         return "\n".join(parts)
     
@@ -333,22 +360,22 @@ class AIParser:
                 "type": "function",
                 "function": {
                     "name": "ask_missing_info",
-                    "description": "작업일지 저장에 필요한 정보가 부족할 때 사용자에게 물어봅니다. 부족한 정보를 물어보면서 이미 파악한 정보는 저장합니다. 날짜는 물어보지 마세요(미입력 시 오늘로 저장).",
+                    "description": "작업일지 저장에 필요한 정보가 부족할 때 사용자에게 물어봅니다. ⚠️ 필수 정보는 vendor, work_type, unit_price 3개뿐! 날짜(date)와 수량(qty)은 필수가 아니므로 절대 물어보지 마세요. 날짜 미입력 시 오늘, 수량 미입력 시 1로 자동 저장됩니다.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "vendor": {"type": "string", "description": "파악된 업체명 (없으면 생략)"},
                             "work_type": {"type": "string", "description": "파악된 작업종류 (없으면 생략)"},
                             "unit_price": {"type": "integer", "description": "파악된 단가 (없으면 생략)"},
-                            "qty": {"type": "integer", "description": "파악된 수량 (없으면 생략)"},
-                            "date": {"type": "string", "description": "파악된 날짜 (없으면 생략, 물어보지 말 것)"},
+                            "qty": {"type": "integer", "description": "파악된 수량 (없으면 생략, 기본값 1)"},
+                            "date": {"type": "string", "description": "파악된 날짜 (없으면 생략, 기본값 오늘)"},
                             "remark": {"type": "string", "description": "파악된 비고 (없으면 생략)"},
                             "missing": {
                                 "type": "array",
-                                "items": {"type": "string"},
-                                "description": "누락된 필드 목록. vendor, work_type, unit_price 중에서만. date는 넣지 마세요."
+                                "items": {"type": "string", "enum": ["vendor", "work_type", "unit_price"]},
+                                "description": "누락된 필드 목록. vendor, work_type, unit_price 중에서만 선택 가능. date, qty는 절대 넣지 마세요!"
                             },
-                            "question": {"type": "string", "description": "사용자에게 물어볼 질문"}
+                            "question": {"type": "string", "description": "사용자에게 물어볼 질문 (날짜나 수량을 물어보면 안 됨!)"}
                         },
                         "required": ["missing", "question"]
                     }
@@ -358,16 +385,16 @@ class AIParser:
                 "type": "function",
                 "function": {
                     "name": "complete_pending_entry",
-                    "description": "이전 대화에서 불완전했던 작업일지에 누락된 정보를 추가하여 완성합니다.",
+                    "description": "이전 대화에서 ask_missing_info로 물어본 후, 사용자가 누락된 정보를 답했을 때 사용합니다. 이미 파악된 정보(pending_data)와 자동으로 병합되므로, 새로 추가된 정보만 전달하세요. save_work_log 대신 반드시 이 도구를 사용하세요!",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "vendor": {"type": "string", "description": "추가된 업체명"},
-                            "work_type": {"type": "string", "description": "추가된 작업종류"},
-                            "unit_price": {"type": "integer", "description": "추가된 단가"},
-                            "qty": {"type": "integer", "description": "추가된 수량"},
-                            "date": {"type": "string", "description": "추가된 날짜"},
-                            "remark": {"type": "string", "description": "추가된 비고"}
+                            "vendor": {"type": "string", "description": "사용자가 새로 답한 업체명 (이전에 누락됐던 경우만)"},
+                            "work_type": {"type": "string", "description": "사용자가 새로 답한 작업종류 (이전에 누락됐던 경우만)"},
+                            "unit_price": {"type": "integer", "description": "사용자가 새로 답한 단가 (이전에 누락됐던 경우만)"},
+                            "qty": {"type": "integer", "description": "사용자가 새로 답한 수량 (이전에 누락됐던 경우만)"},
+                            "date": {"type": "string", "description": "사용자가 새로 답한 날짜 (이전에 누락됐던 경우만)"},
+                            "remark": {"type": "string", "description": "사용자가 새로 답한 비고 (이전에 누락됐던 경우만)"}
                         }
                     }
                 }
