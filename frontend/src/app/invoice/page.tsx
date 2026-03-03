@@ -71,6 +71,7 @@ export default function InvoicePage() {
   const [includeRemoteFee, setIncludeRemoteFee] = useState(true);
   const [includeWorklog, setIncludeWorklog] = useState(true);
   const [includeCombinedFee, setIncludeCombinedFee] = useState(true);
+  const [worklogSource, setWorklogSource] = useState<'all' | 'bot' | 'upload'>('all');
   
   // 계산 모드
   const [mode, setMode] = useState<'single' | 'batch'>('batch');
@@ -178,6 +179,7 @@ export default function InvoicePage() {
         include_remote_fee: includeRemoteFee,
         include_worklog: includeWorklog,
         include_combined_fee: includeCombinedFee,
+        worklog_source: worklogSource,
       };
       
       const res = await fetch(`${API_URL}/calculate?token=${token}`, {
@@ -261,6 +263,7 @@ export default function InvoicePage() {
           include_remote_fee: includeRemoteFee,
           include_worklog: includeWorklog,
           include_combined_fee: includeCombinedFee,
+          worklog_source: worklogSource,
         };
         
         const res = await fetch(`${API_URL}/calculate?token=${token}`, {
@@ -480,7 +483,7 @@ export default function InvoicePage() {
         </div>
 
         {/* 옵션 */}
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <input type="checkbox" checked={includeBasicShipping} onChange={(e) => setIncludeBasicShipping(e.target.checked)} />
             기본 출고비
@@ -506,6 +509,43 @@ export default function InvoicePage() {
             합포장
           </label>
         </div>
+
+        {/* 작업일지 소스 선택 */}
+        {includeWorklog && (
+          <div style={{ 
+            display: 'flex', 
+            gap: '0.5rem', 
+            alignItems: 'center', 
+            marginBottom: '1rem',
+            padding: '0.75rem',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '8px',
+            border: '1px solid #e9ecef'
+          }}>
+            <span style={{ fontWeight: 500, color: '#495057' }}>📋 작업일지 소스:</span>
+            <select
+              value={worklogSource}
+              onChange={(e) => setWorklogSource(e.target.value as 'all' | 'bot' | 'upload')}
+              style={{
+                padding: '0.5rem 1rem',
+                border: '1px solid #ced4da',
+                borderRadius: '4px',
+                backgroundColor: 'white',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+            >
+              <option value="all">전체 (봇 + 업로드)</option>
+              <option value="bot">봇 작업일지만</option>
+              <option value="upload">업로드 파일만</option>
+            </select>
+            <span style={{ fontSize: '0.85rem', color: '#6c757d' }}>
+              {worklogSource === 'all' && '모든 작업일지 데이터를 사용합니다'}
+              {worklogSource === 'bot' && '봇으로 입력된 작업일지만 사용합니다'}
+              {worklogSource === 'upload' && '엑셀로 업로드된 작업일지만 사용합니다'}
+            </span>
+          </div>
+        )}
       </Card>
 
       {/* 일괄 계산 모드 */}

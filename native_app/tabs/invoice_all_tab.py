@@ -8,7 +8,7 @@ import threading
 import pandas as pd
 from PySide6.QtCore import QDate, QTimer
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QPushButton, QTableView, QMessageBox, QListWidget, QListWidgetItem, QAbstractItemView, QProgressDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QPushButton, QTableView, QMessageBox, QListWidget, QListWidgetItem, QAbstractItemView, QProgressDialog, QComboBox
 )
 from PySide6.QtWidgets import QHeaderView
 
@@ -51,10 +51,17 @@ class InvoiceAllTab(QWidget):
         self.btn_run = QPushButton("인보이스 일괄 생성", self)
         self.lst_vendors = QListWidget(self); self.lst_vendors.setSelectionMode(QAbstractItemView.MultiSelection)
         self.tbl_log = QTableView(self)
+        
+        # 작업일지 소스 선택 콤보박스
+        self.cmb_worklog_source = QComboBox(self)
+        self.cmb_worklog_source.addItem("전체 (봇 + 업로드)", "all")
+        self.cmb_worklog_source.addItem("봇 작업일지만", "bot")
+        self.cmb_worklog_source.addItem("업로드 파일만", "upload")
 
         top = QHBoxLayout()
         top.addWidget(QLabel("시작일")); top.addWidget(self.dt_from)
         top.addWidget(QLabel("종료일")); top.addWidget(self.dt_to)
+        top.addWidget(QLabel("작업일지:")); top.addWidget(self.cmb_worklog_source)
         top.addStretch(1); top.addWidget(self.btn_load_vendors); top.addWidget(self.btn_run)
 
         lay = QVBoxLayout(self)
@@ -152,7 +159,8 @@ class InvoiceAllTab(QWidget):
                 add_video_ret_fee(items, ven, d_from, d_to)
 
                 # 작업일지 항목
-                add_worklog_items(items, ven, d_from, d_to)
+                worklog_source = self.cmb_worklog_source.currentData()
+                add_worklog_items(items, ven, d_from, d_to, source=worklog_source)
 
                 # 보관료 (활성 상태인 항목은 매월 자동 청구)
                 add_storage_fee(items, ven)

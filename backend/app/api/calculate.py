@@ -170,7 +170,7 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         
         # 9. 작업일지 (플래그/반품 요금 뒤에 추가)
         if req.include_worklog:
-            add_worklog_items(items, req.vendor, d_from, d_to)
+            add_worklog_items(items, req.vendor, d_from, d_to, source=req.worklog_source)
         
         # 10. 거래처별 보관료 (활성 상태인 항목은 매월 자동 청구)
         # 보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정)

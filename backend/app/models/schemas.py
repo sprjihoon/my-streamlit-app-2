@@ -52,6 +52,10 @@ class InvoiceCalculateRequest(BaseModel):
     include_remote_fee: bool = Field(default=True, description="도서산간 포함")
     include_worklog: bool = Field(default=True, description="작업일지 포함")
     include_combined_fee: bool = Field(default=True, description="합포장 포함")
+    worklog_source: str = Field(
+        default="all",
+        description="작업일지 소스: bot(봇입력), upload(엑셀업로드), all(전체)"
+    )
 
 
 class InvoiceCalculateResponse(BaseModel):

@@ -556,9 +556,22 @@ def add_worklog_items(
     item_list: List[dict],
     vendor: str,
     d_from: str,
-    d_to: str
+    d_to: str,
+    source: str = "all"
 ) -> None:
-    """작업일지에서 인보이스 항목 추가."""
+    """
+    작업일지에서 인보이스 항목 추가.
+    
+    Args:
+        item_list: 인보이스 항목 리스트 (in-place 수정)
+        vendor: 공급처명
+        d_from: 시작일
+        d_to: 종료일
+        source: 데이터 소스 필터
+            - "all": 전체 (기본값)
+            - "bot": 봇으로 입력된 작업일지만 (출처='bot')
+            - "upload": 엑셀 업로드된 작업일지만 (출처가 NULL 또는 빈값)
+    """
     with get_connection() as con:
         # work_log 전용 별칭 가져오기
         alias_df = pd.read_sql(
@@ -570,12 +583,22 @@ def add_worklog_items(
 
         # IN (…) 구문으로 데이터 로드
         placeholders = ",".join("?" * len(names))
+        
+        # 소스 필터 조건 추가
+        source_condition = ""
+        if source == "bot":
+            source_condition = "AND 출처 = 'bot'"
+        elif source == "upload":
+            source_condition = "AND (출처 IS NULL OR 출처 = '' OR 출처 != 'bot')"
+        # source == "all"이면 조건 없음
+        
         df = pd.read_sql(
             f"""SELECT {WL_COL_DATE}, {WL_COL_CAT}, {WL_COL_UNIT},
                        {WL_COL_QTY},  {WL_COL_AMT}, {WL_COL_MEMO}
                 FROM work_log
                 WHERE {WL_COL_VEN} IN ({placeholders})
-                  AND {WL_COL_DATE} BETWEEN ? AND ?""",
+                  AND {WL_COL_DATE} BETWEEN ? AND ?
+                  {source_condition}""",
             con, params=(*names, d_from, d_to)
         )
 
