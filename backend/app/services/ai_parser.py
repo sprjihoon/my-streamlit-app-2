@@ -80,35 +80,38 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - **수량**: 필수 아님! 미입력 시 **1**로 자동 저장. ❌ 절대 물어보지 마세요!
 - **비고**: 필수 아님! 미입력 시 빈 값으로 저장.
 
-### 예시
-- "틸리언 하차" (단가 없음) → ask_missing_info (missing: ["unit_price"])
+## 🚨🚨🚨 가격(단가) 없을 때 처리 순서 (최우선 규칙!) 🚨🚨🚨
+**업체명 + 작업종류는 있는데 가격이 없는 경우** → 반드시 아래 순서대로!
+
+### 1단계: lookup_price_from_history 호출 (필수!)
+- "틸리언 하차" → lookup_price_from_history(vendor="틸리언", work_type="하차")
+- "틸리언 3톤상차" → lookup_price_from_history(vendor="틸리언", work_type="3톤상차")
+- "나블리 양품화 50개" → lookup_price_from_history(vendor="나블리", work_type="양품화")
+
+### 2단계: 결과에 따라 분기
+- **가격 발견됨** → ask_price_confirmation 호출 (확인 질문)
+- **가격 없음** → ask_missing_info 호출 (단가 질문)
+
+### ❌ 절대 하면 안 되는 것
+- 가격 없을 때 바로 ask_missing_info 호출 ← 이거 금지!
+- 반드시 lookup_price_from_history를 **먼저** 호출해야 함!
+
+### 예시 (올바른 처리)
+- "틸리언 3톤상차" (가격 없음)
+  → **1단계**: lookup_price_from_history(vendor="틸리언", work_type="3톤상차") 호출
+  → **2단계**: 가격 발견 시 ask_price_confirmation, 없으면 ask_missing_info
+
+- "나블리 양품화 50개" (가격 없음)
+  → **1단계**: lookup_price_from_history(vendor="나블리", work_type="양품화") 호출
+  → **2단계**: 가격 발견 시 ask_price_confirmation, 없으면 ask_missing_info
+
+### 다른 정보가 없는 경우
 - "3만원" (업체/작업 없음) → ask_missing_info (missing: ["vendor", "work_type"])
 - "하차 3만원" (업체 없음) → ask_missing_info (missing: ["vendor"])
-- "로지킴 3톤하차 70박스 입고 박스당 1000원" → **바로 save_work_log 호출!** (업체명=로지킴, 작업=3톤하차/입고, 수량=70, 단가=1000 모두 있음)
+- "로지킴 3톤하차 박스당 1000원" → **바로 save_work_log 호출!** (모든 정보 있음)
 
-⚠️ 불완전한 정보로 save_work_log를 호출하지 마세요! 먼저 ask_missing_info로 부족한 정보를 물어보세요.
-⚠️ 업체명·작업종류·단가만 있으면 바로 save_work_log 호출. 날짜/수량 없어도 날짜=오늘, 수량=1로 저장됨.
+⚠️ 업체명·작업종류·단가 모두 있으면 바로 save_work_log 호출.
 ⚠️ ask_missing_info의 missing 배열에는 vendor, work_type, unit_price만 넣을 수 있음. date, qty 넣으면 안 됨!
-
-## ⚠️ 가격 자동 조회 기능 (매우 중요!)
-사용자가 **업체명 + 작업종류 + 수량**만 말하고 **가격을 말하지 않은 경우**:
-1. **먼저** lookup_price_from_history 도구로 이전 가격 조회
-2. 가격이 발견되면 → 사용자에게 확인 질문 (ask_price_confirmation 호출)
-3. 사용자가 "네", "맞아", "그래" 등으로 확인하면 → complete_pending_entry로 저장
-4. 사용자가 다른 가격을 말하면 → 그 가격으로 저장
-
-### 가격 조회 예시
-- "틸리언 하차 3건" (가격 없음)
-  → lookup_price_from_history(vendor="틸리언", work_type="하차") 호출
-  → 결과: 최근 단가 30,000원 발견
-  → ask_price_confirmation 호출: "틸리언 하차 최근 단가가 30,000원이에요. 이 가격으로 저장할까요?"
-  
-- "나블리 양품화 50개" (가격 없음)
-  → lookup_price_from_history(vendor="나블리", work_type="양품화") 호출
-  → 결과: 최근 단가 800원 발견
-  → ask_price_confirmation 호출: "나블리 양품화 최근 단가가 800원이에요. 50개 × 800원 = 40,000원으로 저장할까요?"
-
-⚠️ 가격 없이 업체명+작업종류만 있으면 바로 ask_missing_info 호출하지 말고, 먼저 lookup_price_from_history로 이전 가격을 찾아보세요!
 
 ## ⚠️ 업체명 규칙 (매우 중요!)
 - 업체명은 DB에 등록된 업체만 사용 가능! (DB 컨텍스트의 "등록 업체" 목록 참고)
@@ -511,6 +514,78 @@ class AIParser:
                         "tool_result": {"pending_data": pending_data, "missing": missing},
                         "waiting_for_info": True
                     }
+                
+                # ─────────────────────────────────────
+                # 특수 도구 처리: lookup_price_from_history (첫 번째만, 조기 반환)
+                # ─────────────────────────────────────
+                if tool_name_first == "lookup_price_from_history":
+                    # 가격 조회 실행
+                    price_result = execute_tool("lookup_price_from_history", tool_args_first, user_id, user_name)
+                    
+                    vendor = tool_args_first.get("vendor", "")
+                    work_type = tool_args_first.get("work_type", "")
+                    
+                    if price_result.get("found") and price_result.get("most_recent_price"):
+                        # 가격 발견! → 확인 질문
+                        found_price = price_result["most_recent_price"]
+                        exact_match = price_result.get("exact_match", False)
+                        
+                        # pending_data 구성 (기존 대화에서 수량 등이 있을 수 있음)
+                        pending_data = {
+                            "vendor": vendor,
+                            "work_type": work_type,
+                            "unit_price": found_price,
+                        }
+                        
+                        # 수량 정보가 있으면 추가 (메시지에서 파싱된 경우)
+                        # GPT가 tool_args에 qty를 넣지 않으므로, 원본 메시지에서 추출 필요
+                        # 일단 기본값 1로 설정
+                        qty = 1
+                        pending_data["qty"] = qty
+                        
+                        # 확인 질문 생성
+                        if exact_match:
+                            question = f"{vendor} {work_type} 최근 단가가 {found_price:,}원이에요. 이 가격으로 저장할까요?"
+                        else:
+                            question = f"'{work_type}' 작업의 최근 단가가 {found_price:,}원이에요 (다른 업체 기준). 이 가격으로 저장할까요?"
+                        
+                        # 대기 상태 저장
+                        self.conv_manager.set_state(
+                            user_id=user_id,
+                            channel_id=channel_id or "",
+                            pending_data=pending_data,
+                            missing=[],
+                            last_question=question
+                        )
+                        
+                        return {
+                            "response": f"💰 {question}",
+                            "tool_called": tool_name_first,
+                            "tool_result": price_result,
+                            "waiting_for_info": True
+                        }
+                    else:
+                        # 가격 없음 → 단가 질문
+                        pending_data = {
+                            "vendor": vendor,
+                            "work_type": work_type,
+                        }
+                        question = f"{vendor} {work_type}의 단가를 알려주세요!"
+                        
+                        self.conv_manager.set_state(
+                            user_id=user_id,
+                            channel_id=channel_id or "",
+                            pending_data=pending_data,
+                            missing=["unit_price"],
+                            last_question=question
+                        )
+                        
+                        return {
+                            "response": f"❓ {question}",
+                            "tool_called": tool_name_first,
+                            "tool_result": price_result,
+                            "waiting_for_info": True
+                        }
                 
                 # ─────────────────────────────────────
                 # 특수 도구 처리: ask_price_confirmation (첫 번째만, 조기 반환)
