@@ -711,22 +711,22 @@ def _save_multiple_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
 
 
 def _delete_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
-    """작업일지 삭제"""
+    """작업일지 삭제 - 상세 정보 포함"""
     log_id = args.get("log_id")
     delete_recent = args.get("delete_recent", False)
     
     with get_connection() as con:
-        # 삭제할 레코드 찾기
+        # 삭제할 레코드 찾기 (비고 포함)
         if delete_recent:
             row = con.execute(
-                """SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자
+                """SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자, 비고1
                    FROM work_log WHERE works_user_id = ?
                    ORDER BY id DESC LIMIT 1""",
                 (user_id,)
             ).fetchone()
         elif log_id:
             row = con.execute(
-                "SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자 FROM work_log WHERE id = ?",
+                "SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자, 비고1 FROM work_log WHERE id = ?",
                 (log_id,)
             ).fetchone()
         else:
@@ -754,7 +754,7 @@ def _delete_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
             params.append(user_id)
             
             row = con.execute(
-                f"""SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자
+                f"""SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자, 비고1
                    FROM work_log WHERE {' AND '.join(conditions)}
                    ORDER BY id DESC LIMIT 1""",
                 params
@@ -766,7 +766,8 @@ def _delete_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
         log_id = row[0]
         log_data = {
             "id": row[0], "날짜": row[1], "업체명": row[2], "분류": row[3],
-            "단가": row[4], "수량": row[5], "합계": row[6], "작성자": row[7]
+            "단가": row[4], "수량": row[5], "합계": row[6], "작성자": row[7],
+            "비고": row[8] if len(row) > 8 else None
         }
         
         # 이력 기록
@@ -786,10 +787,32 @@ def _delete_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
         details=f"날짜: {log_data['날짜']}, 합계: {log_data['합계']:,}원"
     )
     
+    # 상세 삭제 메시지 구성
+    날짜 = log_data['날짜']
+    업체명 = log_data['업체명']
+    분류 = log_data['분류']
+    단가 = log_data['단가'] or 0
+    수량 = log_data['수량'] or 1
+    합계 = log_data['합계'] or 0
+    비고 = log_data.get('비고')
+    
+    # 상세 메시지
+    detail_msg = f"🗑️ 삭제 완료!\n"
+    detail_msg += f"━━━━━━━━━━━━━━━━━━━━\n"
+    detail_msg += f"📅 날짜: {날짜}\n"
+    detail_msg += f"🏢 업체: {업체명}\n"
+    detail_msg += f"📋 작업: {분류}\n"
+    detail_msg += f"💵 단가: {단가:,}원\n"
+    detail_msg += f"📦 수량: {수량}건\n"
+    detail_msg += f"💰 합계: {합계:,}원\n"
+    if 비고:
+        detail_msg += f"📝 비고: {비고}\n"
+    detail_msg += f"━━━━━━━━━━━━━━━━━━━━"
+    
     return {
         "success": True,
         "deleted": log_data,
-        "message": f"삭제완료! {log_data['업체명']} {log_data['분류']} {log_data['합계']:,}원"
+        "message": detail_msg
     }
 
 
