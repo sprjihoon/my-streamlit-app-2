@@ -164,6 +164,8 @@ def _read_excel_or_html(path: Path, **kwargs) -> pd.DataFrame:
     
     일부 시스템에서는 .xls 확장자로 HTML 테이블을 내보내기 때문에
     파일 내용을 확인하여 적절한 방법으로 읽습니다.
+    
+    여러 시트가 있는 경우 데이터가 있는 첫 번째 시트를 자동으로 선택합니다.
     """
     # 파일 시작 부분을 읽어서 HTML인지 확인
     with open(path, 'rb') as f:
@@ -201,9 +203,53 @@ def _read_excel_or_html(path: Path, **kwargs) -> pd.DataFrame:
         except Exception as e:
             # HTML 읽기 실패 시 Excel로 시도
             print(f"HTML 읽기 실패, Excel로 재시도: {e}")
-            return pd.read_excel(path, **kwargs)
+            return _read_excel_with_best_sheet(path, **kwargs)
     else:
-        # 일반 Excel 파일
+        # 일반 Excel 파일 - 여러 시트 중 데이터가 있는 시트 선택
+        return _read_excel_with_best_sheet(path, **kwargs)
+
+
+def _read_excel_with_best_sheet(path: Path, **kwargs) -> pd.DataFrame:
+    """
+    Excel 파일에서 데이터가 있는 최적의 시트를 자동으로 선택하여 읽습니다.
+    
+    여러 시트가 있는 경우:
+    1. 각 시트를 확인하여 데이터가 있는 시트 목록 생성
+    2. 가장 많은 행을 가진 시트 선택
+    """
+    try:
+        xl = pd.ExcelFile(path)
+        sheet_names = xl.sheet_names
+        
+        if len(sheet_names) == 1:
+            # 시트가 하나면 그냥 읽기
+            return pd.read_excel(path, **kwargs)
+        
+        # 여러 시트가 있는 경우, 데이터가 있는 시트 찾기
+        best_sheet = None
+        best_row_count = 0
+        
+        for sheet_name in sheet_names:
+            try:
+                # 빠른 확인을 위해 처음 몇 행만 읽기
+                df_check = pd.read_excel(path, sheet_name=sheet_name, nrows=5)
+                if len(df_check.columns) > 0 and len(df_check) > 0:
+                    # 전체 행 수 확인
+                    df_full = pd.read_excel(path, sheet_name=sheet_name, **kwargs)
+                    if len(df_full) > best_row_count:
+                        best_row_count = len(df_full)
+                        best_sheet = sheet_name
+            except Exception:
+                continue
+        
+        if best_sheet:
+            return pd.read_excel(path, sheet_name=best_sheet, **kwargs)
+        
+        # 데이터가 있는 시트를 찾지 못한 경우 기본 시트 사용
+        return pd.read_excel(path, **kwargs)
+        
+    except Exception:
+        # ExcelFile 생성 실패 시 기본 방식으로 읽기
         return pd.read_excel(path, **kwargs)
 
 
@@ -268,8 +314,14 @@ def ingest(
     except Exception as e:
         return False, f"⚠️ 파일 읽기 실패: {str(e)}"
     
-    # 컬럼명 정리 (공백 제거, 줄바꿈 제거)
-    df.columns = df.columns.astype(str).str.strip().str.replace('\n', ' ').str.replace('\r', '')
+    # 컬럼명 정리 (공백 제거, 줄바꿈 제거, 특수 공백 문자 제거)
+    df.columns = (
+        df.columns.astype(str)
+        .str.strip()
+        .str.replace(r'[\n\r\t\xa0]', '', regex=True)  # 줄바꿈, 탭, 비표준 공백 제거
+        .str.replace(r'\s+', ' ', regex=True)  # 연속 공백을 단일 공백으로
+        .str.strip()  # 다시 양쪽 공백 제거
+    )
 
     # 송장번호 정규화
     if table == "kpost_in":
@@ -288,8 +340,13 @@ def ingest(
             df[f"{date_col}_날짜"] = df[date_col].dt.date
     elif date_col:
         # 필수 날짜 컬럼이 없으면 에러
-        available_cols = ", ".join(df.columns.tolist()[:10])
-        return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 파일의 컬럼: {available_cols}..."
+        # 디버깅: 컬럼명과 유사한 컬럼 찾기
+        similar_cols = [c for c in df.columns if date_col.replace(' ', '') in c.replace(' ', '')]
+        available_cols = ", ".join([f"'{c}'" for c in df.columns.tolist()[:15]])
+        
+        if similar_cols:
+            return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 유사한 컬럼 발견: {similar_cols}. 파일의 컬럼: {available_cols}"
+        return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 파일의 컬럼: {available_cols}"
 
     # 5) 행-중복 제거
     key_cols = UNIQUE_KEY.get(table)
