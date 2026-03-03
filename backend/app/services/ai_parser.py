@@ -38,10 +38,23 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 1. **작업일지 입력**: "틸리언 1톤하차 3만원" → save_work_log 호출
 2. **조회/검색**: "오늘 작업 보여줘" → search_work_logs 호출
 3. **통계**: "이번달 총 얼마?" → get_work_log_stats 호출
-4. **삭제**: "취소", "방금거 삭제" → delete_work_log 호출
+4. **삭제**: "방금거 삭제", "삭제해줘" → delete_work_log 호출
 5. **수정**: "수정해줘" → update_work_log 호출
 6. **불완전 정보**: 필수 정보 누락 시 → ask_missing_info 호출
 7. **일반 대화**: 도구 없이 직접 응답
+
+## 🚨🚨🚨 "취소" 처리 규칙 (최우선!) 🚨🚨🚨
+**이전 대화 맥락(pending_context)에 대기 중인 정보가 있을 때** "취소"라고 하면:
+- ❌ delete_work_log 호출 금지! (기존 작업일지 삭제됨)
+- ✅ cancel_pending_entry 호출! (대기 중인 입력만 취소)
+
+**대기 중인 정보가 없을 때** "취소", "방금거 삭제"라고 하면:
+- ✅ delete_work_log 호출 (최근 저장된 작업일지 삭제)
+
+### 예시
+- 이전: "틸리언 3톤상차" → 봇: "단가를 알려주세요"
+- 현재: "취소" → **cancel_pending_entry 호출** (대기 취소)
+- ❌ 절대로 delete_work_log 호출하면 안 됨!
 
 ## 금액 해석 규칙
 - 만 = 10000, 천 = 1000
@@ -451,6 +464,17 @@ class AIParser:
                         "required": ["vendor", "work_type", "unit_price", "question"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "cancel_pending_entry",
+                    "description": "대기 중인 작업일지 입력을 취소합니다. 이전 대화에서 ask_missing_info나 ask_price_confirmation으로 정보를 물어본 상태에서 사용자가 '취소'라고 하면 이 도구를 호출하세요. ⚠️ delete_work_log가 아닌 이 도구를 사용해야 합니다!",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
             }
         ]
         
@@ -490,6 +514,31 @@ class AIParser:
                 tool_args_first = json.loads(tool_call_first.function.arguments)
                 if "vendor" in tool_args_first:
                     tool_args_first["vendor"] = self._map_vendor_alias(tool_args_first["vendor"])
+                
+                # ─────────────────────────────────────
+                # 특수 도구 처리: cancel_pending_entry (첫 번째만, 조기 반환)
+                # ─────────────────────────────────────
+                if tool_name_first == "cancel_pending_entry":
+                    # 대기 상태 취소
+                    if pending_state:
+                        pending_data = pending_state.get("pending_data", {})
+                        vendor = pending_data.get("vendor", "")
+                        work_type = pending_data.get("work_type", "")
+                        self.conv_manager.clear_state(user_id)
+                        
+                        if vendor or work_type:
+                            return {
+                                "response": f"🚫 '{vendor} {work_type}' 입력이 취소되었어요.",
+                                "tool_called": tool_name_first,
+                                "tool_result": {"cancelled": True, "pending_data": pending_data}
+                            }
+                    
+                    self.conv_manager.clear_state(user_id)
+                    return {
+                        "response": "🚫 취소되었어요.",
+                        "tool_called": tool_name_first,
+                        "tool_result": {"cancelled": True}
+                    }
                 
                 # ─────────────────────────────────────
                 # 특수 도구 처리: ask_missing_info (첫 번째만, 조기 반환)
