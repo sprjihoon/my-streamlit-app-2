@@ -90,6 +90,26 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 ⚠️ 업체명·작업종류·단가만 있으면 바로 save_work_log 호출. 날짜/수량 없어도 날짜=오늘, 수량=1로 저장됨.
 ⚠️ ask_missing_info의 missing 배열에는 vendor, work_type, unit_price만 넣을 수 있음. date, qty 넣으면 안 됨!
 
+## ⚠️ 가격 자동 조회 기능 (매우 중요!)
+사용자가 **업체명 + 작업종류 + 수량**만 말하고 **가격을 말하지 않은 경우**:
+1. **먼저** lookup_price_from_history 도구로 이전 가격 조회
+2. 가격이 발견되면 → 사용자에게 확인 질문 (ask_price_confirmation 호출)
+3. 사용자가 "네", "맞아", "그래" 등으로 확인하면 → complete_pending_entry로 저장
+4. 사용자가 다른 가격을 말하면 → 그 가격으로 저장
+
+### 가격 조회 예시
+- "틸리언 하차 3건" (가격 없음)
+  → lookup_price_from_history(vendor="틸리언", work_type="하차") 호출
+  → 결과: 최근 단가 30,000원 발견
+  → ask_price_confirmation 호출: "틸리언 하차 최근 단가가 30,000원이에요. 이 가격으로 저장할까요?"
+  
+- "나블리 양품화 50개" (가격 없음)
+  → lookup_price_from_history(vendor="나블리", work_type="양품화") 호출
+  → 결과: 최근 단가 800원 발견
+  → ask_price_confirmation 호출: "나블리 양품화 최근 단가가 800원이에요. 50개 × 800원 = 40,000원으로 저장할까요?"
+
+⚠️ 가격 없이 업체명+작업종류만 있으면 바로 ask_missing_info 호출하지 말고, 먼저 lookup_price_from_history로 이전 가격을 찾아보세요!
+
 ## ⚠️ 업체명 규칙 (매우 중요!)
 - 업체명은 DB에 등록된 업체만 사용 가능! (DB 컨텍스트의 "등록 업체" 목록 참고)
 - **[대괄호] 안의 이름은 작성자 이름**이지 업체명이 아닙니다!
@@ -114,6 +134,16 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 - 예: 이전에 "2박스 입고 1000원"을 물어봤고, 사용자가 "하이비오"라고 답하면
   → complete_pending_entry(vendor="하이비오") 호출
   → 시스템이 자동으로 qty=2, work_type=입고, unit_price=1000과 병합
+
+## ⚠️ 가격 확인 응답 처리 (매우 중요!)
+이전 대화에서 ask_price_confirmation으로 가격 확인을 물어본 상태라면:
+- 사용자가 **"네", "응", "맞아", "그래", "ㅇㅇ", "저장해"** 등으로 답하면 → complete_pending_entry 호출 (인자 없이!)
+- 사용자가 **다른 가격**을 말하면 → complete_pending_entry 호출 (unit_price만 전달)
+- 사용자가 **"아니", "취소", "다시"** 등으로 답하면 → 취소 메시지 응답
+- 예: 이전에 "틸리언 하차 30,000원으로 저장할까요?"를 물어봤고, 사용자가 "응"이라고 답하면
+  → complete_pending_entry() 호출 (인자 없이, 이미 모든 정보가 pending_data에 있음)
+- 예: 사용자가 "아니 2만원"이라고 답하면
+  → complete_pending_entry(unit_price=20000) 호출
 
 ## 중요
 - 사용자가 작업일지 형식("업체명 작업 금액")으로 말하면 **반드시** save_work_log 도구를 호출하세요. 도구를 호출하지 않고 "저장완료"라고 말하지 마세요.
@@ -354,13 +384,13 @@ class AIParser:
         pending_state = self.conv_manager.get_state(user_id)
         pending_context = self._format_pending_context(pending_state)
         
-        # 확장된 도구 목록 (ask_missing_info, complete_pending_entry 추가)
+        # 확장된 도구 목록 (ask_missing_info, complete_pending_entry, ask_price_confirmation 추가)
         extended_tools = TOOLS + [
             {
                 "type": "function",
                 "function": {
                     "name": "ask_missing_info",
-                    "description": "작업일지 저장에 필요한 정보가 부족할 때 사용자에게 물어봅니다. ⚠️ 필수 정보는 vendor, work_type, unit_price 3개뿐! 날짜(date)와 수량(qty)은 필수가 아니므로 절대 물어보지 마세요. 날짜 미입력 시 오늘, 수량 미입력 시 1로 자동 저장됩니다.",
+                    "description": "작업일지 저장에 필요한 정보가 부족할 때 사용자에게 물어봅니다. ⚠️ 필수 정보는 vendor, work_type, unit_price 3개뿐! 날짜(date)와 수량(qty)은 필수가 아니므로 절대 물어보지 마세요. 날짜 미입력 시 오늘, 수량 미입력 시 1로 자동 저장됩니다. ⚠️ 가격이 없으면 먼저 lookup_price_from_history로 이전 가격을 찾아보세요!",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -385,7 +415,7 @@ class AIParser:
                 "type": "function",
                 "function": {
                     "name": "complete_pending_entry",
-                    "description": "이전 대화에서 ask_missing_info로 물어본 후, 사용자가 누락된 정보를 답했을 때 사용합니다. 이미 파악된 정보(pending_data)와 자동으로 병합되므로, 새로 추가된 정보만 전달하세요. save_work_log 대신 반드시 이 도구를 사용하세요!",
+                    "description": "이전 대화에서 ask_missing_info 또는 ask_price_confirmation으로 물어본 후, 사용자가 누락된 정보를 답했을 때 사용합니다. 이미 파악된 정보(pending_data)와 자동으로 병합되므로, 새로 추가된 정보만 전달하세요. save_work_log 대신 반드시 이 도구를 사용하세요!",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -396,6 +426,26 @@ class AIParser:
                             "date": {"type": "string", "description": "사용자가 새로 답한 날짜 (이전에 누락됐던 경우만)"},
                             "remark": {"type": "string", "description": "사용자가 새로 답한 비고 (이전에 누락됐던 경우만)"}
                         }
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ask_price_confirmation",
+                    "description": "lookup_price_from_history로 이전 가격을 찾은 후, 사용자에게 그 가격으로 저장할지 확인합니다. 사용자가 가격 없이 업체명+작업종류+수량만 말했을 때, 이전 가격을 찾아서 확인 질문을 합니다.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "vendor": {"type": "string", "description": "업체명"},
+                            "work_type": {"type": "string", "description": "작업종류"},
+                            "unit_price": {"type": "integer", "description": "조회된 이전 단가"},
+                            "qty": {"type": "integer", "description": "수량 (기본값 1)"},
+                            "date": {"type": "string", "description": "날짜 (기본값 오늘)"},
+                            "remark": {"type": "string", "description": "비고"},
+                            "question": {"type": "string", "description": "사용자에게 확인할 질문. 예: '틸리언 하차 최근 단가가 30,000원이에요. 이 가격으로 저장할까요?'"}
+                        },
+                        "required": ["vendor", "work_type", "unit_price", "question"]
                     }
                 }
             }
@@ -459,6 +509,32 @@ class AIParser:
                         "response": f"❓ {question}",
                         "tool_called": tool_name_first,
                         "tool_result": {"pending_data": pending_data, "missing": missing},
+                        "waiting_for_info": True
+                    }
+                
+                # ─────────────────────────────────────
+                # 특수 도구 처리: ask_price_confirmation (첫 번째만, 조기 반환)
+                # ─────────────────────────────────────
+                if tool_name_first == "ask_price_confirmation":
+                    pending_data = {
+                        k: v for k, v in tool_args_first.items()
+                        if k in ["vendor", "work_type", "unit_price", "qty", "date", "remark"] and v
+                    }
+                    question = tool_args_first.get("question", "이 가격으로 저장할까요?")
+                    
+                    # 대기 상태 저장 (가격 확인 대기)
+                    self.conv_manager.set_state(
+                        user_id=user_id,
+                        channel_id=channel_id or "",
+                        pending_data=pending_data,
+                        missing=[],  # 모든 정보가 있음, 확인만 대기
+                        last_question=question
+                    )
+                    
+                    return {
+                        "response": f"💰 {question}",
+                        "tool_called": tool_name_first,
+                        "tool_result": {"pending_data": pending_data, "awaiting_confirmation": True},
                         "waiting_for_info": True
                     }
                 
