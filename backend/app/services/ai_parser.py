@@ -578,6 +578,8 @@ class AIParser:
                         # 가격 발견! → 확인 질문
                         found_price = price_result["most_recent_price"]
                         exact_match = price_result.get("exact_match", False)
+                        usage_count = price_result.get("usage_count", 0)
+                        sample_vendor = price_result.get("sample_vendor", "")
                         
                         # pending_data 구성 (기존 대화에서 수량 등이 있을 수 있음)
                         pending_data = {
@@ -594,9 +596,14 @@ class AIParser:
                         
                         # 확인 질문 생성
                         if exact_match:
-                            question = f"{vendor} {work_type} 최근 단가가 {found_price:,}원이에요. 이 가격으로 저장할까요?"
+                            question = f"{vendor} {work_type} 최근 단가가 {found_price:,}원이에요 ({usage_count}회 사용). 이 가격으로 저장할까요?"
                         else:
-                            question = f"'{work_type}' 작업의 최근 단가가 {found_price:,}원이에요 (다른 업체 기준). 이 가격으로 저장할까요?"
+                            # 다른 업체 기준 - 참고 정보 제공
+                            ref_info = f"({usage_count}회 사용"
+                            if sample_vendor:
+                                ref_info += f", 예: {sample_vendor}"
+                            ref_info += ")"
+                            question = f"'{work_type}' 작업의 최근 단가가 {found_price:,}원이에요 {ref_info}. 이 가격으로 저장할까요? (다른 가격이면 직접 입력해주세요)"
                         
                         # 대기 상태 저장
                         self.conv_manager.set_state(
@@ -619,7 +626,7 @@ class AIParser:
                             "vendor": vendor,
                             "work_type": work_type,
                         }
-                        question = f"{vendor} {work_type}의 단가를 알려주세요!"
+                        question = f"'{work_type}' 작업의 이전 가격 기록이 없어요. 단가를 알려주세요!"
                         
                         self.conv_manager.set_state(
                             user_id=user_id,

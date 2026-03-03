@@ -1520,102 +1520,116 @@ def _web_search(args: Dict, user_id: str, user_name: str) -> Dict:
 
 
 def _lookup_price_from_history(args: Dict, user_id: str, user_name: str) -> Dict:
-    """기존 작업일지에서 업체명+작업종류 조합의 가격 조회"""
+    """기존 작업일지에서 업체명+작업종류 조합의 가격 조회
+    
+    조회 우선순위:
+    1. 해당 업체 + 해당 작업종류 (정확히 일치)
+    2. 해당 작업종류만 (모든 업체에서 검색)
+    """
     vendor = args.get("vendor", "")
     work_type = args.get("work_type", "")
     
-    if not vendor or not work_type:
-        return {"success": False, "error": "업체명과 작업종류가 필요합니다."}
+    if not work_type:
+        return {"success": False, "error": "작업종류가 필요합니다."}
     
     with get_connection() as con:
-        # 공백 제거한 버전도 준비
-        vendor_normalized = vendor.replace(" ", "").replace("　", "")
+        resolved_vendor = vendor
         
-        # 1. 별칭 테이블에서 실제 업체명 찾기
-        vendor_check = con.execute(
-            """SELECT vendor FROM vendors WHERE LOWER(vendor) = LOWER(?)
-               UNION
-               SELECT vendor FROM aliases WHERE LOWER(alias) = LOWER(?)""",
-            (vendor, vendor)
-        ).fetchone()
-        
-        if not vendor_check:
+        if vendor:
+            # 공백 제거한 버전도 준비
+            vendor_normalized = vendor.replace(" ", "").replace("　", "")
+            
+            # 1. 별칭 테이블에서 실제 업체명 찾기
             vendor_check = con.execute(
-                """SELECT vendor FROM vendors 
-                   WHERE REPLACE(LOWER(vendor), ' ', '') = LOWER(?)
+                """SELECT vendor FROM vendors WHERE LOWER(vendor) = LOWER(?)
                    UNION
-                   SELECT vendor FROM aliases 
-                   WHERE REPLACE(LOWER(alias), ' ', '') = LOWER(?)""",
-                (vendor_normalized, vendor_normalized)
+                   SELECT vendor FROM aliases WHERE LOWER(alias) = LOWER(?)""",
+                (vendor, vendor)
             ).fetchone()
-        
-        if vendor_check:
-            vendor = vendor_check[0]
-        
-        # 2. 해당 업체+작업종류 조합의 최근 가격 조회
-        # 가장 최근 사용된 단가를 찾음
-        price_rows = con.execute(
-            """SELECT 단가, 합계, 수량, 날짜, COUNT(*) as usage_count
-               FROM work_log 
-               WHERE 업체명 = ? AND 분류 LIKE ?
-               GROUP BY 단가
-               ORDER BY MAX(날짜) DESC, usage_count DESC
-               LIMIT 5""",
-            (vendor, f"%{work_type}%")
-        ).fetchall()
-        
-        if not price_rows:
-            # 작업종류만으로 검색 (업체 무관)
+            
+            if not vendor_check:
+                vendor_check = con.execute(
+                    """SELECT vendor FROM vendors 
+                       WHERE REPLACE(LOWER(vendor), ' ', '') = LOWER(?)
+                       UNION
+                       SELECT vendor FROM aliases 
+                       WHERE REPLACE(LOWER(alias), ' ', '') = LOWER(?)""",
+                    (vendor_normalized, vendor_normalized)
+                ).fetchone()
+            
+            if vendor_check:
+                resolved_vendor = vendor_check[0]
+            
+            # 2. 해당 업체+작업종류 조합의 최근 가격 조회
             price_rows = con.execute(
-                """SELECT 단가, 합계, 수량, 날짜, COUNT(*) as usage_count
+                """SELECT 단가, 합계, 수량, 날짜, COUNT(*) as usage_count, 업체명
                    FROM work_log 
-                   WHERE 분류 LIKE ?
+                   WHERE 업체명 = ? AND 분류 LIKE ?
                    GROUP BY 단가
                    ORDER BY MAX(날짜) DESC, usage_count DESC
                    LIMIT 5""",
-                (f"%{work_type}%",)
+                (resolved_vendor, f"%{work_type}%")
             ).fetchall()
             
-            if not price_rows:
-                return {
-                    "success": False,
-                    "found": False,
-                    "vendor": vendor,
-                    "work_type": work_type,
-                    "message": f"'{vendor} {work_type}'에 대한 이전 가격 기록이 없습니다."
-                }
-            
-            # 작업종류만 일치하는 경우
-            prices = [
-                {
-                    "unit_price": r[0],
-                    "total": r[1],
-                    "qty": r[2],
-                    "last_date": r[3],
-                    "usage_count": r[4]
-                }
-                for r in price_rows if r[0]
-            ]
-            
+            if price_rows:
+                # 정확히 일치하는 경우
+                prices = [
+                    {
+                        "unit_price": r[0],
+                        "total": r[1],
+                        "qty": r[2],
+                        "last_date": r[3],
+                        "usage_count": r[4],
+                        "vendor": r[5]
+                    }
+                    for r in price_rows if r[0]
+                ]
+                
+                if prices:
+                    most_recent = prices[0]
+                    return {
+                        "success": True,
+                        "found": True,
+                        "exact_match": True,
+                        "vendor": resolved_vendor,
+                        "work_type": work_type,
+                        "prices": prices,
+                        "most_recent_price": most_recent["unit_price"],
+                        "most_recent_date": most_recent["last_date"],
+                        "usage_count": most_recent["usage_count"],
+                        "message": f"'{resolved_vendor} {work_type}'의 최근 단가: {most_recent['unit_price']:,}원 ({most_recent['usage_count']}회 사용)"
+                    }
+        
+        # 3. 작업종류만으로 검색 (모든 업체에서)
+        # 가장 많이 사용된 단가를 찾음
+        price_rows = con.execute(
+            """SELECT 단가, 합계, 수량, MAX(날짜) as last_date, COUNT(*) as usage_count, 업체명
+               FROM work_log 
+               WHERE 분류 LIKE ? AND 단가 IS NOT NULL AND 단가 > 0
+               GROUP BY 단가
+               ORDER BY usage_count DESC, last_date DESC
+               LIMIT 5""",
+            (f"%{work_type}%",)
+        ).fetchall()
+        
+        if not price_rows:
             return {
-                "success": True,
-                "found": True,
-                "exact_match": False,
-                "vendor": vendor,
+                "success": False,
+                "found": False,
+                "vendor": resolved_vendor,
                 "work_type": work_type,
-                "prices": prices,
-                "most_recent_price": prices[0]["unit_price"] if prices else None,
-                "message": f"'{work_type}' 작업의 최근 단가: {prices[0]['unit_price']:,}원 (다른 업체 기준)"
+                "message": f"'{work_type}' 작업에 대한 이전 가격 기록이 없습니다."
             }
         
-        # 정확히 일치하는 경우
+        # 작업종류만 일치하는 경우 - 가장 많이 사용된 단가 제안
         prices = [
             {
                 "unit_price": r[0],
                 "total": r[1],
                 "qty": r[2],
                 "last_date": r[3],
-                "usage_count": r[4]
+                "usage_count": r[4],
+                "sample_vendor": r[5]
             }
             for r in price_rows if r[0]
         ]
@@ -1624,24 +1638,26 @@ def _lookup_price_from_history(args: Dict, user_id: str, user_name: str) -> Dict
             return {
                 "success": False,
                 "found": False,
-                "vendor": vendor,
+                "vendor": resolved_vendor,
                 "work_type": work_type,
-                "message": f"'{vendor} {work_type}'에 대한 이전 가격 기록이 없습니다."
+                "message": f"'{work_type}' 작업에 대한 이전 가격 기록이 없습니다."
             }
         
-        most_recent = prices[0]
+        most_used = prices[0]
+        sample_vendor = most_used.get("sample_vendor", "")
         
         return {
             "success": True,
             "found": True,
-            "exact_match": True,
-            "vendor": vendor,
+            "exact_match": False,
+            "vendor": resolved_vendor,
             "work_type": work_type,
             "prices": prices,
-            "most_recent_price": most_recent["unit_price"],
-            "most_recent_date": most_recent["last_date"],
-            "usage_count": most_recent["usage_count"],
-            "message": f"'{vendor} {work_type}'의 최근 단가: {most_recent['unit_price']:,}원 ({most_recent['usage_count']}회 사용)"
+            "most_recent_price": most_used["unit_price"],
+            "most_recent_date": most_used["last_date"],
+            "usage_count": most_used["usage_count"],
+            "sample_vendor": sample_vendor,
+            "message": f"'{work_type}' 작업의 최근 단가: {most_used['unit_price']:,}원 ({most_used['usage_count']}회 사용, 예: {sample_vendor})"
         }
 
 
