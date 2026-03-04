@@ -162,7 +162,12 @@ async def remove_upload(upload_id: int, token: Optional[str] = None) -> UploadRe
 @router.delete("/table/{table_name}")
 async def reset_table_data(table_name: str, token: Optional[str] = None) -> UploadResponse:
     """
-    특정 테이블의 모든 데이터 삭제 (관리자만).
+    특정 테이블의 업로드된 데이터만 삭제 (관리자만).
+    
+    work_log 테이블의 경우:
+    - 봇으로 입력된 작업일지(출처='bot')는 보존됩니다.
+    - 엑셀로 업로드된 데이터만 삭제됩니다.
+    
     업로드 기록도 함께 삭제됩니다.
     """
     # 관리자 권한 체크
@@ -177,11 +182,25 @@ async def reset_table_data(table_name: str, token: Optional[str] = None) -> Uplo
     
     try:
         with get_connection() as con:
-            # 테이블 데이터 삭제 전 건수 확인
-            count_before = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-            
-            # 테이블 데이터 삭제
-            con.execute(f"DELETE FROM {table_name}")
+            if table_name == "work_log":
+                # work_log: 봇 작업일지는 보존하고 업로드된 데이터만 삭제
+                count_before = con.execute(
+                    "SELECT COUNT(*) FROM work_log WHERE 출처 IS NULL OR 출처 = '' OR 출처 != 'bot'"
+                ).fetchone()[0]
+                bot_count = con.execute(
+                    "SELECT COUNT(*) FROM work_log WHERE 출처 = 'bot'"
+                ).fetchone()[0]
+                
+                con.execute(
+                    "DELETE FROM work_log WHERE 출처 IS NULL OR 출처 = '' OR 출처 != 'bot'"
+                )
+                
+                message = f"✅ {table_name} 업로드 데이터 초기화 완료 ({count_before}건 삭제, 봇 작업일지 {bot_count}건 보존)"
+            else:
+                # 다른 테이블: 전체 삭제
+                count_before = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                con.execute(f"DELETE FROM {table_name}")
+                message = f"✅ {table_name} 테이블 초기화 완료 ({count_before}건 삭제)"
             
             # 관련 업로드 기록도 삭제
             con.execute("DELETE FROM uploads WHERE table_name = ?", (table_name,))
@@ -195,12 +214,12 @@ async def reset_table_data(table_name: str, token: Optional[str] = None) -> Uplo
             target_id=table_name,
             target_name=table_name,
             user_nickname=nickname,
-            details=f"테이블 '{table_name}' 초기화 ({count_before}건 삭제)"
+            details=message
         )
         
         return UploadResponse(
             success=True,
-            message=f"✅ {table_name} 테이블 초기화 완료 ({count_before}건 삭제)"
+            message=message
         )
         
     except Exception as e:
