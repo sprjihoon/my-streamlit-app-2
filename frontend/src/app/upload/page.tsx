@@ -140,8 +140,17 @@ export default function UploadPage() {
 
   // 테이블 데이터 초기화
   async function handleResetTable(tableName: string, tableLabel: string) {
-    if (!confirm(`⚠️ ${tableLabel} 테이블의 모든 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
-    if (!confirm(`정말로 ${tableLabel} 데이터를 모두 삭제하시겠습니까?`)) return;
+    // work_log는 봇 데이터 보존, 다른 테이블은 전체 삭제
+    const confirmMsg = tableName === 'work_log'
+      ? `⚠️ ${tableLabel}의 업로드된 데이터를 삭제하시겠습니까?\n\n✅ 봇으로 입력한 작업일지는 유지됩니다.\n❌ 엑셀로 업로드한 데이터만 삭제됩니다.`
+      : `⚠️ ${tableLabel} 테이블의 모든 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`;
+    
+    const confirmMsg2 = tableName === 'work_log'
+      ? `정말로 ${tableLabel} 업로드 데이터를 삭제하시겠습니까?\n(봇 작업일지는 유지됩니다)`
+      : `정말로 ${tableLabel} 데이터를 모두 삭제하시겠습니까?`;
+    
+    if (!confirm(confirmMsg)) return;
+    if (!confirm(confirmMsg2)) return;
     
     try {
       const result = await resetTableData(tableName);
