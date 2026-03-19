@@ -878,7 +878,6 @@ export interface ComboDetail {
   name: string;
   qty: number;
   barcode?: string;
-  code?: string;
 }
 
 export interface PrepackingCombo {

@@ -101,65 +101,176 @@ def _normalize_text(text: str) -> str:
     return text
 
 
-def _is_option_only(name: str) -> bool:
-    """[블랙], [화이트] 등 대괄호로만 감싸진 옵션명인지 판별."""
-    return bool(re.match(r"^\[.+\]$", name.strip()))
+def _safe_int(val, default: int = 1) -> int:
+    """안전하게 정수 변환. NaN/None/빈문자열 → default."""
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return default
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_str(val) -> str:
+    """안전하게 문자열 변환. NaN/None → 빈문자열."""
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return ""
+    s = str(val).strip()
+    return "" if s.lower() == "nan" else s
+
+
+def _detect_columns(df: pd.DataFrame) -> Dict[str, Optional[str]]:
+    """DataFrame에서 핵심 컬럼명을 자동 감지."""
+    col_map: Dict[str, Optional[str]] = {
+        "order": None, "product": None, "option": None,
+        "qty": None, "inner_qty": None, "barcode": None,
+        "date": None, "admin_product_qty": None,
+    }
+    for c in df.columns:
+        cl = c.strip()
+        if cl == "주문번호":
+            col_map["order"] = c
+        elif cl == "상품명":
+            col_map["product"] = c
+        elif cl in ("옵션", "옵션정보"):
+            col_map["option"] = c
+        elif cl == "수량":
+            col_map["qty"] = c
+        elif cl == "내품수량":
+            col_map["inner_qty"] = c
+        elif cl == "상품바코드":
+            col_map["barcode"] = c
+        elif cl in ("배송일", "송장등록일", "출고일자"):
+            if col_map["date"] is None:
+                col_map["date"] = c
+        elif cl in ("어드민상품명수량", "어드민상품명 수량"):
+            col_map["admin_product_qty"] = c
+    return col_map
 
 
 def parse_admin_product_qty(raw: str) -> List[Dict[str, Any]]:
     """
     어드민상품명수량 컬럼 파싱.
-    예: "닭가슴살---5, 오리안심---5" → [{"name": "닭가슴살", "qty": 5}, ...]
-    
-    옵션 처리:
-    - "[블랙]---1, 허밍 레이스 티셔츠---1" 같은 경우
-      [블랙]은 옵션이므로 다음 상품명에 붙여서 "허밍 레이스 티셔츠 [블랙]"으로 합침.
-    - 옵션이 상품명 뒤에 오는 경우도 처리.
+
+    구분자 규칙:
+    - 줄바꿈(\\n)이 SKU 간 구분자
+    - `---` 뒤의 숫자가 수량 (예: `슬로우 피딩 스푼, [옐로우]--- 1`)
+    - 줄바꿈이 없으면 콤마를 구분자로 시도하되, `--- 숫자` 패턴이 있는 위치 기준
     """
-    if not raw or pd.isna(raw):
+    if not raw or (isinstance(raw, float) and math.isnan(raw)):
         return []
     raw = str(raw).strip()
-    raw_items: List[Dict[str, Any]] = []
-    for part in re.split(r"[,\n]", raw):
-        part = part.strip()
-        if not part:
-            continue
-        m = re.match(r"^(.+?)---+(\d+)$", part)
-        if m:
-            raw_items.append({"name": _normalize_text(m.group(1)), "qty": int(m.group(2))})
-            continue
-        m = re.match(r"^(.+?)\s*[x×\*]\s*(\d+)$", part, re.IGNORECASE)
-        if m:
-            raw_items.append({"name": _normalize_text(m.group(1)), "qty": int(m.group(2))})
-            continue
-        raw_items.append({"name": _normalize_text(part), "qty": 1})
+    if not raw:
+        return []
 
-    # 옵션 병합: [대괄호] 항목을 인접 상품명에 합침
+    # 줄바꿈이 있으면 줄바꿈으로 split
+    if "\n" in raw:
+        lines = [l.strip() for l in raw.split("\n") if l.strip()]
+    else:
+        # 줄바꿈 없으면 "---숫자" 뒤의 콤마를 기준으로 split
+        # 예: "상품A---1, 상품B---2" → ["상품A---1", "상품B---2"]
+        lines = re.split(r"(---\s*\d+)\s*,\s*", raw)
+        # re.split with group → ["상품A", "---1", "상품B", "---2", ""]
+        # 짝수/홀수 인덱스를 재결합
+        if len(lines) > 1:
+            merged_lines = []
+            i = 0
+            while i < len(lines):
+                if i + 1 < len(lines) and re.match(r"^---\s*\d+$", lines[i + 1]):
+                    merged_lines.append(lines[i] + lines[i + 1])
+                    i += 2
+                else:
+                    if lines[i].strip():
+                        merged_lines.append(lines[i])
+                    i += 1
+            lines = merged_lines
+
+    raw_items: List[Dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^(.+?)---+\s*(\d+)\s*$", line)
+        if m:
+            name = _normalize_text(m.group(1))
+            qty = int(m.group(2))
+            raw_items.append({"name": name, "qty": qty})
+        else:
+            raw_items.append({"name": _normalize_text(line), "qty": 1})
+
     if not raw_items:
         return []
 
+    # 옵션 병합: "[옵션명]"만으로 된 항목은 바로 앞 상품의 옵션
     merged: List[Dict[str, Any]] = []
-    pending_options: List[str] = []
-
     for item in raw_items:
-        if _is_option_only(item["name"]):
-            pending_options.append(item["name"])
+        if re.match(r"^\[.+\]$", item["name"]):
+            if merged:
+                merged[-1]["name"] = f"{merged[-1]['name']}, {item['name']}"
+            else:
+                merged.append(item)
         else:
-            name = item["name"]
-            # 앞에 대기 중인 옵션이 있으면 현재 상품명에 붙임
-            if pending_options:
-                name = f"{name} {' '.join(pending_options)}"
-                pending_options.clear()
-            merged.append({"name": name, "qty": item["qty"]})
-
-    # 끝에 남은 옵션이 있으면 마지막 상품에 붙임
-    if pending_options and merged:
-        merged[-1]["name"] = f"{merged[-1]['name']} {' '.join(pending_options)}"
-    elif pending_options:
-        for opt in pending_options:
-            merged.append({"name": opt, "qty": 1})
+            merged.append(item)
 
     return merged
+
+
+def _split_csv_field(val) -> List[str]:
+    """콤마로 구분된 필드를 split. NaN/None → 빈 리스트."""
+    s = _safe_str(val)
+    if not s:
+        return []
+    return [v.strip() for v in s.split(",") if v.strip()]
+
+
+def _extract_items_from_row(
+    row: pd.Series,
+    col_map: Dict[str, Optional[str]],
+) -> List[Dict[str, Any]]:
+    """
+    한 행에서 SKU 아이템 리스트 추출.
+
+    어드민상품명수량 파싱 후, 같은 행의 상품바코드를
+    콤마로 split하여 순서대로 매핑.
+    """
+    admin_col = col_map.get("admin_product_qty")
+    bc_col = col_map.get("barcode")
+
+    # 방법1: 어드민상품명수량 파싱 (우선)
+    if admin_col and admin_col in row.index:
+        raw = _safe_str(row.get(admin_col, ""))
+        if raw:
+            items = parse_admin_product_qty(raw)
+            if items:
+                barcodes = _split_csv_field(row.get(bc_col, "")) if bc_col and bc_col in row.index else []
+                for i, it in enumerate(items):
+                    it["barcode"] = barcodes[i] if i < len(barcodes) else ""
+                return items
+
+    # 방법2: 개별 컬럼 (fallback)
+    product_col = col_map.get("product")
+    product = _safe_str(row.get(product_col, "")) if product_col else ""
+    if not product:
+        return []
+
+    option_col = col_map.get("option")
+    option = _safe_str(row.get(option_col, "")) if option_col else ""
+
+    qty = 1
+    inner_col = col_map.get("inner_qty")
+    if inner_col and inner_col in row.index:
+        qty = _safe_int(row[inner_col], 0)
+    if qty <= 0:
+        qty_col = col_map.get("qty")
+        if qty_col and qty_col in row.index:
+            qty = _safe_int(row[qty_col], 1)
+    if qty <= 0:
+        qty = 1
+
+    name = f"{product} [{option}]" if option else product
+    barcode = _safe_str(row.get(bc_col, "")) if bc_col and bc_col in row.index else ""
+
+    return [{"name": name, "qty": qty, "barcode": barcode}]
 
 
 def build_combo_key(items: List[Dict[str, Any]]) -> str:
@@ -173,19 +284,13 @@ def build_combo_key(items: List[Dict[str, Any]]) -> str:
     return "|".join(f"{it['name']}:{it['qty']}" for it in sorted_items)
 
 
-def build_combo_detail(
-    items: List[Dict[str, Any]],
-    barcode_map: Optional[Dict[str, str]] = None,
-    code_map: Optional[Dict[str, str]] = None,
-) -> str:
-    """combo_detail JSON 생성 (제품명, 바코드, 코드, 수량)."""
+def build_combo_detail(items: List[Dict[str, Any]]) -> str:
+    """combo_detail JSON 생성 (제품명, 바코드, 수량)."""
     details = []
     for it in sorted(items, key=lambda x: x["name"]):
         d: Dict[str, Any] = {"name": it["name"], "qty": it["qty"]}
-        if barcode_map and it["name"] in barcode_map:
-            d["barcode"] = barcode_map[it["name"]]
-        if code_map and it["name"] in code_map:
-            d["code"] = code_map[it["name"]]
+        if it.get("barcode"):
+            d["barcode"] = it["barcode"]
         details.append(d)
     return json.dumps(details, ensure_ascii=False)
 
@@ -194,6 +299,40 @@ def build_combo_detail(
 # 3. 조합 분석
 # ─────────────────────────────────────
 
+def _load_vendor_df(vendor: str, d_from: date, d_to: date) -> Tuple[pd.DataFrame, Dict[str, Optional[str]]]:
+    """
+    배송통계 로드 → 공급처 필터 → 날짜 필터 → 송장 중복 제거.
+    Returns: (filtered_df, col_map)
+    """
+    with get_connection() as con:
+        df = pd.read_sql("SELECT * FROM shipping_stats", con)
+        df.columns = [c.strip() for c in df.columns]
+        alias_df = pd.read_sql(
+            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'shipping_stats'",
+            con, params=(vendor,),
+        )
+    name_list = [vendor] + alias_df["alias"].tolist()
+    col_map = _detect_columns(df)
+
+    if not col_map["date"]:
+        return pd.DataFrame(), col_map
+
+    date_col = col_map["date"]
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df = df[(df[date_col] >= pd.to_datetime(d_from)) & (df[date_col] <= pd.to_datetime(d_to))]
+
+    if "공급처" in df.columns:
+        df = df[df["공급처"].isin(name_list)]
+
+    # 송장번호 중복 제거 (한 송장 = 한 배송건)
+    for key in ("송장번호", "운송장번호"):
+        if key in df.columns:
+            df = df.drop_duplicates(subset=[key])
+            break
+
+    return df.reset_index(drop=True), col_map
+
+
 def analyze_combinations(
     vendor: str,
     d_from: date,
@@ -201,76 +340,24 @@ def analyze_combinations(
 ) -> Dict[str, Any]:
     """
     배송통계에서 공급처별 SKU 조합을 추출·분석.
-    Returns:
-        {
-            "vendor": str,
-            "total_orders": int,
-            "multi_item_orders": int,
-            "combos": [{"combo_key", "combo_detail", "count", "day_counts": {0..6: int}}],
-            "data_weeks": int,
-        }
+    각 행의 어드민상품명수량을 파싱하여 합포장 조합 식별.
+    어드민상품명수량이 없으면 주문번호 그룹핑으로 fallback.
     """
-    with get_connection() as con:
-        df = pd.read_sql("SELECT * FROM shipping_stats", con)
-        df.columns = [c.strip() for c in df.columns]
+    df, col_map = _load_vendor_df(vendor, d_from, d_to)
+    date_col = col_map["date"]
 
-        alias_df = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'shipping_stats'",
-            con, params=(vendor,),
-        )
-    name_list = [vendor] + alias_df["alias"].tolist()
-
-    # 날짜 컬럼 감지
-    date_col = None
-    for c in ["배송일", "송장등록일", "출고일자"]:
-        if c in df.columns:
-            date_col = c
-            break
-    if not date_col:
+    if df.empty or not date_col:
         return {"vendor": vendor, "total_orders": 0, "multi_item_orders": 0, "combos": [], "data_weeks": 0}
-
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df = df[(df[date_col] >= pd.to_datetime(d_from)) & (df[date_col] <= pd.to_datetime(d_to))]
-
-    if "공급처" in df.columns:
-        df = df[df["공급처"].isin(name_list)]
-
-    # 중복 제거
-    for key in ("송장번호", "운송장번호"):
-        if key in df.columns:
-            df = df.drop_duplicates(subset=[key])
-            break
 
     total_orders = len(df)
 
-    # 어드민상품명수량 파싱
-    admin_col = None
-    for c in ["어드민상품명수량", "어드민상품명 수량"]:
-        if c in df.columns:
-            admin_col = c
-            break
-
-    if not admin_col:
-        return {"vendor": vendor, "total_orders": total_orders, "multi_item_orders": 0, "combos": [], "data_weeks": 0}
-
-    # 바코드·코드 매핑 구축
-    barcode_map: Dict[str, str] = {}
-    code_map: Dict[str, str] = {}
-    if "상품바코드" in df.columns and "상품명" in df.columns:
-        for _, row in df[["상품명", "상품바코드"]].dropna().drop_duplicates().iterrows():
-            barcode_map[_normalize_text(str(row["상품명"]))] = str(row["상품바코드"])
-    if "어드민상품코드" in df.columns and "상품명" in df.columns:
-        for _, row in df[["상품명", "어드민상품코드"]].dropna().drop_duplicates().iterrows():
-            code_map[_normalize_text(str(row["상품명"]))] = str(row["어드민상품코드"])
-
-    # 조합 추출
     combo_counter: Counter = Counter()
     combo_day_counter: Dict[str, Counter] = defaultdict(Counter)
     combo_detail_cache: Dict[str, str] = {}
     multi_item_count = 0
 
     for _, row in df.iterrows():
-        items = parse_admin_product_qty(row.get(admin_col, ""))
+        items = _extract_items_from_row(row, col_map)
         if len(items) < 2:
             continue
         multi_item_count += 1
@@ -279,13 +366,12 @@ def analyze_combinations(
         dow = row[date_col].weekday() if pd.notna(row[date_col]) else 0
         combo_day_counter[key][dow] += 1
         if key not in combo_detail_cache:
-            combo_detail_cache[key] = build_combo_detail(items, barcode_map, code_map)
+            combo_detail_cache[key] = build_combo_detail(items)
 
     # 데이터 기간 (주 수)
-    if len(df) > 0 and pd.notna(df[date_col]).any():
-        min_d = df[date_col].min()
-        max_d = df[date_col].max()
-        data_weeks = max(1, (max_d - min_d).days // 7)
+    valid_dates = df[date_col].dropna()
+    if len(valid_dates) > 0:
+        data_weeks = max(1, (valid_dates.max() - valid_dates.min()).days // 7)
     else:
         data_weeks = 0
 
@@ -326,43 +412,6 @@ def _weighted_moving_average(values: List[int], weights: Optional[List[float]] =
     return sum(v * wt for v, wt in zip(values, w)) / total_w
 
 
-def _load_filtered_df(vendor: str, d_from: date, d_to: date):
-    """배송통계 로드 + 공급처 필터 + 중복 제거. (date_col, admin_col, df) 반환."""
-    with get_connection() as con:
-        df = pd.read_sql("SELECT * FROM shipping_stats", con)
-        df.columns = [c.strip() for c in df.columns]
-        alias_df = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'shipping_stats'",
-            con, params=(vendor,),
-        )
-    name_list = [vendor] + alias_df["alias"].tolist()
-
-    date_col = None
-    for c in ["배송일", "송장등록일", "출고일자"]:
-        if c in df.columns:
-            date_col = c
-            break
-    if not date_col:
-        return None, None, pd.DataFrame()
-
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df = df[(df[date_col] >= pd.to_datetime(d_from)) & (df[date_col] <= pd.to_datetime(d_to))]
-    if "공급처" in df.columns:
-        df = df[df["공급처"].isin(name_list)]
-    for key in ("송장번호", "운송장번호"):
-        if key in df.columns:
-            df = df.drop_duplicates(subset=[key])
-            break
-
-    admin_col = None
-    for c in ["어드민상품명수량", "어드민상품명 수량"]:
-        if c in df.columns:
-            admin_col = c
-            break
-
-    return date_col, admin_col, df
-
-
 def predict_for_date(
     vendor: str,
     target_date: date,
@@ -370,6 +419,7 @@ def predict_for_date(
 ) -> List[Dict[str, Any]]:
     """
     특정 날짜의 프리패킹 추천 목록 생성 (통계 기반).
+    어드민상품명수량 파싱으로 각 행의 SKU 조합을 추출.
     같은 요일 데이터가 2주 미만이면 전체 요일 일평균으로 폴백.
     """
     settings = get_settings(vendor)
@@ -378,9 +428,24 @@ def predict_for_date(
     d_to = target_date - timedelta(days=1)
     d_from = target_date - timedelta(weeks=weeks_back)
 
-    date_col, admin_col, df = _load_filtered_df(vendor, d_from, d_to)
-    if date_col is None or admin_col is None or df.empty:
+    df, col_map = _load_vendor_df(vendor, d_from, d_to)
+    date_col = col_map["date"]
+
+    if df.empty or not date_col:
         return []
+
+    def _extract_combos(work_df: pd.DataFrame) -> Tuple[Counter, Dict[str, str]]:
+        freq: Counter = Counter()
+        detail_cache: Dict[str, str] = {}
+        for _, row in work_df.iterrows():
+            items = _extract_items_from_row(row, col_map)
+            if len(items) < settings["min_sku_count"]:
+                continue
+            key = build_combo_key(items)
+            freq[key] += 1
+            if key not in detail_cache:
+                detail_cache[key] = build_combo_detail(items)
+        return freq, detail_cache
 
     # 1차 시도: 같은 요일만
     dow_df = df[df[date_col].dt.weekday == target_dow]
@@ -388,31 +453,13 @@ def predict_for_date(
     use_all_days = dow_weeks < 2
 
     if use_all_days:
-        # 전체 요일 사용, 일평균으로 계산
-        work_df = df.copy()
-        total_days = work_df[date_col].dt.date.nunique()
+        total_days = df[date_col].dt.date.nunique()
         if total_days == 0:
             return []
-    else:
-        work_df = dow_df
-        total_days = 0  # 주별 그룹핑 사용
-
-    combo_total_freq: Counter = Counter()
-    combo_detail_cache: Dict[str, str] = {}
-
-    if use_all_days:
-        # 전체 기간 빈도 → 일평균으로 예측
-        for _, row in work_df.iterrows():
-            items = parse_admin_product_qty(row.get(admin_col, ""))
-            if len(items) < settings["min_sku_count"]:
-                continue
-            key = build_combo_key(items)
-            combo_total_freq[key] += 1
-            if key not in combo_detail_cache:
-                combo_detail_cache[key] = build_combo_detail(items)
+        combo_freq, combo_detail_cache = _extract_combos(df)
 
         predictions = []
-        for key, freq in combo_total_freq.items():
+        for key, freq in combo_freq.items():
             if freq < settings["min_frequency"]:
                 continue
             daily_avg = freq / total_days
@@ -428,15 +475,18 @@ def predict_for_date(
             })
     else:
         # 같은 요일 주별 가중이동평균
-        work_df = work_df.copy()
-        work_df["_week"] = work_df[date_col].dt.isocalendar().week.astype(int)
-        weeks_sorted = sorted(work_df["_week"].unique())
+        dow_df = dow_df.copy()
+        dow_df["_week"] = dow_df[date_col].dt.isocalendar().week.astype(int)
+        weeks_sorted = sorted(dow_df["_week"].unique())
+
         combo_weekly: Dict[str, List[int]] = defaultdict(lambda: [0] * len(weeks_sorted))
+        combo_total_freq: Counter = Counter()
+        combo_detail_cache: Dict[str, str] = {}
 
         for week_idx, week_num in enumerate(weeks_sorted):
-            week_df = work_df[work_df["_week"] == week_num]
+            week_df = dow_df[dow_df["_week"] == week_num]
             for _, row in week_df.iterrows():
-                items = parse_admin_product_qty(row.get(admin_col, ""))
+                items = _extract_items_from_row(row, col_map)
                 if len(items) < settings["min_sku_count"]:
                     continue
                 key = build_combo_key(items)

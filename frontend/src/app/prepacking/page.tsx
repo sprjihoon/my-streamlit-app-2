@@ -655,11 +655,6 @@ export default function PrepackingPage() {
                                     {d.barcode}
                                   </span>
                                 )}
-                                {d.code && !d.barcode && (
-                                  <span style={{ fontSize: '0.75rem', color: '#888', backgroundColor: '#f5f5f5', padding: '0.1rem 0.3rem', borderRadius: 3 }}>
-                                    {d.code}
-                                  </span>
-                                )}
                               </div>
                             ))}
                           </div>
