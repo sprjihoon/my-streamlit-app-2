@@ -93,7 +93,12 @@ export default function PrepackingPage() {
   const [analysisDateFrom, setAnalysisDateFrom] = useState(weeksAgoStr(8));
   const [analysisDateTo, setAnalysisDateTo] = useState(todayStr());
   const [combos, setCombos] = useState<PrepackingCombo[]>([]);
-  const [analysisInfo, setAnalysisInfo] = useState<{ total_orders: number; multi_item_orders: number; data_weeks: number } | null>(null);
+  const [analysisInfo, setAnalysisInfo] = useState<{
+    total_orders: number; multi_item_orders: number; data_weeks: number;
+    single_item_orders?: number; parse_failures?: number;
+    min_sku_count?: number; has_admin_col?: boolean; has_barcode_col?: boolean;
+    detected_columns?: Record<string, string>;
+  } | null>(null);
 
   // 정확도
   const [accuracyHistory, setAccuracyHistory] = useState<AccuracyRecord[]>([]);
@@ -154,7 +159,12 @@ export default function PrepackingPage() {
     try {
       const data = await analyzePrepackingCombos({ vendor, date_from: analysisDateFrom, date_to: analysisDateTo });
       setCombos(data.combos);
-      setAnalysisInfo({ total_orders: data.total_orders, multi_item_orders: data.multi_item_orders, data_weeks: data.data_weeks });
+      setAnalysisInfo({
+        total_orders: data.total_orders, multi_item_orders: data.multi_item_orders, data_weeks: data.data_weeks,
+        single_item_orders: data.single_item_orders, parse_failures: data.parse_failures,
+        min_sku_count: data.min_sku_count, has_admin_col: data.has_admin_col, has_barcode_col: data.has_barcode_col,
+        detected_columns: data.detected_columns,
+      });
     } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
     finally { setLoading(false); }
   }, [vendor, analysisDateFrom, analysisDateTo]);
@@ -621,11 +631,22 @@ export default function PrepackingPage() {
           </div>
 
           {analysisInfo && (
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-              <div style={statCard}>전체 주문: <strong>{analysisInfo.total_orders.toLocaleString()}</strong></div>
-              <div style={statCard}>합포장 주문: <strong>{analysisInfo.multi_item_orders.toLocaleString()}</strong></div>
-              <div style={statCard}>데이터 기간: <strong>{analysisInfo.data_weeks}주</strong></div>
-              <div style={statCard}>조합 수: <strong>{combos.length}</strong></div>
+            <div>
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                <div style={statCard}>전체 주문: <strong>{analysisInfo.total_orders.toLocaleString()}</strong></div>
+                <div style={statCard}>합포장 주문: <strong>{analysisInfo.multi_item_orders.toLocaleString()}</strong></div>
+                <div style={statCard}>단품 주문: <strong>{(analysisInfo.single_item_orders ?? 0).toLocaleString()}</strong></div>
+                <div style={statCard}>데이터 기간: <strong>{analysisInfo.data_weeks}주</strong></div>
+                <div style={statCard}>조합 수: <strong>{combos.length}</strong></div>
+              </div>
+              {analysisInfo.multi_item_orders === 0 && analysisInfo.total_orders > 0 && (
+                <div style={{ padding: '0.75rem', backgroundColor: '#fff3e0', borderRadius: 6, marginBottom: '1rem', fontSize: '0.85rem', color: '#e65100' }}>
+                  <strong>합포장 주문이 0건입니다.</strong><br/>
+                  전체 {analysisInfo.total_orders}건 중 단품 {analysisInfo.single_item_orders ?? 0}건, 파싱실패 {analysisInfo.parse_failures ?? 0}건<br/>
+                  감지된 컬럼: {analysisInfo.detected_columns ? Object.entries(analysisInfo.detected_columns).map(([k,v]) => `${k}=${v}`).join(', ') : 'N/A'}<br/>
+                  어드민상품명수량 컬럼: {analysisInfo.has_admin_col ? '있음' : '없음'} / 최소 SKU 수: {analysisInfo.min_sku_count ?? 2}
+                </div>
+              )}
             </div>
           )}
 

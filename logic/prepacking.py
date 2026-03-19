@@ -364,15 +364,24 @@ def analyze_combinations(
         return {"vendor": vendor, "total_orders": 0, "multi_item_orders": 0, "combos": [], "data_weeks": 0}
 
     total_orders = len(df)
+    settings = get_settings(vendor)
+    min_sku = settings.get("min_sku_count", 2)
 
     combo_counter: Counter = Counter()
     combo_day_counter: Dict[str, Counter] = defaultdict(Counter)
     combo_detail_cache: Dict[str, str] = {}
+    combo_sku_count: Dict[str, int] = {}
     multi_item_count = 0
+    parse_fail_count = 0
+    single_item_count = 0
 
     for _, row in df.iterrows():
         items = _extract_items_from_row(row, col_map)
-        if len(items) < 2:
+        if not items:
+            parse_fail_count += 1
+            continue
+        if len(items) < min_sku:
+            single_item_count += 1
             continue
         multi_item_count += 1
         key = build_combo_key(items)
@@ -381,6 +390,7 @@ def analyze_combinations(
         combo_day_counter[key][dow] += 1
         if key not in combo_detail_cache:
             combo_detail_cache[key] = build_combo_detail(items)
+            combo_sku_count[key] = len(items)
 
     # 데이터 기간 (주 수)
     valid_dates = df[date_col].dropna()
@@ -397,14 +407,21 @@ def analyze_combinations(
             "combo_detail": combo_detail_cache.get(key, "[]"),
             "count": count,
             "day_counts": day_counts,
+            "sku_count": combo_sku_count.get(key, 0),
         })
 
     return {
         "vendor": vendor,
         "total_orders": total_orders,
         "multi_item_orders": multi_item_count,
+        "single_item_orders": single_item_count,
+        "parse_failures": parse_fail_count,
         "combos": combos,
         "data_weeks": data_weeks,
+        "min_sku_count": min_sku,
+        "has_admin_col": col_map.get("admin_product_qty") is not None,
+        "has_barcode_col": col_map.get("barcode") is not None,
+        "detected_columns": {k: v for k, v in col_map.items() if v is not None},
     }
 
 
