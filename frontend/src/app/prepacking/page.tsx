@@ -102,7 +102,7 @@ export default function PrepackingPage() {
   // 설정
   const [allSettings, setAllSettings] = useState<PrepackingSettings[]>([]);
   const [editSettings, setEditSettings] = useState<PrepackingSettings>({
-    vendor: '_default', min_predicted_qty: 3, min_frequency: 5, min_sku_count: 2, retention_days: 2,
+    vendor: '_default', min_predicted_qty: 1, min_frequency: 2, min_sku_count: 2, retention_days: 2,
   });
 
   useEffect(() => {
@@ -626,23 +626,49 @@ export default function PrepackingPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={thStyle}>#</th><th style={thStyle}>조합</th><th style={thStyle}>횟수</th>
+                  <th style={thStyle}>#</th><th style={thStyle}>조합 상세</th><th style={thStyle}>횟수</th>
                   {WEEKDAYS.map(d => <th key={d} style={{ ...thStyle, textAlign: 'center', width: 40 }}>{d}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {combos.slice(0, 50).map((c, i) => (
-                  <tr key={c.combo_key} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ ...tdStyle, textAlign: 'center', color: '#999' }}>{i + 1}</td>
-                    <td style={tdStyle}>{formatComboKey(c.combo_key)}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{c.count}</td>
-                    {WEEKDAYS.map((_, di) => (
-                      <td key={di} style={{ ...tdStyle, textAlign: 'center', fontSize: '0.85rem' }}>
-                        {c.day_counts[String(di)] || 0}
+                {combos.slice(0, 50).map((c, i) => {
+                  const details = parseComboDetail(c.combo_detail);
+                  return (
+                    <tr key={c.combo_key} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ ...tdStyle, textAlign: 'center', color: '#999', verticalAlign: 'top' }}>{i + 1}</td>
+                      <td style={{ ...tdStyle, minWidth: 250 }}>
+                        {details.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                            {details.map((d, di) => (
+                              <div key={di} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                                <span style={{ fontWeight: 600 }}>{d.name}</span>
+                                <span style={{ color: '#1976d2', fontWeight: 700 }}>x{d.qty}</span>
+                                {d.barcode && (
+                                  <span style={{ fontSize: '0.75rem', color: '#888', backgroundColor: '#f5f5f5', padding: '0.1rem 0.3rem', borderRadius: 3 }}>
+                                    {d.barcode}
+                                  </span>
+                                )}
+                                {d.code && !d.barcode && (
+                                  <span style={{ fontSize: '0.75rem', color: '#888', backgroundColor: '#f5f5f5', padding: '0.1rem 0.3rem', borderRadius: 3 }}>
+                                    {d.code}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.85rem' }}>{formatComboKey(c.combo_key)}</span>
+                        )}
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, verticalAlign: 'top' }}>{c.count}</td>
+                      {WEEKDAYS.map((_, di) => (
+                        <td key={di} style={{ ...tdStyle, textAlign: 'center', fontSize: '0.85rem', verticalAlign: 'top' }}>
+                          {c.day_counts[String(di)] || 0}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

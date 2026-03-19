@@ -43,7 +43,7 @@ def get_settings(vendor: str = "_default") -> Dict[str, Any]:
                 "min_sku_count": row[2],
                 "retention_days": row[3],
             }
-    return {"min_predicted_qty": 3, "min_frequency": 5, "min_sku_count": 2, "retention_days": 2}
+    return {"min_predicted_qty": 1, "min_frequency": 2, "min_sku_count": 2, "retention_days": 2}
 
 
 def save_settings(vendor: str, settings: Dict[str, Any]) -> None:

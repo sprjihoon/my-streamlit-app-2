@@ -269,8 +269,8 @@ DDL_SQL = textwrap.dedent(
     CREATE TABLE IF NOT EXISTS prepacking_settings(
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         vendor          TEXT DEFAULT '_default',
-        min_predicted_qty INTEGER DEFAULT 3,
-        min_frequency     INTEGER DEFAULT 5,
+        min_predicted_qty INTEGER DEFAULT 1,
+        min_frequency     INTEGER DEFAULT 2,
         min_sku_count     INTEGER DEFAULT 2,
         retention_days    INTEGER DEFAULT 2,
         updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
