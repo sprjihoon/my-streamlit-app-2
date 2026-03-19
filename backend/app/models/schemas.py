@@ -380,7 +380,7 @@ class PrepackingSettingsUpdate(BaseModel):
     """프리패킹 설정 저장."""
     vendor: str = Field(default="_default", description="공급처 (_default=글로벌)")
     min_predicted_qty: int = Field(default=1, ge=1)
-    min_frequency: int = Field(default=2, ge=1)
+    min_frequency: int = Field(default=1, ge=1)
     min_sku_count: int = Field(default=2, ge=1)
     retention_days: int = Field(default=2, ge=1)
 

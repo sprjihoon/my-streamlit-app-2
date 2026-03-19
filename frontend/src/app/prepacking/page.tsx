@@ -102,7 +102,7 @@ export default function PrepackingPage() {
   // 설정
   const [allSettings, setAllSettings] = useState<PrepackingSettings[]>([]);
   const [editSettings, setEditSettings] = useState<PrepackingSettings>({
-    vendor: '_default', min_predicted_qty: 1, min_frequency: 2, min_sku_count: 2, retention_days: 2,
+    vendor: '_default', min_predicted_qty: 1, min_frequency: 1, min_sku_count: 2, retention_days: 2,
   });
 
   useEffect(() => {
@@ -447,7 +447,14 @@ export default function PrepackingPage() {
           )}
 
           {!instructions.carry.length && !instructions.hold.length && !instructions.disassemble.length && !instructions.new_production.length && (
-            <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>지시 사항이 없습니다.</p>
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              <p style={{ fontSize: '1.1rem', marginBottom: '0.75rem', fontWeight: 600 }}>오늘의 지시 사항이 없습니다.</p>
+              <p style={{ fontSize: '0.9rem', color: '#999', lineHeight: 1.6 }}>
+                아직 제작된 프리패킹이 없거나, 내일 예측 데이터가 부족합니다.<br />
+                먼저 <strong>&quot;제작 등록&quot;</strong> 탭에서 예측 추천을 확인하고 제작을 시작하세요.<br />
+                배송통계 데이터가 많을수록 예측이 정확해집니다.
+              </p>
+            </div>
           )}
         </div>
       )}

@@ -43,7 +43,7 @@ def get_settings(vendor: str = "_default") -> Dict[str, Any]:
                 "min_sku_count": row[2],
                 "retention_days": row[3],
             }
-    return {"min_predicted_qty": 1, "min_frequency": 2, "min_sku_count": 2, "retention_days": 2}
+    return {"min_predicted_qty": 1, "min_frequency": 1, "min_sku_count": 2, "retention_days": 2}
 
 
 def save_settings(vendor: str, settings: Dict[str, Any]) -> None:
@@ -326,29 +326,8 @@ def _weighted_moving_average(values: List[int], weights: Optional[List[float]] =
     return sum(v * wt for v, wt in zip(values, w)) / total_w
 
 
-def predict_for_date(
-    vendor: str,
-    target_date: date,
-    weeks_back: int = 8,
-) -> List[Dict[str, Any]]:
-    """
-    특정 날짜의 프리패킹 추천 목록 생성 (통계 기반).
-    
-    Returns:
-        [{"combo_key", "combo_detail", "predicted_qty", "frequency", "weekly_history": [...]}]
-    """
-    settings = get_settings(vendor)
-    target_dow = target_date.weekday()
-
-    # 과거 N주간 같은 요일 데이터 수집
-    d_to = target_date - timedelta(days=1)
-    d_from = target_date - timedelta(weeks=weeks_back)
-
-    analysis = analyze_combinations(vendor, d_from, d_to)
-    if not analysis["combos"]:
-        return []
-
-    # 주별 조합 카운트 구축
+def _load_filtered_df(vendor: str, d_from: date, d_to: date):
+    """배송통계 로드 + 공급처 필터 + 중복 제거. (date_col, admin_col, df) 반환."""
     with get_connection() as con:
         df = pd.read_sql("SELECT * FROM shipping_stats", con)
         df.columns = [c.strip() for c in df.columns]
@@ -364,7 +343,7 @@ def predict_for_date(
             date_col = c
             break
     if not date_col:
-        return []
+        return None, None, pd.DataFrame()
 
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     df = df[(df[date_col] >= pd.to_datetime(d_from)) & (df[date_col] <= pd.to_datetime(d_to))]
@@ -380,49 +359,108 @@ def predict_for_date(
         if c in df.columns:
             admin_col = c
             break
-    if not admin_col:
+
+    return date_col, admin_col, df
+
+
+def predict_for_date(
+    vendor: str,
+    target_date: date,
+    weeks_back: int = 8,
+) -> List[Dict[str, Any]]:
+    """
+    특정 날짜의 프리패킹 추천 목록 생성 (통계 기반).
+    같은 요일 데이터가 2주 미만이면 전체 요일 일평균으로 폴백.
+    """
+    settings = get_settings(vendor)
+    target_dow = target_date.weekday()
+
+    d_to = target_date - timedelta(days=1)
+    d_from = target_date - timedelta(weeks=weeks_back)
+
+    date_col, admin_col, df = _load_filtered_df(vendor, d_from, d_to)
+    if date_col is None or admin_col is None or df.empty:
         return []
 
-    # 같은 요일만 필터
-    df = df[df[date_col].dt.weekday == target_dow]
+    # 1차 시도: 같은 요일만
+    dow_df = df[df[date_col].dt.weekday == target_dow]
+    dow_weeks = dow_df[date_col].dt.isocalendar().week.nunique() if not dow_df.empty else 0
+    use_all_days = dow_weeks < 2
 
-    # 주별 그룹핑
-    df["_week"] = df[date_col].dt.isocalendar().week.astype(int)
-    weeks_sorted = sorted(df["_week"].unique())
+    if use_all_days:
+        # 전체 요일 사용, 일평균으로 계산
+        work_df = df.copy()
+        total_days = work_df[date_col].dt.date.nunique()
+        if total_days == 0:
+            return []
+    else:
+        work_df = dow_df
+        total_days = 0  # 주별 그룹핑 사용
 
-    combo_weekly: Dict[str, List[int]] = defaultdict(lambda: [0] * len(weeks_sorted))
-    combo_detail_cache: Dict[str, str] = {}
     combo_total_freq: Counter = Counter()
+    combo_detail_cache: Dict[str, str] = {}
 
-    for week_idx, week_num in enumerate(weeks_sorted):
-        week_df = df[df["_week"] == week_num]
-        for _, row in week_df.iterrows():
+    if use_all_days:
+        # 전체 기간 빈도 → 일평균으로 예측
+        for _, row in work_df.iterrows():
             items = parse_admin_product_qty(row.get(admin_col, ""))
             if len(items) < settings["min_sku_count"]:
                 continue
             key = build_combo_key(items)
-            combo_weekly[key][week_idx] += 1
             combo_total_freq[key] += 1
             if key not in combo_detail_cache:
                 combo_detail_cache[key] = build_combo_detail(items)
 
-    # 예측 생성
-    predictions = []
-    for key, weekly_vals in combo_weekly.items():
-        freq = combo_total_freq[key]
-        if freq < settings["min_frequency"]:
-            continue
-        pred = _weighted_moving_average(weekly_vals)
-        pred_qty = max(1, round(pred))
-        if pred_qty < settings["min_predicted_qty"]:
-            continue
-        predictions.append({
-            "combo_key": key,
-            "combo_detail": combo_detail_cache.get(key, "[]"),
-            "predicted_qty": pred_qty,
-            "frequency": freq,
-            "weekly_history": weekly_vals,
-        })
+        predictions = []
+        for key, freq in combo_total_freq.items():
+            if freq < settings["min_frequency"]:
+                continue
+            daily_avg = freq / total_days
+            pred_qty = max(1, round(daily_avg))
+            if pred_qty < settings["min_predicted_qty"]:
+                continue
+            predictions.append({
+                "combo_key": key,
+                "combo_detail": combo_detail_cache.get(key, "[]"),
+                "predicted_qty": pred_qty,
+                "frequency": freq,
+                "weekly_history": [],
+            })
+    else:
+        # 같은 요일 주별 가중이동평균
+        work_df = work_df.copy()
+        work_df["_week"] = work_df[date_col].dt.isocalendar().week.astype(int)
+        weeks_sorted = sorted(work_df["_week"].unique())
+        combo_weekly: Dict[str, List[int]] = defaultdict(lambda: [0] * len(weeks_sorted))
+
+        for week_idx, week_num in enumerate(weeks_sorted):
+            week_df = work_df[work_df["_week"] == week_num]
+            for _, row in week_df.iterrows():
+                items = parse_admin_product_qty(row.get(admin_col, ""))
+                if len(items) < settings["min_sku_count"]:
+                    continue
+                key = build_combo_key(items)
+                combo_weekly[key][week_idx] += 1
+                combo_total_freq[key] += 1
+                if key not in combo_detail_cache:
+                    combo_detail_cache[key] = build_combo_detail(items)
+
+        predictions = []
+        for key, weekly_vals in combo_weekly.items():
+            freq = combo_total_freq[key]
+            if freq < settings["min_frequency"]:
+                continue
+            pred = _weighted_moving_average(weekly_vals)
+            pred_qty = max(1, round(pred))
+            if pred_qty < settings["min_predicted_qty"]:
+                continue
+            predictions.append({
+                "combo_key": key,
+                "combo_detail": combo_detail_cache.get(key, "[]"),
+                "predicted_qty": pred_qty,
+                "frequency": freq,
+                "weekly_history": weekly_vals,
+            })
 
     predictions.sort(key=lambda x: x["predicted_qty"], reverse=True)
     return predictions
