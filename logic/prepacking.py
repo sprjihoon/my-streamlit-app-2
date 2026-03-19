@@ -101,32 +101,65 @@ def _normalize_text(text: str) -> str:
     return text
 
 
+def _is_option_only(name: str) -> bool:
+    """[블랙], [화이트] 등 대괄호로만 감싸진 옵션명인지 판별."""
+    return bool(re.match(r"^\[.+\]$", name.strip()))
+
+
 def parse_admin_product_qty(raw: str) -> List[Dict[str, Any]]:
     """
     어드민상품명수량 컬럼 파싱.
     예: "닭가슴살---5, 오리안심---5" → [{"name": "닭가슴살", "qty": 5}, ...]
+    
+    옵션 처리:
+    - "[블랙]---1, 허밍 레이스 티셔츠---1" 같은 경우
+      [블랙]은 옵션이므로 다음 상품명에 붙여서 "허밍 레이스 티셔츠 [블랙]"으로 합침.
+    - 옵션이 상품명 뒤에 오는 경우도 처리.
     """
     if not raw or pd.isna(raw):
         return []
     raw = str(raw).strip()
-    items = []
+    raw_items: List[Dict[str, Any]] = []
     for part in re.split(r"[,\n]", raw):
         part = part.strip()
         if not part:
             continue
-        # "상품명---수량" 패턴
         m = re.match(r"^(.+?)---+(\d+)$", part)
         if m:
-            items.append({"name": _normalize_text(m.group(1)), "qty": int(m.group(2))})
+            raw_items.append({"name": _normalize_text(m.group(1)), "qty": int(m.group(2))})
             continue
-        # "상품명 x 수량" 또는 "상품명 * 수량"
         m = re.match(r"^(.+?)\s*[x×\*]\s*(\d+)$", part, re.IGNORECASE)
         if m:
-            items.append({"name": _normalize_text(m.group(1)), "qty": int(m.group(2))})
+            raw_items.append({"name": _normalize_text(m.group(1)), "qty": int(m.group(2))})
             continue
-        # 구분자 없으면 수량 1로 간주
-        items.append({"name": _normalize_text(part), "qty": 1})
-    return items
+        raw_items.append({"name": _normalize_text(part), "qty": 1})
+
+    # 옵션 병합: [대괄호] 항목을 인접 상품명에 합침
+    if not raw_items:
+        return []
+
+    merged: List[Dict[str, Any]] = []
+    pending_options: List[str] = []
+
+    for item in raw_items:
+        if _is_option_only(item["name"]):
+            pending_options.append(item["name"])
+        else:
+            name = item["name"]
+            # 앞에 대기 중인 옵션이 있으면 현재 상품명에 붙임
+            if pending_options:
+                name = f"{name} {' '.join(pending_options)}"
+                pending_options.clear()
+            merged.append({"name": name, "qty": item["qty"]})
+
+    # 끝에 남은 옵션이 있으면 마지막 상품에 붙임
+    if pending_options and merged:
+        merged[-1]["name"] = f"{merged[-1]['name']} {' '.join(pending_options)}"
+    elif pending_options:
+        for opt in pending_options:
+            merged.append({"name": opt, "qty": 1})
+
+    return merged
 
 
 def build_combo_key(items: List[Dict[str, Any]]) -> str:
