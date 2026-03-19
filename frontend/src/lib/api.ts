@@ -870,3 +870,241 @@ export async function deleteWorkLog(id: number) {
   });
 }
 
+// ─────────────────────────────────────
+// 프리패킹 API
+// ─────────────────────────────────────
+
+export interface ComboDetail {
+  name: string;
+  qty: number;
+  barcode?: string;
+  code?: string;
+}
+
+export interface PrepackingCombo {
+  combo_key: string;
+  combo_detail: string;
+  count: number;
+  day_counts: Record<string, number>;
+}
+
+export interface PrepackingPrediction {
+  id?: number;
+  combo_key: string;
+  combo_detail: string;
+  predicted_qty: number;
+  ai_adjusted_qty?: number | null;
+  ai_reasoning?: string | null;
+  actual_qty?: number | null;
+  mape?: number | null;
+  frequency?: number;
+  weekly_history?: number[];
+}
+
+export interface PrepackingProduction {
+  id: number;
+  vendor: string;
+  target_date: string;
+  combo_key: string;
+  combo_detail: string;
+  predicted_qty: number;
+  produced_qty: number;
+  remaining_qty: number;
+  location: string;
+  status: string;
+  created_at: string;
+}
+
+export interface DailyInstructions {
+  vendor: string;
+  date: string;
+  tomorrow: string;
+  carry: (PrepackingProduction & { tomorrow_predicted: number })[];
+  hold: (PrepackingProduction & { age_days: number; expires_in: number })[];
+  disassemble: (PrepackingProduction & { age_days: number })[];
+  new_production: {
+    combo_key: string;
+    combo_detail: string;
+    predicted_qty: number;
+    existing_qty: number;
+    new_qty: number;
+  }[];
+}
+
+export interface PrepackingSettings {
+  vendor: string;
+  min_predicted_qty: number;
+  min_frequency: number;
+  min_sku_count: number;
+  retention_days: number;
+}
+
+export interface AccuracyRecord {
+  target_date: string;
+  combo_count: number;
+  avg_mape: number | null;
+  total_predicted: number;
+  total_ai_predicted: number;
+  total_actual: number;
+}
+
+export interface EfficiencyStats {
+  total: number;
+  total_produced: number;
+  total_used: number;
+  depleted_count: number;
+  disassembled_count: number;
+  utilization_rate: number;
+  waste_rate: number;
+}
+
+export async function getPrepackingVendors() {
+  return fetchApi<string[]>('/prepacking/vendors');
+}
+
+export async function analyzePrepackingCombos(params: {
+  vendor: string;
+  date_from: string;
+  date_to: string;
+}) {
+  return fetchApi<{
+    vendor: string;
+    total_orders: number;
+    multi_item_orders: number;
+    combos: PrepackingCombo[];
+    data_weeks: number;
+  }>('/prepacking/analyze', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function predictPrepacking(params: {
+  vendor: string;
+  target_date: string;
+  weeks_back?: number;
+  save?: boolean;
+}) {
+  return fetchApi<{
+    vendor: string;
+    target_date: string;
+    predictions: PrepackingPrediction[];
+  }>('/prepacking/predict', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function getPrepackingPredictions(vendor: string, targetDate: string) {
+  return fetchApi<PrepackingPrediction[]>(
+    `/prepacking/predictions?vendor=${encodeURIComponent(vendor)}&target_date=${targetDate}`
+  );
+}
+
+export async function getDailyInstructions(vendor: string, today?: string) {
+  let url = `/prepacking/daily-instructions?vendor=${encodeURIComponent(vendor)}`;
+  if (today) url += `&today=${today}`;
+  return fetchApi<DailyInstructions>(url);
+}
+
+export async function createPrepackingProduction(data: {
+  vendor: string;
+  target_date: string;
+  combo_key: string;
+  combo_detail?: string;
+  predicted_qty?: number;
+  produced_qty: number;
+  location?: string;
+}) {
+  return fetchApi<{ success: boolean; id: number }>('/prepacking/productions', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getActiveProductions(vendor?: string) {
+  const query = vendor ? `?vendor=${encodeURIComponent(vendor)}` : '';
+  return fetchApi<PrepackingProduction[]>(`/prepacking/productions/active${query}`);
+}
+
+export async function getProductionsByDate(vendor: string, targetDate: string) {
+  return fetchApi<PrepackingProduction[]>(
+    `/prepacking/productions/by-date?vendor=${encodeURIComponent(vendor)}&target_date=${targetDate}`
+  );
+}
+
+export async function usePrepackingProduction(productionId: number, useQty: number, changedBy?: string) {
+  return fetchApi<{ success: boolean; remaining_qty: number; status: string }>(
+    `/prepacking/productions/${productionId}/use`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ use_qty: useQty, changed_by: changedBy || '' }),
+    }
+  );
+}
+
+export async function updatePrepackingStatus(productionId: number, status: string, changedBy?: string) {
+  return fetchApi<{ success: boolean; old_status: string; new_status: string }>(
+    `/prepacking/productions/${productionId}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status, changed_by: changedBy || '' }),
+    }
+  );
+}
+
+export async function updatePrepackingLocation(productionId: number, location: string, changedBy?: string) {
+  return fetchApi<{ success: boolean; old_location: string; new_location: string }>(
+    `/prepacking/productions/${productionId}/location`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ location, changed_by: changedBy || '' }),
+    }
+  );
+}
+
+export async function updatePrepackingAccuracy(vendor: string, targetDate: string) {
+  return fetchApi<{
+    vendor: string;
+    target_date: string;
+    predictions_updated: number;
+    avg_mape: number | null;
+  }>('/prepacking/accuracy/update', {
+    method: 'POST',
+    body: JSON.stringify({ vendor, target_date: targetDate }),
+  });
+}
+
+export async function getAccuracyHistory(vendor: string, limit: number = 30) {
+  return fetchApi<AccuracyRecord[]>(
+    `/prepacking/accuracy/history?vendor=${encodeURIComponent(vendor)}&limit=${limit}`
+  );
+}
+
+export async function getPrepackingEfficiency(vendor: string, days: number = 30) {
+  return fetchApi<EfficiencyStats>(
+    `/prepacking/efficiency?vendor=${encodeURIComponent(vendor)}&days=${days}`
+  );
+}
+
+export async function getAllPrepackingSettings() {
+  return fetchApi<PrepackingSettings[]>('/prepacking/settings');
+}
+
+export async function getPrepackingSettings(vendor: string) {
+  return fetchApi<PrepackingSettings>(`/prepacking/settings/${encodeURIComponent(vendor)}`);
+}
+
+export async function savePrepackingSettings(data: PrepackingSettings) {
+  return fetchApi<{ success: boolean; vendor: string }>('/prepacking/settings', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function suggestLocations(vendor: string, prefix: string = '', limit: number = 10) {
+  return fetchApi<string[]>(
+    `/prepacking/locations/suggest?vendor=${encodeURIComponent(vendor)}&prefix=${encodeURIComponent(prefix)}&limit=${limit}`
+  );
+}
+

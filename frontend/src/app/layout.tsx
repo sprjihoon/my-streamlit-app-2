@@ -20,6 +20,7 @@ interface User {
 const NAV_ITEMS = [
   { href: '/', label: '🏠 대시보드' },
   { href: '/work-log', label: '📋 작업일지' },
+  { href: '/prepacking', label: '📦 프리패킹' },
   { href: '/upload', label: '📤 데이터 업로드' },
   { href: '/mapping', label: '🔗 업체 매핑 관리' },
   { href: '/vendors', label: '📋 매핑 리스트' },

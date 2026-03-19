@@ -15,6 +15,7 @@ FastAPI 백엔드에서 사용하는 순수 Python 함수들.
 - shipping_stats.py: 배송통계 필터
 - upload.py: 파일 업로드 로직
 - invoice_pdf.py: PDF 템플릿
+- prepacking.py: 프리패킹 예측·관리
 """
 
 # DB 연결

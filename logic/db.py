@@ -232,6 +232,63 @@ DDL_SQL = textwrap.dedent(
         items_json   TEXT DEFAULT '[]',
         created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    /* ── 프리패킹 예측 ── */
+    CREATE TABLE IF NOT EXISTS prepacking_predictions(
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor        TEXT NOT NULL,
+        target_date   TEXT NOT NULL,
+        day_of_week   INTEGER,
+        combo_key     TEXT NOT NULL,
+        combo_detail  TEXT DEFAULT '[]',
+        predicted_qty INTEGER DEFAULT 0,
+        ai_adjusted_qty INTEGER,
+        ai_reasoning  TEXT,
+        actual_qty    INTEGER,
+        mape          REAL,
+        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    /* ── 프리패킹 제작 기록 + 로케이션 ── */
+    CREATE TABLE IF NOT EXISTS prepacking_productions(
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor        TEXT NOT NULL,
+        target_date   TEXT NOT NULL,
+        combo_key     TEXT NOT NULL,
+        combo_detail  TEXT DEFAULT '[]',
+        predicted_qty INTEGER DEFAULT 0,
+        produced_qty  INTEGER DEFAULT 0,
+        remaining_qty INTEGER DEFAULT 0,
+        location      TEXT DEFAULT '',
+        status        TEXT DEFAULT 'active',
+        created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    /* ── 프리패킹 설정 (글로벌 + 공급처별) ── */
+    CREATE TABLE IF NOT EXISTS prepacking_settings(
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor          TEXT DEFAULT '_default',
+        min_predicted_qty INTEGER DEFAULT 3,
+        min_frequency     INTEGER DEFAULT 5,
+        min_sku_count     INTEGER DEFAULT 2,
+        retention_days    INTEGER DEFAULT 2,
+        updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(vendor)
+    );
+
+    /* ── 프리패킹 변경 이력 ── */
+    CREATE TABLE IF NOT EXISTS prepacking_logs(
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        production_id  INTEGER,
+        action         TEXT NOT NULL,
+        field_changed  TEXT,
+        old_value      TEXT,
+        new_value      TEXT,
+        changed_by     TEXT DEFAULT '',
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (production_id) REFERENCES prepacking_productions(id)
+    );
     """
 )
 
