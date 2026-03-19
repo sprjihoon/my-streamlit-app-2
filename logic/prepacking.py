@@ -201,16 +201,30 @@ def parse_admin_product_qty(raw: str) -> List[Dict[str, Any]]:
     if not raw_items:
         return []
 
-    # 옵션 병합: "[옵션명]"만으로 된 항목은 바로 앞 상품의 옵션
+    # 옵션 병합: "[옵션명]"만으로 된 항목을 인접 상품에 병합
+    # 패턴1: 상품명 → [옵션] (뒤에 오는 옵션 → 앞 상품에 병합)
+    # 패턴2: [옵션] → 상품명 (앞에 오는 옵션 → 뒤 상품에 병합)
     merged: List[Dict[str, Any]] = []
+    pending_options: List[str] = []
+
     for item in raw_items:
         if re.match(r"^\[.+\]$", item["name"]):
             if merged:
                 merged[-1]["name"] = f"{merged[-1]['name']}, {item['name']}"
             else:
-                merged.append(item)
+                pending_options.append(item["name"])
         else:
-            merged.append(item)
+            name = item["name"]
+            if pending_options:
+                name = f"{name}, {', '.join(pending_options)}"
+                pending_options.clear()
+            merged.append({"name": name, "qty": item["qty"]})
+
+    if pending_options and merged:
+        merged[-1]["name"] = f"{merged[-1]['name']}, {', '.join(pending_options)}"
+    elif pending_options:
+        for opt in pending_options:
+            merged.append({"name": opt, "qty": 1})
 
     return merged
 
