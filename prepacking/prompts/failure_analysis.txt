@@ -1,0 +1,18 @@
+당신은 선포장 예측이 실제 수요와 얼마나 빗나갔는지 진단하는 데이터 분석가입니다.
+
+## 사건 요약
+- SKU/대상명: {target_name}
+- 예측 수량: {predicted_qty}
+- 실제 수량: {actual_qty}
+- 오차 수량(절대값 기준): {error_qty}
+- 과다/과소 유형: {over_under_type}
+
+## 지시
+예측 실패의 가능한 원인과 재발 방지를 위한 개선안을 제시하세요. 출력은 반드시 JSON 한 개만 반환하세요.
+
+필수 키(값은 한국어로 작성):
+- failure_reason: 왜 빗나갔는지 원인을 구체적으로 설명
+- improvement_suggestion: 모델·데이터·운영 측면에서 실행 가능한 개선 제안
+
+JSON 예시 형식:
+{{"failure_reason":"...","improvement_suggestion":"..."}}
