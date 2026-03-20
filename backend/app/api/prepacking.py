@@ -39,6 +39,12 @@ from logic.prepacking import (
     get_all_settings,
     suggest_locations,
     get_vendors_with_data,
+    parse_admin_product_qty,
+    _detect_columns,
+    _safe_str,
+    _extract_items_from_row,
+    _find_invoice_col,
+    _group_shipments,
 )
 
 router = APIRouter(prefix="/prepacking", tags=["prepacking"])
@@ -231,3 +237,96 @@ async def location_suggest(
 ):
     """로케이션 자동완성 제안."""
     return suggest_locations(vendor, prefix, limit)
+
+
+# ─────────────────────────────────────
+# 디버그
+# ─────────────────────────────────────
+@router.get("/debug/sample-rows")
+async def debug_sample_rows(
+    vendor: str = Query(...),
+    limit: int = Query(default=10, ge=1, le=50),
+):
+    """샘플 데이터 + 파싱 결과 확인 (경량 버전)."""
+    import pandas as pd
+    from logic.db import get_connection
+
+    with get_connection() as con:
+        # 전체 로드 대신 컬럼 정보만 먼저 확인
+        col_info = con.execute("PRAGMA table_info(shipping_stats)").fetchall()
+        all_columns = [c[1].strip() for c in col_info]
+
+        alias_df = pd.read_sql(
+            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'shipping_stats'",
+            con, params=(vendor,),
+        )
+        name_list = [vendor] + alias_df["alias"].tolist()
+
+        # 공급처 필터가 있으면 적용, LIMIT으로 가볍게
+        if "공급처" in all_columns:
+            placeholders = ",".join(["?"] * len(name_list))
+            sample_df = pd.read_sql(
+                f"SELECT * FROM shipping_stats WHERE [공급처] IN ({placeholders}) LIMIT ?",
+                con, params=(*name_list, limit * 5),
+            )
+        else:
+            sample_df = pd.read_sql(
+                f"SELECT * FROM shipping_stats LIMIT ?",
+                con, params=(limit * 5,),
+            )
+
+        # 전체 건수 (가볍게)
+        if "공급처" in all_columns:
+            total_row = con.execute(
+                f"SELECT COUNT(*) FROM shipping_stats WHERE [공급처] IN ({placeholders})",
+                name_list,
+            ).fetchone()
+        else:
+            total_row = con.execute("SELECT COUNT(*) FROM shipping_stats").fetchone()
+        total_rows = total_row[0] if total_row else 0
+
+    sample_df.columns = [c.strip() for c in sample_df.columns]
+    col_map = _detect_columns(sample_df)
+
+    admin_col = col_map.get("admin_product_qty")
+    invoice_col = _find_invoice_col(sample_df)
+
+    # 샘플 행 파싱
+    samples = []
+    for idx, row in sample_df.head(limit).iterrows():
+        raw_val = _safe_str(row.get(admin_col, "")) if admin_col else ""
+        parsed = parse_admin_product_qty(raw_val) if raw_val else []
+        items = _extract_items_from_row(row, col_map)
+        samples.append({
+            "row_idx": int(idx),
+            "admin_product_qty_raw": raw_val[:500],
+            "parsed_skus": parsed,
+            "extracted_items": items,
+            "item_count": len(items),
+        })
+
+    # 샘플 범위 내 합포장 감지
+    shipments = _group_shipments(sample_df, col_map)
+    multi_shipments = [(items, dt) for items, dt in shipments if len(items) >= 2]
+
+    multi_samples = []
+    for items, dt in multi_shipments[:limit]:
+        multi_samples.append({
+            "item_count": len(items),
+            "items": items,
+            "date": str(dt) if pd.notna(dt) else None,
+        })
+
+    return {
+        "vendor": vendor,
+        "total_rows": total_rows,
+        "sample_rows": len(sample_df),
+        "total_shipments": len(shipments),
+        "multi_item_shipments": len(multi_shipments),
+        "detected_columns": {k: v for k, v in col_map.items() if v is not None},
+        "admin_col": admin_col,
+        "invoice_col": invoice_col,
+        "all_columns": all_columns[:40],
+        "first_rows": samples,
+        "multi_shipment_samples": multi_samples,
+    }

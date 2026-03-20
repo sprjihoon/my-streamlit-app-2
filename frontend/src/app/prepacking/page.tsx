@@ -17,7 +17,6 @@ import {
   getAllPrepackingSettings,
   savePrepackingSettings,
   suggestLocations,
-  debugPrepackingSampleRows,
   type PrepackingCombo,
   type PrepackingPrediction,
   type PrepackingProduction,
@@ -99,7 +98,6 @@ export default function PrepackingPage() {
   const [analysisTo, setAnalysisTo] = useState(today());
   const [combos, setCombos] = useState<PrepackingCombo[]>([]);
   const [analysisInfo, setAnalysisInfo] = useState<any>(null);
-  const [debugData, setDebugData] = useState<any>(null);
   const [accuracyHistory, setAccuracyHistory] = useState<AccuracyRecord[]>([]);
   const [efficiency, setEfficiency] = useState<EfficiencyStats | null>(null);
   const [allSettings, setAllSettings] = useState<PrepackingSettings[]>([]);
@@ -493,39 +491,27 @@ export default function PrepackingPage() {
                   <div style={{ color: '#78350f', lineHeight: 1.8 }}>
                     <div>감지된 컬럼: <strong>{analysisInfo.detected_columns ? Object.entries(analysisInfo.detected_columns).map(([k, v]) => `${k}=${v}`).join(', ') : '없음'}</strong></div>
                     <div>어드민상품명수량: <strong>{analysisInfo.has_admin_col ? '있음' : '없음'}</strong> / 송장번호: <strong>{analysisInfo.has_invoice_col ? '있음' : '없음'}</strong> / 최소 SKU: <strong>{analysisInfo.min_sku_count ?? 2}</strong></div>
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#a16207' }}>
-                      합포장 감지에는 <strong>어드민상품명수량</strong> 컬럼(한 행에 여러 SKU) 또는 <strong>같은 송장번호</strong>로 여러 행이 필요합니다.
-                      배송통계 엑셀에 해당 컬럼이 포함되어 있는지 확인하세요.
-                    </div>
                   </div>
-                  <button onClick={async () => {
-                    if (!vendor) return;
-                    try { setDebugData(await debugPrepackingSampleRows(vendor, 10)); }
-                    catch (e) { setError(e instanceof Error ? e.message : '오류'); }
-                  }} style={{ ...btnOutline, marginTop: 12, fontSize: 12 }}>샘플 데이터 확인</button>
-                </div>
-              )}
 
-              {/* 디버그 데이터 */}
-              {debugData && (
-                <div style={{ padding: 16, marginBottom: 20, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, fontSize: 12, maxHeight: 400, overflow: 'auto' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13 }}>데이터 진단</span>
-                    <button onClick={() => setDebugData(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 16 }}>x</button>
-                  </div>
-                  <div style={{ display: 'grid', gap: 4, color: '#374151' }}>
-                    <div>총 행: <strong>{debugData.total_rows}</strong> / 배송건: <strong>{debugData.total_shipments}</strong> / 합포장: <strong>{debugData.multi_item_shipments}</strong></div>
-                    <div>어드민상품명수량: <strong>{debugData.admin_col || '없음'}</strong> / 송장번호: <strong>{debugData.invoice_col || '없음'}</strong></div>
-                    <div>전체 컬럼: <span style={{ color: '#6b7280' }}>{debugData.all_columns?.join(', ')}</span></div>
-                  </div>
-                  {debugData.first_rows?.length > 0 && (
-                    <div style={{ marginTop: 12 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>샘플 행:</div>
-                      {debugData.first_rows.map((r: any, i: number) => (
-                        <div key={i} style={{ padding: 8, marginBottom: 4, background: '#fff', borderRadius: 6, border: '1px solid #e5e7eb' }}>
-                          <div style={{ fontWeight: 600 }}>#{r.row_idx} (아이템 {r.item_count}개)</div>
-                          {r.admin_product_qty_raw && <div style={{ color: '#6b7280', wordBreak: 'break-all' }}>원본: {r.admin_product_qty_raw}</div>}
-                          <div style={{ color: '#2563eb' }}>추출: {JSON.stringify(r.extracted_items)}</div>
+                  {/* 인라인 진단 (analyze API 응답에 포함) */}
+                  {analysisInfo.diagnostic && (
+                    <div style={{ marginTop: 12, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #fde68a', fontSize: 12 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 8, color: '#92400e' }}>데이터 진단</div>
+                      {analysisInfo.diagnostic.item_count_distribution && (
+                        <div style={{ marginBottom: 8, color: '#78350f' }}>
+                          배송건별 아이템 수: {Object.entries(analysisInfo.diagnostic.item_count_distribution).map(([k, v]) => `${k}개=${v}건`).join(', ')}
+                        </div>
+                      )}
+                      {analysisInfo.diagnostic.all_columns && (
+                        <div style={{ marginBottom: 8, color: '#6b7280', wordBreak: 'break-all' }}>
+                          DB 컬럼: {analysisInfo.diagnostic.all_columns.join(', ')}
+                        </div>
+                      )}
+                      {analysisInfo.diagnostic.sample_rows?.map((r: any, i: number) => (
+                        <div key={i} style={{ padding: 8, marginBottom: 4, background: '#fffbeb', borderRadius: 6, border: '1px solid #fef3c7' }}>
+                          <div style={{ fontWeight: 600 }}>샘플 #{i + 1} (아이템 {r.item_count}개)</div>
+                          <div style={{ color: '#92400e', wordBreak: 'break-all' }}>어드민상품명수량: <strong>{r.admin_raw}</strong></div>
+                          <div style={{ color: '#2563eb' }}>파싱 결과: {JSON.stringify(r.items)}</div>
                         </div>
                       ))}
                     </div>

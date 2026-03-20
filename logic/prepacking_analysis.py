@@ -15,9 +15,11 @@ import pandas as pd
 from .prepacking_parse import (
     build_combo_detail,
     build_combo_key,
+    extract_items_from_row,
     find_invoice_col,
     group_shipments,
     load_vendor_df,
+    _safe_str,
 )
 from .prepacking_settings import get_settings
 
@@ -78,7 +80,8 @@ def analyze_combinations(
     ]
 
     invoice_col = find_invoice_col(df)
-    return {
+
+    result: Dict[str, Any] = {
         "vendor": vendor,
         "total_orders": len(shipments),
         "multi_item_orders": multi_item_count,
@@ -92,6 +95,27 @@ def analyze_combinations(
         "invoice_col": invoice_col,
         "detected_columns": {k: v for k, v in col_map.items() if v is not None},
     }
+
+    # 합포장 0건일 때 진단 정보 추가
+    if multi_item_count == 0 and len(shipments) > 0:
+        diag_samples = []
+        admin_col = col_map.get("admin_product_qty")
+        for _, row in df.head(5).iterrows():
+            raw = _safe_str(row.get(admin_col, "")) if admin_col else ""
+            items = extract_items_from_row(row, col_map)
+            diag_samples.append({
+                "admin_raw": raw[:300] if raw else "(empty)",
+                "items": items,
+                "item_count": len(items),
+            })
+        item_counts = [len(items) for items, _ in shipments[:200]]
+        result["diagnostic"] = {
+            "sample_rows": diag_samples,
+            "item_count_distribution": {str(c): item_counts.count(c) for c in set(item_counts)},
+            "all_columns": list(df.columns[:30]),
+        }
+
+    return result
 
 
 # ── 가중이동평균 ────────────────────
