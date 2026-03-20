@@ -357,15 +357,6 @@ export default function RootLayout({
                 </>
               )}
 
-              {/* 프리패킹 - 하단 고정 */}
-              <div style={{ marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                <Link
-                  href="/prepacking"
-                  className={pathname === '/prepacking' ? 'active' : ''}
-                >
-                  📦 프리패킹
-                </Link>
-              </div>
             </nav>
           </aside>
 
