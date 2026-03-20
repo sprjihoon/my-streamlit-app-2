@@ -48,6 +48,8 @@ a:hover {
   position: fixed;
   height: 100vh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar h1 {
@@ -61,6 +63,7 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  flex: 1;
 }
 
 .sidebar a {

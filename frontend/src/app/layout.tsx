@@ -20,7 +20,6 @@ interface User {
 const NAV_ITEMS = [
   { href: '/', label: '🏠 대시보드' },
   { href: '/work-log', label: '📋 작업일지' },
-  { href: '/prepacking', label: '📦 프리패킹' },
   { href: '/upload', label: '📤 데이터 업로드' },
   { href: '/mapping', label: '🔗 업체 매핑 관리' },
   { href: '/vendors', label: '📋 매핑 리스트' },
@@ -357,6 +356,16 @@ export default function RootLayout({
                   ))}
                 </>
               )}
+
+              {/* 프리패킹 - 하단 고정 */}
+              <div style={{ marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <Link
+                  href="/prepacking"
+                  className={pathname === '/prepacking' ? 'active' : ''}
+                >
+                  📦 프리패킹
+                </Link>
+              </div>
             </nav>
           </aside>
 
