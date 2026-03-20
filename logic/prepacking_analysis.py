@@ -16,6 +16,7 @@ from .prepacking_parse import (
     build_combo_detail,
     build_combo_key,
     extract_items_from_row,
+    find_group_col,
     find_invoice_col,
     group_shipments,
     load_vendor_df,
@@ -109,10 +110,25 @@ def analyze_combinations(
                 "item_count": len(items),
             })
         item_counts = [len(items) for items, _ in shipments[:200]]
+
+        group_col = find_group_col(df)
+        group_stats = {}
+        if group_col:
+            vc = df[group_col].value_counts()
+            group_stats = {
+                "group_col": group_col,
+                "total_unique": int(vc.shape[0]),
+                "multi_row_groups": int((vc > 1).sum()),
+                "max_rows_per_group": int(vc.max()) if len(vc) > 0 else 0,
+                "sample_multi": vc[vc > 1].head(3).to_dict() if (vc > 1).any() else {},
+                "empty_count": int(df[group_col].isna().sum() + (df[group_col].astype(str).str.strip() == "").sum()),
+            }
+
         result["diagnostic"] = {
             "sample_rows": diag_samples,
             "item_count_distribution": {str(c): item_counts.count(c) for c in set(item_counts)},
-            "all_columns": list(df.columns[:30]),
+            "all_columns": list(df.columns[:40]),
+            "group_stats": group_stats,
         }
 
     return result

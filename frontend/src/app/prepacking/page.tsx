@@ -502,6 +502,22 @@ export default function PrepackingPage() {
                           배송건별 아이템 수: {Object.entries(analysisInfo.diagnostic.item_count_distribution).map(([k, v]) => `${k}개=${v}건`).join(', ')}
                         </div>
                       )}
+                      {analysisInfo.diagnostic.group_stats && (
+                        <div style={{ marginBottom: 8, padding: 8, background: '#fef3c7', borderRadius: 6 }}>
+                          <div style={{ fontWeight: 600, color: '#92400e', marginBottom: 4 }}>그룹핑 분석 ({analysisInfo.diagnostic.group_stats.group_col})</div>
+                          <div style={{ color: '#78350f' }}>
+                            고유값: {analysisInfo.diagnostic.group_stats.total_unique}개 /
+                            2행 이상 그룹: <strong>{analysisInfo.diagnostic.group_stats.multi_row_groups}개</strong> /
+                            최대 행수: {analysisInfo.diagnostic.group_stats.max_rows_per_group} /
+                            빈값: {analysisInfo.diagnostic.group_stats.empty_count}개
+                          </div>
+                          {analysisInfo.diagnostic.group_stats.multi_row_groups === 0 && (
+                            <div style={{ marginTop: 4, color: '#dc2626', fontWeight: 600 }}>
+                              같은 {analysisInfo.diagnostic.group_stats.group_col}로 묶이는 행이 없습니다. 모든 행이 개별 배송건으로 처리됩니다.
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {analysisInfo.diagnostic.all_columns && (
                         <div style={{ marginBottom: 8, color: '#6b7280', wordBreak: 'break-all' }}>
                           DB 컬럼: {analysisInfo.diagnostic.all_columns.join(', ')}

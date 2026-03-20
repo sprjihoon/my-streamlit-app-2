@@ -80,6 +80,14 @@ def find_invoice_col(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+def find_group_col(df: pd.DataFrame) -> Optional[str]:
+    """합포장 그룹핑에 사용할 컬럼 찾기. 합포번호 > 송장번호 우선."""
+    for key in ("합포번호", "송장번호", "운송장번호"):
+        if key in df.columns:
+            return key
+    return None
+
+
 # ── 어드민상품명수량 파싱 ────────────
 
 def parse_admin_product_qty(raw: str) -> List[Dict[str, Any]]:
@@ -225,15 +233,14 @@ def group_shipments(
     """
     배송 건 단위로 SKU 아이템 목록을 구성.
 
-    송장번호가 있으면 그룹핑, 없으면 행 단위.
-    어드민상품명수량이 있으면 한 행에서 여러 SKU를 추출하므로,
-    같은 송장의 여러 행도 하나의 배송건으로 합침.
+    합포번호 또는 송장번호로 그룹핑하여 같은 주문의 여러 행을 합침.
+    그룹핑 컬럼이 없으면 행 단위.
     """
     date_col = col_map.get("date")
-    invoice_col = find_invoice_col(df)
+    group_col = find_group_col(df)
 
-    if invoice_col:
-        return _group_by_invoice(df, col_map, date_col, invoice_col)
+    if group_col:
+        return _group_by_invoice(df, col_map, date_col, group_col)
     return _group_by_row(df, col_map, date_col)
 
 
