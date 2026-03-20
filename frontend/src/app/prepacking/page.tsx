@@ -27,541 +27,395 @@ import {
   type ComboDetail,
 } from '@/lib/api';
 
+/* ── 상수 ── */
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
-const STATUS_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  active: { label: '사용가능', color: '#2e7d32', bg: '#e8f5e9' },
-  carried: { label: '이월(유지)', color: '#1565c0', bg: '#e3f2fd' },
-  held: { label: '보류중', color: '#f57f17', bg: '#fff8e1' },
-  disassemble: { label: '해체지시', color: '#c62828', bg: '#ffebee' },
-  disassembled: { label: '해체완료', color: '#757575', bg: '#f5f5f5' },
-  depleted: { label: '소진', color: '#9e9e9e', bg: '#fafafa' },
+const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
+  active:       { label: '사용가능',   color: '#16a34a', bg: '#f0fdf4' },
+  carried:      { label: '이월',       color: '#2563eb', bg: '#eff6ff' },
+  held:         { label: '보류',       color: '#ca8a04', bg: '#fefce8' },
+  disassemble:  { label: '해체지시',   color: '#dc2626', bg: '#fef2f2' },
+  disassembled: { label: '해체완료',   color: '#6b7280', bg: '#f9fafb' },
+  depleted:     { label: '소진',       color: '#9ca3af', bg: '#f9fafb' },
 };
 
-function parseComboDetail(detailStr: string): ComboDetail[] {
-  try {
-    return JSON.parse(detailStr);
-  } catch {
-    return [];
-  }
+type Tab = 'instructions' | 'production' | 'inventory' | 'analysis' | 'accuracy' | 'settings';
+
+/* ── 유틸 ── */
+function parseDetail(s: string): ComboDetail[] { try { return JSON.parse(s); } catch { return []; } }
+function fmtCombo(key: string) { return key.split('|').map(p => { const [n, q] = p.split(':'); return `${n} x${q}`; }).join(' + '); }
+function today() { return new Date().toISOString().split('T')[0]; }
+function tomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0]; }
+function weeksAgo(w: number) { const d = new Date(); d.setDate(d.getDate() - w * 7); return d.toISOString().split('T')[0]; }
+
+/* ── 공통 컴포넌트 ── */
+function Badge({ label, color, bg }: { label: string; color: string; bg: string }) {
+  return <span style={{ padding: '2px 10px', borderRadius: 99, fontSize: 12, fontWeight: 600, color, backgroundColor: bg, whiteSpace: 'nowrap' }}>{label}</span>;
 }
 
-function formatComboKey(key: string): string {
-  return key.split('|').map(part => {
-    const [name, qty] = part.split(':');
-    return `${name} x${qty}`;
-  }).join(' + ');
+function Stat({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+  return (
+    <div style={{ flex: '1 1 140px', padding: '16px 20px', background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb' }}>
+      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: accent || '#111827' }}>{value}</div>
+    </div>
+  );
 }
 
-function todayStr(): string {
-  return new Date().toISOString().split('T')[0];
+function Card({ title, color, count, children }: { title: string; color: string; count?: number; children: React.ReactNode }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: 20 }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 4, height: 20, borderRadius: 2, background: color }} />
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: '#111827', margin: 0 }}>{title}</h3>
+        {count !== undefined && <span style={{ fontSize: 13, color: '#9ca3af', fontWeight: 500 }}>{count}건</span>}
+      </div>
+      <div style={{ padding: '12px 20px' }}>{children}</div>
+    </div>
+  );
 }
 
-function tomorrowStr(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+function EmptyState({ message }: { message: string }) {
+  return <div style={{ textAlign: 'center', padding: '48px 20px', color: '#9ca3af', fontSize: 14 }}>{message}</div>;
 }
 
-function weeksAgoStr(weeks: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - weeks * 7);
-  return d.toISOString().split('T')[0];
-}
-
+/* ── 메인 ── */
 export default function PrepackingPage() {
-  const [tab, setTab] = useState<'instructions' | 'production' | 'inventory' | 'analysis' | 'accuracy' | 'settings'>('instructions');
+  const [tab, setTab] = useState<Tab>('instructions');
   const [vendors, setVendors] = useState<string[]>([]);
   const [vendor, setVendor] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // 오늘의 지시
   const [instructions, setInstructions] = useState<DailyInstructions | null>(null);
-
-  // 제작 기록
   const [predictions, setPredictions] = useState<PrepackingPrediction[]>([]);
   const [productionInputs, setProductionInputs] = useState<Record<string, { qty: number; location: string }>>({});
   const [locationSuggestions, setLocationSuggestions] = useState<string[]>([]);
   const [activeSuggestionKey, setActiveSuggestionKey] = useState<string | null>(null);
-
-  // 재고 현황
   const [activeProds, setActiveProds] = useState<PrepackingProduction[]>([]);
   const [useQtyInputs, setUseQtyInputs] = useState<Record<number, number>>({});
-
-  // 조합 분석
-  const [analysisDateFrom, setAnalysisDateFrom] = useState(weeksAgoStr(8));
-  const [analysisDateTo, setAnalysisDateTo] = useState(todayStr());
+  const [analysisFrom, setAnalysisFrom] = useState(weeksAgo(8));
+  const [analysisTo, setAnalysisTo] = useState(today());
   const [combos, setCombos] = useState<PrepackingCombo[]>([]);
-  const [analysisInfo, setAnalysisInfo] = useState<{
-    total_orders: number; multi_item_orders: number; data_weeks: number;
-    single_item_orders?: number; parse_failures?: number;
-    min_sku_count?: number; has_admin_col?: boolean; has_barcode_col?: boolean;
-    detected_columns?: Record<string, string>;
-  } | null>(null);
-
-  // 정확도
+  const [analysisInfo, setAnalysisInfo] = useState<any>(null);
   const [accuracyHistory, setAccuracyHistory] = useState<AccuracyRecord[]>([]);
   const [efficiency, setEfficiency] = useState<EfficiencyStats | null>(null);
-
-  // 설정
   const [allSettings, setAllSettings] = useState<PrepackingSettings[]>([]);
   const [editSettings, setEditSettings] = useState<PrepackingSettings>({
     vendor: '_default', min_predicted_qty: 1, min_frequency: 1, min_sku_count: 2, retention_days: 2,
   });
 
-  useEffect(() => {
-    getPrepackingVendors().then(setVendors).catch(() => {});
-  }, []);
+  useEffect(() => { getPrepackingVendors().then(setVendors).catch(() => {}); }, []);
+  useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(null), 3000); return () => clearTimeout(t); } }, [success]);
 
-  const clearMessages = () => { setError(null); setSuccess(null); };
+  const clear = () => { setError(null); setSuccess(null); };
 
-  // ── 오늘의 지시 로드 ──
+  /* ── 데이터 로더 ── */
   const loadInstructions = useCallback(async () => {
-    if (!vendor) return;
-    setLoading(true); clearMessages();
-    try {
-      const data = await getDailyInstructions(vendor);
-      setInstructions(data);
-    } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
+    if (!vendor) return; setLoading(true); clear();
+    try { setInstructions(await getDailyInstructions(vendor)); }
+    catch (e) { setError(e instanceof Error ? e.message : '오류'); }
     finally { setLoading(false); }
   }, [vendor]);
 
-  // ── 예측 로드 (제작 탭) ──
   const loadPredictions = useCallback(async () => {
-    if (!vendor) return;
-    setLoading(true); clearMessages();
+    if (!vendor) return; setLoading(true); clear();
     try {
-      const res = await predictPrepacking({ vendor, target_date: tomorrowStr(), save: true });
+      const res = await predictPrepacking({ vendor, target_date: tomorrow(), save: true });
       setPredictions(res.predictions);
-      const inputs: Record<string, { qty: number; location: string }> = {};
-      res.predictions.forEach(p => { inputs[p.combo_key] = { qty: p.predicted_qty, location: '' }; });
-      setProductionInputs(inputs);
-    } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
+      const inp: Record<string, { qty: number; location: string }> = {};
+      res.predictions.forEach(p => { inp[p.combo_key] = { qty: p.predicted_qty, location: '' }; });
+      setProductionInputs(inp);
+    } catch (e) { setError(e instanceof Error ? e.message : '오류'); }
     finally { setLoading(false); }
   }, [vendor]);
 
-  // ── 재고 로드 ──
   const loadInventory = useCallback(async () => {
-    if (!vendor) return;
-    setLoading(true); clearMessages();
-    try {
-      const data = await getActiveProductions(vendor);
-      setActiveProds(data);
-    } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
+    if (!vendor) return; setLoading(true); clear();
+    try { setActiveProds(await getActiveProductions(vendor)); }
+    catch (e) { setError(e instanceof Error ? e.message : '오류'); }
     finally { setLoading(false); }
   }, [vendor]);
 
-  // ── 조합 분석 ──
   const loadAnalysis = useCallback(async () => {
-    if (!vendor) return;
-    setLoading(true); clearMessages();
+    if (!vendor) return; setLoading(true); clear();
     try {
-      const data = await analyzePrepackingCombos({ vendor, date_from: analysisDateFrom, date_to: analysisDateTo });
+      const data = await analyzePrepackingCombos({ vendor, date_from: analysisFrom, date_to: analysisTo });
       setCombos(data.combos);
-      setAnalysisInfo({
-        total_orders: data.total_orders, multi_item_orders: data.multi_item_orders, data_weeks: data.data_weeks,
-        single_item_orders: data.single_item_orders, parse_failures: data.parse_failures,
-        min_sku_count: data.min_sku_count, has_admin_col: data.has_admin_col, has_barcode_col: data.has_barcode_col,
-        detected_columns: data.detected_columns,
-      });
-    } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
+      setAnalysisInfo(data);
+    } catch (e) { setError(e instanceof Error ? e.message : '오류'); }
     finally { setLoading(false); }
-  }, [vendor, analysisDateFrom, analysisDateTo]);
+  }, [vendor, analysisFrom, analysisTo]);
 
-  // ── 정확도 로드 ──
   const loadAccuracy = useCallback(async () => {
-    if (!vendor) return;
-    setLoading(true); clearMessages();
+    if (!vendor) return; setLoading(true); clear();
     try {
-      const [hist, eff] = await Promise.all([
-        getAccuracyHistory(vendor),
-        getPrepackingEfficiency(vendor),
-      ]);
-      setAccuracyHistory(hist);
-      setEfficiency(eff);
-    } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
+      const [h, e] = await Promise.all([getAccuracyHistory(vendor), getPrepackingEfficiency(vendor)]);
+      setAccuracyHistory(h); setEfficiency(e);
+    } catch (e) { setError(e instanceof Error ? e.message : '오류'); }
     finally { setLoading(false); }
   }, [vendor]);
 
-  // ── 설정 로드 ──
   const loadSettings = useCallback(async () => {
-    setLoading(true); clearMessages();
+    setLoading(true); clear();
     try {
       const data = await getAllPrepackingSettings();
       setAllSettings(data);
       const def = data.find(s => s.vendor === '_default');
       if (def) setEditSettings(def);
-    } catch (e) { setError(e instanceof Error ? e.message : '오류 발생'); }
+    } catch (e) { setError(e instanceof Error ? e.message : '오류'); }
     finally { setLoading(false); }
   }, []);
 
-  // 탭 변경 시 데이터 로드
   useEffect(() => {
     if (!vendor && tab !== 'settings') return;
-    if (tab === 'instructions') loadInstructions();
-    else if (tab === 'production') loadPredictions();
-    else if (tab === 'inventory') loadInventory();
-    else if (tab === 'analysis') loadAnalysis();
-    else if (tab === 'accuracy') loadAccuracy();
-    else if (tab === 'settings') loadSettings();
+    const loaders: Record<Tab, () => void> = {
+      instructions: loadInstructions, production: loadPredictions, inventory: loadInventory,
+      analysis: loadAnalysis, accuracy: loadAccuracy, settings: loadSettings,
+    };
+    loaders[tab]?.();
   }, [tab, vendor]);
 
-  // ── 제작 등록 ──
-  async function handleCreateProduction(comboKey: string, comboDetail: string, predictedQty: number) {
-    const input = productionInputs[comboKey];
-    if (!input || input.qty <= 0) return;
-    clearMessages();
+  /* ── 액션 ── */
+  async function handleCreateProduction(key: string, detail: string, predQty: number) {
+    const inp = productionInputs[key]; if (!inp || inp.qty <= 0) return; clear();
     try {
-      await createPrepackingProduction({
-        vendor, target_date: tomorrowStr(), combo_key: comboKey,
-        combo_detail: comboDetail, predicted_qty: predictedQty,
-        produced_qty: input.qty, location: input.location,
-      });
-      setSuccess(`${formatComboKey(comboKey)} ${input.qty}세트 제작 등록 완료`);
-      loadPredictions();
-    } catch (e) { setError(e instanceof Error ? e.message : '등록 실패'); }
+      await createPrepackingProduction({ vendor, target_date: tomorrow(), combo_key: key, combo_detail: detail, predicted_qty: predQty, produced_qty: inp.qty, location: inp.location });
+      setSuccess(`${fmtCombo(key)} ${inp.qty}세트 등록`); loadPredictions();
+    } catch (e) { setError(e instanceof Error ? e.message : '실패'); }
   }
 
-  // ── 전체 제작 일괄 등록 ──
-  async function handleCreateAllProductions() {
-    clearMessages();
-    let created = 0;
-    for (const pred of predictions) {
-      const input = productionInputs[pred.combo_key];
-      if (!input || input.qty <= 0) continue;
-      try {
-        await createPrepackingProduction({
-          vendor, target_date: tomorrowStr(), combo_key: pred.combo_key,
-          combo_detail: pred.combo_detail, predicted_qty: pred.predicted_qty,
-          produced_qty: input.qty, location: input.location,
-        });
-        created++;
-      } catch { /* skip */ }
+  async function handleCreateAll() {
+    clear(); let n = 0;
+    for (const p of predictions) {
+      const inp = productionInputs[p.combo_key]; if (!inp || inp.qty <= 0) continue;
+      try { await createPrepackingProduction({ vendor, target_date: tomorrow(), combo_key: p.combo_key, combo_detail: p.combo_detail, predicted_qty: p.predicted_qty, produced_qty: inp.qty, location: inp.location }); n++; } catch {}
     }
-    if (created > 0) {
-      setSuccess(`${created}건 제작 등록 완료`);
-      loadPredictions();
-    }
+    if (n) { setSuccess(`${n}건 등록 완료`); loadPredictions(); }
   }
 
-  // ── 사용 차감 ──
-  async function handleUse(prodId: number) {
-    const qty = useQtyInputs[prodId] || 1;
-    clearMessages();
-    try {
-      await usePrepackingProduction(prodId, qty);
-      setSuccess('차감 완료');
-      loadInventory();
-    } catch (e) { setError(e instanceof Error ? e.message : '차감 실패'); }
+  async function handleUse(id: number) {
+    clear();
+    try { await usePrepackingProduction(id, useQtyInputs[id] || 1); setSuccess('차감 완료'); loadInventory(); }
+    catch (e) { setError(e instanceof Error ? e.message : '실패'); }
   }
 
-  // ── 상태 변경 ──
-  async function handleStatusChange(prodId: number, newStatus: string) {
-    clearMessages();
-    try {
-      await updatePrepackingStatus(prodId, newStatus);
-      setSuccess('상태 변경 완료');
-      loadInventory();
-    } catch (e) { setError(e instanceof Error ? e.message : '상태 변경 실패'); }
+  async function handleStatus(id: number, status: string) {
+    clear();
+    try { await updatePrepackingStatus(id, status); setSuccess('상태 변경'); loadInventory(); }
+    catch (e) { setError(e instanceof Error ? e.message : '실패'); }
   }
 
-  // ── 로케이션 자동완성 ──
-  async function handleLocationInput(comboKey: string, value: string) {
-    setProductionInputs(prev => ({ ...prev, [comboKey]: { ...prev[comboKey], location: value } }));
-    if (value.length >= 1 && vendor) {
-      try {
-        const suggestions = await suggestLocations(vendor, value);
-        setLocationSuggestions(suggestions);
-        setActiveSuggestionKey(comboKey);
-      } catch { setLocationSuggestions([]); }
-    } else {
-      setLocationSuggestions([]);
-      setActiveSuggestionKey(null);
-    }
+  async function handleLocationInput(key: string, val: string) {
+    setProductionInputs(prev => ({ ...prev, [key]: { ...prev[key], location: val } }));
+    if (val.length >= 1 && vendor) {
+      try { setLocationSuggestions(await suggestLocations(vendor, val)); setActiveSuggestionKey(key); }
+      catch { setLocationSuggestions([]); }
+    } else { setLocationSuggestions([]); setActiveSuggestionKey(null); }
   }
 
-  // ── 설정 저장 ──
   async function handleSaveSettings() {
-    clearMessages();
-    try {
-      await savePrepackingSettings(editSettings);
-      setSuccess('설정 저장 완료');
-      loadSettings();
-    } catch (e) { setError(e instanceof Error ? e.message : '설정 저장 실패'); }
+    clear();
+    try { await savePrepackingSettings(editSettings); setSuccess('설정 저장 완료'); loadSettings(); }
+    catch (e) { setError(e instanceof Error ? e.message : '실패'); }
   }
 
-  // ── 정확도 업데이트 ──
   async function handleUpdateAccuracy() {
-    if (!vendor) return;
-    clearMessages();
-    try {
-      const result = await updatePrepackingAccuracy(vendor, todayStr());
-      setSuccess(`정확도 업데이트: ${result.predictions_updated}건, 평균 MAPE: ${result.avg_mape ?? 'N/A'}%`);
-      loadAccuracy();
-    } catch (e) { setError(e instanceof Error ? e.message : '업데이트 실패'); }
+    if (!vendor) return; clear();
+    try { const r = await updatePrepackingAccuracy(vendor, today()); setSuccess(`정확도 업데이트: ${r.predictions_updated}건, MAPE ${r.avg_mape ?? 'N/A'}%`); loadAccuracy(); }
+    catch (e) { setError(e instanceof Error ? e.message : '실패'); }
   }
 
-  const tabStyle = (t: string) => ({
-    padding: '0.5rem 1rem',
-    border: 'none',
-    borderBottom: tab === t ? '3px solid #1976d2' : '3px solid transparent',
-    background: 'none',
-    cursor: 'pointer',
-    fontWeight: tab === t ? 700 : 400,
-    color: tab === t ? '#1976d2' : '#666',
-    fontSize: '0.9rem',
-  });
+  /* ── 탭 정의 ── */
+  const tabs: { key: Tab; label: string; icon: string }[] = [
+    { key: 'instructions', label: '오늘의 지시', icon: '📋' },
+    { key: 'production',   label: '제작 등록',   icon: '🔨' },
+    { key: 'inventory',    label: '재고 현황',   icon: '📦' },
+    { key: 'analysis',     label: '조합 분석',   icon: '🔍' },
+    { key: 'accuracy',     label: '정확도',      icon: '📊' },
+    { key: 'settings',     label: '설정',        icon: '⚙️' },
+  ];
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 1200 }}>
-      <h1 style={{ marginBottom: '0.5rem' }}>📦 프리패킹 관리</h1>
-
-      {/* 공급처 선택 */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
-        <label style={{ fontWeight: 600 }}>공급처:</label>
+    <div style={{ padding: '24px 32px', maxWidth: 1280, margin: '0 auto' }}>
+      {/* 헤더 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: '#111827', margin: 0 }}>프리패킹</h1>
         <select
-          value={vendor}
-          onChange={e => setVendor(e.target.value)}
-          style={{ padding: '0.4rem 0.75rem', borderRadius: 4, border: '1px solid #ccc', minWidth: 200 }}
+          value={vendor} onChange={e => setVendor(e.target.value)}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #d1d5db', fontSize: 14, minWidth: 200, background: '#fff', color: vendor ? '#111827' : '#9ca3af' }}
         >
-          <option value="">선택하세요</option>
+          <option value="">공급처 선택</option>
           {vendors.map(v => <option key={v} value={v}>{v}</option>)}
         </select>
       </div>
 
       {/* 탭 */}
-      <div style={{ borderBottom: '1px solid #ddd', marginBottom: '1rem', display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-        <button style={tabStyle('instructions')} onClick={() => setTab('instructions')}>오늘의 지시</button>
-        <button style={tabStyle('production')} onClick={() => setTab('production')}>제작 등록</button>
-        <button style={tabStyle('inventory')} onClick={() => setTab('inventory')}>재고 현황</button>
-        <button style={tabStyle('analysis')} onClick={() => setTab('analysis')}>조합 분석</button>
-        <button style={tabStyle('accuracy')} onClick={() => setTab('accuracy')}>정확도/효율</button>
-        <button style={tabStyle('settings')} onClick={() => setTab('settings')}>설정</button>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid #e5e7eb', overflowX: 'auto' }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            padding: '10px 16px', border: 'none', background: 'none', cursor: 'pointer',
+            fontSize: 13, fontWeight: tab === t.key ? 700 : 500,
+            color: tab === t.key ? '#2563eb' : '#6b7280',
+            borderBottom: tab === t.key ? '2px solid #2563eb' : '2px solid transparent',
+            whiteSpace: 'nowrap', transition: 'all 0.15s',
+          }}>
+            {t.icon} {t.label}
+          </button>
+        ))}
       </div>
 
-      {/* 메시지 */}
-      {error && <div style={{ padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: 4 }}>{error}</div>}
-      {success && <div style={{ padding: '0.75rem', marginBottom: '1rem', backgroundColor: '#e8f5e9', color: '#2e7d32', borderRadius: 4 }}>{success}</div>}
-      {loading && <div style={{ padding: '1rem', textAlign: 'center', color: '#666' }}>로딩 중...</div>}
+      {/* 토스트 */}
+      {error && <div style={{ padding: '12px 16px', marginBottom: 16, background: '#fef2f2', color: '#dc2626', borderRadius: 8, fontSize: 13, border: '1px solid #fecaca' }}>{error}</div>}
+      {success && <div style={{ padding: '12px 16px', marginBottom: 16, background: '#f0fdf4', color: '#16a34a', borderRadius: 8, fontSize: 13, border: '1px solid #bbf7d0' }}>{success}</div>}
+      {loading && <div style={{ textAlign: 'center', padding: 48, color: '#9ca3af' }}>불러오는 중...</div>}
 
       {/* ═══ 오늘의 지시 ═══ */}
-      {tab === 'instructions' && !loading && instructions && (
-        <div>
-          <h2 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>
-            {instructions.date} → {instructions.tomorrow} 지시
-          </h2>
+      {tab === 'instructions' && !loading && instructions && (() => {
+        const empty = !instructions.carry.length && !instructions.hold.length && !instructions.disassemble.length && !instructions.new_production.length;
+        if (empty) return <EmptyState message="오늘의 지시 사항이 없습니다. 제작 등록 탭에서 시작하세요." />;
+        return (
+          <div>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>{instructions.date} → <strong>{instructions.tomorrow}</strong></div>
 
-          {/* 유지 */}
-          {instructions.carry.length > 0 && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ color: '#1565c0', marginBottom: '0.5rem' }}>✅ 유지 (내일도 필요)</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#e3f2fd' }}>
-                    <th style={thStyle}>조합</th><th style={thStyle}>잔여</th><th style={thStyle}>내일 예측</th><th style={thStyle}>위치</th><th style={thStyle}>제작일</th>
-                  </tr>
-                </thead>
-                <tbody>
+            {instructions.new_production.length > 0 && (
+              <Card title="신규 제작" color="#16a34a" count={instructions.new_production.length}>
+                <table style={tbl}><thead><tr style={thr}>
+                  <th style={th}>조합</th><th style={thC}>예측</th><th style={thC}>기존</th><th style={thC}>신규 필요</th>
+                </tr></thead><tbody>
+                  {instructions.new_production.map(n => (
+                    <tr key={n.combo_key} style={trb}>
+                      <td style={td}><ComboLabel combo_key={n.combo_key} /></td>
+                      <td style={tdC}>{n.predicted_qty}</td>
+                      <td style={tdC}>{n.existing_qty}</td>
+                      <td style={{ ...tdC, fontWeight: 700, color: '#16a34a', fontSize: 16 }}>{n.new_qty}</td>
+                    </tr>
+                  ))}
+                </tbody></table>
+              </Card>
+            )}
+
+            {instructions.carry.length > 0 && (
+              <Card title="유지 (내일도 필요)" color="#2563eb" count={instructions.carry.length}>
+                <table style={tbl}><thead><tr style={thr}>
+                  <th style={th}>조합</th><th style={thC}>잔여</th><th style={thC}>내일 예측</th><th style={th}>위치</th><th style={th}>제작일</th>
+                </tr></thead><tbody>
                   {instructions.carry.map(c => (
-                    <tr key={c.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{formatComboKey(c.combo_key)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{c.remaining_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{c.tomorrow_predicted}</td>
-                      <td style={tdStyle}>{c.location}</td>
-                      <td style={tdStyle}>{c.target_date}</td>
+                    <tr key={c.id} style={trb}>
+                      <td style={td}><ComboLabel combo_key={c.combo_key} /></td>
+                      <td style={tdC}>{c.remaining_qty}</td>
+                      <td style={tdC}>{c.tomorrow_predicted}</td>
+                      <td style={td}><LocBadge loc={c.location} /></td>
+                      <td style={{ ...td, color: '#6b7280', fontSize: 12 }}>{c.target_date}</td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </tbody></table>
+              </Card>
+            )}
 
-          {/* 보류 */}
-          {instructions.hold.length > 0 && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ color: '#f57f17', marginBottom: '0.5rem' }}>⏳ 보류 (유지기간 내)</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#fff8e1' }}>
-                    <th style={thStyle}>조합</th><th style={thStyle}>잔여</th><th style={thStyle}>경과일</th><th style={thStyle}>남은일</th><th style={thStyle}>위치</th>
-                  </tr>
-                </thead>
-                <tbody>
+            {instructions.hold.length > 0 && (
+              <Card title="보류 (유지기간 내)" color="#ca8a04" count={instructions.hold.length}>
+                <table style={tbl}><thead><tr style={thr}>
+                  <th style={th}>조합</th><th style={thC}>잔여</th><th style={thC}>경과</th><th style={thC}>남은일</th><th style={th}>위치</th>
+                </tr></thead><tbody>
                   {instructions.hold.map(h => (
-                    <tr key={h.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{formatComboKey(h.combo_key)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{h.remaining_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{h.age_days}일</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{h.expires_in}일</td>
-                      <td style={tdStyle}>{h.location}</td>
+                    <tr key={h.id} style={trb}>
+                      <td style={td}><ComboLabel combo_key={h.combo_key} /></td>
+                      <td style={tdC}>{h.remaining_qty}</td>
+                      <td style={tdC}>{h.age_days}일</td>
+                      <td style={tdC}>{h.expires_in}일</td>
+                      <td style={td}><LocBadge loc={h.location} /></td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </tbody></table>
+              </Card>
+            )}
 
-          {/* 해체 지시 */}
-          {instructions.disassemble.length > 0 && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ color: '#c62828', marginBottom: '0.5rem' }}>🔴 해체 지시 (유지기간 초과)</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#ffebee' }}>
-                    <th style={thStyle}>조합</th><th style={thStyle}>잔여</th><th style={thStyle}>경과일</th><th style={thStyle}>위치</th><th style={thStyle}>처리</th>
-                  </tr>
-                </thead>
-                <tbody>
+            {instructions.disassemble.length > 0 && (
+              <Card title="해체 지시" color="#dc2626" count={instructions.disassemble.length}>
+                <table style={tbl}><thead><tr style={thr}>
+                  <th style={th}>조합</th><th style={thC}>잔여</th><th style={thC}>경과</th><th style={th}>위치</th><th style={thC}>처리</th>
+                </tr></thead><tbody>
                   {instructions.disassemble.map(d => (
-                    <tr key={d.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{formatComboKey(d.combo_key)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{d.remaining_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{d.age_days}일</td>
-                      <td style={tdStyle}>{d.location}</td>
-                      <td style={tdStyle}>
-                        <button
-                          onClick={() => handleStatusChange(d.id, 'disassembled')}
-                          style={{ padding: '0.25rem 0.5rem', backgroundColor: '#c62828', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}
-                        >해체 완료</button>
+                    <tr key={d.id} style={trb}>
+                      <td style={td}><ComboLabel combo_key={d.combo_key} /></td>
+                      <td style={tdC}>{d.remaining_qty}</td>
+                      <td style={tdC}>{d.age_days}일</td>
+                      <td style={td}><LocBadge loc={d.location} /></td>
+                      <td style={tdC}>
+                        <button onClick={() => handleStatus(d.id, 'disassembled')} style={btnDanger}>해체 완료</button>
                       </td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* 신규 제작 추천 */}
-          {instructions.new_production.length > 0 && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ color: '#2e7d32', marginBottom: '0.5rem' }}>🆕 신규 제작 추천</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#e8f5e9' }}>
-                    <th style={thStyle}>조합</th><th style={thStyle}>예측</th><th style={thStyle}>기존유지</th><th style={thStyle}>신규필요</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {instructions.new_production.map(n => (
-                    <tr key={n.combo_key} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{formatComboKey(n.combo_key)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{n.predicted_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{n.existing_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#2e7d32' }}>{n.new_qty}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {!instructions.carry.length && !instructions.hold.length && !instructions.disassemble.length && !instructions.new_production.length && (
-            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-              <p style={{ fontSize: '1.1rem', marginBottom: '0.75rem', fontWeight: 600 }}>오늘의 지시 사항이 없습니다.</p>
-              <p style={{ fontSize: '0.9rem', color: '#999', lineHeight: 1.6 }}>
-                아직 제작된 프리패킹이 없거나, 내일 예측 데이터가 부족합니다.<br />
-                먼저 <strong>&quot;제작 등록&quot;</strong> 탭에서 예측 추천을 확인하고 제작을 시작하세요.<br />
-                배송통계 데이터가 많을수록 예측이 정확해집니다.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+                </tbody></table>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ═══ 제작 등록 ═══ */}
       {tab === 'production' && !loading && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.1rem' }}>내일({tomorrowStr()}) 프리패킹 제작</h2>
-            {predictions.length > 0 && (
-              <button
-                onClick={handleCreateAllProductions}
-                style={{ padding: '0.5rem 1rem', backgroundColor: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
-              >전체 등록</button>
-            )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: '#6b7280' }}>내일 <strong>{tomorrow()}</strong> 예측 기반</div>
+            {predictions.length > 0 && <button onClick={handleCreateAll} style={btnPrimary}>전체 등록</button>}
           </div>
 
           {predictions.length === 0 ? (
-            <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>
-              {vendor ? '추천할 조합이 없습니다. (데이터 부족 또는 설정 기준 미달)' : '공급처를 선택하세요.'}
-            </p>
+            <EmptyState message={vendor ? '추천할 조합이 없습니다.' : '공급처를 선택하세요.'} />
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={thStyle}>조합</th>
-                  <th style={thStyle}>상세</th>
-                  <th style={thStyle}>추천</th>
-                  <th style={thStyle}>제작 수량</th>
-                  <th style={thStyle}>보관 위치</th>
-                  <th style={thStyle}>등록</th>
-                </tr>
-              </thead>
-              <tbody>
-                {predictions.map(pred => {
-                  const details = parseComboDetail(pred.combo_detail);
-                  const input = productionInputs[pred.combo_key] || { qty: pred.predicted_qty, location: '' };
-                  return (
-                    <tr key={pred.combo_key} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{formatComboKey(pred.combo_key)}</td>
-                      <td style={{ ...tdStyle, fontSize: '0.8rem' }}>
-                        {details.map((d, i) => (
-                          <div key={i}>
-                            {d.name} x{d.qty}
-                            {d.barcode && <span style={{ color: '#999', marginLeft: 4 }}>({d.barcode})</span>}
-                          </div>
-                        ))}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{pred.predicted_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>
-                        <input
-                          type="number" min={0} value={input.qty}
-                          onChange={e => setProductionInputs(prev => ({
-                            ...prev, [pred.combo_key]: { ...prev[pred.combo_key], qty: parseInt(e.target.value) || 0 }
-                          }))}
-                          style={{ width: 60, padding: '0.25rem', textAlign: 'center', border: '1px solid #ccc', borderRadius: 4 }}
-                        />
-                      </td>
-                      <td style={{ ...tdStyle, position: 'relative' }}>
-                        <input
-                          type="text" value={input.location}
-                          onChange={e => handleLocationInput(pred.combo_key, e.target.value)}
-                          onBlur={() => setTimeout(() => setActiveSuggestionKey(null), 200)}
-                          placeholder="예: A-3-2"
-                          style={{ width: '100%', padding: '0.25rem', border: '1px solid #ccc', borderRadius: 4 }}
-                        />
-                        {activeSuggestionKey === pred.combo_key && locationSuggestions.length > 0 && (
-                          <div style={{
-                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
-                            backgroundColor: '#fff', border: '1px solid #ccc', borderRadius: 4, maxHeight: 150, overflowY: 'auto',
-                          }}>
-                            {locationSuggestions.map(loc => (
-                              <div
-                                key={loc}
-                                onClick={() => {
-                                  setProductionInputs(prev => ({ ...prev, [pred.combo_key]: { ...prev[pred.combo_key], location: loc } }));
-                                  setActiveSuggestionKey(null);
-                                }}
-                                style={{ padding: '0.25rem 0.5rem', cursor: 'pointer', fontSize: '0.85rem' }}
-                                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e3f2fd')}
-                                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#fff')}
-                              >{loc}</div>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>
-                        <button
-                          onClick={() => handleCreateProduction(pred.combo_key, pred.combo_detail, pred.predicted_qty)}
-                          style={{ padding: '0.25rem 0.75rem', backgroundColor: '#4CAF50', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.85rem' }}
-                        >등록</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {predictions.map(pred => {
+                const details = parseDetail(pred.combo_detail);
+                const inp = productionInputs[pred.combo_key] || { qty: pred.predicted_qty, location: '' };
+                return (
+                  <div key={pred.combo_key} style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                      {/* 왼쪽: 조합 정보 */}
+                      <div style={{ flex: '1 1 300px' }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 6 }}>{fmtCombo(pred.combo_key)}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {details.map((d, i) => (
+                            <span key={i} style={{ fontSize: 12, padding: '2px 8px', background: '#f3f4f6', borderRadius: 6, color: '#374151' }}>
+                              {d.name} <strong>x{d.qty}</strong>
+                              {d.barcode && <span style={{ color: '#9ca3af', marginLeft: 4 }}>{d.barcode}</span>}
+                            </span>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
+                          추천 수량: <strong style={{ color: '#2563eb' }}>{pred.predicted_qty}</strong> / 출현 {pred.frequency}회
+                        </div>
+                      </div>
+                      {/* 오른쪽: 입력 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <input type="number" min={0} value={inp.qty}
+                          onChange={e => setProductionInputs(prev => ({ ...prev, [pred.combo_key]: { ...prev[pred.combo_key], qty: parseInt(e.target.value) || 0 } }))}
+                          style={{ ...inputSm, width: 64, textAlign: 'center' }} />
+                        <div style={{ position: 'relative' }}>
+                          <input type="text" value={inp.location} placeholder="위치"
+                            onChange={e => handleLocationInput(pred.combo_key, e.target.value)}
+                            onBlur={() => setTimeout(() => setActiveSuggestionKey(null), 200)}
+                            style={{ ...inputSm, width: 100 }} />
+                          {activeSuggestionKey === pred.combo_key && locationSuggestions.length > 0 && (
+                            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: 120, overflowY: 'auto' }}>
+                              {locationSuggestions.map(loc => (
+                                <div key={loc} onClick={() => { setProductionInputs(prev => ({ ...prev, [pred.combo_key]: { ...prev[pred.combo_key], location: loc } })); setActiveSuggestionKey(null); }}
+                                  style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f3f4f6' }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
+                                >{loc}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => handleCreateProduction(pred.combo_key, pred.combo_detail, pred.predicted_qty)} style={btnSuccess}>등록</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -569,53 +423,43 @@ export default function PrepackingPage() {
       {/* ═══ 재고 현황 ═══ */}
       {tab === 'inventory' && !loading && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.1rem' }}>프리패킹 재고 현황</h2>
-            <button onClick={loadInventory} style={{ padding: '0.4rem 0.75rem', backgroundColor: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.85rem' }}>새로고침</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: '#6b7280' }}>활성 재고 <strong>{activeProds.length}</strong>건</div>
+            <button onClick={loadInventory} style={btnOutline}>새로고침</button>
           </div>
 
-          {activeProds.length === 0 ? (
-            <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>활성 재고가 없습니다.</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={thStyle}>조합</th><th style={thStyle}>제작</th><th style={thStyle}>잔여</th>
-                  <th style={thStyle}>위치</th><th style={thStyle}>상태</th><th style={thStyle}>제작일</th><th style={thStyle}>사용</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeProds.map(prod => {
-                  const st = STATUS_LABELS[prod.status] || { label: prod.status, color: '#333', bg: '#fff' };
-                  return (
-                    <tr key={prod.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{formatComboKey(prod.combo_key)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{prod.produced_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{prod.remaining_qty}</td>
-                      <td style={tdStyle}>{prod.location}</td>
-                      <td style={tdStyle}>
-                        <span style={{ padding: '0.15rem 0.5rem', borderRadius: 12, fontSize: '0.75rem', backgroundColor: st.bg, color: st.color, fontWeight: 600 }}>
-                          {st.label}
-                        </span>
-                      </td>
-                      <td style={tdStyle}>{prod.target_date}</td>
-                      <td style={{ ...tdStyle, display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
-                        <input
-                          type="number" min={1} max={prod.remaining_qty}
+          {activeProds.length === 0 ? <EmptyState message="활성 재고가 없습니다." /> : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {activeProds.map(prod => {
+                const st = STATUS_MAP[prod.status] || { label: prod.status, color: '#333', bg: '#f9fafb' };
+                return (
+                  <div key={prod.id} style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 250px' }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>{fmtCombo(prod.combo_key)}</div>
+                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>{prod.target_date} <LocBadge loc={prod.location} /></div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#9ca3af' }}>제작</div>
+                        <div style={{ fontSize: 15, fontWeight: 600 }}>{prod.produced_qty}</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#9ca3af' }}>잔여</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#2563eb' }}>{prod.remaining_qty}</div>
+                      </div>
+                      <Badge label={st.label} color={st.color} bg={st.bg} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input type="number" min={1} max={prod.remaining_qty}
                           value={useQtyInputs[prod.id] || 1}
                           onChange={e => setUseQtyInputs(prev => ({ ...prev, [prod.id]: parseInt(e.target.value) || 1 }))}
-                          style={{ width: 50, padding: '0.2rem', textAlign: 'center', border: '1px solid #ccc', borderRadius: 4 }}
-                        />
-                        <button
-                          onClick={() => handleUse(prod.id)}
-                          style={{ padding: '0.2rem 0.5rem', backgroundColor: '#ff9800', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem' }}
-                        >차감</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          style={{ ...inputSm, width: 48, textAlign: 'center' }} />
+                        <button onClick={() => handleUse(prod.id)} style={btnWarn}>차감</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -623,221 +467,161 @@ export default function PrepackingPage() {
       {/* ═══ 조합 분석 ═══ */}
       {tab === 'analysis' && !loading && (
         <div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <input type="date" value={analysisDateFrom} onChange={e => setAnalysisDateFrom(e.target.value)} style={inputStyle} />
-            <span>~</span>
-            <input type="date" value={analysisDateTo} onChange={e => setAnalysisDateTo(e.target.value)} style={inputStyle} />
-            <button onClick={loadAnalysis} style={{ padding: '0.4rem 0.75rem', backgroundColor: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>분석</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+            <input type="date" value={analysisFrom} onChange={e => setAnalysisFrom(e.target.value)} style={inputSm} />
+            <span style={{ color: '#9ca3af' }}>~</span>
+            <input type="date" value={analysisTo} onChange={e => setAnalysisTo(e.target.value)} style={inputSm} />
+            <button onClick={loadAnalysis} style={btnPrimary}>분석</button>
           </div>
 
           {analysisInfo && (
-            <div>
-              <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                <div style={statCard}>전체 주문: <strong>{analysisInfo.total_orders.toLocaleString()}</strong></div>
-                <div style={statCard}>합포장 주문: <strong>{analysisInfo.multi_item_orders.toLocaleString()}</strong></div>
-                <div style={statCard}>단품 주문: <strong>{(analysisInfo.single_item_orders ?? 0).toLocaleString()}</strong></div>
-                <div style={statCard}>데이터 기간: <strong>{analysisInfo.data_weeks}주</strong></div>
-                <div style={statCard}>조합 수: <strong>{combos.length}</strong></div>
-              </div>
-              {analysisInfo.multi_item_orders === 0 && analysisInfo.total_orders > 0 && (
-                <div style={{ padding: '0.75rem', backgroundColor: '#fff3e0', borderRadius: 6, marginBottom: '1rem', fontSize: '0.85rem', color: '#e65100' }}>
-                  <strong>합포장 주문이 0건입니다.</strong><br/>
-                  전체 {analysisInfo.total_orders}건 중 단품 {analysisInfo.single_item_orders ?? 0}건, 파싱실패 {analysisInfo.parse_failures ?? 0}건<br/>
-                  감지된 컬럼: {analysisInfo.detected_columns ? Object.entries(analysisInfo.detected_columns).map(([k,v]) => `${k}=${v}`).join(', ') : 'N/A'}<br/>
-                  어드민상품명수량 컬럼: {analysisInfo.has_admin_col ? '있음' : '없음'} / 최소 SKU 수: {analysisInfo.min_sku_count ?? 2}
-                </div>
-              )}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+              <Stat label="전체 주문" value={analysisInfo.total_orders?.toLocaleString()} />
+              <Stat label="합포장" value={analysisInfo.multi_item_orders?.toLocaleString()} accent="#2563eb" />
+              <Stat label="단품" value={(analysisInfo.single_item_orders ?? 0).toLocaleString()} />
+              <Stat label="조합 수" value={combos.length} accent="#7c3aed" />
+              <Stat label="데이터" value={`${analysisInfo.data_weeks}주`} />
             </div>
           )}
 
           {combos.length > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={thStyle}>#</th><th style={thStyle}>조합 상세</th><th style={thStyle}>횟수</th>
-                  {WEEKDAYS.map(d => <th key={d} style={{ ...thStyle, textAlign: 'center', width: 40 }}>{d}</th>)}
-                </tr>
-              </thead>
-              <tbody>
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+              <table style={tbl}><thead><tr style={{ background: '#f9fafb' }}>
+                <th style={{ ...th, width: 40, textAlign: 'center' }}>#</th>
+                <th style={th}>조합</th>
+                <th style={{ ...thC, width: 60 }}>횟수</th>
+                {WEEKDAYS.map(d => <th key={d} style={{ ...thC, width: 40 }}>{d}</th>)}
+              </tr></thead><tbody>
                 {combos.slice(0, 50).map((c, i) => {
-                  const details = parseComboDetail(c.combo_detail);
+                  const details = parseDetail(c.combo_detail);
+                  const maxDay = Math.max(...Object.values(c.day_counts).map(Number));
                   return (
-                    <tr key={c.combo_key} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ ...tdStyle, textAlign: 'center', color: '#999', verticalAlign: 'top' }}>{i + 1}</td>
-                      <td style={{ ...tdStyle, minWidth: 250 }}>
+                    <tr key={c.combo_key} style={trb}>
+                      <td style={{ ...tdC, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
+                      <td style={td}>
                         {details.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                             {details.map((d, di) => (
-                              <div key={di} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                                <span style={{ fontWeight: 600 }}>{d.name}</span>
-                                <span style={{ color: '#1976d2', fontWeight: 700 }}>x{d.qty}</span>
-                                {d.barcode && (
-                                  <span style={{ fontSize: '0.75rem', color: '#888', backgroundColor: '#f5f5f5', padding: '0.1rem 0.3rem', borderRadius: 3 }}>
-                                    {d.barcode}
-                                  </span>
-                                )}
-                              </div>
+                              <span key={di} style={{ fontSize: 12, padding: '1px 6px', background: '#f3f4f6', borderRadius: 4 }}>
+                                {d.name} <strong>x{d.qty}</strong>
+                              </span>
                             ))}
                           </div>
-                        ) : (
-                          <span style={{ fontSize: '0.85rem' }}>{formatComboKey(c.combo_key)}</span>
-                        )}
+                        ) : <span style={{ fontSize: 13 }}>{fmtCombo(c.combo_key)}</span>}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, verticalAlign: 'top' }}>{c.count}</td>
-                      {WEEKDAYS.map((_, di) => (
-                        <td key={di} style={{ ...tdStyle, textAlign: 'center', fontSize: '0.85rem', verticalAlign: 'top' }}>
-                          {c.day_counts[String(di)] || 0}
-                        </td>
-                      ))}
+                      <td style={{ ...tdC, fontWeight: 700 }}>{c.count}</td>
+                      {WEEKDAYS.map((_, di) => {
+                        const v = Number(c.day_counts[String(di)] || 0);
+                        const intensity = maxDay > 0 ? v / maxDay : 0;
+                        return (
+                          <td key={di} style={{
+                            ...tdC, fontSize: 12,
+                            background: v > 0 ? `rgba(37, 99, 235, ${0.08 + intensity * 0.2})` : 'transparent',
+                            fontWeight: v === maxDay && v > 0 ? 700 : 400,
+                            color: v > 0 ? '#1e40af' : '#d1d5db',
+                          }}>{v}</td>
+                        );
+                      })}
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
+              </tbody></table>
+            </div>
           )}
         </div>
       )}
 
-      {/* ═══ 정확도/효율 ═══ */}
+      {/* ═══ 정확도 ═══ */}
       {tab === 'accuracy' && !loading && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.1rem' }}>정확도 & 효율</h2>
-            <button onClick={handleUpdateAccuracy} style={{ padding: '0.4rem 0.75rem', backgroundColor: '#ff9800', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>오늘 정확도 업데이트</button>
-          </div>
-
           {efficiency && (
-            <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-              <div style={statCard}>총 제작: <strong>{efficiency.total_produced}</strong></div>
-              <div style={statCard}>총 사용: <strong>{efficiency.total_used}</strong></div>
-              <div style={{ ...statCard, borderColor: '#4CAF50' }}>활용률: <strong>{efficiency.utilization_rate}%</strong></div>
-              <div style={{ ...statCard, borderColor: '#f44336' }}>폐기율: <strong>{efficiency.waste_rate}%</strong></div>
-              <div style={statCard}>소진: <strong>{efficiency.depleted_count}</strong></div>
-              <div style={statCard}>해체: <strong>{efficiency.disassembled_count}</strong></div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+              <Stat label="총 제작" value={efficiency.total_produced} />
+              <Stat label="총 사용" value={efficiency.total_used} />
+              <Stat label="활용률" value={`${efficiency.utilization_rate}%`} accent="#16a34a" />
+              <Stat label="폐기율" value={`${efficiency.waste_rate}%`} accent="#dc2626" />
             </div>
           )}
 
-          {accuracyHistory.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={thStyle}>날짜</th><th style={thStyle}>조합수</th><th style={thStyle}>평균 MAPE</th>
-                  <th style={thStyle}>예측합</th><th style={thStyle}>실제합</th><th style={thStyle}>차이</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button onClick={handleUpdateAccuracy} style={btnWarn}>오늘 정확도 업데이트</button>
+          </div>
+
+          {accuracyHistory.length === 0 ? <EmptyState message="정확도 데이터가 없습니다." /> : (
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+              <table style={tbl}><thead><tr style={{ background: '#f9fafb' }}>
+                <th style={th}>날짜</th><th style={thC}>조합수</th><th style={thC}>MAPE</th><th style={thC}>예측</th><th style={thC}>실제</th><th style={thC}>차이</th>
+              </tr></thead><tbody>
                 {accuracyHistory.map(a => (
-                  <tr key={a.target_date} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={tdStyle}>{a.target_date}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>{a.combo_count}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: a.avg_mape !== null && a.avg_mape < 30 ? '#2e7d32' : '#c62828' }}>
+                  <tr key={a.target_date} style={trb}>
+                    <td style={{ ...td, fontSize: 13 }}>{a.target_date}</td>
+                    <td style={tdC}>{a.combo_count}</td>
+                    <td style={{ ...tdC, fontWeight: 700, color: a.avg_mape !== null && a.avg_mape < 30 ? '#16a34a' : '#dc2626' }}>
                       {a.avg_mape !== null ? `${a.avg_mape}%` : '-'}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>{a.total_predicted}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>{a.total_actual}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>
-                      {a.total_actual !== null ? (a.total_predicted - a.total_actual) : '-'}
+                    <td style={tdC}>{a.total_predicted}</td>
+                    <td style={tdC}>{a.total_actual}</td>
+                    <td style={{ ...tdC, color: a.total_actual !== null ? ((a.total_predicted - a.total_actual) > 0 ? '#dc2626' : '#16a34a') : '#9ca3af' }}>
+                      {a.total_actual !== null ? (a.total_predicted - a.total_actual > 0 ? '+' : '') + (a.total_predicted - a.total_actual) : '-'}
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>정확도 데이터가 없습니다.</p>
+              </tbody></table>
+            </div>
           )}
         </div>
       )}
 
       {/* ═══ 설정 ═══ */}
       {tab === 'settings' && !loading && (
-        <div>
-          <h2 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>프리패킹 설정</h2>
-
-          <div style={{ backgroundColor: '#f9f9f9', padding: '1.5rem', borderRadius: 8, marginBottom: '1.5rem', maxWidth: 500 }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>적용 대상</label>
-              <select
-                value={editSettings.vendor}
-                onChange={e => {
-                  const v = e.target.value;
-                  const existing = allSettings.find(s => s.vendor === v);
-                  if (existing) setEditSettings(existing);
-                  else setEditSettings(prev => ({ ...prev, vendor: v }));
-                }}
-                style={{ width: '100%', padding: '0.4rem', border: '1px solid #ccc', borderRadius: 4 }}
-              >
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 360px', background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', padding: 24 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 20, color: '#111827' }}>설정 편집</h3>
+            <SettingField label="적용 대상">
+              <select value={editSettings.vendor} onChange={e => {
+                const v = e.target.value;
+                const ex = allSettings.find(s => s.vendor === v);
+                if (ex) setEditSettings(ex); else setEditSettings(prev => ({ ...prev, vendor: v }));
+              }} style={inputFull}>
                 <option value="_default">글로벌 기본값</option>
                 {vendors.map(v => <option key={v} value={v}>{v}</option>)}
               </select>
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>최소 예측 수량</label>
-              <input
-                type="number" min={1} value={editSettings.min_predicted_qty}
-                onChange={e => setEditSettings(prev => ({ ...prev, min_predicted_qty: parseInt(e.target.value) || 1 }))}
-                style={{ width: '100%', padding: '0.4rem', border: '1px solid #ccc', borderRadius: 4 }}
-              />
-              <small style={{ color: '#999' }}>이 수량 이상 예측된 조합만 추천에 포함</small>
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>최소 출현 빈도</label>
-              <input
-                type="number" min={1} value={editSettings.min_frequency}
-                onChange={e => setEditSettings(prev => ({ ...prev, min_frequency: parseInt(e.target.value) || 1 }))}
-                style={{ width: '100%', padding: '0.4rem', border: '1px solid #ccc', borderRadius: 4 }}
-              />
-              <small style={{ color: '#999' }}>과거 데이터에서 이 횟수 이상 출현한 조합만 포함</small>
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>최소 SKU 수</label>
-              <input
-                type="number" min={1} value={editSettings.min_sku_count}
-                onChange={e => setEditSettings(prev => ({ ...prev, min_sku_count: parseInt(e.target.value) || 1 }))}
-                style={{ width: '100%', padding: '0.4rem', border: '1px solid #ccc', borderRadius: 4 }}
-              />
-              <small style={{ color: '#999' }}>합포장 기준 (2 = 2개 이상 SKU 조합만)</small>
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>유지 기간 (일)</label>
-              <input
-                type="number" min={1} value={editSettings.retention_days}
-                onChange={e => setEditSettings(prev => ({ ...prev, retention_days: parseInt(e.target.value) || 1 }))}
-                style={{ width: '100%', padding: '0.4rem', border: '1px solid #ccc', borderRadius: 4 }}
-              />
-              <small style={{ color: '#999' }}>미사용 프리패킹의 최대 보관 기간. 초과 시 해체 지시</small>
-            </div>
-
-            <button
-              onClick={handleSaveSettings}
-              style={{ width: '100%', padding: '0.5rem', backgroundColor: '#4CAF50', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
-            >설정 저장</button>
+            </SettingField>
+            <SettingField label="최소 예측 수량" hint="이 수량 이상 예측된 조합만 추천">
+              <input type="number" min={1} value={editSettings.min_predicted_qty}
+                onChange={e => setEditSettings(prev => ({ ...prev, min_predicted_qty: parseInt(e.target.value) || 1 }))} style={inputFull} />
+            </SettingField>
+            <SettingField label="최소 출현 빈도" hint="과거 데이터에서 이 횟수 이상 출현한 조합">
+              <input type="number" min={1} value={editSettings.min_frequency}
+                onChange={e => setEditSettings(prev => ({ ...prev, min_frequency: parseInt(e.target.value) || 1 }))} style={inputFull} />
+            </SettingField>
+            <SettingField label="최소 SKU 수" hint="2 = 2개 이상 SKU 조합만 합포장으로 인식">
+              <input type="number" min={1} value={editSettings.min_sku_count}
+                onChange={e => setEditSettings(prev => ({ ...prev, min_sku_count: parseInt(e.target.value) || 1 }))} style={inputFull} />
+            </SettingField>
+            <SettingField label="유지 기간 (일)" hint="초과 시 해체 지시">
+              <input type="number" min={1} value={editSettings.retention_days}
+                onChange={e => setEditSettings(prev => ({ ...prev, retention_days: parseInt(e.target.value) || 1 }))} style={inputFull} />
+            </SettingField>
+            <button onClick={handleSaveSettings} style={{ ...btnPrimary, width: '100%', padding: '10px 0', marginTop: 8 }}>저장</button>
           </div>
 
           {allSettings.length > 0 && (
-            <div>
-              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>현재 설정 목록</h3>
-              <table style={{ borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    <th style={thStyle}>대상</th><th style={thStyle}>최소예측</th><th style={thStyle}>최소빈도</th><th style={thStyle}>최소SKU</th><th style={thStyle}>유지기간</th>
+            <div style={{ flex: '1 1 300px', background: '#fff', borderRadius: 12, border: '1px solid #e5e7eb', overflow: 'hidden', alignSelf: 'flex-start' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6', fontWeight: 700, fontSize: 15, color: '#111827' }}>현재 설정</div>
+              <table style={tbl}><thead><tr style={{ background: '#f9fafb' }}>
+                <th style={th}>대상</th><th style={thC}>예측</th><th style={thC}>빈도</th><th style={thC}>SKU</th><th style={thC}>유지</th>
+              </tr></thead><tbody>
+                {allSettings.map(s => (
+                  <tr key={s.vendor} style={trb}>
+                    <td style={{ ...td, fontWeight: 600 }}>{s.vendor === '_default' ? '기본값' : s.vendor}</td>
+                    <td style={tdC}>{s.min_predicted_qty}</td>
+                    <td style={tdC}>{s.min_frequency}</td>
+                    <td style={tdC}>{s.min_sku_count}</td>
+                    <td style={tdC}>{s.retention_days}일</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {allSettings.map(s => (
-                    <tr key={s.vendor} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={tdStyle}>{s.vendor === '_default' ? '글로벌 기본값' : s.vendor}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{s.min_predicted_qty}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{s.min_frequency}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{s.min_sku_count}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{s.retention_days}일</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody></table>
             </div>
           )}
         </div>
@@ -846,10 +630,55 @@ export default function PrepackingPage() {
   );
 }
 
-const thStyle: React.CSSProperties = { padding: '0.5rem', textAlign: 'left', fontSize: '0.85rem', fontWeight: 600, whiteSpace: 'nowrap' };
-const tdStyle: React.CSSProperties = { padding: '0.5rem', fontSize: '0.85rem', verticalAlign: 'top' };
-const inputStyle: React.CSSProperties = { padding: '0.4rem', border: '1px solid #ccc', borderRadius: 4 };
-const statCard: React.CSSProperties = {
-  padding: '0.75rem 1rem', backgroundColor: '#f9f9f9', borderRadius: 8,
-  border: '1px solid #e0e0e0', fontSize: '0.9rem', minWidth: 120,
-};
+/* ── 작은 컴포넌트 ── */
+function ComboLabel({ combo_key }: { combo_key: string }) {
+  const parts = combo_key.split('|');
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      {parts.map((p, i) => {
+        const [name, qty] = p.split(':');
+        return (
+          <span key={i} style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+            {i > 0 && <span style={{ color: '#d1d5db', margin: '0 2px' }}>+</span>}
+            <span style={{ fontWeight: 600, color: '#111827' }}>{name}</span>
+            <span style={{ color: '#2563eb', fontWeight: 700 }}>x{qty}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function LocBadge({ loc }: { loc: string }) {
+  if (!loc) return null;
+  return <span style={{ fontSize: 11, padding: '1px 6px', background: '#f3f4f6', borderRadius: 4, color: '#6b7280', marginLeft: 4 }}>{loc}</span>;
+}
+
+function SettingField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{label}</label>
+      {children}
+      {hint && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{hint}</div>}
+    </div>
+  );
+}
+
+/* ── 스타일 상수 ── */
+const tbl: React.CSSProperties = { width: '100%', borderCollapse: 'collapse' };
+const thr: React.CSSProperties = { background: '#f9fafb' };
+const trb: React.CSSProperties = { borderBottom: '1px solid #f3f4f6' };
+const th: React.CSSProperties = { padding: '10px 12px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' };
+const thC: React.CSSProperties = { ...th, textAlign: 'center' };
+const td: React.CSSProperties = { padding: '10px 12px', fontSize: 13, verticalAlign: 'middle' };
+const tdC: React.CSSProperties = { ...td, textAlign: 'center' };
+
+const inputSm: React.CSSProperties = { padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, background: '#fff' };
+const inputFull: React.CSSProperties = { ...inputSm, width: '100%' };
+
+const btnBase: React.CSSProperties = { padding: '6px 14px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' };
+const btnPrimary: React.CSSProperties = { ...btnBase, background: '#2563eb', color: '#fff' };
+const btnSuccess: React.CSSProperties = { ...btnBase, background: '#16a34a', color: '#fff' };
+const btnWarn: React.CSSProperties = { ...btnBase, background: '#f59e0b', color: '#fff' };
+const btnDanger: React.CSSProperties = { ...btnBase, background: '#dc2626', color: '#fff' };
+const btnOutline: React.CSSProperties = { ...btnBase, background: '#fff', color: '#374151', border: '1px solid #d1d5db' };

@@ -970,8 +970,15 @@ export async function analyzePrepackingCombos(params: {
     vendor: string;
     total_orders: number;
     multi_item_orders: number;
+    single_item_orders?: number;
     combos: PrepackingCombo[];
     data_weeks: number;
+    min_sku_count?: number;
+    has_admin_col?: boolean;
+    has_barcode_col?: boolean;
+    has_invoice_col?: boolean;
+    invoice_col?: string | null;
+    detected_columns?: Record<string, string>;
   }>('/prepacking/analyze', {
     method: 'POST',
     body: JSON.stringify(params),
@@ -1104,6 +1111,12 @@ export async function savePrepackingSettings(data: PrepackingSettings) {
 export async function suggestLocations(vendor: string, prefix: string = '', limit: number = 10) {
   return fetchApi<string[]>(
     `/prepacking/locations/suggest?vendor=${encodeURIComponent(vendor)}&prefix=${encodeURIComponent(prefix)}&limit=${limit}`
+  );
+}
+
+export async function debugPrepackingSampleRows(vendor: string, limit: number = 20) {
+  return fetchApi<any>(
+    `/prepacking/debug/sample-rows?vendor=${encodeURIComponent(vendor)}&limit=${limit}`
   );
 }
 
