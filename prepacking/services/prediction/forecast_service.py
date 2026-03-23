@@ -76,10 +76,14 @@ def _compute_trend(daily: dict[str, int], target_date: str, days: int = 14) -> f
     return float(np.polyfit(x, y, 1)[0])
 
 
+MAX_GPT_ITEMS = 10
+
+
 def predict_for_date(
     supplier_name: str,
     target_date: str,
     weeks_back: int = 8,
+    use_gpt: bool = False,
 ) -> list[dict]:
     if weeks_back < 1:
         weeks_back = 1
@@ -136,7 +140,6 @@ def predict_for_date(
 
         best_qty = ml_qty if ml_type == "ml" else stat_qty
         final_conf = min(1.0, base_conf + confidence_boost)
-        model_used = f"ml+gpt" if ml_type == "ml" else "stat+gpt"
 
         entry = {
             "target_type": target_type,
@@ -159,7 +162,7 @@ def predict_for_date(
             "recent_same_weekday_avg": round(avg_same_wd, 1),
             "weekday_basis": wb,
             "frequency": row["frequency"],
-            "model_used": model_used,
+            "model_used": ml_type,
             "gpt_reason": "",
             "gpt_confidence": "",
         }
@@ -175,6 +178,7 @@ def predict_for_date(
             "trend": round(trend, 3),
         })
 
+    gpt_count = 0
     for item in gpt_batch:
         entry = item["entry"]
         best_qty = entry["predicted_qty"]
@@ -184,6 +188,12 @@ def predict_for_date(
             out.append(entry)
             continue
 
+        if not use_gpt or gpt_count >= MAX_GPT_ITEMS:
+            entry["model_used"] = entry.get("ml_model_type", "statistical")
+            out.append(entry)
+            continue
+
+        gpt_count += 1
         try:
             gpt_result = gpt_adjust_service.adjust_with_gpt(
                 supplier_name=item["supplier_name"],

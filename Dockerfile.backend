@@ -16,7 +16,7 @@ WORKDIR $APP_HOME
 
 # 시스템 의존성
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    gcc g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 의존성 설치
@@ -28,6 +28,7 @@ COPY logic/ ./logic/
 COPY backend/ ./backend/
 COPY assets/ ./assets/
 COPY prepacking/ ./prepacking/
+COPY prepacking/prompts/ ./prepacking/prompts/
 
 # 데이터 디렉토리 생성 (Railway Volume 마운트 포인트)
 RUN mkdir -p /app/data/uploads
