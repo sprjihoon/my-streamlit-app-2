@@ -19,19 +19,28 @@ from prepacking.services.prediction.pipeline.metrics import compute_all_metrics
 logger = logging.getLogger(__name__)
 
 
-def _ensure_calibrated(supplier_name: str) -> None:
-    """캘리브레이션 결과가 없으면 자동 실행."""
+def _run_post_calibration(supplier_name: str, target_date: str, actual_map: dict[str, int]) -> None:
+    """백테스트 완료 후 캐시된 컨텍스트로 캘리브레이션 실행."""
     try:
-        from prepacking.services.prediction.pipeline.calibration import (
-            load_supplier_params,
-            calibrate_supplier,
+        from prepacking.services.prediction.pipeline.predictor import _last_context
+        from prepacking.services.prediction.pipeline.calibration import calibrate_from_backtest
+
+        ctx = _last_context
+        if not ctx or ctx.get("supplier_name") != supplier_name:
+            return
+
+        result = calibrate_from_backtest(
+            supplier_name=supplier_name,
+            target_date=target_date,
+            sku_series_map=ctx["sku_series_map"],
+            all_rows=ctx["all_rows"],
+            actual_map=actual_map,
+            td_ts=ctx["td_ts"],
         )
-        saved = load_supplier_params(supplier_name)
-        if saved is None:
-            logger.info("Auto-calibrating %s (no saved params)", supplier_name)
-            calibrate_supplier(supplier_name)
+        if result:
+            logger.info("Post-calibration for %s: acc=%.1f%%", supplier_name, result["accuracy"])
     except Exception as exc:
-        logger.warning("Auto-calibration failed for %s: %s", supplier_name, exc)
+        logger.warning("Post-calibration failed for %s: %s", supplier_name, exc)
 
 
 def _load_actual_shipments(supplier_name: str, target_date: str) -> dict[str, int]:
@@ -77,9 +86,6 @@ def run_backtest(
             "message": f"{target_date}에 {supplier_name}의 출하 데이터가 없습니다.",
             "target_date": target_date,
         }
-
-    # 캘리브레이션 결과가 없으면 자동 실행
-    _ensure_calibrated(supplier_name)
 
     predicted_items = forecast_service.predict_for_date(
         supplier_name, target_date, weeks_back, use_gpt=False,
@@ -202,6 +208,9 @@ def run_backtest(
     total_actual = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
 
     predictions.sort(key=lambda x: (-x["error_abs"], -x["actual_qty"]))
+
+    # 백테스트 완료 후 자동 캘리브레이션
+    _run_post_calibration(supplier_name, target_date, actual)
 
     weekday_kr = ["월", "화", "수", "목", "금", "토", "일"]
 

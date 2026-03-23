@@ -1,18 +1,17 @@
 """
-calibration — 업체별 예측 파라미터 자동 튜닝
-═══════════════════════════════════════════════
-과거 데이터를 사용하여 그리드서치로 최적 파라미터 조합을 찾고
-DB에 저장한다.
+calibration — 업체별 예측 파라미터 자동 튜닝 (경량 버전)
+═══════════════════════════════════════════════════════
+백테스트 실행 시 이미 로드된 데이터를 재활용하여
+추가 DB 쿼리 없이 그리드서치를 수행한다.
 
-사용 시점:
-  1) 백테스트 실행 시 자동 트리거
-  2) 수동 캘리브레이션 API 호출
-  3) 새 데이터 업로드 후 자동 실행
+흐름:
+  1) 백테스트가 predict_for_date를 호출 → 데이터 로드됨
+  2) 백테스트 결과에서 실제값 확보
+  3) calibrate_from_backtest()로 현재 날짜 기준 최적 파라미터 탐색
+  4) DB에 저장 (기존 결과와 가중 평균)
 """
 from __future__ import annotations
 
-import datetime as dt
-import itertools
 import json
 import logging
 
@@ -21,278 +20,104 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 그리드서치 파라미터 공간 (최소화 — Railway 타임아웃 대응)
-PARAM_GRID = {
-    "prob_threshold": [0.17, 0.33, 0.50],
-    "blend_recent_weight": [0.3, 0.5],
-    "fallback_prob": [0.40, 0.60],
-    "fallback_ratio": [0.3, 0.7],
-    "trend_scale_range": [
-        (0.85, 1.15),
-        (1.0, 1.0),
-    ],
-}
-# 3*2*2*2*2 = 48 조합 × 3 날짜 = 144 시뮬레이션
+# 그리드 — 48 조합 (빠름)
+PROB_THRESHOLDS = [0.17, 0.33, 0.50]
+BLEND_WEIGHTS = [0.3, 0.5]
+FALLBACK_PROBS = [0.40, 0.60]
+FALLBACK_RATIOS = [0.3, 0.7]
+TREND_RANGES = [(0.85, 1.15), (1.0, 1.0)]
 
 
-def calibrate_supplier(
+def calibrate_from_backtest(
     supplier_name: str,
-    test_dates: list[str] | None = None,
-    max_dates: int = 3,
-) -> dict:
+    target_date: str,
+    sku_series_map: dict[str, pd.Series],
+    all_rows: list[tuple[str, dict]],
+    actual_map: dict[str, int],
+    td_ts: pd.Timestamp,
+) -> dict | None:
     """
-    업체의 최적 예측 파라미터를 찾아 DB에 저장한다.
-
-    1. 과거 테스트 날짜들을 자동 선택 (최근 N주 같은 요일)
-    2. 각 파라미터 조합으로 시뮬레이션
-    3. 평균 정확도가 가장 높은 조합을 저장
+    백테스트 데이터를 재활용하여 최적 파라미터를 찾는다.
+    추가 DB 쿼리 없이 순수 계산만 수행.
     """
-    from prepacking.services.prediction.pipeline.predictor import (
-        _daily_to_filled_series,
-        _analyze_supplier,
-    )
     from prepacking.common.utils import normalize_sku_name
-    from prepacking.services.analysis import repeat_sku_service, repeat_combination_service
 
-    if test_dates is None:
-        test_dates = _auto_select_test_dates(supplier_name, max_dates)
+    if not actual_map or not sku_series_map:
+        return None
 
-    if not test_dates:
-        return {"error": "no_test_dates", "supplier_name": supplier_name}
+    total_actual = sum(actual_map.values())
+    if total_actual <= 0:
+        return None
 
-    logger.info("Calibrating %s with %d test dates: %s", supplier_name, len(test_dates), test_dates)
-
-    # 각 테스트 날짜별 실제 데이터 로드
-    date_contexts: list[dict] = []
-    for td_str in test_dates:
-        ctx = _load_date_context(supplier_name, td_str)
-        if ctx:
-            date_contexts.append(ctx)
-
-    if not date_contexts:
-        return {"error": "no_data", "supplier_name": supplier_name}
-
-    # 프로파일 분석 (첫 번째 날짜 기준)
-    first_ctx = date_contexts[0]
-    profile = _analyze_supplier(first_ctx["sku_series_map"], first_ctx["td_ts"])
-
-    # 그리드서치
     best_accuracy = -1.0
     best_params = None
-    all_results = []
 
-    combos = list(itertools.product(
-        PARAM_GRID["prob_threshold"],
-        PARAM_GRID["blend_recent_weight"],
-        PARAM_GRID["fallback_prob"],
-        PARAM_GRID["fallback_ratio"],
-        PARAM_GRID["trend_scale_range"],
-    ))
+    for pt in PROB_THRESHOLDS:
+        for brw in BLEND_WEIGHTS:
+            for fp in FALLBACK_PROBS:
+                for fr in FALLBACK_RATIOS:
+                    for ts_min, ts_max in TREND_RANGES:
+                        total_pred = _simulate_total(
+                            sku_series_map, all_rows, td_ts,
+                            pt, brw, fp, fr, ts_min, ts_max,
+                        )
+                        error_rate = abs(total_pred - total_actual) / total_actual * 100
+                        acc = max(0.0, 100.0 - error_rate)
 
-    logger.info("Grid search: %d combinations x %d dates", len(combos), len(date_contexts))
-
-    for pt, brw, fp, fr, (ts_min, ts_max) in combos:
-        accuracies = []
-        for ctx in date_contexts:
-            acc = _simulate_accuracy(ctx, pt, brw, fp, fr, ts_min, ts_max)
-            accuracies.append(acc)
-
-        avg_acc = float(np.mean(accuracies))
-        min_acc = float(np.min(accuracies))
-
-        if avg_acc > best_accuracy:
-            best_accuracy = avg_acc
-            best_params = {
-                "prob_threshold": pt,
-                "blend_recent_weight": brw,
-                "fallback_prob": fp,
-                "fallback_ratio": fr,
-                "trend_scale_min": ts_min,
-                "trend_scale_max": ts_max,
-                "avg_accuracy": round(avg_acc, 1),
-                "min_accuracy": round(min_acc, 1),
-                "per_date_accuracy": [round(a, 1) for a in accuracies],
-            }
+                        if acc > best_accuracy:
+                            best_accuracy = acc
+                            best_params = {
+                                "prob_threshold": pt,
+                                "blend_recent_weight": brw,
+                                "fallback_prob": fp,
+                                "fallback_ratio": fr,
+                                "trend_scale_min": ts_min,
+                                "trend_scale_max": ts_max,
+                            }
 
     if best_params is None:
-        return {"error": "no_valid_params", "supplier_name": supplier_name}
+        return None
 
-    # DB 저장
-    _save_params_to_db(supplier_name, best_params, profile, test_dates)
-
-    result = {
-        "supplier_name": supplier_name,
-        "supplier_type": profile.supplier_type,
-        "best_params": best_params,
-        "test_dates": test_dates,
-        "total_combinations_tested": len(combos),
-        "profile": {
-            "total_skus": profile.total_skus,
-            "avg_qty": round(profile.avg_qty_per_active_day, 1),
-            "volatility": round(profile.volatility, 2),
-            "avg_ship_prob": round(profile.avg_ship_prob, 2),
-        },
-    }
+    # DB에 저장 (기존 결과와 블렌딩)
+    _update_params_in_db(supplier_name, target_date, best_params, best_accuracy, sku_series_map, td_ts)
 
     logger.info(
-        "Calibration complete for %s: accuracy=%.1f%%, params=%s",
-        supplier_name, best_accuracy, best_params,
+        "Calibrated %s on %s: acc=%.1f%%, pt=%.2f, brw=%.1f, fp=%.2f, fr=%.1f, ts=[%.2f,%.2f]",
+        supplier_name, target_date, best_accuracy,
+        best_params["prob_threshold"], best_params["blend_recent_weight"],
+        best_params["fallback_prob"], best_params["fallback_ratio"],
+        best_params["trend_scale_min"], best_params["trend_scale_max"],
     )
-
-    return result
-
-
-def _auto_select_test_dates(supplier_name: str, max_dates: int = 8) -> list[str]:
-    """업체의 출하 데이터가 있는 최근 날짜들을 자동 선택."""
-    from prepacking.database import get_pp_connection
-
-    with get_pp_connection() as con:
-        rows = con.execute(
-            """
-            SELECT DISTINCT shipping_date
-            FROM pp_shipping_stats
-            WHERE supplier_name = ?
-              AND shipping_date IS NOT NULL
-            ORDER BY shipping_date DESC
-            LIMIT 60
-            """,
-            (supplier_name,),
-        ).fetchall()
-
-    if not rows:
-        return []
-
-    all_dates = [r[0] for r in rows if r[0]]
-    if len(all_dates) <= 2:
-        return []
-
-    # 최근 날짜는 제외, 7일 이상 간격으로 분산 선택
-    selected = []
-    last_selected = None
-    for d_str in all_dates[1:]:
-        try:
-            d = dt.datetime.strptime(d_str[:10], "%Y-%m-%d").date()
-        except ValueError:
-            continue
-
-        if last_selected is None or (last_selected - d).days >= 7:
-            selected.append(d_str[:10])
-            last_selected = d
-            if len(selected) >= max_dates:
-                break
-
-    return selected
-
-
-def _load_date_context(supplier_name: str, target_date: str) -> dict | None:
-    """특정 날짜의 예측에 필요한 컨텍스트를 로드."""
-    from prepacking.services.prediction.pipeline.predictor import _daily_to_filled_series
-    from prepacking.common.utils import normalize_sku_name
-    from prepacking.services.analysis import repeat_sku_service, repeat_combination_service
-
-    try:
-        td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
-    except ValueError:
-        return None
-
-    td_ts = pd.Timestamp(td)
-    lookback_days = 120
-
-    skus = repeat_sku_service.load_repeat_sku_daily_totals(
-        supplier_name, target_date, lookback_days
-    )
-    combos = repeat_combination_service.load_repeat_combo_daily_totals(
-        supplier_name, target_date, lookback_days
-    )
-
-    all_rows: list[tuple[str, dict]] = []
-    sku_series_map: dict[str, pd.Series] = {}
-
-    for row in skus:
-        all_rows.append(("single_sku", row))
-        pn = normalize_sku_name(row.get("target_code", ""))
-        on = normalize_sku_name(row.get("option_name", ""))
-        key = f"{pn}||{on}"
-        daily = row.get("daily", {})
-        s = _daily_to_filled_series(daily, td_ts, lookback_days)
-        if s is not None:
-            sku_series_map[key] = s
-
-    for row in combos:
-        all_rows.append(("combination", row))
-        ckey = row.get("combination_key", "")
-        daily = row.get("daily", {})
-        s = _daily_to_filled_series(daily, td_ts, lookback_days)
-        if s is not None:
-            sku_series_map[f"combo||{ckey}"] = s
-
-    # 실제 출하 데이터 로드
-    actual_map = _load_actual_for_date(supplier_name, target_date)
-
-    if not all_rows:
-        return None
 
     return {
-        "supplier_name": supplier_name,
-        "target_date": target_date,
-        "td_ts": td_ts,
-        "all_rows": all_rows,
-        "sku_series_map": sku_series_map,
-        "actual_map": actual_map,
+        "accuracy": round(best_accuracy, 1),
+        **best_params,
     }
 
 
-def _load_actual_for_date(supplier_name: str, target_date: str) -> dict[str, int]:
-    """특정 날짜의 실제 출하 데이터를 로드."""
-    from prepacking.common.utils import normalize_sku_name
-    from prepacking.database import get_pp_connection
-
-    actual: dict[str, int] = {}
-    with get_pp_connection() as con:
-        rows = con.execute(
-            """
-            SELECT product_name, option_name, SUM(qty) as total_qty
-            FROM pp_shipping_stats
-            WHERE supplier_name = ? AND shipping_date = ?
-            GROUP BY product_name, option_name
-            """,
-            (supplier_name, target_date),
-        ).fetchall()
-
-    for pn, on, qty in rows:
-        key = f"{normalize_sku_name(pn or '')}||{normalize_sku_name(on or '')}"
-        actual[key] = actual.get(key, 0) + int(qty or 0)
-
-    return actual
-
-
-def _simulate_accuracy(
-    ctx: dict,
+def _simulate_total(
+    sku_series_map: dict[str, pd.Series],
+    all_rows: list[tuple[str, dict]],
+    td: pd.Timestamp,
     prob_threshold: float,
     blend_recent_weight: float,
     fallback_prob: float,
     fallback_ratio: float,
     trend_scale_min: float,
     trend_scale_max: float,
-) -> float:
-    """특정 파라미터 조합으로 예측하고 총합 기준 정확도를 계산."""
+) -> int:
+    """특정 파라미터로 전체 예측 총합을 계산."""
     from prepacking.common.utils import normalize_sku_name
     from prepacking.services.prediction.pipeline.predictor import _compute_supplier_trend_scale
 
-    td_ts = ctx["td_ts"]
-    sku_series_map = ctx["sku_series_map"]
-    actual_map = ctx["actual_map"]
-
     trend_scale = _compute_supplier_trend_scale(
-        sku_series_map, td_ts,
+        sku_series_map, td,
         scale_min=trend_scale_min,
         scale_max=trend_scale_max,
     )
 
-    total_predicted = 0
-    total_actual = sum(actual_map.values())
-
-    for target_type, row in ctx["all_rows"]:
+    total = 0
+    for target_type, row in all_rows:
         if target_type == "combination":
             series_key = f"combo||{row.get('combination_key', '')}"
         else:
@@ -304,25 +129,17 @@ def _simulate_accuracy(
         if series is None or series.empty:
             continue
 
-        pred = _sim_predict(
-            series, td_ts,
-            prob_threshold, blend_recent_weight,
-            fallback_prob, fallback_ratio,
-        )
+        pred = _fast_predict(series, td, prob_threshold, blend_recent_weight, fallback_prob, fallback_ratio)
 
         if pred > 0 and trend_scale != 1.0:
             pred = max(1, int(round(pred * trend_scale)))
 
-        total_predicted += pred
+        total += pred
 
-    if total_actual <= 0:
-        return 100.0 if total_predicted == 0 else 0.0
-
-    error_rate = abs(total_predicted - total_actual) / total_actual * 100
-    return max(0.0, 100.0 - error_rate)
+    return total
 
 
-def _sim_predict(
+def _fast_predict(
     series: pd.Series,
     td: pd.Timestamp,
     prob_threshold: float,
@@ -330,18 +147,14 @@ def _sim_predict(
     fallback_prob: float,
     fallback_ratio: float,
 ) -> int:
-    """단순화된 예측 — 캘리브레이션용."""
+    """최소한의 계산으로 예측값 반환."""
     cutoff = td - pd.Timedelta(days=1)
     past = series[series.index <= cutoff]
 
-    if past.empty:
+    if past.empty or (past.index.max() - past.index.min()).days < 7:
         return 0
 
-    data_span = (past.index.max() - past.index.min()).days
-    if data_span < 7:
-        return 0
-
-    wd_vals: list[float] = []
+    wd_vals = []
     for w in range(1, 7):
         d = td - pd.Timedelta(weeks=w)
         if d in past.index:
@@ -352,9 +165,7 @@ def _sim_predict(
     if not wd_vals:
         return 0
 
-    ship_count = len([v for v in wd_vals if v > 0])
-    ship_prob = ship_count / len(wd_vals)
-
+    ship_prob = len([v for v in wd_vals if v > 0]) / len(wd_vals)
     if ship_prob < prob_threshold:
         return 0
 
@@ -364,25 +175,61 @@ def _sim_predict(
     d_7 = td - pd.Timedelta(weeks=1)
     val_7 = float(past[d_7]) if d_7 in past.index else 0.0
 
-    rw = blend_recent_weight
-
     if val_7 > 0:
-        blended = val_7 * rw + median_active * (1 - rw)
-        return max(1, int(round(blended)))
-    elif ship_prob >= fallback_prob and median_active > 0:
+        return max(1, int(round(val_7 * blend_recent_weight + median_active * (1 - blend_recent_weight))))
+
+    if ship_prob >= fallback_prob and median_active > 0:
         return max(1, int(round(median_active * fallback_ratio)))
-    else:
-        return 0
+
+    return 0
 
 
-def _save_params_to_db(
+def _update_params_in_db(
     supplier_name: str,
-    params: dict,
-    profile,
-    test_dates: list[str],
+    target_date: str,
+    new_params: dict,
+    new_accuracy: float,
+    sku_series_map: dict[str, pd.Series],
+    td_ts: pd.Timestamp,
 ) -> None:
-    """최적 파라미터를 DB에 저장 (UPSERT)."""
+    """DB에 파라미터 저장. 기존 결과가 있으면 가중 평균으로 블렌딩."""
     from prepacking.database import get_pp_connection
+    from prepacking.services.prediction.pipeline.predictor import _analyze_supplier
+
+    existing = load_supplier_params(supplier_name)
+    profile = _analyze_supplier(sku_series_map, td_ts)
+
+    if existing and existing.get("calibration_accuracy", 0) > 0:
+        old_acc = existing["calibration_accuracy"]
+        old_weight = 0.6
+        new_weight = 0.4
+
+        params = {}
+        for key in ["prob_threshold", "blend_recent_weight", "fallback_prob",
+                     "fallback_ratio", "trend_scale_min", "trend_scale_max"]:
+            old_val = existing.get(key, new_params[key])
+            params[key] = old_val * old_weight + new_params[key] * new_weight
+
+        # 이산값으로 스냅 (가장 가까운 그리드 값)
+        params["prob_threshold"] = _snap_to_grid(params["prob_threshold"], PROB_THRESHOLDS)
+        params["blend_recent_weight"] = _snap_to_grid(params["blend_recent_weight"], BLEND_WEIGHTS)
+        params["fallback_prob"] = _snap_to_grid(params["fallback_prob"], FALLBACK_PROBS)
+        params["fallback_ratio"] = _snap_to_grid(params["fallback_ratio"], FALLBACK_RATIOS)
+
+        blended_acc = old_acc * old_weight + new_accuracy * new_weight
+    else:
+        params = new_params
+        blended_acc = new_accuracy
+
+    dates_json = json.dumps([target_date])
+    if existing:
+        try:
+            old_dates = json.loads(existing.get("calibration_dates", "[]") or "[]")
+            if target_date not in old_dates:
+                old_dates.append(target_date)
+            dates_json = json.dumps(old_dates[-5:])
+        except (json.JSONDecodeError, TypeError):
+            dates_json = json.dumps([target_date])
 
     with get_pp_connection() as con:
         con.execute(
@@ -422,8 +269,8 @@ def _save_params_to_db(
                 14,
                 params["fallback_prob"],
                 params["fallback_ratio"],
-                params["avg_accuracy"],
-                json.dumps(test_dates),
+                round(blended_acc, 1),
+                dates_json,
                 profile.total_skus,
                 round(profile.avg_qty_per_active_day, 1),
                 round(profile.volatility, 2),
@@ -432,21 +279,30 @@ def _save_params_to_db(
         con.commit()
 
 
+def _snap_to_grid(value: float, grid: list[float]) -> float:
+    """가장 가까운 그리드 값으로 스냅."""
+    return min(grid, key=lambda g: abs(g - value))
+
+
 def load_supplier_params(supplier_name: str) -> dict | None:
     """DB에서 업체별 저장된 파라미터를 로드."""
     from prepacking.database import get_pp_connection
 
-    with get_pp_connection() as con:
-        row = con.execute(
-            """
-            SELECT supplier_type, prob_threshold, blend_recent_weight,
-                   trend_scale_min, trend_scale_max, min_data_days,
-                   fallback_prob, fallback_ratio, calibration_accuracy
-            FROM pp_supplier_params
-            WHERE supplier_name = ?
-            """,
-            (supplier_name,),
-        ).fetchone()
+    try:
+        with get_pp_connection() as con:
+            row = con.execute(
+                """
+                SELECT supplier_type, prob_threshold, blend_recent_weight,
+                       trend_scale_min, trend_scale_max, min_data_days,
+                       fallback_prob, fallback_ratio, calibration_accuracy,
+                       calibration_dates
+                FROM pp_supplier_params
+                WHERE supplier_name = ?
+                """,
+                (supplier_name,),
+            ).fetchone()
+    except Exception:
+        return None
 
     if row is None:
         return None
@@ -461,4 +317,5 @@ def load_supplier_params(supplier_name: str) -> dict | None:
         "fallback_prob": row[6],
         "fallback_ratio": row[7],
         "calibration_accuracy": row[8],
+        "calibration_dates": row[9],
     }

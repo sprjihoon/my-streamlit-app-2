@@ -23,6 +23,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# 마지막 예측 컨텍스트 캐시 (캘리브레이션에서 재활용)
+_last_context: dict = {}
+
 
 # ──────────────────────────────────────────────
 # 업체 프로파일 — 자동 분석 결과
@@ -342,6 +345,16 @@ def predict_for_date(
             "gpt_confidence": "",
         }
         out.append(entry)
+
+    # 캘리브레이션에서 재활용할 수 있도록 컨텍스트 캐시
+    _last_context.clear()
+    _last_context.update({
+        "supplier_name": supplier_name,
+        "target_date": target_date,
+        "td_ts": td_ts,
+        "sku_series_map": sku_series_map,
+        "all_rows": all_rows,
+    })
 
     return out
 

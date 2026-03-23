@@ -96,56 +96,26 @@ def post_walk_forward(body: PPWalkForwardRequest) -> dict:
 
 @router.post("/calibrate")
 def post_calibrate(body: PPValidationRequest) -> dict:
-    """업체별 예측 파라미터 자동 캘리브레이션."""
-    from prepacking.services.prediction.pipeline.calibration import calibrate_supplier
-
+    """업체별 예측 파라미터 캘리브레이션 — 백테스트를 실행하여 자동 튜닝."""
     if not (body.supplier_name or "").strip():
         raise HTTPException(status_code=400, detail="supplier_name_required")
+    if not (body.target_date or "").strip():
+        raise HTTPException(status_code=400, detail="target_date_required")
 
     try:
-        result = calibrate_supplier(body.supplier_name)
+        result = run_backtest(body.supplier_name, body.target_date)
     except Exception as exc:
-        logger.exception("calibration failed: %s", exc)
+        logger.exception("calibration backtest failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+        raise HTTPException(status_code=400, detail=result.get("message", result["error"]))
 
-
-@router.post("/calibrate-all")
-def post_calibrate_all() -> dict:
-    """모든 업체의 예측 파라미터를 자동 캘리브레이션."""
-    import numpy as np
-    from prepacking.database import get_pp_connection
-    from prepacking.services.prediction.pipeline.calibration import calibrate_supplier
-
-    with get_pp_connection() as con:
-        rows = con.execute(
-            "SELECT DISTINCT supplier_name FROM pp_shipping_stats WHERE supplier_name IS NOT NULL"
-        ).fetchall()
-
-    suppliers = [r[0] for r in rows if r[0]]
-    results = []
-
-    for s in suppliers:
-        try:
-            r = calibrate_supplier(s)
-            results.append(r)
-        except Exception as exc:
-            logger.warning("calibration failed for %s: %s", s, exc)
-            results.append({"supplier_name": s, "error": str(exc)})
-
-    successes = [r for r in results if "error" not in r]
-    avg_acc = (
-        float(np.mean([r["best_params"]["avg_accuracy"] for r in successes]))
-        if successes else 0.0
-    )
+    from prepacking.services.prediction.pipeline.calibration import load_supplier_params
+    saved = load_supplier_params(body.supplier_name)
 
     return {
-        "total_suppliers": len(suppliers),
-        "calibrated": len(successes),
-        "failed": len(results) - len(successes),
-        "avg_accuracy": round(avg_acc, 1),
-        "results": results,
+        "backtest_accuracy": result["summary"]["accuracy"],
+        "calibrated_params": saved,
+        "summary": result["summary"],
     }
