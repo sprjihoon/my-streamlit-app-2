@@ -59,35 +59,48 @@ def debug_data(supplier: str = ""):
         sample_suppliers = con.execute(
             "SELECT DISTINCT supplier_name FROM pp_shipping_stats LIMIT 10"
         ).fetchall()
+        date_fn_test = con.execute(
+            "SELECT shipping_date, date(shipping_date) FROM pp_shipping_stats "
+            "WHERE shipping_date IS NOT NULL AND shipping_date != '' LIMIT 5"
+        ).fetchall()
+        date_compare_test = con.execute(
+            "SELECT COUNT(*) FROM pp_shipping_stats "
+            "WHERE shipping_date IS NOT NULL AND shipping_date != '' "
+            "AND date(shipping_date) >= date('2025-12-01') AND date(shipping_date) <= date('2026-03-31')"
+        ).fetchone()[0]
         if supplier:
             sup_count = con.execute(
                 "SELECT COUNT(*) FROM pp_shipping_stats WHERE TRIM(supplier_name) = TRIM(?)",
                 (supplier.strip(),),
             ).fetchone()[0]
-            sup_dates = con.execute(
-                "SELECT DISTINCT shipping_date FROM pp_shipping_stats "
-                "WHERE TRIM(supplier_name) = TRIM(?) AND shipping_date IS NOT NULL AND shipping_date != '' LIMIT 10",
+            sup_date_compare = con.execute(
+                "SELECT COUNT(*) FROM pp_shipping_stats "
+                "WHERE TRIM(supplier_name) = TRIM(?) "
+                "AND shipping_date IS NOT NULL AND shipping_date != '' "
+                "AND date(shipping_date) >= date('2025-12-01') AND date(shipping_date) <= date('2026-03-31')",
                 (supplier.strip(),),
-            ).fetchall()
-            sup_sample = con.execute(
-                "SELECT shipping_date, product_name, option_name, qty FROM pp_shipping_stats "
-                "WHERE TRIM(supplier_name) = TRIM(?) LIMIT 5",
+            ).fetchone()[0]
+            sup_raw_date_sample = con.execute(
+                "SELECT shipping_date, typeof(shipping_date), length(shipping_date) "
+                "FROM pp_shipping_stats WHERE TRIM(supplier_name) = TRIM(?) LIMIT 5",
                 (supplier.strip(),),
             ).fetchall()
         else:
             sup_count = 0
-            sup_dates = []
-            sup_sample = []
+            sup_date_compare = 0
+            sup_raw_date_sample = []
     return {
         "total_rows": total,
         "rows_with_date": with_date,
         "sample_dates": [r[0] for r in sample_dates],
         "sample_suppliers": [r[0] for r in sample_suppliers],
+        "date_fn_test": [{"raw": r[0], "date_fn": r[1]} for r in date_fn_test],
+        "date_compare_count": date_compare_test,
         "supplier_filter": supplier,
         "supplier_row_count": sup_count,
-        "supplier_dates": [r[0] for r in sup_dates],
-        "supplier_sample_rows": [
-            {"shipping_date": r[0], "product_name": r[1], "option_name": r[2], "qty": r[3]}
-            for r in sup_sample
+        "supplier_date_compare_count": sup_date_compare,
+        "supplier_raw_date_sample": [
+            {"value": r[0], "type": r[1], "length": r[2]}
+            for r in sup_raw_date_sample
         ],
     }
