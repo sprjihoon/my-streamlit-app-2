@@ -29,8 +29,17 @@ def _resolve_dates(supplier_name: str, date_from: str, date_to: str) -> tuple[st
 
 @router.post("/repeat-skus")
 def post_repeat_skus(body: PPAnalysisRequest) -> list[dict]:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "repeat-skus called: supplier=%s date_from=%r date_to=%r min_count=%d",
+        body.supplier_name, body.date_from, body.date_to, body.min_count,
+    )
     d_from, d_to = _resolve_dates(body.supplier_name, body.date_from, body.date_to)
-    return analyze_repeat_skus(body.supplier_name, d_from, d_to, body.min_count)
+    logger.warning("resolved dates: %s ~ %s", d_from, d_to)
+    result = analyze_repeat_skus(body.supplier_name, d_from, d_to, body.min_count)
+    logger.warning("repeat-skus result count: %d", len(result))
+    return result
 
 
 @router.post("/repeat-combinations")
