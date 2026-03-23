@@ -1068,12 +1068,21 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
             <button
               onClick={async () => {
                 try {
+                  showToast('PDF 생성 중...', 'success');
+                  const controller = new AbortController();
+                  const timeout = setTimeout(() => controller.abort(), 120000);
                   const res = await fetch(`${API_BASE}/pp/recommendations/work-order/pdf`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ target_date: targetDate, supplier_name: supplierName }),
+                    signal: controller.signal,
                   });
-                  if (!res.ok) throw new Error('PDF 생성 실패');
+                  clearTimeout(timeout);
+                  if (!res.ok) {
+                    let detail = '';
+                    try { detail = await res.text(); } catch {}
+                    throw new Error(`PDF 생성 실패 (${res.status}): ${detail}`);
+                  }
                   const blob = await res.blob();
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -1083,7 +1092,8 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                   URL.revokeObjectURL(url);
                   showToast('PDF 다운로드 완료', 'success');
                 } catch (e: unknown) {
-                  showToast(e instanceof Error ? e.message : 'PDF 다운로드 실패', 'error');
+                  const msg = e instanceof Error ? e.message : 'PDF 다운로드 실패';
+                  showToast(msg.includes('abort') ? 'PDF 생성 시간 초과 - 다시 시도해주세요' : msg, 'error');
                 }
               }}
               style={{
