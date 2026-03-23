@@ -32,6 +32,9 @@ interface UploadRecord {
   row_count: number;
   applied_yn: boolean;
   note: string;
+  upload_status: string;
+  skipped_count: number;
+  total_count: number;
 }
 
 interface RepeatSku {
@@ -491,6 +494,7 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
   const [note, setNote] = useState('');
   const [uploadedBy, setUploadedBy] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadUploads = useCallback(async () => {
     setLoading(true);
@@ -508,6 +512,20 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
 
   useEffect(() => { loadUploads(); }, [loadUploads]);
 
+  const hasProcessing = uploads.some((u) => u.upload_status === 'processing');
+
+  useEffect(() => {
+    if (hasProcessing) {
+      pollingRef.current = setInterval(() => { loadUploads(); }, 3000);
+    } else if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [hasProcessing, loadUploads]);
+
   const handleUpload = async () => {
     const file = fileRef.current?.files?.[0];
     if (!file) { showToast('파일을 선택해주세요', 'error'); return; }
@@ -519,8 +537,16 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
       fd.append('uploaded_by', uploadedBy || 'unknown');
       fd.append('note', note);
       const res = await fetch(`${API_BASE}/pp/upload/upload`, { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(await res.text());
-      showToast('업로드 완료! 파일 내 공급처 정보가 자동 반영됩니다.', 'success');
+      if (!res.ok) {
+        const errText = await res.text();
+        if (res.status === 409) {
+          showToast(`중복 파일: ${errText.replace(/^"?detail"?:\s*"?|"$/g, '')}`, 'error');
+        } else {
+          throw new Error(errText);
+        }
+        return;
+      }
+      showToast('파일 업로드 완료! 서버에서 데이터 처리 중입니다...', 'info');
       if (fileRef.current) fileRef.current.value = '';
       setNote('');
       loadUploads();
@@ -541,6 +567,12 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : '삭제 실패', 'error');
     }
+  };
+
+  const statusLabel = (status: string) => {
+    if (status === 'processing') return { text: '처리 중...', bg: '#fef3c7', fg: '#92400e' };
+    if (status === 'failed') return { text: '실패', bg: '#fee2e2', fg: '#991b1b' };
+    return { text: '완료', bg: '#d1fae5', fg: '#065f46' };
   };
 
   return (
@@ -572,17 +604,24 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="메모 (선택)" style={inputStyle} />
           </div>
           <button onClick={handleUpload} disabled={uploading} style={{ ...btnPrimary, opacity: uploading ? 0.6 : 1 }}>
-            {uploading ? '업로드 중...' : '업로드'}
+            {uploading ? '전송 중...' : '업로드'}
           </button>
         </div>
       </div>
 
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>업로드 이력</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+            업로드 이력
+            {hasProcessing && (
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#92400e', fontWeight: 500 }}>
+                (처리 중인 파일이 있습니다...)
+              </span>
+            )}
+          </h3>
           <button onClick={loadUploads} style={btnOutline}>새로고침</button>
         </div>
-        {loading ? (
+        {loading && uploads.length === 0 ? (
           <Spinner />
         ) : uploads.length === 0 ? (
           <Empty message="업로드 이력이 없습니다. 파일을 업로드해주세요." />
@@ -593,29 +632,63 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
                 <tr>
                   <th style={thStyle}>ID</th>
                   <th style={thStyle}>파일명</th>
+                  <th style={thStyle}>상태</th>
                   <th style={thStyle}>업로더</th>
-                  <th style={thStyle}>행 수</th>
-                  <th style={thStyle}>적용</th>
+                  <th style={thStyle}>저장/스킵/전체</th>
                   <th style={thStyle}>메모</th>
                   <th style={thStyle}>업로드일</th>
                   <th style={thStyle}>작업</th>
                 </tr>
               </thead>
               <tbody>
-                {uploads.map((u, i) => (
-                  <tr key={u.upload_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{u.upload_id}</td>
-                    <td style={tdStyle}>{u.file_name}</td>
-                    <td style={tdStyle}>{u.uploaded_by}</td>
-                    <td style={tdStyle}>{u.row_count?.toLocaleString()}</td>
-                    <td style={tdStyle}>{u.applied_yn ? '적용' : '-'}</td>
-                    <td style={tdStyle}>{u.note || '-'}</td>
-                    <td style={tdStyle}>{u.uploaded_at?.slice(0, 16)}</td>
-                    <td style={tdStyle}>
-                      <button onClick={() => handleDelete(u.upload_id)} style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}>삭제</button>
-                    </td>
-                  </tr>
-                ))}
+                {uploads.map((u, i) => {
+                  const st = statusLabel(u.upload_status);
+                  return (
+                    <tr key={u.upload_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                      <td style={tdStyle}>{u.upload_id}</td>
+                      <td style={tdStyle}>{u.file_name}</td>
+                      <td style={tdStyle}>
+                        <span style={{
+                          background: st.bg, color: st.fg,
+                          padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}>
+                          {u.upload_status === 'processing' && (
+                            <span style={{
+                              display: 'inline-block', width: 10, height: 10,
+                              border: '2px solid #92400e', borderTopColor: 'transparent',
+                              borderRadius: '50%', animation: 'pp-spin 0.7s linear infinite',
+                            }} />
+                          )}
+                          {st.text}
+                        </span>
+                      </td>
+                      <td style={tdStyle}>{u.uploaded_by}</td>
+                      <td style={tdStyle}>
+                        {u.upload_status === 'processing' ? (
+                          <span style={{ color: '#92400e', fontSize: 12 }}>처리 중...</span>
+                        ) : u.upload_status === 'failed' ? (
+                          <span style={{ color: '#991b1b', fontSize: 12 }}>오류 발생</span>
+                        ) : (
+                          <span>
+                            <span style={{ fontWeight: 700, color: '#2563eb' }}>{u.row_count?.toLocaleString()}</span>
+                            {u.skipped_count > 0 && (
+                              <span style={{ color: '#92400e', fontSize: 12 }}> / {u.skipped_count.toLocaleString()} 스킵</span>
+                            )}
+                            <span style={{ color: '#6b7280', fontSize: 12 }}> / {u.total_count?.toLocaleString()}</span>
+                          </span>
+                        )}
+                      </td>
+                      <td style={tdStyle}>{u.note || '-'}</td>
+                      <td style={tdStyle}>{u.uploaded_at?.slice(0, 16)}</td>
+                      <td style={tdStyle}>
+                        {u.upload_status !== 'processing' && (
+                          <button onClick={() => handleDelete(u.upload_id)} style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}>삭제</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

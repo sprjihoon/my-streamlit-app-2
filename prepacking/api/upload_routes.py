@@ -6,8 +6,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from prepacking.models.schemas import PPUploadListItem, PPUploadResponse, pp_optional_date_str
-from prepacking.services.upload.shipping_stats_upload_service import upload_shipping_stats
+from prepacking.models.schemas import PPUploadListItem, PPUploadResponse, PPUploadStatusResponse, pp_optional_date_str
+from prepacking.services.upload.shipping_stats_upload_service import (
+    DuplicateFileError,
+    upload_shipping_stats,
+)
 from prepacking.services.upload.upload_history_service import (
     delete_upload,
     get_upload_detail,
@@ -28,6 +31,9 @@ def _upload_item_from_row(r: dict) -> PPUploadListItem:
         row_count=int(r.get("row_count") or 0),
         applied_yn=bool(r.get("applied_yn")),
         note=str(r.get("note") or ""),
+        upload_status=str(r.get("upload_status") or "completed"),
+        skipped_count=int(r.get("skipped_count") or 0),
+        total_count=int(r.get("total_count") or 0),
     )
 
 
@@ -44,14 +50,29 @@ async def post_upload(
         tmp_path = tmp.name
     try:
         result = upload_shipping_stats(tmp_path, supplier_name, uploaded_by, note)
+    except DuplicateFileError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     finally:
         os.unlink(tmp_path)
     return PPUploadResponse(
         upload_id=int(result["upload_id"]),
         file_name=str(result.get("file_name") or ""),
-        row_count=int(result.get("row_count") or 0),
-        data_start_date=pp_optional_date_str(result.get("data_start_date")),
-        data_end_date=pp_optional_date_str(result.get("data_end_date")),
+        upload_status=str(result.get("upload_status") or "processing"),
+    )
+
+
+@router.get("/status/{upload_id}", response_model=PPUploadStatusResponse)
+def get_upload_status(upload_id: int) -> PPUploadStatusResponse:
+    row = get_upload_detail(upload_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="upload_not_found")
+    return PPUploadStatusResponse(
+        upload_id=int(row.get("upload_id") or 0),
+        upload_status=str(row.get("upload_status") or "completed"),
+        row_count=int(row.get("row_count") or 0),
+        skipped_count=int(row.get("skipped_count") or 0),
+        total_count=int(row.get("total_count") or 0),
+        error_message=str(row.get("error_message") or ""),
     )
 
 

@@ -9,9 +9,16 @@ from pydantic import BaseModel, Field
 class PPUploadResponse(BaseModel):
     upload_id: int
     file_name: str
-    row_count: int
-    data_start_date: Optional[str] = None
-    data_end_date: Optional[str] = None
+    upload_status: str = "processing"
+
+
+class PPUploadStatusResponse(BaseModel):
+    upload_id: int
+    upload_status: str
+    row_count: int = 0
+    skipped_count: int = 0
+    total_count: int = 0
+    error_message: str = ""
 
 
 class PPUploadListItem(BaseModel):
@@ -23,6 +30,9 @@ class PPUploadListItem(BaseModel):
     row_count: int
     applied_yn: bool
     note: str
+    upload_status: str = "completed"
+    skipped_count: int = 0
+    total_count: int = 0
 
 
 class PPAnalysisRequest(BaseModel):

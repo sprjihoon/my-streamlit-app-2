@@ -17,12 +17,17 @@ DDL = textwrap.dedent("""\
     CREATE TABLE IF NOT EXISTS pp_upload_files(
         upload_id       INTEGER PRIMARY KEY AUTOINCREMENT,
         file_name       TEXT NOT NULL,
+        file_hash       TEXT DEFAULT '',
         file_version    INTEGER DEFAULT 1,
         uploaded_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         uploaded_by     TEXT DEFAULT '',
         data_start_date TEXT,
         data_end_date   TEXT,
         row_count       INTEGER DEFAULT 0,
+        skipped_count   INTEGER DEFAULT 0,
+        total_count     INTEGER DEFAULT 0,
+        upload_status   TEXT DEFAULT 'processing',
+        error_message   TEXT DEFAULT '',
         applied_yn      INTEGER DEFAULT 0,
         note            TEXT DEFAULT ''
     );
@@ -48,6 +53,9 @@ DDL = textwrap.dedent("""\
     );
     CREATE INDEX IF NOT EXISTS idx_pp_ss_date ON pp_shipping_stats(shipping_date);
     CREATE INDEX IF NOT EXISTS idx_pp_ss_supplier ON pp_shipping_stats(supplier_name);
+    CREATE INDEX IF NOT EXISTS idx_pp_ss_dedup ON pp_shipping_stats(
+        shipping_date, supplier_name, order_no, invoice_no, product_name, option_name, sku_code, qty
+    );
 
     /* 3. 선포장 추천 마스터 */
     CREATE TABLE IF NOT EXISTS pp_recommendations(
@@ -326,6 +334,17 @@ def ensure_pp_tables() -> None:
     """프리패킹 전용 테이블 생성."""
     with get_pp_connection() as con:
         con.executescript(DDL)
+        cols = {r[1] for r in con.execute("PRAGMA table_info(pp_upload_files)").fetchall()}
+        migrations = {
+            "file_hash": "ALTER TABLE pp_upload_files ADD COLUMN file_hash TEXT DEFAULT ''",
+            "upload_status": "ALTER TABLE pp_upload_files ADD COLUMN upload_status TEXT DEFAULT 'completed'",
+            "error_message": "ALTER TABLE pp_upload_files ADD COLUMN error_message TEXT DEFAULT ''",
+            "skipped_count": "ALTER TABLE pp_upload_files ADD COLUMN skipped_count INTEGER DEFAULT 0",
+            "total_count": "ALTER TABLE pp_upload_files ADD COLUMN total_count INTEGER DEFAULT 0",
+        }
+        for col, sql in migrations.items():
+            if col not in cols:
+                con.execute(sql)
         con.commit()
 
 
