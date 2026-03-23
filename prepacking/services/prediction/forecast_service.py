@@ -44,10 +44,6 @@ def predict_for_date(
     combos = repeat_combination_service.load_repeat_combo_daily_totals(
         supplier_name, target_date, lookback_days
     )
-    logger.warning(
-        "predict_for_date: supplier=%s target=%s skus=%d combos=%d lookback=%d",
-        supplier_name, target_date, len(skus), len(combos), lookback_days,
-    )
     out: list[dict] = []
     for row in skus:
         daily = {k: int(v) for k, v in row["daily"].items()}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from fastapi import APIRouter, HTTPException
 
@@ -21,6 +22,7 @@ from prepacking.services.recommendation.recommendation_service import (
 )
 
 router = APIRouter(prefix="/pp/recommendations", tags=["prepacking-recommendations"])
+logger = logging.getLogger(__name__)
 
 WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -28,8 +30,6 @@ WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 @router.post("/work-order")
 def post_work_order(body: PPWorkOrderRequest) -> dict:
     """내일(또는 지정일) 프리패킹 작업 지시서를 생성. DB 저장 없이 바로 반환."""
-    import logging
-    logger = logging.getLogger(__name__)
 
     target = body.target_date
     try:
@@ -53,21 +53,16 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
             suppliers = [r[0] for r in cur.fetchall()]
 
     all_items: list[dict] = []
-    debug_stats: dict = {"suppliers_total": len(suppliers), "preds_total": 0, "preds_positive": 0, "errors": 0, "error_details": []}
     for sup in suppliers:
         try:
             preds = forecast_service.predict_for_date(sup, target)
         except Exception as exc:
-            logger.warning("forecast failed for supplier=%s: %s", sup, exc, exc_info=True)
-            debug_stats["errors"] += 1
-            debug_stats["error_details"].append(f"{sup}: {type(exc).__name__}: {exc}")
+            logger.warning("forecast failed for supplier=%s: %s", sup, exc)
             continue
-        debug_stats["preds_total"] += len(preds)
         for p in preds:
             qty = int(p.get("predicted_qty", 0))
             if qty <= 0:
                 continue
-            debug_stats["preds_positive"] += 1
             all_items.append({
                 "supplier_name": sup,
                 "target_type": p.get("target_type", "single_sku"),
@@ -82,8 +77,6 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
                 "weekday_basis": weekday_idx,
                 "frequency": int(p.get("frequency", 0)),
             })
-    logger.warning("work-order debug: %s", debug_stats)
-
     all_items.sort(key=lambda x: (-x["predicted_qty"], -x["confidence_score"]))
 
     total_qty = sum(i["predicted_qty"] for i in all_items)
@@ -100,7 +93,6 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
         "combination_count": len(combo_items),
         "single_sku_count": len(sku_items),
         "items": all_items,
-        "_debug": debug_stats,
     }
 
 
