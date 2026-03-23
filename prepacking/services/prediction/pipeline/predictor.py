@@ -94,13 +94,20 @@ def _analyze_supplier(
     avg_qty = float(np.mean(avg_qtys)) if avg_qtys else 0.0
     avg_cv = float(np.mean(cvs)) if cvs else 1.0
 
-    # 업체 유형 결정
-    if total_skus <= 30 and avg_qty >= 15 and avg_cv < 0.7:
+    # 업체 유형 결정 — SKU 수 기반
+    if total_skus <= 30:
         stype = "stable_few"
-    elif total_skus >= 200 or (avg_qty < 3 and avg_cv > 0.8):
+    elif total_skus >= 200:
         stype = "volatile_many"
     else:
         stype = "mixed"
+
+    # prob_threshold를 SKU 수에 비례하여 동적 설정
+    # SKU 10개 → 0.13, SKU 100개 → 0.25, SKU 500개 → 0.38, SKU 1000개 → 0.50
+    dynamic_prob = min(0.50, 0.10 + total_skus * 0.0004)
+    # 출하 확률이 전반적으로 낮은 업체는 threshold도 낮춤
+    if avg_ship_prob < 0.3:
+        dynamic_prob = max(0.10, dynamic_prob * 0.7)
 
     # 유형별 파라미터 결정
     if stype == "stable_few":
@@ -110,12 +117,12 @@ def _analyze_supplier(
             avg_ship_prob=avg_ship_prob,
             volatility=avg_cv,
             supplier_type=stype,
-            prob_threshold=0.13,
+            prob_threshold=max(0.13, dynamic_prob),
             blend_recent_weight=0.50,
             trend_scale_min=0.75,
             trend_scale_max=1.25,
             min_data_days=7,
-            fallback_prob=0.20,
+            fallback_prob=max(0.13, dynamic_prob * 0.8),
             fallback_ratio=0.8,
         )
     elif stype == "volatile_many":
@@ -125,13 +132,13 @@ def _analyze_supplier(
             volatility=avg_cv,
             avg_ship_prob=avg_ship_prob,
             supplier_type=stype,
-            prob_threshold=0.25,
+            prob_threshold=max(0.25, dynamic_prob),
             blend_recent_weight=0.35,
             trend_scale_min=0.90,
             trend_scale_max=1.10,
             min_data_days=10,
-            fallback_prob=0.30,
-            fallback_ratio=0.6,
+            fallback_prob=max(0.25, dynamic_prob * 0.8),
+            fallback_ratio=0.5,
         )
     else:
         return SupplierProfile(
@@ -140,12 +147,12 @@ def _analyze_supplier(
             avg_ship_prob=avg_ship_prob,
             volatility=avg_cv,
             supplier_type=stype,
-            prob_threshold=0.17,
+            prob_threshold=max(0.17, dynamic_prob),
             blend_recent_weight=0.45,
             trend_scale_min=0.80,
             trend_scale_max=1.20,
             min_data_days=7,
-            fallback_prob=0.25,
+            fallback_prob=max(0.17, dynamic_prob * 0.8),
             fallback_ratio=0.7,
         )
 
@@ -385,6 +392,9 @@ def predict_for_date(
     except Exception as exc:
         logger.warning("ML prediction failed, stat only: %s", exc)
 
+    # === 3차: 총합 보정 — 과다예측 방지 ===
+    _apply_volume_cap(out, sku_series_map, td_ts, weeks_back)
+
     # LLM 이상치 검증 (use_gpt=True일 때만)
     if use_gpt and out:
         try:
@@ -508,6 +518,57 @@ def _adaptive_predict(
         return predicted, ship_prob, method
 
     return 0, ship_prob, f"zero(7d=0,p={ship_prob:.0%})"
+
+
+def _apply_volume_cap(
+    out: list[dict],
+    sku_series_map: dict[str, pd.Series],
+    td: pd.Timestamp,
+    weeks_back: int = 8,
+) -> None:
+    """
+    예측 총합이 과거 같은 요일 총합의 합리적 범위를 벗어나면 비례 축소.
+    과다예측 방지의 핵심 메커니즘.
+    """
+    if not out:
+        return
+
+    # 과거 같은 요일의 업체 전체 총합 수집
+    wd_totals: list[float] = []
+    for w in range(1, weeks_back + 1):
+        d = td - pd.Timedelta(weeks=w)
+        day_total = 0.0
+        for series in sku_series_map.values():
+            if d in series.index:
+                day_total += float(series[d])
+        if day_total > 0:
+            wd_totals.append(day_total)
+
+    if not wd_totals:
+        return
+
+    # 과거 같은 요일 총합의 가중 평균 (최근 비중 높음)
+    weights = [0.85 ** i for i in range(len(wd_totals))]
+    expected_total = sum(t * w for t, w in zip(wd_totals, weights)) / sum(weights)
+
+    # 현재 예측 총합
+    predicted_total = sum(e.get("predicted_qty", 0) for e in out)
+
+    if predicted_total <= 0 or expected_total <= 0:
+        return
+
+    # 예측이 기대값의 1.5배를 초과하면 비례 축소
+    cap_ratio = expected_total * 1.5
+    if predicted_total > cap_ratio:
+        scale = cap_ratio / predicted_total
+        logger.info(
+            "Volume cap: pred=%d > cap=%.0f (exp=%.0f), scale=%.2f",
+            predicted_total, cap_ratio, expected_total, scale,
+        )
+        for entry in out:
+            old_qty = entry.get("predicted_qty", 0)
+            if old_qty > 0:
+                entry["predicted_qty"] = max(1, int(round(old_qty * scale)))
 
 
 # ──────────────────────────────────────────────
