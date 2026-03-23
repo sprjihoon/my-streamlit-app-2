@@ -19,6 +19,21 @@ from prepacking.services.prediction.pipeline.metrics import compute_all_metrics
 logger = logging.getLogger(__name__)
 
 
+def _ensure_calibrated(supplier_name: str) -> None:
+    """캘리브레이션 결과가 없으면 자동 실행."""
+    try:
+        from prepacking.services.prediction.pipeline.calibration import (
+            load_supplier_params,
+            calibrate_supplier,
+        )
+        saved = load_supplier_params(supplier_name)
+        if saved is None:
+            logger.info("Auto-calibrating %s (no saved params)", supplier_name)
+            calibrate_supplier(supplier_name)
+    except Exception as exc:
+        logger.warning("Auto-calibration failed for %s: %s", supplier_name, exc)
+
+
 def _load_actual_shipments(supplier_name: str, target_date: str) -> dict[str, int]:
     with get_pp_connection() as con:
         rows = con.execute(
@@ -62,6 +77,9 @@ def run_backtest(
             "message": f"{target_date}에 {supplier_name}의 출하 데이터가 없습니다.",
             "target_date": target_date,
         }
+
+    # 캘리브레이션 결과가 없으면 자동 실행
+    _ensure_calibrated(supplier_name)
 
     predicted_items = forecast_service.predict_for_date(
         supplier_name, target_date, weeks_back, use_gpt=False,

@@ -315,7 +315,28 @@ DDL = textwrap.dedent("""\
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
-    /* 16. ML 예측 정확도 추적 */
+    /* 16. 업체별 예측 파라미터 (자동 캘리브레이션 결과) */
+    CREATE TABLE IF NOT EXISTS pp_supplier_params(
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_name       TEXT NOT NULL,
+        supplier_type       TEXT DEFAULT 'mixed',
+        prob_threshold      REAL DEFAULT 0.30,
+        blend_recent_weight REAL DEFAULT 0.40,
+        trend_scale_min     REAL DEFAULT 0.70,
+        trend_scale_max     REAL DEFAULT 1.30,
+        min_data_days       INTEGER DEFAULT 14,
+        fallback_prob       REAL DEFAULT 0.50,
+        fallback_ratio      REAL DEFAULT 0.70,
+        calibration_accuracy REAL DEFAULT 0,
+        calibration_dates   TEXT DEFAULT '',
+        total_skus          INTEGER DEFAULT 0,
+        avg_qty             REAL DEFAULT 0,
+        volatility          REAL DEFAULT 0,
+        calibrated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(supplier_name)
+    );
+
+    /* 17. ML 예측 정확도 추적 */
     CREATE TABLE IF NOT EXISTS pp_forecast_accuracy(
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         target_date     TEXT NOT NULL,

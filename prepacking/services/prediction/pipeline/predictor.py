@@ -31,16 +31,19 @@ logger = logging.getLogger(__name__)
 class SupplierProfile:
     total_skus: int
     avg_qty_per_active_day: float
-    avg_ship_prob: float       # 전체 SKU의 평균 출하 확률
-    volatility: float          # 전체 변동계수 (CV)
-    supplier_type: str         # "stable_few", "volatile_many", "mixed"
+    avg_ship_prob: float
+    volatility: float
+    supplier_type: str
 
     # 적응형 파라미터
-    prob_threshold: float      # 출하확률 이 미만이면 0 예측
-    blend_recent_weight: float # 7일전 값 가중치 (나머지는 중앙값)
+    prob_threshold: float
+    blend_recent_weight: float
     trend_scale_min: float
     trend_scale_max: float
-    min_data_days: int         # 최소 데이터 일수
+    min_data_days: int
+    fallback_prob: float = 0.50
+    fallback_ratio: float = 0.70
+    calibrated: bool = False
 
 
 def _analyze_supplier(
@@ -98,7 +101,6 @@ def _analyze_supplier(
 
     # 유형별 파라미터 결정
     if stype == "stable_few":
-        # 소품종 대량: 활성값 중심, 트렌드 적극 반영
         return SupplierProfile(
             total_skus=total_skus,
             avg_qty_per_active_day=avg_qty,
@@ -110,9 +112,10 @@ def _analyze_supplier(
             trend_scale_min=0.6,
             trend_scale_max=1.4,
             min_data_days=7,
+            fallback_prob=0.40,
+            fallback_ratio=0.7,
         )
     elif stype == "volatile_many":
-        # 다품종 소량: 매우 보수적, 중앙값 중심, 트렌드 거의 무시
         return SupplierProfile(
             total_skus=total_skus,
             avg_qty_per_active_day=avg_qty,
@@ -124,6 +127,8 @@ def _analyze_supplier(
             trend_scale_min=0.85,
             trend_scale_max=1.15,
             min_data_days=14,
+            fallback_prob=0.50,
+            fallback_ratio=0.7,
         )
     else:
         return SupplierProfile(
@@ -137,6 +142,8 @@ def _analyze_supplier(
             trend_scale_min=0.7,
             trend_scale_max=1.3,
             min_data_days=14,
+            fallback_prob=0.50,
+            fallback_ratio=0.7,
         )
 
 
@@ -152,7 +159,42 @@ def _default_profile() -> SupplierProfile:
         trend_scale_min=0.7,
         trend_scale_max=1.3,
         min_data_days=14,
+        fallback_prob=0.50,
+        fallback_ratio=0.7,
     )
+
+
+def _load_or_analyze_profile(
+    supplier_name: str,
+    sku_series_map: dict[str, pd.Series],
+    td_ts: pd.Timestamp,
+) -> SupplierProfile:
+    """DB에서 캘리브레이션된 파라미터를 로드. 없으면 자동 분석."""
+    try:
+        from prepacking.services.prediction.pipeline.calibration import load_supplier_params
+        saved = load_supplier_params(supplier_name)
+    except Exception:
+        saved = None
+
+    if saved:
+        base = _analyze_supplier(sku_series_map, td_ts)
+        return SupplierProfile(
+            total_skus=base.total_skus,
+            avg_qty_per_active_day=base.avg_qty_per_active_day,
+            avg_ship_prob=base.avg_ship_prob,
+            volatility=base.volatility,
+            supplier_type=saved["supplier_type"],
+            prob_threshold=saved["prob_threshold"],
+            blend_recent_weight=saved["blend_recent_weight"],
+            trend_scale_min=saved["trend_scale_min"],
+            trend_scale_max=saved["trend_scale_max"],
+            min_data_days=saved["min_data_days"],
+            fallback_prob=saved["fallback_prob"],
+            fallback_ratio=saved["fallback_ratio"],
+            calibrated=True,
+        )
+
+    return _analyze_supplier(sku_series_map, td_ts)
 
 
 # ──────────────────────────────────────────────
@@ -206,15 +248,17 @@ def predict_for_date(
         if s is not None:
             sku_series_map[f"combo||{ckey}"] = s
 
-    # 업체 프로파일 자동 분석
-    profile = _analyze_supplier(sku_series_map, td_ts)
+    # 1) DB에서 캘리브레이션된 파라미터 로드 시도
+    # 2) 없으면 자동 분석으로 폴백
+    profile = _load_or_analyze_profile(supplier_name, sku_series_map, td_ts)
     logger.info(
-        "Supplier profile: %s — type=%s, skus=%d, avgQty=%.1f, cv=%.2f, "
-        "probTh=%.2f, blendW=%.2f, trendRange=[%.2f,%.2f]",
+        "Supplier profile: %s — type=%s, skus=%d, "
+        "probTh=%.2f, blendW=%.2f, trendRange=[%.2f,%.2f], "
+        "fbProb=%.2f, fbRatio=%.2f",
         supplier_name, profile.supplier_type, profile.total_skus,
-        profile.avg_qty_per_active_day, profile.volatility,
         profile.prob_threshold, profile.blend_recent_weight,
         profile.trend_scale_min, profile.trend_scale_max,
+        profile.fallback_prob, profile.fallback_ratio,
     )
 
     # 트렌드 스케일링
@@ -353,41 +397,21 @@ def _adaptive_predict(
 
     rw = profile.blend_recent_weight
 
-    if profile.supplier_type == "volatile_many":
-        # 다품종 소량: 7일전 값 우선, 0이면 0
-        if val_7 > 0:
-            blended = val_7 * rw + median_active * (1 - rw)
-            predicted = max(1, int(round(blended)))
-            method = f"vol(7d={val_7:.0f},medA={median_active:.0f})"
-        elif ship_prob >= 0.50 and median_active > 0:
-            # 자주 출하되는 SKU는 중앙값 폴백
-            predicted = max(1, int(round(median_active * 0.7)))
-            method = f"vol_fb(medA={median_active:.0f}*0.7,p={ship_prob:.0%})"
-        else:
-            predicted = 0
-            method = f"vol_zero(7d=0,p={ship_prob:.0%})"
+    fp = profile.fallback_prob
+    fr = profile.fallback_ratio
+
+    if val_7 > 0:
+        blended = val_7 * rw + median_active * (1 - rw)
+        predicted = max(1, int(round(blended)))
+        method = f"blend(7d={val_7:.0f},medA={median_active:.0f},rw={rw:.1f})"
         return predicted, ship_prob, method
 
-    # stable_few / mixed
-    if ship_prob >= 0.5:
-        if val_7 > 0:
-            blended = val_7 * rw + median_active * (1 - rw)
-        else:
-            blended = median_active * ship_prob
-        predicted = max(0, int(round(blended)))
-        method = f"freq(7d={val_7:.0f},medA={median_active:.0f},rw={rw:.1f})"
-    else:
-        if median_all > 0:
-            predicted = max(0, int(round(median_all)))
-            method = f"rare_med({median_all:.0f},p={ship_prob:.0%})"
-        elif val_7 > 0:
-            predicted = max(0, int(round(val_7 * ship_prob)))
-            method = f"rare_7d({val_7:.0f}*{ship_prob:.0%})"
-        else:
-            predicted = 0
-            method = "rare_zero"
+    if ship_prob >= fp and median_active > 0:
+        predicted = max(1, int(round(median_active * fr)))
+        method = f"fb(medA={median_active:.0f}*{fr:.1f},p={ship_prob:.0%})"
+        return predicted, ship_prob, method
 
-    return predicted, ship_prob, method
+    return 0, ship_prob, f"zero(7d=0,p={ship_prob:.0%})"
 
 
 # ──────────────────────────────────────────────
