@@ -14,6 +14,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pp/benchmark", tags=["benchmark"])
 
 
+@router.get("/top-suppliers")
+def get_top_suppliers(limit: int = 10) -> list[dict]:
+    """출고량 기준 상위 업체 목록."""
+    with get_pp_connection() as con:
+        cur = con.execute(
+            "SELECT TRIM(supplier_name) AS name, SUM(qty) AS total_qty, "
+            "COUNT(DISTINCT shipping_date) AS active_days, "
+            "COUNT(DISTINCT product_name || '||' || COALESCE(option_name,'')) AS sku_count "
+            "FROM pp_shipping_stats "
+            "WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != '' "
+            "GROUP BY TRIM(supplier_name) "
+            "ORDER BY total_qty DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            {"rank": i + 1, "supplier": r[0], "total_qty": r[1],
+             "active_days": r[2], "sku_count": r[3]}
+            for i, r in enumerate(cur.fetchall())
+        ]
+
+
 @router.post("/run")
 def run_benchmark(body: dict | None = None) -> dict:
     """
@@ -25,16 +46,23 @@ def run_benchmark(body: dict | None = None) -> dict:
     ])
     requested_suppliers = (body or {}).get("suppliers", [])
 
+    top_n = (body or {}).get("top_n", 0)
+
     if requested_suppliers:
         suppliers = requested_suppliers
     else:
         with get_pp_connection() as con:
             cur = con.execute(
-                "SELECT DISTINCT TRIM(supplier_name) FROM pp_shipping_stats "
+                "SELECT TRIM(supplier_name) AS name, SUM(qty) AS total "
+                "FROM pp_shipping_stats "
                 "WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != '' "
-                "ORDER BY supplier_name"
+                "GROUP BY TRIM(supplier_name) "
+                "ORDER BY total DESC"
             )
-            suppliers = [r[0] for r in cur.fetchall()]
+            rows = cur.fetchall()
+            suppliers = [r[0] for r in rows]
+            if top_n > 0:
+                suppliers = suppliers[:top_n]
 
     results = []
     supplier_avgs = {}
