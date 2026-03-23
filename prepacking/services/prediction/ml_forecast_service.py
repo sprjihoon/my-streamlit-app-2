@@ -1,251 +1,135 @@
 """
-ML 기반 예측 서비스
-─────────────────
-GradientBoostingRegressor를 사용하여 SKU/조합별 수요를 예측.
-특성(feature):
-  - 같은 요일 과거 N주 출하량
-  - 최근 7/14/30일 이동평균
-  - 요일 원핫
-  - 추세(선형 기울기)
-  - 변동성(CV)
-통계 폴백: ML 학습 데이터가 부족하면 기존 가중이동평균으로 폴백.
+ml_forecast_service — 답안지 기반 통합 ML 모델
+───────────────────────────────────────────────
+핵심: 전체 SKU/조합의 과거 출하 데이터를 답안지로 사용하여
+하나의 GradientBoostingRegressor 모델을 학습.
+
+- SKU별 개별 모델 X → 전체 통합 모델 1개
+- 학습 데이터: 과거 60일 × 전체 SKU = 수만 건
+- 학습 시간: 1~2초 (모델 1개)
+- 캐싱: supplier+날짜 기준으로 캐시하여 재학습 방지
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
-import math
+import time
 from collections import defaultdict
 
 import numpy as np
 
+from prepacking.common.utils import normalize_sku_name, safe_int, safe_str
+from prepacking.database import get_pp_connection
+
 logger = logging.getLogger(__name__)
 
-_MODEL_CACHE: dict[str, object] = {}
-
-WEEKS_BACK = 12
-MIN_TRAIN_POINTS = 4
-
-
-def _parse_date(s: str) -> dt.date | None:
-    if not s:
-        return None
-    try:
-        return dt.datetime.strptime(s[:10], "%Y-%m-%d").date()
-    except ValueError:
-        return None
+_MODEL_CACHE: dict[str, dict] = {}
+TRAIN_DAYS = 60
+MIN_SAMPLES = 30
+FEATURE_NAMES = [
+    "active_avg_14", "active_avg_30", "active_avg_60",
+    "active_days_14", "active_days_30",
+    "same_wd_avg", "same_wd_count",
+    "last_qty", "max_14", "median_14",
+    "frequency_ratio",
+    "wd_0", "wd_1", "wd_2", "wd_3", "wd_4", "wd_5", "wd_6",
+]
 
 
-def _build_daily_series(daily: dict[str, int], end_date: dt.date, lookback: int) -> list[tuple[dt.date, int]]:
-    """날짜순 (date, qty) 리스트 생성."""
-    start = end_date - dt.timedelta(days=lookback)
-    series = []
-    d = start
-    while d < end_date:
-        series.append((d, daily.get(d.isoformat(), 0)))
-        d += dt.timedelta(days=1)
-    return series
-
-
-def _extract_features(series: list[tuple[dt.date, int]], target_date: dt.date) -> list[dict]:
-    """학습/예측용 feature 행 생성. 각 날짜에 대해 feature dict를 만든다."""
-    if not series:
-        return []
-
-    daily_map: dict[str, int] = {d.isoformat(): q for d, q in series}
-    rows = []
-
-    for i, (d, qty) in enumerate(series):
-        if i < 14:
-            continue
-
-        wd = d.weekday()
-        wd_onehot = [1.0 if j == wd else 0.0 for j in range(7)]
-
-        same_wd_vals = []
-        for w in range(1, WEEKS_BACK + 1):
-            past_d = d - dt.timedelta(weeks=w)
-            same_wd_vals.append(float(daily_map.get(past_d.isoformat(), 0)))
-
-        recent_7 = [float(daily_map.get((d - dt.timedelta(days=k)).isoformat(), 0)) for k in range(1, 8)]
-        recent_14 = [float(daily_map.get((d - dt.timedelta(days=k)).isoformat(), 0)) for k in range(1, 15)]
-        recent_30 = [float(daily_map.get((d - dt.timedelta(days=k)).isoformat(), 0)) for k in range(1, min(31, i + 1))]
-
-        avg_7 = sum(recent_7) / 7.0
-        avg_14 = sum(recent_14) / 14.0
-        avg_30 = sum(recent_30) / max(1, len(recent_30))
-
-        avg_same_wd = sum(same_wd_vals) / max(1, len([v for v in same_wd_vals if v > 0])) if any(v > 0 for v in same_wd_vals) else 0.0
-
-        if len(recent_7) > 1 and avg_7 > 0:
-            cv_7 = float(np.std(recent_7)) / avg_7
-        else:
-            cv_7 = 0.0
-
-        trend_vals = recent_14[::-1]
-        if len(trend_vals) >= 3:
-            x = np.arange(len(trend_vals), dtype=float)
-            y = np.array(trend_vals, dtype=float)
-            if np.std(x) > 0:
-                slope = float(np.polyfit(x, y, 1)[0])
-            else:
-                slope = 0.0
-        else:
-            slope = 0.0
-
-        features = {
-            "avg_7": avg_7,
-            "avg_14": avg_14,
-            "avg_30": avg_30,
-            "avg_same_wd": avg_same_wd,
-            "cv_7": min(cv_7, 3.0),
-            "trend_slope": slope,
-            "same_wd_1w": same_wd_vals[0] if same_wd_vals else 0.0,
-            "same_wd_2w": same_wd_vals[1] if len(same_wd_vals) > 1 else 0.0,
-            "same_wd_3w": same_wd_vals[2] if len(same_wd_vals) > 2 else 0.0,
-            "same_wd_4w": same_wd_vals[3] if len(same_wd_vals) > 3 else 0.0,
-        }
-        for j, v in enumerate(wd_onehot):
-            features[f"wd_{j}"] = v
-
-        rows.append({"date": d, "qty": qty, "features": features})
-
-    return rows
-
-
-def _feature_names() -> list[str]:
-    return [
-        "avg_7", "avg_14", "avg_30", "avg_same_wd",
-        "cv_7", "trend_slope",
-        "same_wd_1w", "same_wd_2w", "same_wd_3w", "same_wd_4w",
-        "wd_0", "wd_1", "wd_2", "wd_3", "wd_4", "wd_5", "wd_6",
-    ]
-
-
-def _rows_to_xy(rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
-    names = _feature_names()
-    X = np.array([[r["features"].get(n, 0.0) for n in names] for r in rows], dtype=float)
-    y = np.array([r["qty"] for r in rows], dtype=float)
-    return X, y
-
-
-def predict_ml(
-    daily: dict[str, int],
-    target_date: str,
-    frequency: int,
-    cache_key: str = "",
-) -> dict:
+def _load_all_sku_daily(supplier_name: str, date_from: str, date_to: str) -> dict[str, dict[str, int]]:
     """
-    ML 예측. 반환:
-      {"predicted_qty": int, "model_type": str, "confidence_boost": float}
-    model_type: "ml" | "statistical" (폴백)
+    supplier의 전체 SKU별 일별 출하량을 로드.
+    반환: { "상품명||옵션명": { "2026-01-05": 10, ... }, ... }
     """
-    td = _parse_date(target_date)
-    if td is None:
-        return {"predicted_qty": 0, "model_type": "error", "confidence_boost": 0.0}
+    with get_pp_connection() as con:
+        rows = con.execute(
+            """
+            SELECT shipping_date, product_name, option_name, qty
+            FROM pp_shipping_stats
+            WHERE TRIM(supplier_name) = TRIM(?)
+              AND shipping_date IS NOT NULL AND shipping_date != ''
+              AND date(shipping_date) >= date(?)
+              AND date(shipping_date) <= date(?)
+            """,
+            (supplier_name.strip(), date_from, date_to),
+        ).fetchall()
 
-    lookback = max(WEEKS_BACK * 7 + 45, 120)
-    series = _build_daily_series(daily, td, lookback)
+    result: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for row in rows:
+        ds = safe_str(row[0])[:10]
+        pn = normalize_sku_name(row[1])
+        on = normalize_sku_name(row[2])
+        qty = max(1, safe_int(row[3], 1))
+        key = f"{pn}||{on}"
+        result[key][ds] += qty
 
-    feature_rows = _extract_features(series, td)
-
-    if len(feature_rows) < MIN_TRAIN_POINTS:
-        return _fallback_statistical(daily, td, frequency)
-
-    train_rows = feature_rows
-    X_train, y_train = _rows_to_xy(train_rows)
-
-    nonzero_count = int(np.count_nonzero(y_train))
-    if nonzero_count < MIN_TRAIN_POINTS:
-        return _fallback_statistical(daily, td, frequency)
-
-    try:
-        from sklearn.ensemble import GradientBoostingRegressor
-
-        model = GradientBoostingRegressor(
-            n_estimators=80,
-            max_depth=3,
-            learning_rate=0.1,
-            min_samples_leaf=2,
-            subsample=0.8,
-            random_state=42,
-        )
-        model.fit(X_train, y_train)
-
-        target_row = _build_target_features(daily, td)
-        if target_row is None:
-            return _fallback_statistical(daily, td, frequency)
-
-        names = _feature_names()
-        X_pred = np.array([[target_row.get(n, 0.0) for n in names]], dtype=float)
-        pred_val = float(model.predict(X_pred)[0])
-
-        y_pred_train = model.predict(X_train)
-        residuals = y_train - y_pred_train
-        mae = float(np.mean(np.abs(residuals)))
-        mean_y = float(np.mean(y_train)) if len(y_train) > 0 else 1.0
-        mape = mae / max(mean_y, 1.0)
-        accuracy = max(0.0, 1.0 - mape)
-
-        pred_qty = max(0, int(round(pred_val)))
-
-        confidence_boost = min(0.2, accuracy * 0.25)
-
-        return {
-            "predicted_qty": pred_qty,
-            "model_type": "ml",
-            "confidence_boost": round(confidence_boost, 3),
-            "train_accuracy": round(accuracy, 3),
-            "train_mae": round(mae, 2),
-            "train_samples": len(y_train),
-        }
-
-    except Exception as exc:
-        logger.warning("ML prediction failed, falling back: %s", exc)
-        return _fallback_statistical(daily, td, frequency)
+    return dict(result)
 
 
-def _build_target_features(daily: dict[str, int], td: dt.date) -> dict | None:
-    """예측 대상 날짜의 feature dict 생성."""
-    daily_map = daily
+def _compute_features(daily: dict[str, int], td: dt.date) -> dict[str, float]:
+    """하나의 SKU에 대해 td 시점의 피처를 계산."""
+
+    def _active_avg(days: int) -> tuple[float, int]:
+        vals = []
+        for i in range(1, days + 1):
+            d = td - dt.timedelta(days=i)
+            v = daily.get(d.isoformat(), 0)
+            if v > 0:
+                vals.append(float(v))
+        return (sum(vals) / len(vals) if vals else 0.0), len(vals)
+
+    def _same_wd() -> tuple[float, int]:
+        nonzero = []
+        for w in range(1, 9):
+            past_d = td - dt.timedelta(weeks=w)
+            v = daily.get(past_d.isoformat(), 0)
+            if v > 0:
+                nonzero.append(float(v))
+        avg = sum(nonzero) / len(nonzero) if nonzero else 0.0
+        return avg, len(nonzero)
+
+    avg_14, active_14 = _active_avg(14)
+    avg_30, active_30 = _active_avg(30)
+    avg_60, _ = _active_avg(60)
+    wd_avg, wd_count = _same_wd()
+
+    recent_14_vals = []
+    for i in range(1, 15):
+        d = td - dt.timedelta(days=i)
+        v = daily.get(d.isoformat(), 0)
+        if v > 0:
+            recent_14_vals.append(float(v))
+
+    last_qty = 0.0
+    for i in range(1, 31):
+        d = td - dt.timedelta(days=i)
+        v = daily.get(d.isoformat(), 0)
+        if v > 0:
+            last_qty = float(v)
+            break
+
+    max_14 = max(recent_14_vals) if recent_14_vals else 0.0
+    median_14 = float(np.median(recent_14_vals)) if recent_14_vals else 0.0
+
+    total_days_in_range = len(daily)
+    active_total = len([v for v in daily.values() if v > 0])
+    freq_ratio = active_total / max(total_days_in_range, 1)
+
     wd = td.weekday()
     wd_onehot = [1.0 if j == wd else 0.0 for j in range(7)]
 
-    same_wd_vals = []
-    for w in range(1, WEEKS_BACK + 1):
-        past_d = td - dt.timedelta(weeks=w)
-        same_wd_vals.append(float(daily_map.get(past_d.isoformat(), 0)))
-
-    recent_7 = [float(daily_map.get((td - dt.timedelta(days=k)).isoformat(), 0)) for k in range(1, 8)]
-    recent_14 = [float(daily_map.get((td - dt.timedelta(days=k)).isoformat(), 0)) for k in range(1, 15)]
-    recent_30 = [float(daily_map.get((td - dt.timedelta(days=k)).isoformat(), 0)) for k in range(1, 31)]
-
-    avg_7 = sum(recent_7) / 7.0
-    avg_14 = sum(recent_14) / 14.0
-    avg_30 = sum(recent_30) / max(1, len(recent_30))
-    avg_same_wd = sum(same_wd_vals) / max(1, len([v for v in same_wd_vals if v > 0])) if any(v > 0 for v in same_wd_vals) else 0.0
-
-    cv_7 = (float(np.std(recent_7)) / avg_7) if avg_7 > 0 else 0.0
-
-    trend_vals = recent_14[::-1]
-    if len(trend_vals) >= 3:
-        x = np.arange(len(trend_vals), dtype=float)
-        y = np.array(trend_vals, dtype=float)
-        slope = float(np.polyfit(x, y, 1)[0]) if np.std(x) > 0 else 0.0
-    else:
-        slope = 0.0
-
     features = {
-        "avg_7": avg_7,
-        "avg_14": avg_14,
-        "avg_30": avg_30,
-        "avg_same_wd": avg_same_wd,
-        "cv_7": min(cv_7, 3.0),
-        "trend_slope": slope,
-        "same_wd_1w": same_wd_vals[0] if same_wd_vals else 0.0,
-        "same_wd_2w": same_wd_vals[1] if len(same_wd_vals) > 1 else 0.0,
-        "same_wd_3w": same_wd_vals[2] if len(same_wd_vals) > 2 else 0.0,
-        "same_wd_4w": same_wd_vals[3] if len(same_wd_vals) > 3 else 0.0,
+        "active_avg_14": avg_14,
+        "active_avg_30": avg_30,
+        "active_avg_60": avg_60,
+        "active_days_14": float(active_14),
+        "active_days_30": float(active_30),
+        "same_wd_avg": wd_avg,
+        "same_wd_count": float(wd_count),
+        "last_qty": last_qty,
+        "max_14": max_14,
+        "median_14": median_14,
+        "frequency_ratio": freq_ratio,
     }
     for j, v in enumerate(wd_onehot):
         features[f"wd_{j}"] = v
@@ -253,44 +137,129 @@ def _build_target_features(daily: dict[str, int], td: dt.date) -> dict | None:
     return features
 
 
-def _fallback_statistical(daily: dict[str, int], td: dt.date, frequency: int) -> dict:
-    """일평균 기반 폴백 (같은 요일만 보지 않고 전체 최근 데이터 활용)."""
-    avg_7 = sum(daily.get((td - dt.timedelta(days=i)).isoformat(), 0) for i in range(1, 8)) / 7.0
-    avg_14 = sum(daily.get((td - dt.timedelta(days=i)).isoformat(), 0) for i in range(1, 15)) / 14.0
+def _build_training_data(
+    all_sku_daily: dict[str, dict[str, int]],
+    target_date: str,
+    train_days: int = TRAIN_DAYS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    과거 train_days일에 대해 전체 SKU의 (피처, 실제출하량) 쌍을 생성.
+    답안지 = 각 날짜의 실제 출하량.
+    """
+    td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
 
-    same_wd_vals = []
-    for w in range(1, 9):
-        past_d = td - dt.timedelta(weeks=w)
-        same_wd_vals.append(float(daily.get(past_d.isoformat(), 0)))
-    same_wd_nonzero = [v for v in same_wd_vals if v > 0]
-    avg_same_wd = sum(same_wd_vals) / len(same_wd_vals) if same_wd_vals else 0.0
+    X_rows = []
+    y_rows = []
 
-    signals: list[tuple[float, float]] = []
-    if avg_7 > 0:
-        signals.append((avg_7, 3.0))
-    if avg_14 > 0:
-        signals.append((avg_14, 2.0))
-    if avg_same_wd > 0:
-        signals.append((avg_same_wd, 2.0))
+    for day_offset in range(1, train_days + 1):
+        train_date = td - dt.timedelta(days=day_offset)
 
-    if not signals:
-        total_qty = sum(daily.values())
-        active = len([v for v in daily.values() if v > 0])
-        if active > 0:
-            pred = total_qty / active
-        else:
-            pred = 0.0
-        return {
-            "predicted_qty": max(0, int(round(pred))),
-            "model_type": "statistical",
-            "confidence_boost": 0.0,
-        }
+        for sku_key, daily in all_sku_daily.items():
+            actual_qty = daily.get(train_date.isoformat(), 0)
+            if actual_qty <= 0:
+                continue
 
-    total_w = sum(w for _, w in signals)
-    pred = sum(v * w for v, w in signals) / total_w
+            features = _compute_features(daily, train_date)
+            if features["active_avg_14"] <= 0 and features["active_avg_30"] <= 0 and features["same_wd_avg"] <= 0:
+                continue
 
+            row = [features.get(n, 0.0) for n in FEATURE_NAMES]
+            X_rows.append(row)
+            y_rows.append(float(actual_qty))
+
+    if not X_rows:
+        return np.array([]), np.array([])
+
+    return np.array(X_rows, dtype=float), np.array(y_rows, dtype=float)
+
+
+def train_and_predict(
+    supplier_name: str,
+    target_date: str,
+    sku_daily_map: dict[str, dict[str, int]],
+) -> dict[str, int]:
+    """
+    통합 모델을 학습하고, 각 SKU에 대해 예측값을 반환.
+    반환: { "상품명||옵션명": predicted_qty, ... }
+    캐시 키: supplier + target_date
+    """
+    cache_key = f"{supplier_name}||{target_date}"
+
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached and cached.get("predictions"):
+        return cached["predictions"]
+
+    td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+
+    data_end = (td - dt.timedelta(days=1)).isoformat()
+    data_start = (td - dt.timedelta(days=120)).isoformat()
+    all_sku_daily = _load_all_sku_daily(supplier_name, data_start, data_end)
+
+    if not all_sku_daily:
+        return {}
+
+    t0 = time.time()
+    X_train, y_train = _build_training_data(all_sku_daily, target_date, TRAIN_DAYS)
+    t_build = time.time() - t0
+
+    if len(X_train) < MIN_SAMPLES:
+        logger.info("ML: insufficient training data (%d samples) for %s", len(X_train), supplier_name)
+        return {}
+
+    try:
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        t0 = time.time()
+        model = GradientBoostingRegressor(
+            n_estimators=100,
+            max_depth=4,
+            learning_rate=0.1,
+            min_samples_leaf=3,
+            subsample=0.8,
+            random_state=42,
+        )
+        model.fit(X_train, y_train)
+        t_train = time.time() - t0
+
+        y_pred_train = model.predict(X_train)
+        mae = float(np.mean(np.abs(y_train - y_pred_train)))
+        mean_y = float(np.mean(y_train))
+        train_accuracy = max(0.0, 1.0 - mae / max(mean_y, 1.0))
+
+        logger.info(
+            "ML trained: %s | samples=%d | accuracy=%.1f%% | build=%.2fs | train=%.2fs",
+            supplier_name, len(X_train), train_accuracy * 100, t_build, t_train,
+        )
+
+    except Exception as exc:
+        logger.warning("ML training failed for %s: %s", supplier_name, exc)
+        return {}
+
+    predictions: dict[str, int] = {}
+    for sku_key, daily in sku_daily_map.items():
+        features = _compute_features(daily, td)
+        row = np.array([[features.get(n, 0.0) for n in FEATURE_NAMES]], dtype=float)
+        pred_val = float(model.predict(row)[0])
+        predictions[sku_key] = max(0, int(round(pred_val)))
+
+    _MODEL_CACHE[cache_key] = {
+        "predictions": predictions,
+        "train_samples": len(X_train),
+        "train_accuracy": round(train_accuracy, 3),
+    }
+
+    if len(_MODEL_CACHE) > 10:
+        oldest = next(iter(_MODEL_CACHE))
+        del _MODEL_CACHE[oldest]
+
+    return predictions
+
+
+def get_model_info(supplier_name: str, target_date: str) -> dict:
+    cache_key = f"{supplier_name}||{target_date}"
+    cached = _MODEL_CACHE.get(cache_key, {})
     return {
-        "predicted_qty": max(0, int(round(pred))),
-        "model_type": "statistical",
-        "confidence_boost": 0.0,
+        "trained": bool(cached),
+        "train_samples": cached.get("train_samples", 0),
+        "train_accuracy": cached.get("train_accuracy", 0),
     }
