@@ -29,17 +29,8 @@ def _resolve_dates(supplier_name: str, date_from: str, date_to: str) -> tuple[st
 
 @router.post("/repeat-skus")
 def post_repeat_skus(body: PPAnalysisRequest) -> list[dict]:
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.warning(
-        "repeat-skus called: supplier=%s date_from=%r date_to=%r min_count=%d",
-        body.supplier_name, body.date_from, body.date_to, body.min_count,
-    )
     d_from, d_to = _resolve_dates(body.supplier_name, body.date_from, body.date_to)
-    logger.warning("resolved dates: %s ~ %s", d_from, d_to)
-    result = analyze_repeat_skus(body.supplier_name, d_from, d_to, body.min_count)
-    logger.warning("repeat-skus result count: %d", len(result))
-    return result
+    return analyze_repeat_skus(body.supplier_name, d_from, d_to, body.min_count)
 
 
 @router.post("/repeat-combinations")
@@ -125,4 +116,38 @@ def debug_data(supplier: str = ""):
         "resolved_dates": {"from": resolved[0], "to": resolved[1]},
         "sku_analysis_count": sku_count,
         "sku_analysis_first3": sku_first3,
+    }
+
+
+@router.post("/debug-post")
+def debug_post(body: PPAnalysisRequest) -> dict:
+    """POST body 인코딩 디버그."""
+    supplier_bytes = body.supplier_name.encode("utf-8")
+    d_from, d_to = _resolve_dates(body.supplier_name, body.date_from, body.date_to)
+    result = analyze_repeat_skus(body.supplier_name, d_from, d_to, body.min_count)
+    with get_pp_connection() as con:
+        exact_match = con.execute(
+            "SELECT COUNT(*) FROM pp_shipping_stats WHERE supplier_name = ?",
+            (body.supplier_name,),
+        ).fetchone()[0]
+        trim_match = con.execute(
+            "SELECT COUNT(*) FROM pp_shipping_stats WHERE TRIM(supplier_name) = TRIM(?)",
+            (body.supplier_name.strip(),),
+        ).fetchone()[0]
+        like_match = con.execute(
+            "SELECT COUNT(*) FROM pp_shipping_stats WHERE supplier_name LIKE ?",
+            (f"%{body.supplier_name.strip()[:4]}%",),
+        ).fetchone()[0]
+    return {
+        "supplier_name": body.supplier_name,
+        "supplier_name_hex": supplier_bytes.hex(),
+        "supplier_name_len": len(body.supplier_name),
+        "date_from": body.date_from,
+        "date_to": body.date_to,
+        "resolved_from": d_from,
+        "resolved_to": d_to,
+        "result_count": len(result),
+        "exact_match_rows": exact_match,
+        "trim_match_rows": trim_match,
+        "like_match_rows": like_match,
     }
