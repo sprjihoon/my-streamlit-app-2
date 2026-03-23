@@ -248,8 +248,8 @@ def run_backtest(
     total_items = len(predictions) + len(missed_items)
     acc_sku_match = (matched / max(total_items, 1)) * 100
 
-    # 종합 정확도 = 총합 40% + 방향성 30% + 수량근접 30%
-    accuracy = acc_volume * 0.4 + acc_direction * 0.3 + acc_qty_close * 0.3
+    # 종합 정확도 = 총합 50% + 수량근접 35% + 방향성 15%
+    accuracy = acc_volume * 0.50 + acc_qty_close * 0.35 + acc_direction * 0.15
 
     # 참고용 MAPE
     items_with_actual = [p for p in predictions if p["actual_qty"] > 0]

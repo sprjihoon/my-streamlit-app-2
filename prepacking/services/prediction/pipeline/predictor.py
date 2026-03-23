@@ -557,18 +557,31 @@ def _apply_volume_cap(
     if predicted_total <= 0 or expected_total <= 0:
         return
 
-    # 예측이 기대값의 1.5배를 초과하면 비례 축소
-    cap_ratio = expected_total * 1.5
-    if predicted_total > cap_ratio:
-        scale = cap_ratio / predicted_total
+    # 예측이 기대값의 1.3배를 초과하면 비례 축소
+    upper_cap = expected_total * 1.3
+    if predicted_total > upper_cap:
+        scale = upper_cap / predicted_total
         logger.info(
-            "Volume cap: pred=%d > cap=%.0f (exp=%.0f), scale=%.2f",
-            predicted_total, cap_ratio, expected_total, scale,
+            "Volume cap DOWN: pred=%d > cap=%.0f (exp=%.0f), scale=%.2f",
+            predicted_total, upper_cap, expected_total, scale,
         )
         for entry in out:
             old_qty = entry.get("predicted_qty", 0)
             if old_qty > 0:
                 entry["predicted_qty"] = max(1, int(round(old_qty * scale)))
+
+    # 예측이 기대값의 0.5배 미만이면 비례 확대 (과소예측 방지)
+    elif predicted_total < expected_total * 0.5 and predicted_total > 0:
+        scale = (expected_total * 0.7) / predicted_total
+        if scale > 1.0:
+            logger.info(
+                "Volume cap UP: pred=%d < floor=%.0f (exp=%.0f), scale=%.2f",
+                predicted_total, expected_total * 0.5, expected_total, scale,
+            )
+            for entry in out:
+                old_qty = entry.get("predicted_qty", 0)
+                if old_qty > 0:
+                    entry["predicted_qty"] = max(1, int(round(old_qty * scale)))
 
 
 # ──────────────────────────────────────────────
