@@ -70,6 +70,9 @@ def predict_for_date(
         if s is not None:
             sku_series_map[f"combo||{ckey}"] = s
 
+    # 전체 공급처 수준 트렌드 스케일링 계산
+    trend_scale = _compute_supplier_trend_scale(sku_series_map, td_ts)
+
     out: list[dict] = []
 
     for target_type, row in all_rows:
@@ -88,6 +91,11 @@ def predict_for_date(
         predicted_qty, ship_prob, method_detail = _seasonal_naive_predict(
             series, td_ts
         )
+
+        # 트렌드 스케일링 적용 (0이 아닌 예측에만)
+        if predicted_qty > 0 and trend_scale != 1.0:
+            predicted_qty = max(1, int(round(predicted_qty * trend_scale)))
+            method_detail += f",scale={trend_scale:.2f}"
 
         daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
         data_days = weekday_pattern_service.distinct_active_days(
@@ -142,6 +150,40 @@ def predict_for_date(
         out.append(entry)
 
     return out
+
+
+def _compute_supplier_trend_scale(
+    sku_series_map: dict[str, pd.Series],
+    td: pd.Timestamp,
+) -> float:
+    """
+    전체 공급처 수준의 트렌드 스케일링 팩터 계산.
+
+    직전 7일 총합 vs 그 전 7일 총합 비율로 증가/감소 추세를 반영.
+    급격한 변동 방지를 위해 0.6~1.5 범위로 제한.
+    """
+    if not sku_series_map:
+        return 1.0
+
+    cutoff = td - pd.Timedelta(days=1)
+    recent_start = cutoff - pd.Timedelta(days=6)
+    prev_start = recent_start - pd.Timedelta(days=7)
+    prev_end = recent_start - pd.Timedelta(days=1)
+
+    recent_total = 0.0
+    prev_total = 0.0
+
+    for series in sku_series_map.values():
+        recent_window = series[(series.index >= recent_start) & (series.index <= cutoff)]
+        prev_window = series[(series.index >= prev_start) & (series.index <= prev_end)]
+        recent_total += recent_window.sum()
+        prev_total += prev_window.sum()
+
+    if prev_total < 10:
+        return 1.0
+
+    raw_scale = recent_total / prev_total
+    return max(0.6, min(1.5, raw_scale))
 
 
 def _daily_to_filled_series(
