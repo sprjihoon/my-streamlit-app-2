@@ -1,29 +1,26 @@
 """
-predictor — 2단계 예측기 (Classification → Regression)
-──────────────────────────────────────────────────────
-1단계: 출하 여부 분류 (이 SKU가 오늘 출하되는가?)
-2단계: 출하 시 수량 예측 (출하된다면 몇 개?)
+predictor — Baseline-first 예측기
+──────────────────────────────────
+원칙: ML은 walk-forward validation에서 baseline을 이긴 후에만 사용.
+현재 ML이 baseline을 이기지 못하므로 SeasonalNaive 기반 예측 사용.
 
-이렇게 하면 실제 0인 SKU에 양수를 예측하는 과다예측을 방지.
+예측 로직:
+1. 같은 요일 최근 4주 데이터 확인
+2. 출하 확률 계산 → 낮으면 0
+3. 출하일 평균 × 출하 확률로 수량 예측
+4. 최근 트렌드 반영 (상승/하락)
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
-import time
 
 import numpy as np
 import pandas as pd
 
-from prepacking.services.prediction.pipeline.features import compute_features_for_date, get_feature_names
 from prepacking.services.prediction.pipeline.baselines import ShipProbAdjustedMean
 
 logger = logging.getLogger(__name__)
-
-_TRAINED_CACHE: dict[str, dict] = {}
-MAX_CACHE = 5
-
-SHIP_PROB_THRESHOLD = 0.3
 
 
 def predict_for_date(
@@ -80,12 +77,6 @@ def predict_for_date(
             ).sort_index()
             sku_series_map[f"combo||{ckey}"] = s
 
-    clf_model, reg_model, model_info = _get_or_train_models(
-        supplier_name, target_date, sku_series_map
-    )
-    feature_names = get_feature_names()
-    baseline = ShipProbAdjustedMean()
-
     out: list[dict] = []
 
     for target_type, row in all_rows:
@@ -101,30 +92,9 @@ def predict_for_date(
         if series is None or series.empty:
             continue
 
-        bl_qty = max(0, int(round(baseline.predict(series, td_ts))))
-
-        feat = compute_features_for_date(series, td_ts)
-        X = np.array([[feat.get(f, 0.0) for f in feature_names]], dtype=float)
-
-        ml_qty = 0
-        model_used = "statistical"
-        ship_prob_ml = feat.get("wd_ship_prob", 0)
-
-        if clf_model is not None and reg_model is not None:
-            ship_prob_ml = float(clf_model.predict_proba(X)[0][1])
-
-            if ship_prob_ml >= SHIP_PROB_THRESHOLD:
-                raw_qty = float(reg_model.predict(X)[0])
-                ml_qty = max(0, int(round(raw_qty)))
-                model_used = "ml"
-            else:
-                ml_qty = 0
-                model_used = "ml"
-
-        if model_used == "ml":
-            predicted_qty = ml_qty
-        else:
-            predicted_qty = bl_qty
+        predicted_qty, ship_prob, method_detail = _smart_baseline_predict(
+            series, td_ts, weeks_back
+        )
 
         daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
         data_days = weekday_pattern_service.distinct_active_days(
@@ -147,7 +117,6 @@ def predict_for_date(
                 wd_vals.append(float(series[d]))
         wd_active = [v for v in wd_vals if v > 0]
         wd_avg = np.mean(wd_active) if wd_active else 0.0
-        ship_prob_stat = len(wd_active) / max(len(wd_vals), 1) if wd_vals else 0.0
 
         entry = {
             "target_type": target_type,
@@ -159,20 +128,20 @@ def predict_for_date(
             "combination_key": row.get("combination_key", ""),
             "items": row.get("items", []),
             "predicted_qty": predicted_qty,
-            "stat_qty": bl_qty,
-            "ml_qty": ml_qty,
-            "ml_model_type": model_used,
-            "ml_accuracy": round(model_info.get("train_accuracy", 0), 3),
-            "ml_samples": model_info.get("train_samples", 0),
+            "stat_qty": predicted_qty,
+            "ml_qty": 0,
+            "ml_model_type": "statistical",
+            "ml_accuracy": 0,
+            "ml_samples": 0,
             "confidence_score": round(base_conf, 3),
             "recent_7d_avg": round(avg_14, 1),
             "recent_30d_avg": round(avg_30, 1),
             "recent_same_weekday_avg": round(wd_avg, 1),
             "weekday_basis": wb,
             "frequency": row.get("frequency", 0),
-            "model_used": model_used,
-            "ship_probability": round(ship_prob_ml if model_used == "ml" else ship_prob_stat, 3),
-            "gpt_reason": "",
+            "model_used": "statistical",
+            "ship_probability": round(ship_prob, 3),
+            "gpt_reason": method_detail,
             "gpt_confidence": "",
         }
         out.append(entry)
@@ -180,138 +149,89 @@ def predict_for_date(
     return out
 
 
-def _get_or_train_models(
-    supplier_name: str,
-    target_date: str,
-    sku_series_map: dict[str, pd.Series],
-) -> tuple:
+def _smart_baseline_predict(
+    series: pd.Series,
+    td: pd.Timestamp,
+    weeks_back: int = 8,
+) -> tuple[int, float, str]:
     """
-    2단계 모델 학습:
-    1) Classifier: 출하 여부 (0/1)
-    2) Regressor: 출하 시 수량 (양수만 학습)
+    스마트 baseline 예측.
+
+    로직:
+    1. 같은 요일 최근 N주 데이터 수집
+    2. 출하 확률 계산
+    3. 최근 1주 값이 있으면 가중치 높게
+    4. 트렌드 반영 (최근 2주 vs 이전 2주)
+
+    반환: (예측수량, 출하확률, 방법설명)
     """
-    cache_key = f"{supplier_name}||{target_date}"
-    if cache_key in _TRAINED_CACHE:
-        c = _TRAINED_CACHE[cache_key]
-        return c.get("clf"), c.get("reg"), c.get("info", {})
+    cutoff = td - pd.Timedelta(days=1)
+    past = series[series.index <= cutoff]
 
-    td = pd.Timestamp(target_date)
-    feature_names = get_feature_names()
-    train_days = 60
+    if past.empty:
+        return 0, 0.0, "no_data"
 
-    X_all, y_all = [], []
-    t0 = time.time()
+    # === 같은 요일 데이터 수집 ===
+    wd_data: list[tuple[int, float]] = []  # (weeks_ago, qty)
+    for w in range(1, weeks_back + 1):
+        d = td - pd.Timedelta(weeks=w)
+        if d in past.index:
+            wd_data.append((w, float(past[d])))
 
-    for sku_key, series in sku_series_map.items():
-        if series.empty:
-            continue
-        for offset in range(1, train_days + 1):
-            train_date = td - pd.Timedelta(days=offset)
-            if train_date < series.index.min():
-                continue
+    if not wd_data:
+        last_7 = past.tail(7)
+        if last_7.empty or last_7.sum() == 0:
+            return 0, 0.0, "no_weekday_data"
+        return max(0, int(round(float(last_7.mean())))), 0.1, "fallback_7d_avg"
 
-            actual = float(series.get(train_date, 0))
-            feat = compute_features_for_date(series, train_date)
+    # === 출하 확률 ===
+    total_weeks = len(wd_data)
+    ship_weeks = len([d for d in wd_data if d[1] > 0])
+    ship_prob = ship_weeks / total_weeks
 
-            has_signal = (
-                feat.get("roll_active_mean_14", 0) > 0
-                or feat.get("roll_active_mean_30", 0) > 0
-                or feat.get("wd_avg", 0) > 0
-            )
-            if not has_signal and actual == 0:
-                continue
+    if ship_prob == 0:
+        return 0, 0.0, "zero_ship_prob"
 
-            X_all.append([feat.get(f, 0.0) for f in feature_names])
-            y_all.append(actual)
+    # === 가중 평균 (최근 주에 높은 가중치) ===
+    active_data = [(w, q) for w, q in wd_data if q > 0]
+    if not active_data:
+        return 0, 0.0, "no_active_weekday"
 
-            if len(X_all) >= 25000:
-                break
-        if len(X_all) >= 25000:
-            break
+    weights = []
+    qtys = []
+    for weeks_ago, qty in active_data:
+        weight = 1.0 / weeks_ago  # 1주전=1.0, 2주전=0.5, 4주전=0.25
+        weights.append(weight)
+        qtys.append(qty)
 
-    build_time = time.time() - t0
+    weighted_avg = np.average(qtys, weights=weights)
 
-    if len(X_all) < 100:
-        logger.info("Insufficient training data (%d) for %s", len(X_all), supplier_name)
-        _TRAINED_CACHE[cache_key] = {"clf": None, "reg": None, "info": {}}
-        return None, None, {}
+    # === 트렌드 반영 ===
+    recent_2w = [q for w, q in active_data if w <= 2]
+    older_2w = [q for w, q in active_data if w > 2]
 
-    X = np.array(X_all, dtype=float)
-    y = np.array(y_all, dtype=float)
-    y_cls = (y > 0).astype(int)
+    trend_factor = 1.0
+    if recent_2w and older_2w:
+        recent_mean = np.mean(recent_2w)
+        older_mean = np.mean(older_2w)
+        if older_mean > 0:
+            raw_trend = recent_mean / older_mean
+            trend_factor = max(0.5, min(1.5, raw_trend))
 
-    try:
-        from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
+    adjusted_qty = weighted_avg * trend_factor
 
-        t0 = time.time()
+    # === 출하 확률 적용 ===
+    # 확률이 높으면 (>=50%) 수량 그대로
+    # 확률이 낮으면 수량 줄임
+    if ship_prob >= 0.5:
+        final_qty = adjusted_qty
+    else:
+        final_qty = adjusted_qty * ship_prob * 2  # 25% prob → qty * 0.5
 
-        # === Stage 1: Classification (출하 여부) ===
-        clf = GradientBoostingClassifier(
-            n_estimators=150,
-            max_depth=4,
-            learning_rate=0.05,
-            min_samples_leaf=10,
-            subsample=0.8,
-            random_state=42,
-        )
-        clf.fit(X, y_cls)
+    predicted = max(0, int(round(final_qty)))
 
-        clf_acc = float(np.mean(clf.predict(X) == y_cls))
-
-        # === Stage 2: Regression (출하 시 수량, 양수만) ===
-        pos_mask = y > 0
-        X_pos = X[pos_mask]
-        y_pos = y[pos_mask]
-
-        reg = None
-        reg_mae = 0.0
-        if len(X_pos) >= 30:
-            reg = GradientBoostingRegressor(
-                n_estimators=200,
-                max_depth=4,
-                learning_rate=0.05,
-                min_samples_leaf=5,
-                subsample=0.8,
-                random_state=42,
-            )
-            reg.fit(X_pos, y_pos)
-            y_pred_pos = reg.predict(X_pos)
-            reg_mae = float(np.mean(np.abs(y_pos - y_pred_pos)))
-
-        train_time = time.time() - t0
-
-        mean_y = float(np.mean(y[y > 0])) if pos_mask.any() else 1.0
-        accuracy = max(0.0, 1.0 - reg_mae / max(mean_y, 1.0)) if reg else 0.0
-
-        info = {
-            "trained": True,
-            "train_samples": len(X),
-            "train_accuracy": round(accuracy, 3),
-            "clf_accuracy": round(clf_acc, 3),
-            "positive_samples": int(pos_mask.sum()),
-            "zero_samples": int((~pos_mask).sum()),
-            "build_time": round(build_time, 2),
-            "train_time": round(train_time, 2),
-        }
-
-        logger.info(
-            "2-stage model trained: %s | total=%d (pos=%d, zero=%d) | clf_acc=%.1f%% | reg_mae=%.1f | build=%.2fs | train=%.2fs",
-            supplier_name, len(X), int(pos_mask.sum()), int((~pos_mask).sum()),
-            clf_acc * 100, reg_mae, build_time, train_time,
-        )
-
-    except Exception as exc:
-        logger.warning("Model training failed for %s: %s", supplier_name, exc)
-        _TRAINED_CACHE[cache_key] = {"clf": None, "reg": None, "info": {}}
-        return None, None, {}
-
-    _TRAINED_CACHE[cache_key] = {"clf": clf, "reg": reg, "info": info}
-
-    if len(_TRAINED_CACHE) > MAX_CACHE:
-        oldest = next(iter(_TRAINED_CACHE))
-        del _TRAINED_CACHE[oldest]
-
-    return clf, reg, info
+    method = f"wd_weighted(prob={ship_prob:.0%},trend={trend_factor:.2f})"
+    return predicted, ship_prob, method
 
 
 def _variability_coeff(series: pd.Series, td: pd.Timestamp, days: int = 30) -> float:
