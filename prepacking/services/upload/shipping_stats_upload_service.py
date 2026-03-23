@@ -17,6 +17,20 @@ from prepacking.services.upload.file_parser_service import parse_shipping_file
 logger = logging.getLogger(__name__)
 
 
+def _build_alias_map() -> dict[str, str]:
+    """billing DB의 aliases 테이블에서 alias→vendor 매핑을 로드."""
+    try:
+        from logic.db import get_connection
+        with get_connection() as con:
+            cur = con.execute(
+                "SELECT alias, vendor FROM aliases WHERE file_type IN ('shipping_stats', 'all')"
+            )
+            return {row[0].strip(): row[1].strip() for row in cur.fetchall() if row[0] and row[1]}
+    except Exception:
+        logger.debug("Could not load aliases from billing DB", exc_info=True)
+        return {}
+
+
 class DuplicateFileError(Exception):
     """동일한 파일이 이미 업로드되어 있을 때 발생."""
 
@@ -73,6 +87,8 @@ def _process_upload_background(
         data_end = max(dates) if dates else None
         total_count = len(rows)
 
+        alias_map = _build_alias_map()
+
         with get_pp_connection() as con:
             batch = []
             skipped = 0
@@ -80,7 +96,8 @@ def _process_upload_background(
 
             for r in rows:
                 raw = json.dumps(dict(r), ensure_ascii=False)
-                row_supplier = (r.get("supplier_name") or "").strip() or supplier_name
+                raw_supplier = (r.get("supplier_name") or "").strip() or supplier_name
+                row_supplier = alias_map.get(raw_supplier, raw_supplier)
                 sd = r.get("shipping_date") or ""
                 ono = r.get("order_no") or ""
                 ino = r.get("invoice_no") or ""

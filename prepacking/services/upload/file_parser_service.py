@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
+import unicodedata
 from pathlib import Path
 
 import pandas as pd
 
 from prepacking.common.utils import safe_int, safe_str
+
+logger = logging.getLogger(__name__)
 
 _FIELD_ALIASES: list[tuple[str, frozenset[str]]] = [
     (
@@ -29,7 +33,14 @@ _FIELD_ALIASES: list[tuple[str, frozenset[str]]] = [
                 "supplier",
                 "vendor",
                 "공급처",
+                "공급자",
                 "공급 업체",
+                "업체명",
+                "업체",
+                "거래처",
+                "거래처명",
+                "발송인명",
+                "발송인",
             }
         ),
     ),
@@ -154,11 +165,16 @@ _FIELD_ALIASES: list[tuple[str, frozenset[str]]] = [
 
 def _norm_key(h: object) -> str:
     s = safe_str(h)
+    s = unicodedata.normalize("NFKC", s)
     s = re.sub(r"\s+", "", s)
     return s.casefold() if s.isascii() else s
 
 
 def _build_column_map(columns: list) -> dict[str, str]:
+    alias_norms: list[tuple[str, frozenset[str]]] = [
+        (field, frozenset(_norm_key(a) for a in aliases))
+        for field, aliases in _FIELD_ALIASES
+    ]
     seen: set[str] = set()
     mapping: dict[str, str] = {}
     for col in columns:
@@ -169,8 +185,8 @@ def _build_column_map(columns: list) -> dict[str, str]:
         if nk in seen:
             continue
         seen.add(nk)
-        for field, aliases in _FIELD_ALIASES:
-            if nk in {_norm_key(a) for a in aliases} or raw.strip() in aliases:
+        for field, norm_aliases in alias_norms:
+            if nk in norm_aliases:
                 if field not in mapping:
                     mapping[field] = raw
                 break
@@ -209,13 +225,19 @@ def _read_frame(file_path: str) -> pd.DataFrame:
         return pd.read_excel(path, engine="openpyxl")
     if suf == ".xls":
         try:
-            return pd.read_excel(path, engine="xlrd")
-        except Exception:
-            pass
-        try:
-            return pd.read_html(path)[0]
-        except Exception:
-            pass
+            df = pd.read_excel(path, engine="xlrd")
+            logger.info("xls read via xlrd, columns=%s", list(df.columns)[:15])
+            return df
+        except Exception as e:
+            logger.debug("xlrd failed: %s", e)
+        for enc in ("utf-8", "cp949", "euc-kr"):
+            try:
+                dfs = pd.read_html(path, encoding=enc)
+                if dfs:
+                    logger.info("xls read via read_html(%s), columns=%s", enc, list(dfs[0].columns)[:15])
+                    return dfs[0]
+            except Exception:
+                continue
         return pd.read_excel(path)
     if suf == ".csv":
         for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
@@ -230,7 +252,14 @@ def _read_frame(file_path: str) -> pd.DataFrame:
 def parse_shipping_file(file_path: str) -> list[dict]:
     df = _read_frame(file_path)
     df.columns = [safe_str(c) for c in df.columns]
+
+    if all(c.isdigit() or c == "" for c in df.columns):
+        df.columns = [safe_str(v) for v in df.iloc[0]]
+        df = df.iloc[1:].reset_index(drop=True)
+
     cmap = _build_column_map(list(df.columns))
+    logger.info("Parsed columns: %s", list(df.columns)[:20])
+    logger.info("Column mapping: %s", cmap)
     rows: list[dict] = []
     for _, ser in df.iterrows():
         def get(field: str, default="") -> str:
