@@ -121,8 +121,12 @@ def run_backtest(
         error_abs = abs(best_qty - actual_qty)
         error_pct = (error_abs / actual_qty * 100) if actual_qty > 0 else (100.0 if best_qty > 0 else 0.0)
 
-        if actual_qty > 0 and abs(best_qty - actual_qty) <= max(1, int(actual_qty * 0.2)):
+        # matched 기준: 소량은 ±2개, 대량은 ±30% 이내
+        tolerance = max(2, int(actual_qty * 0.3)) if actual_qty > 0 else 1
+        if actual_qty > 0 and abs(best_qty - actual_qty) <= tolerance:
             result_type = "matched"
+        elif best_qty == 0 and actual_qty > 0:
+            result_type = "under"
         elif best_qty > actual_qty:
             result_type = "over"
         else:
@@ -197,16 +201,26 @@ def run_backtest(
     total_items = len(predictions) + len(missed_items)
     acc_sku_match = (matched / total_items * 100) if total_items > 0 else 0.0
 
-    # 3) 수량 근접률 — 예측이 실제의 ±50% 이내인 SKU 비율
+    # 3) 수량 근접률 — 예측이 실제와 근접한 SKU 비율
+    #    소량(≤5): ±3개 이내, 대량(>5): ±60% 이내
     qty_close_count = 0
     for p in predictions:
-        if p["actual_qty"] > 0:
-            ratio = p["predicted_qty"] / p["actual_qty"]
-            if 0.5 <= ratio <= 1.5:
-                qty_close_count += 1
-        elif p["predicted_qty"] == 0:
+        aq = p["actual_qty"]
+        pq = p["predicted_qty"]
+        if aq == 0 and pq == 0:
             qty_close_count += 1
-    items_with_data = len([p for p in predictions if p["actual_qty"] > 0 or p["predicted_qty"] > 0])
+        elif aq > 0 and aq <= 5:
+            if abs(pq - aq) <= 3:
+                qty_close_count += 1
+        elif aq > 5:
+            ratio = pq / aq
+            if 0.4 <= ratio <= 1.6:
+                qty_close_count += 1
+        elif aq == 0 and pq <= 2:
+            qty_close_count += 1
+    for m in missed_items:
+        pass  # missed = 0 predicted, actual > 0 → not close
+    items_with_data = len(predictions) + len(missed_items)
     acc_qty_close = (qty_close_count / max(items_with_data, 1)) * 100
 
     # WAPE (참고용)

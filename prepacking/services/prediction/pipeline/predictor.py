@@ -110,13 +110,13 @@ def _analyze_supplier(
             avg_ship_prob=avg_ship_prob,
             volatility=avg_cv,
             supplier_type=stype,
-            prob_threshold=0.20,
-            blend_recent_weight=0.5,
-            trend_scale_min=0.6,
-            trend_scale_max=1.4,
+            prob_threshold=0.17,
+            blend_recent_weight=0.55,
+            trend_scale_min=0.7,
+            trend_scale_max=1.3,
             min_data_days=7,
-            fallback_prob=0.40,
-            fallback_ratio=0.7,
+            fallback_prob=0.30,
+            fallback_ratio=0.8,
         )
     elif stype == "volatile_many":
         return SupplierProfile(
@@ -125,13 +125,13 @@ def _analyze_supplier(
             volatility=avg_cv,
             avg_ship_prob=avg_ship_prob,
             supplier_type=stype,
-            prob_threshold=0.50,
-            blend_recent_weight=0.3,
+            prob_threshold=0.33,
+            blend_recent_weight=0.35,
             trend_scale_min=0.85,
             trend_scale_max=1.15,
-            min_data_days=14,
-            fallback_prob=0.50,
-            fallback_ratio=0.7,
+            min_data_days=10,
+            fallback_prob=0.40,
+            fallback_ratio=0.6,
         )
     else:
         return SupplierProfile(
@@ -140,12 +140,12 @@ def _analyze_supplier(
             avg_ship_prob=avg_ship_prob,
             volatility=avg_cv,
             supplier_type=stype,
-            prob_threshold=0.30,
-            blend_recent_weight=0.4,
-            trend_scale_min=0.7,
-            trend_scale_max=1.3,
-            min_data_days=14,
-            fallback_prob=0.50,
+            prob_threshold=0.25,
+            blend_recent_weight=0.45,
+            trend_scale_min=0.75,
+            trend_scale_max=1.25,
+            min_data_days=10,
+            fallback_prob=0.35,
             fallback_ratio=0.7,
         )
 
@@ -417,8 +417,10 @@ def _adaptive_predict(
     """
     업체 프로파일에 따라 파라미터가 달라지는 예측.
 
-    stable_few: 7일전 값 비중 높음, 확률 threshold 낮음 → 과소예측 방지
-    volatile_many: 중앙값 비중 높음, 확률 threshold 높음 → 과다예측 방지
+    핵심 전략:
+    1. 같은 요일 데이터에서 출하 확률 계산
+    2. 확률이 threshold 이상이면 수량 예측
+    3. 수량은 가중 중앙값 기반 (최근 데이터에 더 높은 가중치)
     """
     cutoff = td - pd.Timedelta(days=1)
     past = series[series.index <= cutoff]
@@ -430,14 +432,19 @@ def _adaptive_predict(
     if data_span < profile.min_data_days:
         return 0, 0.0, "insufficient_data"
 
-    # 같은 요일 최근 6주 데이터 수집 (0 포함)
+    # 같은 요일 최근 8주 데이터 수집 (0 포함)
     wd_vals: list[float] = []
-    for w in range(1, 7):
+    wd_weights: list[float] = []
+    for w in range(1, 9):
         d = td - pd.Timedelta(weeks=w)
         if d in past.index:
             wd_vals.append(float(past[d]))
         elif d >= past.index.min():
             wd_vals.append(0.0)
+        else:
+            continue
+        # 최근 주에 더 높은 가중치 (지수 감소)
+        wd_weights.append(0.85 ** (w - 1))
 
     if not wd_vals:
         return 0, 0.0, "no_weekday_data"
@@ -449,26 +456,55 @@ def _adaptive_predict(
         return 0, ship_prob, f"low_prob({ship_prob:.0%}<{profile.prob_threshold:.0%})"
 
     active_vals = [v for v in wd_vals if v > 0]
-    median_all = float(np.median(wd_vals))
+    active_weights = [w for v, w in zip(wd_vals, wd_weights) if v > 0]
+
+    # 가중 평균 (최근 데이터 비중 높음)
+    if active_vals and active_weights:
+        w_sum = sum(active_weights)
+        weighted_avg = sum(v * w for v, w in zip(active_vals, active_weights)) / w_sum
+    else:
+        weighted_avg = 0.0
+
     median_active = float(np.median(active_vals)) if active_vals else 0.0
 
+    # 최근 2주 같은 요일 값
     d_7 = td - pd.Timedelta(weeks=1)
+    d_14 = td - pd.Timedelta(weeks=2)
     val_7 = float(past[d_7]) if d_7 in past.index else 0.0
+    val_14 = float(past[d_14]) if d_14 in past.index else 0.0
 
     rw = profile.blend_recent_weight
 
-    fp = profile.fallback_prob
-    fr = profile.fallback_ratio
+    # 최근 14일 전체 평균 (요일 무관) — 보조 지표
+    recent_14 = past.tail(14)
+    recent_active = recent_14[recent_14 > 0]
+    recent_avg = float(recent_active.mean()) if len(recent_active) > 0 else 0.0
 
+    # === 수량 결정 ===
     if val_7 > 0:
-        blended = val_7 * rw + median_active * (1 - rw)
+        # 7일전 값이 있으면: 7일전 + 가중평균 블렌딩
+        blended = val_7 * rw + weighted_avg * (1 - rw)
         predicted = max(1, int(round(blended)))
-        method = f"blend(7d={val_7:.0f},medA={median_active:.0f},rw={rw:.1f})"
+        method = f"blend(7d={val_7:.0f},wAvg={weighted_avg:.0f},rw={rw:.1f})"
         return predicted, ship_prob, method
 
-    if ship_prob >= fp and median_active > 0:
-        predicted = max(1, int(round(median_active * fr)))
-        method = f"fb(medA={median_active:.0f}*{fr:.1f},p={ship_prob:.0%})"
+    if val_14 > 0 and ship_prob >= 0.3:
+        # 14일전 값이 있으면: 14일전 + 가중평균 블렌딩 (약간 보수적)
+        blended = val_14 * (rw * 0.7) + weighted_avg * (1 - rw * 0.7)
+        predicted = max(1, int(round(blended)))
+        method = f"blend14(14d={val_14:.0f},wAvg={weighted_avg:.0f})"
+        return predicted, ship_prob, method
+
+    if ship_prob >= profile.fallback_prob and weighted_avg > 0:
+        # 최근 같은 요일에 출하 없지만, 전체적으로 출하 확률 높음
+        predicted = max(1, int(round(weighted_avg * profile.fallback_ratio)))
+        method = f"fb(wAvg={weighted_avg:.0f}*{profile.fallback_ratio:.1f},p={ship_prob:.0%})"
+        return predicted, ship_prob, method
+
+    if ship_prob >= 0.25 and recent_avg > 0:
+        # 마지막 안전망: 최근 활성 평균 기반
+        predicted = max(1, int(round(recent_avg * ship_prob)))
+        method = f"safe(rAvg={recent_avg:.0f}*p={ship_prob:.0%})"
         return predicted, ship_prob, method
 
     return 0, ship_prob, f"zero(7d=0,p={ship_prob:.0%})"

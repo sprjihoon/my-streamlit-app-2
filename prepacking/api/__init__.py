@@ -11,6 +11,7 @@ from .stock_routes import router as stock_router
 from .upload_routes import router as upload_router
 from .unwrap_routes import router as unwrap_router
 from .validation_routes import router as validation_router
+from .benchmark_routes import router as benchmark_router
 
 prepacking_router = APIRouter()
 prepacking_router.include_router(upload_router)
@@ -22,3 +23,4 @@ prepacking_router.include_router(location_router)
 prepacking_router.include_router(unwrap_router)
 prepacking_router.include_router(validation_router)
 prepacking_router.include_router(report_router)
+prepacking_router.include_router(benchmark_router)
