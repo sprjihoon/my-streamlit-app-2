@@ -122,11 +122,11 @@ def build_ml_predictions(
             train_y_cls.append(1 if actual_val > 0 else 0)
             train_y_reg.append(actual_val)
 
-        if time.time() - start_time > 8.0:
-            logger.warning("ML training data collection timeout, using %d samples", len(train_X))
+        if time.time() - start_time > 5.0:
+            logger.warning("ML data collection timeout at %.1fs, %d samples", time.time() - start_time, len(train_X))
             break
 
-    if len(train_X) < 20:
+    if len(train_X) < 20 or time.time() - start_time > 6.0:
         return {}
 
     X_train = np.array(train_X)
@@ -225,16 +225,17 @@ def _ensemble(stat_qty: int, ml_qty: int, ml_ship_prob: float) -> tuple[int, str
 def _create_classifier() -> Any:
     if _HAS_LGB:
         return lgb.LGBMClassifier(
-            n_estimators=50,
-            max_depth=4,
-            learning_rate=0.1,
+            n_estimators=30,
+            max_depth=3,
+            learning_rate=0.15,
             min_child_samples=5,
+            num_leaves=8,
             verbose=-1,
         )
     return GradientBoostingClassifier(
-        n_estimators=50,
-        max_depth=3,
-        learning_rate=0.1,
+        n_estimators=30,
+        max_depth=2,
+        learning_rate=0.15,
         min_samples_leaf=5,
     )
 
@@ -242,15 +243,16 @@ def _create_classifier() -> Any:
 def _create_regressor() -> Any:
     if _HAS_LGB:
         return lgb.LGBMRegressor(
-            n_estimators=50,
-            max_depth=4,
-            learning_rate=0.1,
+            n_estimators=30,
+            max_depth=3,
+            learning_rate=0.15,
             min_child_samples=5,
+            num_leaves=8,
             verbose=-1,
         )
     return GradientBoostingRegressor(
-        n_estimators=50,
-        max_depth=3,
-        learning_rate=0.1,
+        n_estimators=30,
+        max_depth=2,
+        learning_rate=0.15,
         min_samples_leaf=5,
     )

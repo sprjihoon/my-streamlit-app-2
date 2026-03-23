@@ -292,9 +292,12 @@ def predict_for_date(
     ml_results: dict[str, dict] = {}
     try:
         from prepacking.services.prediction.pipeline.ml_predictor import build_ml_predictions
-        if len(sku_series_map) >= 10:
+        sku_count = len(sku_series_map)
+        if 10 <= sku_count <= 200:
             ml_results = build_ml_predictions(sku_series_map, td_ts, stat_predictions)
-            logger.info("ML predictions generated for %d SKUs", len(ml_results))
+            logger.info("ML predictions generated for %d/%d SKUs", len(ml_results), sku_count)
+        else:
+            logger.info("ML skipped: %d SKUs (need 10-200)", sku_count)
     except Exception as exc:
         logger.warning("ML prediction failed, using stat only: %s", exc)
 
