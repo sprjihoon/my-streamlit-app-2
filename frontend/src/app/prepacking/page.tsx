@@ -9,12 +9,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 async function ppFetch<T = unknown>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers } as HeadersInit,
-    ...options,
-  });
+  const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
+  if (options?.body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(url, { ...options, headers });
   if (!res.ok) {
-    const text = await res.text();
+    const text = await res.text().catch(() => '');
     throw new Error(text || `API Error ${res.status}`);
   }
   return res.json();
