@@ -53,13 +53,14 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
             suppliers = [r[0] for r in cur.fetchall()]
 
     all_items: list[dict] = []
-    debug_stats: dict = {"suppliers_total": len(suppliers), "preds_total": 0, "preds_positive": 0, "errors": 0}
+    debug_stats: dict = {"suppliers_total": len(suppliers), "preds_total": 0, "preds_positive": 0, "errors": 0, "error_details": []}
     for sup in suppliers:
         try:
             preds = forecast_service.predict_for_date(sup, target)
         except Exception as exc:
-            logger.warning("forecast failed for supplier=%s: %s", sup, exc)
+            logger.warning("forecast failed for supplier=%s: %s", sup, exc, exc_info=True)
             debug_stats["errors"] += 1
+            debug_stats["error_details"].append(f"{sup}: {type(exc).__name__}: {exc}")
             continue
         debug_stats["preds_total"] += len(preds)
         for p in preds:
