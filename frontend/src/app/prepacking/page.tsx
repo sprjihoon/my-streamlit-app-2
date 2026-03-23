@@ -199,7 +199,7 @@ interface AiUsageReport {
 const TABS = [
   { key: 'upload', label: '업로드', icon: '📤' },
   { key: 'analysis', label: '분석', icon: '📊' },
-  { key: 'recommend', label: '추천', icon: '💡' },
+  { key: 'recommend', label: '작업지시', icon: '📋' },
   { key: 'execute', label: '실행', icon: '▶️' },
   { key: 'stock', label: '재고', icon: '📦' },
   { key: 'location', label: '로케이션', icon: '📍' },
@@ -905,139 +905,212 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
 }
 
 // ===========================================================================
-// TAB: 추천
+// TAB: 작업지시
 // ===========================================================================
-function RecommendTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
-  const [targetDate, setTargetDate] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [recs, setRecs] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
+interface WorkOrderItem {
+  supplier_name: string;
+  target_type: string;
+  target_name: string;
+  target_code: string;
+  combination_key: string;
+  predicted_qty: number;
+  confidence_score: number;
+  recent_7d_avg: number;
+  recent_30d_avg: number;
+  recent_same_weekday_avg: number;
+  weekday_basis: number;
+  frequency: number;
+}
 
-  const loadRecs = useCallback(async () => {
-    if (!supplierName) return;
+interface WorkOrderResult {
+  target_date: string;
+  weekday_name: string;
+  weekday_index: number;
+  supplier_filter: string;
+  total_items: number;
+  total_predicted_qty: number;
+  combination_count: number;
+  single_sku_count: number;
+  items: WorkOrderItem[];
+}
+
+function RecommendTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+
+  const [targetDate, setTargetDate] = useState(tomorrowStr);
+  const [result, setResult] = useState<WorkOrderResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'combination' | 'single_sku'>('all');
+
+  const generate = async () => {
+    if (!targetDate) { showToast('날짜를 선택해주세요', 'error'); return; }
     setLoading(true);
     try {
-      let q = `?supplier_name=${encodeURIComponent(supplierName)}`;
-      if (targetDate) q += `&target_date=${targetDate}`;
-      if (statusFilter) q += `&status=${statusFilter}`;
-      const data = await ppFetch<Recommendation[]>(`/pp/recommendations/${q}`);
-      setRecs(Array.isArray(data) ? data : []);
+      const data = await ppFetch<WorkOrderResult>('/pp/recommendations/work-order', {
+        method: 'POST',
+        body: JSON.stringify({ target_date: targetDate, supplier_name: supplierName }),
+      });
+      setResult(data);
+      if (data.total_items === 0) {
+        showToast('예측 데이터가 없습니다. 배송통계 파일을 먼저 업로드해주세요.', 'info');
+      } else {
+        showToast(`${data.weekday_name}요일 작업지시 생성 완료: ${data.total_items}건`, 'success');
+      }
     } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : '추천 목록 조회 실패', 'error');
+      showToast(e instanceof Error ? e.message : '작업지시 생성 실패', 'error');
     } finally {
       setLoading(false);
     }
-  }, [supplierName, targetDate, statusFilter, showToast]);
-
-  useEffect(() => { loadRecs(); }, [loadRecs]);
-
-  const generate = async () => {
-    if (!supplierName || !targetDate) { showToast('업체명과 대상일자를 입력해주세요', 'error'); return; }
-    setGenerating(true);
-    try {
-      await ppFetch('/pp/recommendations/generate', { method: 'POST', body: JSON.stringify({ supplier_name: supplierName, target_date: targetDate }) });
-      showToast('추천 생성 완료', 'success');
-      loadRecs();
-    } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : '추천 생성 실패', 'error');
-    } finally {
-      setGenerating(false);
-    }
   };
 
-  const handleAction = async (id: number, action: string) => {
-    const reason = prompt(`사유를 입력해주세요 (${action})`);
-    if (reason === null) return;
-    try {
-      await ppFetch(`/pp/recommendations/${id}/approve`, {
-        method: 'POST',
-        body: JSON.stringify({ action_type: action, reason, by: 'user', memo: '' }),
-      });
-      showToast(`${action} 처리 완료`, 'success');
-      loadRecs();
-    } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : '처리 실패', 'error');
-    }
-  };
+  const filtered = result?.items.filter((i) => {
+    if (typeFilter === 'combination') return i.target_type === 'combination';
+    if (typeFilter === 'single_sku') return i.target_type !== 'combination';
+    return true;
+  }) || [];
+
+  const confColor = (v: number) => v >= 0.7 ? '#16a34a' : v >= 0.4 ? '#f59e0b' : '#dc2626';
 
   return (
     <>
       <div style={card}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>💡 추천 생성 및 조회</h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>
+          📋 프리패킹 작업 지시서
+        </h3>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: '#6b7280' }}>
+          날짜를 선택하면 해당 요일의 과거 패턴을 분석하여 준비해야 할 조합과 수량을 예측합니다.
+          {!supplierName && ' 공급처를 선택하지 않으면 전체 업체 대상으로 생성됩니다.'}
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-          <div style={{ flex: '0 0 160px' }}>
-            <label style={labelStyle}>대상 일자</label>
+          <div style={{ flex: '0 0 180px' }}>
+            <label style={labelStyle}>대상 날짜</label>
             <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} style={inputStyle} />
           </div>
-          <div style={{ flex: '0 0 140px' }}>
-            <label style={labelStyle}>상태 필터</label>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
-              <option value="">전체</option>
-              <option value="recommended">추천</option>
-              <option value="approved">승인</option>
-              <option value="modified">수정</option>
-              <option value="held">보류</option>
-              <option value="rejected">거절</option>
-              <option value="executed">실행됨</option>
-            </select>
-          </div>
-          <button onClick={generate} disabled={generating} style={{ ...btnSuccess, opacity: generating ? 0.6 : 1 }}>
-            {generating ? '생성 중...' : '추천 생성'}
+          <button onClick={generate} disabled={loading} style={{ ...btnPrimary, padding: '10px 24px', fontSize: 15, opacity: loading ? 0.6 : 1 }}>
+            {loading ? '분석 중...' : '작업지시 생성'}
           </button>
-          <button onClick={loadRecs} style={btnOutline}>조회</button>
         </div>
       </div>
 
-      <div style={card}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>추천 목록</h3>
-        {loading ? <Spinner /> : recs.length === 0 ? <Empty message="추천 내역이 없습니다. 추천을 생성해주세요." /> : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>ID</th>
-                  <th style={thStyle}>SKU</th>
-                  <th style={thStyle}>상품명</th>
-                  <th style={thStyle}>추천 수량</th>
-                  <th style={thStyle}>신뢰도</th>
-                  <th style={thStyle}>리스크</th>
-                  <th style={thStyle}>사유</th>
-                  <th style={thStyle}>상태</th>
-                  <th style={thStyle}>작업</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recs.map((r, i) => (
-                  <tr key={r.recommendation_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{r.recommendation_id}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{r.target_code}</td>
-                    <td style={tdStyle}>{r.target_name}</td>
-                    <td style={{ ...tdStyle, fontWeight: 700, color: '#2563eb' }}>{r.predicted_qty}</td>
-                    <td style={{ ...tdStyle, minWidth: 120 }}>
-                      <ConfidenceBar value={r.confidence_score} color="#16a34a" />
-                    </td>
-                    <td style={{ ...tdStyle, minWidth: 120 }}>
-                      <ConfidenceBar value={r.risk_score} color={r.risk_score > 0.7 ? '#dc2626' : r.risk_score > 0.4 ? '#f59e0b' : '#16a34a'} />
-                    </td>
-                    <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.recommendation_reason}>{r.recommendation_reason}</td>
-                    <td style={tdStyle}><Badge status={r.status} /></td>
-                    <td style={tdStyle}>
-                      {(r.status === 'recommended' || r.status === 'pending') && (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button onClick={() => handleAction(r.recommendation_id, 'approve')} style={{ ...btnSuccess, padding: '4px 8px', fontSize: 11 }}>승인</button>
-                          <button onClick={() => handleAction(r.recommendation_id, 'hold')} style={{ ...btnWarning, padding: '4px 8px', fontSize: 11 }}>보류</button>
-                          <button onClick={() => handleAction(r.recommendation_id, 'reject')} style={{ ...btnDanger, padding: '4px 8px', fontSize: 11 }}>거절</button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {loading && <Spinner />}
+
+      {!loading && result && result.total_items > 0 && (
+        <>
+          {/* Summary cards */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div style={{ ...card, borderLeft: '4px solid #2563eb', flex: '1 1 200px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>대상일</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>
+                {result.target_date}
+                <span style={{ fontSize: 16, fontWeight: 700, color: '#2563eb', marginLeft: 8 }}>({result.weekday_name})</span>
+              </div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #16a34a', flex: '1 1 140px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>총 예측 수량</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{result.total_predicted_qty.toLocaleString()}</div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #7c3aed', flex: '1 1 120px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>조합</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#7c3aed' }}>{result.combination_count}</div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #f59e0b', flex: '1 1 120px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>단일 SKU</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{result.single_sku_count}</div>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Filter + table */}
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>작업 목록 ({filtered.length}건)</h3>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {([['all', '전체'], ['combination', '조합'], ['single_sku', '단일 SKU']] as const).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setTypeFilter(k)}
+                    style={{
+                      padding: '6px 14px', border: typeFilter === k ? '1px solid #2563eb' : '1px solid #d1d5db',
+                      background: typeFilter === k ? '#eff6ff' : '#fff', color: typeFilter === k ? '#2563eb' : '#6b7280',
+                      borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {filtered.length === 0 ? <Empty message="해당 유형의 항목이 없습니다." /> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, width: 40 }}>#</th>
+                      <th style={thStyle}>유형</th>
+                      {!supplierName && <th style={thStyle}>공급처</th>}
+                      <th style={thStyle}>상품/조합명</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>예측 수량</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>신뢰도</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>7일 평균</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>같은 요일 평균</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>출현 일수</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((item, i) => (
+                      <tr key={`${item.target_code}-${item.supplier_name}-${i}`} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                        <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
+                        <td style={tdStyle}>
+                          <span style={{
+                            padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
+                            background: item.target_type === 'combination' ? '#ede9fe' : '#fef3c7',
+                            color: item.target_type === 'combination' ? '#7c3aed' : '#92400e',
+                          }}>
+                            {item.target_type === 'combination' ? '조합' : 'SKU'}
+                          </span>
+                        </td>
+                        {!supplierName && <td style={{ ...tdStyle, fontSize: 12, color: '#6b7280' }}>{item.supplier_name}</td>}
+                        <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.target_name}>
+                          {item.target_name}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#2563eb' }}>
+                          {item.predicted_qty.toLocaleString()}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>
+                          <span style={{
+                            display: 'inline-block', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700,
+                            color: '#fff', background: confColor(item.confidence_score),
+                          }}>
+                            {(item.confidence_score * 100).toFixed(0)}%
+                          </span>
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.recent_7d_avg.toFixed(1)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.recent_same_weekday_avg.toFixed(1)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.frequency}일</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {!loading && result && result.total_items === 0 && (
+        <Empty message="예측 데이터가 없습니다. 배송통계 파일을 업로드한 후 다시 시도해주세요." />
+      )}
+
+      {!loading && !result && (
+        <div style={{ ...card, textAlign: 'center', padding: '48px 20px' }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>📋</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 8 }}>프리패킹 작업 지시서</div>
+          <div style={{ fontSize: 14, color: '#9ca3af', maxWidth: 400, margin: '0 auto' }}>
+            날짜를 선택하고 &quot;작업지시 생성&quot; 버튼을 누르면<br />
+            해당 요일 기반으로 준비해야 할 조합과 수량을 예측합니다.
+          </div>
+        </div>
+      )}
     </>
   );
 }

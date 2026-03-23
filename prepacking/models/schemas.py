@@ -48,6 +48,11 @@ class PPRecommendationRequest(BaseModel):
     source_upload_id: Optional[int] = None
 
 
+class PPWorkOrderRequest(BaseModel):
+    target_date: str
+    supplier_name: str = ""
+
+
 class PPApprovalRequest(BaseModel):
     action_type: str
     adjusted_qty: Optional[int] = None
