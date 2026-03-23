@@ -1,11 +1,15 @@
 """
-predictor — Baseline-first 예측기
-──────────────────────────────────
-원칙: ML은 walk-forward validation에서 baseline을 이긴 후에만 사용.
-현재 ML이 baseline을 이기지 못하므로 SeasonalNaive 기반 예측 사용.
+predictor — SeasonalNaive 기반 예측기
+──────────────────────────────────────
+핵심: 7일 전 같은 요일 값을 그대로 예측.
+7일 전에 출하 0이면 → 0, 20이면 → 20.
 
-핵심 수정: series에 출하 0인 날이 없으므로,
-같은 요일이 데이터 범위 내에 있으면 0으로 간주.
+이것이 가장 정확한 baseline이며, ML이 이를 이기기 전까지는
+이 방식을 사용한다.
+
+보조 로직:
+- 7일 전 데이터가 없으면 14일 전, 21일 전 순서로 폴백
+- 최근 4주 같은 요일 중앙값으로 이상치 보정
 """
 from __future__ import annotations
 
@@ -81,8 +85,8 @@ def predict_for_date(
         if series is None or series.empty:
             continue
 
-        predicted_qty, ship_prob, method_detail = _smart_baseline_predict(
-            series, td_ts, weeks_back
+        predicted_qty, ship_prob, method_detail = _seasonal_naive_predict(
+            series, td_ts
         )
 
         daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
@@ -143,10 +147,7 @@ def predict_for_date(
 def _daily_to_filled_series(
     daily: dict, td_ts: pd.Timestamp, lookback_days: int
 ) -> pd.Series | None:
-    """
-    daily dict를 연속 날짜 시계열로 변환.
-    출하가 없는 날도 0으로 채움 — 출하 확률 계산에 필수.
-    """
+    """daily dict를 연속 날짜 시계열로 변환. 0인 날도 포함."""
     if not daily:
         return None
 
@@ -166,14 +167,18 @@ def _daily_to_filled_series(
     return filled
 
 
-def _smart_baseline_predict(
+def _seasonal_naive_predict(
     series: pd.Series,
     td: pd.Timestamp,
-    weeks_back: int = 8,
 ) -> tuple[int, float, str]:
     """
-    스마트 baseline 예측.
-    series는 연속 날짜 (0 포함)이므로 출하 확률이 정확하게 계산됨.
+    SeasonalNaive 예측 — 같은 요일 최근 값 기반.
+
+    1차: 7일 전 값 사용
+    2차: 7일 전이 0이면, 최근 4주 같은 요일 중앙값 사용
+    3차: 4주 모두 0이면 → 0
+
+    이상치 보정: 7일 전 값이 4주 중앙값의 3배 이상이면 중앙값 사용.
     """
     cutoff = td - pd.Timedelta(days=1)
     past = series[series.index <= cutoff]
@@ -181,65 +186,46 @@ def _smart_baseline_predict(
     if past.empty:
         return 0, 0.0, "no_data"
 
-    # === 같은 요일 데이터 수집 (0 포함) ===
-    wd_data: list[tuple[int, float]] = []
-    for w in range(1, weeks_back + 1):
+    # 같은 요일 최근 4주 데이터 수집 (0 포함)
+    wd_vals: list[float] = []
+    for w in range(1, 5):
         d = td - pd.Timedelta(weeks=w)
         if d in past.index:
-            wd_data.append((w, float(past[d])))
+            wd_vals.append(float(past[d]))
         elif d >= past.index.min():
-            wd_data.append((w, 0.0))
+            wd_vals.append(0.0)
 
-    if not wd_data:
+    if not wd_vals:
         return 0, 0.0, "no_weekday_data"
 
-    # === 출하 확률 (0 포함이므로 정확) ===
-    total_weeks = len(wd_data)
-    ship_weeks = len([d for d in wd_data if d[1] > 0])
-    ship_prob = ship_weeks / total_weeks
+    # 출하 확률
+    ship_count = len([v for v in wd_vals if v > 0])
+    ship_prob = ship_count / len(wd_vals)
 
-    if ship_prob == 0:
-        return 0, 0.0, "zero_ship_prob"
+    # 7일 전 값 (primary)
+    d_7 = td - pd.Timedelta(weeks=1)
+    val_7 = float(past[d_7]) if d_7 in past.index else 0.0
 
-    # === 가중 평균 (출하가 있는 주만, 최근에 높은 가중치) ===
-    active_data = [(w, q) for w, q in wd_data if q > 0]
-    if not active_data:
-        return 0, 0.0, "no_active_weekday"
+    # 4주 중앙값
+    median_4w = float(np.median(wd_vals))
 
-    weights = []
-    qtys = []
-    for weeks_ago, qty in active_data:
-        weight = 1.0 / weeks_ago
-        weights.append(weight)
-        qtys.append(qty)
-
-    weighted_avg = float(np.average(qtys, weights=weights))
-
-    # === 트렌드 반영 ===
-    recent_2w = [q for w, q in active_data if w <= 2]
-    older_2w = [q for w, q in active_data if w > 2]
-
-    trend_factor = 1.0
-    if recent_2w and older_2w:
-        recent_mean = np.mean(recent_2w)
-        older_mean = np.mean(older_2w)
-        if older_mean > 0:
-            raw_trend = recent_mean / older_mean
-            trend_factor = max(0.5, min(1.5, raw_trend))
-
-    adjusted_qty = weighted_avg * trend_factor
-
-    # === 출하 확률 적용 ===
-    if ship_prob >= 0.5:
-        final_qty = adjusted_qty
-    elif ship_prob >= 0.25:
-        final_qty = adjusted_qty * ship_prob * 2
+    # 예측 결정
+    if val_7 > 0:
+        # 이상치 보정: 7일 전 값이 중앙값의 3배 이상이면 중앙값 사용
+        if median_4w > 0 and val_7 > median_4w * 3:
+            predicted = int(round(median_4w))
+            method = f"seasonal_capped(7d={val_7:.0f},med={median_4w:.0f})"
+        else:
+            predicted = int(round(val_7))
+            method = f"seasonal_7d({val_7:.0f})"
+    elif median_4w > 0:
+        # 7일 전이 0이지만 다른 주에 출하가 있었음
+        predicted = int(round(median_4w))
+        method = f"median_4w({median_4w:.0f},prob={ship_prob:.0%})"
     else:
-        final_qty = adjusted_qty * ship_prob
+        predicted = 0
+        method = "zero_all_weeks"
 
-    predicted = max(0, int(round(final_qty)))
-
-    method = f"wd_weighted(prob={ship_prob:.0%},trend={trend_factor:.2f},wAvg={weighted_avg:.1f})"
     return predicted, ship_prob, method
 
 
