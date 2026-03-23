@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import statistics
 
 from prepacking.services.analysis import repeat_combination_service, repeat_sku_service, weekday_pattern_service
 from prepacking.services.prediction import confidence_service
+
+logger = logging.getLogger(__name__)
 
 
 def _weighted_moving_average(values: list[float]) -> float:
@@ -40,6 +43,10 @@ def predict_for_date(
     )
     combos = repeat_combination_service.load_repeat_combo_daily_totals(
         supplier_name, target_date, lookback_days
+    )
+    logger.warning(
+        "predict_for_date: supplier=%s target=%s skus=%d combos=%d lookback=%d",
+        supplier_name, target_date, len(skus), len(combos), lookback_days,
     )
     out: list[dict] = []
     for row in skus:

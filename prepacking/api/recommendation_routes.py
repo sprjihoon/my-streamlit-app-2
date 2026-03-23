@@ -53,16 +53,20 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
             suppliers = [r[0] for r in cur.fetchall()]
 
     all_items: list[dict] = []
+    debug_stats: dict = {"suppliers_total": len(suppliers), "preds_total": 0, "preds_positive": 0, "errors": 0}
     for sup in suppliers:
         try:
             preds = forecast_service.predict_for_date(sup, target)
         except Exception as exc:
             logger.warning("forecast failed for supplier=%s: %s", sup, exc)
+            debug_stats["errors"] += 1
             continue
+        debug_stats["preds_total"] += len(preds)
         for p in preds:
             qty = int(p.get("predicted_qty", 0))
             if qty <= 0:
                 continue
+            debug_stats["preds_positive"] += 1
             all_items.append({
                 "supplier_name": sup,
                 "target_type": p.get("target_type", "single_sku"),
@@ -77,6 +81,7 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
                 "weekday_basis": weekday_idx,
                 "frequency": int(p.get("frequency", 0)),
             })
+    logger.warning("work-order debug: %s", debug_stats)
 
     all_items.sort(key=lambda x: (-x["predicted_qty"], -x["confidence_score"]))
 
@@ -94,6 +99,7 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
         "combination_count": len(combo_items),
         "single_sku_count": len(sku_items),
         "items": all_items,
+        "_debug": debug_stats,
     }
 
 
