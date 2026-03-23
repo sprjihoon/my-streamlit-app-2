@@ -197,12 +197,23 @@ def run_backtest(
     total_items = len(predictions) + len(missed_items)
     acc_sku_match = (matched / total_items * 100) if total_items > 0 else 0.0
 
-    # 3) WAPE — 개별 수량 오차 합계 / 실제 합계
-    wape_pct = (total_abs_error / total_actual * 100) if total_actual > 0 else 0.0
-    acc_wape = max(0.0, 100.0 - wape_pct)
+    # 3) 수량 근접률 — 예측이 실제의 ±50% 이내인 SKU 비율
+    qty_close_count = 0
+    for p in predictions:
+        if p["actual_qty"] > 0:
+            ratio = p["predicted_qty"] / p["actual_qty"]
+            if 0.5 <= ratio <= 1.5:
+                qty_close_count += 1
+        elif p["predicted_qty"] == 0:
+            qty_close_count += 1
+    items_with_data = len([p for p in predictions if p["actual_qty"] > 0 or p["predicted_qty"] > 0])
+    acc_qty_close = (qty_close_count / max(items_with_data, 1)) * 100
 
-    # 종합 정확도 = 총합 40% + SKU매칭 40% + WAPE 20%
-    accuracy = acc_volume * 0.4 + acc_sku_match * 0.4 + acc_wape * 0.2
+    # WAPE (참고용)
+    wape_pct = (total_abs_error / total_actual * 100) if total_actual > 0 else 0.0
+
+    # 종합 정확도 = 총합 30% + SKU매칭 40% + 수량근접 30%
+    accuracy = acc_volume * 0.3 + acc_sku_match * 0.4 + acc_qty_close * 0.3
 
     # 참고용 MAPE
     items_with_actual = [p for p in predictions if p["actual_qty"] > 0]
@@ -229,7 +240,8 @@ def run_backtest(
             "accuracy": round(accuracy, 1),
             "acc_volume": round(acc_volume, 1),
             "acc_sku_match": round(acc_sku_match, 1),
-            "acc_wape": round(acc_wape, 1),
+            "acc_qty_close": round(acc_qty_close, 1),
+            "wape_pct": round(wape_pct, 1),
             "avg_mape": round(avg_mape, 1),
             "total_predicted": total_predicted,
             "total_actual": total_actual,
