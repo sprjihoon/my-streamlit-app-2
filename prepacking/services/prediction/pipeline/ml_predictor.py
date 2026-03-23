@@ -33,21 +33,29 @@ def build_ml_predictions(
     sku_series_map: dict[str, pd.Series],
     td_ts: pd.Timestamp,
     stat_predictions: dict[str, int],
+    max_train_skus: int = 80,
 ) -> dict[str, dict]:
     """
     ML 예측을 생성하여 통계 예측과 앙상블한다.
-
-    Returns: {series_key: {"ml_qty": int, "stat_qty": int, "final_qty": int,
-                           "ml_ship_prob": float, "model_used": str}}
+    속도를 위해 학습 SKU 수를 제한한다.
     """
+    import time
+    start_time = time.time()
+
     feature_names = get_feature_names()
     train_X, train_y_cls, train_y_reg = [], [], []
 
-    cutoff = td_ts - pd.Timedelta(days=1)
+    # 활성 SKU만 선택 (최근 출하가 있는 것 우선)
+    active_keys = sorted(
+        sku_series_map.keys(),
+        key=lambda k: float(sku_series_map[k].tail(30).sum()),
+        reverse=True,
+    )[:max_train_skus]
 
-    # 학습 데이터 수집: 과거 8주의 같은 요일 데이터
-    for series_key, series in sku_series_map.items():
-        for w in range(2, 10):
+    # 학습 데이터: 최근 4주만 (속도 최적화)
+    for series_key in active_keys:
+        series = sku_series_map[series_key]
+        for w in range(2, 6):
             past_date = td_ts - pd.Timedelta(weeks=w)
             if past_date < series.index.min() + pd.Timedelta(days=14):
                 continue
@@ -59,6 +67,10 @@ def build_ml_predictions(
             train_X.append(feat_vec)
             train_y_cls.append(1 if actual_val > 0 else 0)
             train_y_reg.append(actual_val)
+
+        if time.time() - start_time > 8.0:
+            logger.warning("ML training data collection timeout, using %d samples", len(train_X))
+            break
 
     if len(train_X) < 20:
         return {}
@@ -86,10 +98,14 @@ def build_ml_predictions(
             logger.warning("Regressor training failed: %s", e)
             reg = None
 
-    # 예측 생성
+    logger.info("ML trained: clf=%d samples, reg=%d samples, elapsed=%.1fs",
+                len(train_X), int(ship_mask.sum()) if reg else 0, time.time() - start_time)
+
+    # 예측 생성 (활성 SKU만)
     results: dict[str, dict] = {}
 
-    for series_key, series in sku_series_map.items():
+    for series_key in active_keys:
+        series = sku_series_map[series_key]
         feats = compute_features_for_date(series, td_ts)
         feat_vec = np.array([[feats.get(fn, 0.0) for fn in feature_names]])
 
