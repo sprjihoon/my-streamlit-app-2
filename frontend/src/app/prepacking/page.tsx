@@ -11,10 +11,15 @@ async function ppFetch<T = unknown>(endpoint: string, options?: RequestInit): Pr
   const url = `${API_BASE}${endpoint}`;
   const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
   if (options?.body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(url, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...options, headers });
+  } catch (err) {
+    throw new Error(`[${endpoint}] 네트워크 오류: ${err instanceof Error ? err.message : String(err)}`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(text || `API Error ${res.status}`);
+    throw new Error(`[${endpoint}] ${text || `API Error ${res.status}`}`);
   }
   return res.json();
 }
