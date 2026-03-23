@@ -149,21 +149,45 @@ interface MoveRecord {
   action_at: string;
 }
 
-interface AccuracySummary {
-  avg_accuracy: number;
-  avg_mape: number;
-  total_validated: number;
-  matched_count: number;
-  over_count: number;
-  under_count: number;
-  missed_count: number;
+interface BacktestItem {
+  target_type: string;
+  target_name: string;
+  option_name: string;
+  sku_code: string;
+  barcode: string;
+  items?: SkuDetail[];
+  predicted_qty: number;
+  stat_qty: number;
+  ml_qty: number;
+  model_type: string;
+  actual_qty: number;
+  error_abs: number;
+  error_pct: number;
+  result_type: string;
+  confidence_score: number;
+  frequency: number;
 }
 
-interface FailureAnalysis {
-  total_failures: number;
-  by_reason: Record<string, number>;
-  top_failed_skus: { sku_or_name: string; error_weight: number }[];
-  improvement_suggestions: string[];
+interface BacktestResult {
+  target_date: string;
+  weekday_name: string;
+  supplier_name: string;
+  summary: {
+    accuracy: number;
+    avg_mape: number;
+    total_predicted: number;
+    total_actual: number;
+    total_error: number;
+    item_count: number;
+    matched: number;
+    over: number;
+    under: number;
+    missed: number;
+    ml_count: number;
+    stat_count: number;
+  };
+  items: BacktestItem[];
+  missed_items: BacktestItem[];
 }
 
 interface OverviewReport {
@@ -1692,144 +1716,218 @@ function LocationTab({ supplierName, showToast }: { supplierName: string; showTo
 // TAB: 검증
 // ===========================================================================
 function ValidationTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
-  const [accuracy, setAccuracy] = useState<AccuracySummary | null>(null);
-  const [failures, setFailures] = useState<FailureAnalysis | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [running, setRunning] = useState(false);
   const [targetDate, setTargetDate] = useState('');
-  const [days, setDays] = useState(30);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<BacktestResult | null>(null);
+  const [filterType, setFilterType] = useState<'all' | 'matched' | 'over' | 'under' | 'missed'>('all');
 
-  const loadData = useCallback(async () => {
-    if (!supplierName) return;
+  const runBacktest = async () => {
+    if (!supplierName) { showToast('공급처를 선택해주세요', 'error'); return; }
+    if (!targetDate) { showToast('검증할 과거 날짜를 선택해주세요', 'error'); return; }
     setLoading(true);
+    setResult(null);
     try {
-      const [acc, fail] = await Promise.all([
-        ppFetch<AccuracySummary>(`/pp/validation/accuracy?supplier_name=${encodeURIComponent(supplierName)}&days=${days}`),
-        ppFetch<FailureAnalysis>(`/pp/validation/failures?supplier_name=${encodeURIComponent(supplierName)}&days=${days}`),
-      ]);
-      setAccuracy(acc);
-      setFailures(fail);
+      const data = await ppFetch<BacktestResult>('/pp/validation/backtest', {
+        method: 'POST',
+        body: JSON.stringify({ supplier_name: supplierName, target_date: targetDate }),
+      });
+      setResult(data);
+      showToast(`백테스트 완료 — 정확도 ${data.summary.accuracy}%`, 'success');
     } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : '검증 데이터 조회 실패', 'error');
+      showToast(e instanceof Error ? e.message : '백테스트 실패', 'error');
     } finally {
       setLoading(false);
     }
-  }, [supplierName, days, showToast]);
+  };
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const filtered = result ? [
+    ...(filterType === 'all' ? result.items : result.items.filter(it => it.result_type === filterType)),
+    ...(filterType === 'all' || filterType === 'missed' ? result.missed_items : []),
+  ] : [];
 
-  const runValidation = async () => {
-    if (!supplierName || !targetDate) { showToast('업체명과 대상일자를 입력해주세요', 'error'); return; }
-    setRunning(true);
-    try {
-      await ppFetch('/pp/validation/run', { method: 'POST', body: JSON.stringify({ supplier_name: supplierName, target_date: targetDate }) });
-      showToast('검증 실행 완료', 'success');
-      loadData();
-    } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : '검증 실행 실패', 'error');
-    } finally {
-      setRunning(false);
+  const resultColor = (type: string) => {
+    switch (type) {
+      case 'matched': return { bg: '#d1fae5', fg: '#065f46', label: '정확' };
+      case 'over': return { bg: '#fef3c7', fg: '#92400e', label: '과다' };
+      case 'under': return { bg: '#fee2e2', fg: '#991b1b', label: '과소' };
+      case 'missed': return { bg: '#f3f4f6', fg: '#6b7280', label: '미예측' };
+      default: return { bg: '#f3f4f6', fg: '#6b7280', label: type };
     }
   };
 
   return (
     <>
       <div style={card}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>✅ 예측 검증</h3>
+        <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700 }}>🔬 예측 백테스트</h3>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: '#6b7280' }}>
+          과거 특정일을 선택하면, 그 날의 예측값과 실제 출하 데이터를 비교하여 예측 정확도를 검증합니다.
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-          <div style={{ flex: '0 0 160px' }}>
-            <label style={labelStyle}>대상 일자</label>
-            <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} style={inputStyle} />
+          <div style={{ flex: '0 0 180px' }}>
+            <label style={labelStyle}>검증 대상일 (과거)</label>
+            <input
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+              max={new Date(Date.now() - 86400000).toISOString().slice(0, 10)}
+              style={inputStyle}
+            />
           </div>
-          <div style={{ flex: '0 0 100px' }}>
-            <label style={labelStyle}>조회 기간 (일)</label>
-            <input type="number" value={days} onChange={(e) => setDays(Number(e.target.value))} min={1} style={inputStyle} />
-          </div>
-          <button onClick={runValidation} disabled={running} style={{ ...btnPrimary, opacity: running ? 0.6 : 1 }}>
-            {running ? '실행 중...' : '검증 실행'}
+          <button onClick={runBacktest} disabled={loading} style={{ ...btnPrimary, opacity: loading ? 0.6 : 1 }}>
+            {loading ? '분석 중...' : '백테스트 실행'}
           </button>
-          <button onClick={loadData} style={btnOutline}>조회</button>
         </div>
       </div>
 
-      {loading ? <Spinner /> : (
+      {loading && <Spinner />}
+
+      {!loading && result && (
         <>
-          {accuracy && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-              <div style={statCard('#2563eb')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>평균 정확도</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: accuracy.avg_accuracy >= 0.8 ? '#16a34a' : accuracy.avg_accuracy >= 0.5 ? '#f59e0b' : '#dc2626' }}>
-                  {(accuracy.avg_accuracy * 100).toFixed(1)}%
+          {/* Summary cards */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div style={{ ...card, borderLeft: `4px solid ${result.summary.accuracy >= 80 ? '#16a34a' : result.summary.accuracy >= 50 ? '#f59e0b' : '#dc2626'}`, flex: '1 1 200px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>예측 정확도</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: result.summary.accuracy >= 80 ? '#16a34a' : result.summary.accuracy >= 50 ? '#f59e0b' : '#dc2626' }}>
+                {result.summary.accuracy}%
+              </div>
+              <div style={{ fontSize: 11, color: '#9ca3af' }}>MAPE {result.summary.avg_mape}%</div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #2563eb', flex: '1 1 140px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{result.target_date} ({result.weekday_name})</div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 4 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: '#9ca3af' }}>예측</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#2563eb' }}>{result.summary.total_predicted.toLocaleString()}</div>
                 </div>
-              </div>
-              <div style={statCard('#16a34a')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 검증</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{accuracy.total_validated}</div>
-              </div>
-              <div style={statCard('#16a34a')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>정확</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{accuracy.matched_count}</div>
-              </div>
-              <div style={statCard('#f59e0b')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>과다 예측</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{accuracy.over_count}</div>
-              </div>
-              <div style={statCard('#dc2626')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>과소 예측</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{accuracy.under_count}</div>
+                <div>
+                  <div style={{ fontSize: 11, color: '#9ca3af' }}>실제</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>{result.summary.total_actual.toLocaleString()}</div>
+                </div>
               </div>
             </div>
-          )}
+            <div style={{ ...card, borderLeft: '4px solid #16a34a', flex: '1 1 90px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>정확</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{result.summary.matched}</div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #f59e0b', flex: '1 1 90px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>과다</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{result.summary.over}</div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #dc2626', flex: '1 1 90px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>과소</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{result.summary.under}</div>
+            </div>
+            <div style={{ ...card, borderLeft: '4px solid #6b7280', flex: '1 1 90px', marginBottom: 0, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>미예측</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#6b7280' }}>{result.summary.missed}</div>
+            </div>
+          </div>
 
+          {/* Model usage */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, fontSize: 12 }}>
+            <span style={{ padding: '4px 10px', borderRadius: 12, background: '#dbeafe', color: '#2563eb', fontWeight: 600 }}>
+              ML {result.summary.ml_count}건
+            </span>
+            <span style={{ padding: '4px 10px', borderRadius: 12, background: '#f3f4f6', color: '#6b7280', fontWeight: 600 }}>
+              통계 {result.summary.stat_count}건
+            </span>
+          </div>
+
+          {/* Detail table */}
           <div style={card}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>실패 분석</h3>
-            {!failures || failures.total_failures === 0 ? <Empty message="실패 기록이 없습니다." /> : (
-              <>
-                <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>사유별 분포</h4>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {Object.entries(failures.by_reason).map(([reason, count]) => (
-                      <div key={reason} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 16px', textAlign: 'center' }}>
-                        <div style={{ fontSize: 12, color: '#6b7280' }}>{reason}</div>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>{count}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {failures.top_failed_skus.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>실패 상위 SKU</h4>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr>
-                            <th style={thStyle}>SKU/상품명</th>
-                            <th style={thStyle}>오차 가중치</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {failures.top_failed_skus.map((f, i) => (
-                            <tr key={f.sku_or_name} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                              <td style={{ ...tdStyle, fontWeight: 600 }}>{f.sku_or_name}</td>
-                              <td style={{ ...tdStyle, color: '#dc2626', fontWeight: 700 }}>{f.error_weight.toFixed(1)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-                {failures.improvement_suggestions.length > 0 && (
-                  <div>
-                    <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>개선 제안</h4>
-                    <ul style={{ margin: 0, paddingLeft: 20 }}>
-                      {failures.improvement_suggestions.map((s, i) => (
-                        <li key={i} style={{ fontSize: 13, color: '#374151', marginBottom: 4 }}>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>상세 비교 ({filtered.length}건)</h3>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {([['all', '전체'], ['matched', '정확'], ['over', '과다'], ['under', '과소'], ['missed', '미예측']] as const).map(([k, label]) => (
+                  <button
+                    key={k}
+                    onClick={() => setFilterType(k)}
+                    style={{
+                      padding: '5px 12px', border: filterType === k ? '1px solid #2563eb' : '1px solid #d1d5db',
+                      background: filterType === k ? '#eff6ff' : '#fff', color: filterType === k ? '#2563eb' : '#6b7280',
+                      borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {filtered.length === 0 ? <Empty message="해당 조건의 항목이 없습니다." /> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, width: 36 }}>#</th>
+                      <th style={thStyle}>결과</th>
+                      <th style={thStyle}>유형</th>
+                      <th style={thStyle}>상품/조합명</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>예측</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>실제</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>오차</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>오차율</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>모델</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((item, i) => {
+                      const rc = resultColor(item.result_type);
+                      return (
+                        <tr key={`${item.target_name}-${i}`} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+                          <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
+                          <td style={tdStyle}>
+                            <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700, background: rc.bg, color: rc.fg }}>
+                              {rc.label}
+                            </span>
+                          </td>
+                          <td style={tdStyle}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
+                              background: item.target_type === 'combination' ? '#ede9fe' : item.target_type === 'missed' ? '#f3f4f6' : '#fef3c7',
+                              color: item.target_type === 'combination' ? '#7c3aed' : item.target_type === 'missed' ? '#6b7280' : '#92400e',
+                            }}>
+                              {item.target_type === 'combination' ? '조합' : item.target_type === 'missed' ? '-' : 'SKU'}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 280 }}>
+                            <span title={`${item.target_name} ${item.option_name || ''}`.trim()} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.target_name}{item.option_name ? ` / ${item.option_name}` : ''}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#2563eb' }}>
+                            {item.predicted_qty.toLocaleString()}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#111827' }}>
+                            {item.actual_qty.toLocaleString()}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: item.error_abs === 0 ? '#16a34a' : '#dc2626' }}>
+                            {item.result_type === 'over' ? '+' : item.result_type === 'under' ? '-' : ''}{item.error_abs}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            <span style={{
+                              display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                              background: item.error_pct <= 10 ? '#d1fae5' : item.error_pct <= 30 ? '#fef3c7' : '#fee2e2',
+                              color: item.error_pct <= 10 ? '#065f46' : item.error_pct <= 30 ? '#92400e' : '#991b1b',
+                            }}>
+                              {item.error_pct}%
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            {item.model_type ? (
+                              <span style={{
+                                padding: '2px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700,
+                                background: item.model_type === 'ml' ? '#dbeafe' : '#f3f4f6',
+                                color: item.model_type === 'ml' ? '#2563eb' : '#6b7280',
+                              }}>
+                                {item.model_type === 'ml' ? 'ML' : '통계'}
+                              </span>
+                            ) : '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </>
