@@ -1,15 +1,13 @@
 """
 forecast_service — 경량 통계 예측
 ─────────────────────────────────
-핵심 아이디어: "출하가 있는 날의 평균 수량" × "해당 요일 출하 확률"
+핵심: "출하가 있는 날의 평균 수량"을 예측값으로 사용.
+작업지시서 목적 = 출하 발생 시 몇 개 준비할지 → 확률 곱하지 않음.
 
-시그널:
-  1. 최근 14일 중 출하일만의 평균 수량 (가중치 높음)
-  2. 최근 30일 중 출하일만의 평균 수량
-  3. 같은 요일 최근 8주 중 출하가 있었던 날의 평균 수량
-  4. 해당 요일에 출하가 발생할 확률 (최근 8주 기준)
-
-최종 예측 = 가중평균(시그널들) × 요일 출하 확률
+시그널 (출하일만의 평균):
+  1. 최근 14일 출하일 평균 (가중치 4) — 최근 트렌드
+  2. 최근 30일 출하일 평균 (가중치 2) — 중기 트렌드
+  3. 같은 요일 최근 8주 출하일 평균 (가중치 3) — 요일 패턴
 """
 from __future__ import annotations
 
@@ -23,8 +21,8 @@ from prepacking.services.prediction import confidence_service
 logger = logging.getLogger(__name__)
 
 
-def _active_avg(daily: dict[str, int], td: dt.date, days: int) -> tuple[float, int, int]:
-    """최근 N일 중 출하일만의 평균, 출하일수, 전체일수를 반환."""
+def _active_avg(daily: dict[str, int], td: dt.date, days: int) -> tuple[float, int]:
+    """최근 N일 중 출하일만의 평균과 출하일수를 반환."""
     vals = []
     for i in range(1, days + 1):
         d = td - dt.timedelta(days=i)
@@ -32,27 +30,24 @@ def _active_avg(daily: dict[str, int], td: dt.date, days: int) -> tuple[float, i
         if v > 0:
             vals.append(float(v))
     avg = sum(vals) / len(vals) if vals else 0.0
-    return avg, len(vals), days
+    return avg, len(vals)
 
 
-def _same_weekday_stats(daily: dict[str, int], td: dt.date, weeks: int) -> tuple[float, float]:
-    """같은 요일 최근 N주: (출하가 있던 날의 평균 수량, 출하 확률)."""
-    vals = []
+def _same_weekday_avg(daily: dict[str, int], td: dt.date, weeks: int) -> float:
+    """같은 요일 최근 N주 중 출하가 있던 날만의 평균 수량."""
+    nonzero = []
     for w in range(1, weeks + 1):
         past_d = td - dt.timedelta(weeks=w)
-        vals.append(daily.get(past_d.isoformat(), 0))
-    nonzero = [float(v) for v in vals if v > 0]
-    avg = sum(nonzero) / len(nonzero) if nonzero else 0.0
-    prob = len(nonzero) / len(vals) if vals else 0.0
-    return avg, prob
+        v = daily.get(past_d.isoformat(), 0)
+        if v > 0:
+            nonzero.append(float(v))
+    return sum(nonzero) / len(nonzero) if nonzero else 0.0
 
 
 def _predict_qty(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> dict:
-    """경량 통계 예측."""
-    avg_14, active_14, _ = _active_avg(daily, td, 14)
-    avg_30, active_30, _ = _active_avg(daily, td, 30)
-    avg_60, active_60, _ = _active_avg(daily, td, 60)
-    wd_avg, wd_prob = _same_weekday_stats(daily, td, weeks_back)
+    avg_14, active_14 = _active_avg(daily, td, 14)
+    avg_30, active_30 = _active_avg(daily, td, 30)
+    wd_avg = _same_weekday_avg(daily, td, weeks_back)
 
     signals: list[tuple[float, float]] = []
 
@@ -60,8 +55,6 @@ def _predict_qty(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> dic
         signals.append((avg_14, 4.0))
     if active_30 >= 2:
         signals.append((avg_30, 2.0))
-    if active_60 >= 3:
-        signals.append((avg_60, 1.0))
     if wd_avg > 0:
         signals.append((wd_avg, 3.0))
 
@@ -69,25 +62,17 @@ def _predict_qty(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> dic
         total_qty = sum(daily.values())
         active_total = len([v for v in daily.values() if v > 0])
         if active_total > 0:
-            raw = total_qty / active_total
+            predicted_qty = max(1, int(round(total_qty / active_total)))
         else:
-            raw = 0.0
-        return {"raw_avg": raw, "wd_prob": 0.0, "predicted_qty": 0,
+            predicted_qty = 0
+        return {"predicted_qty": predicted_qty,
                 "avg_14": avg_14, "avg_30": avg_30, "avg_same_wd": wd_avg}
 
     total_w = sum(w for _, w in signals)
-    raw_avg = sum(v * w for v, w in signals) / total_w
-
-    if wd_prob <= 0:
-        overall_active, _, total_days = _active_avg(daily, td, 60)
-        wd_prob = active_60 / 60.0 if active_60 > 0 else 0.0
-
-    predicted = raw_avg * max(wd_prob, 0.1)
+    predicted = sum(v * w for v, w in signals) / total_w
     predicted_qty = max(0, int(round(predicted)))
 
     return {
-        "raw_avg": round(raw_avg, 2),
-        "wd_prob": round(wd_prob, 3),
         "predicted_qty": predicted_qty,
         "avg_14": avg_14,
         "avg_30": avg_30,
@@ -133,7 +118,6 @@ def predict_for_date(
         data_days = weekday_pattern_service.distinct_active_days(
             daily, target_date, lookback_days
         )
-        _, active_30, _ = _active_avg(daily, td, 30)
         var = _variability_coeff(daily, td, 30)
         base_conf = confidence_service.calculate_confidence(
             row["frequency"], var, data_days
