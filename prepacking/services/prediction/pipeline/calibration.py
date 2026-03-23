@@ -21,17 +21,16 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 그리드서치 파라미터 공간
+# 그리드서치 파라미터 공간 (축소 — 속도 우선)
 PARAM_GRID = {
-    "prob_threshold": [0.17, 0.25, 0.33, 0.40, 0.50],
-    "blend_recent_weight": [0.2, 0.3, 0.4, 0.5, 0.6],
-    "fallback_prob": [0.40, 0.50, 0.60, 0.67],
-    "fallback_ratio": [0.3, 0.5, 0.7, 0.9],
+    "prob_threshold": [0.17, 0.33, 0.50],
+    "blend_recent_weight": [0.3, 0.5],
+    "fallback_prob": [0.40, 0.50, 0.67],
+    "fallback_ratio": [0.3, 0.5, 0.7],
     "trend_scale_range": [
         (0.85, 1.15),
         (0.7, 1.3),
-        (0.6, 1.4),
-        (1.0, 1.0),  # 트렌드 비활성화
+        (1.0, 1.0),
     ],
 }
 
@@ -39,7 +38,7 @@ PARAM_GRID = {
 def calibrate_supplier(
     supplier_name: str,
     test_dates: list[str] | None = None,
-    max_dates: int = 8,
+    max_dates: int = 5,
 ) -> dict:
     """
     업체의 최적 예측 파라미터를 찾아 DB에 저장한다.
