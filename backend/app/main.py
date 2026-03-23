@@ -21,7 +21,6 @@ from backend.app.api.storage import router as storage_router
 from backend.app.api.naver_works_webhook import router as naver_works_router
 from backend.app.api.work_log import router as work_log_router
 from backend.app.api.estimate_analytics import router as estimate_analytics_router
-from prepacking.api import prepacking_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -60,7 +59,6 @@ app.include_router(naver_works_router)
 app.include_router(work_log_router)
 app.include_router(estimate_router)
 app.include_router(estimate_analytics_router)
-app.include_router(prepacking_router)
 
 
 # 루트 엔드포인트
@@ -81,9 +79,6 @@ async def startup_event():
     """앱 시작 시 DB 테이블 확인 및 스케줄러 시작."""
     from logic import ensure_tables
     ensure_tables()
-    from prepacking.database import ensure_pp_tables
-    ensure_pp_tables()
-    
     # 스케줄러 시작 (평일 오전 10시 인사)
     from backend.app.services.scheduler import start_scheduler
     start_scheduler()

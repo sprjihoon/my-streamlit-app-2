@@ -27,9 +27,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY logic/ ./logic/
 COPY backend/ ./backend/
 COPY assets/ ./assets/
-COPY prepacking/ ./prepacking/
-COPY prepacking/prompts/ ./prepacking/prompts/
-
 # 데이터 디렉토리 생성 (Railway Volume 마운트 포인트)
 RUN mkdir -p /app/data/uploads
 
@@ -44,5 +41,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
 # 실행
-CMD ["gunicorn", "backend.app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--timeout", "120"]
+CMD ["gunicorn", "backend.app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--timeout", "30"]
 
