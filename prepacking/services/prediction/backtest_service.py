@@ -158,6 +158,9 @@ def run_backtest(
     over = sum(1 for p in predictions if p["result_type"] == "over")
     under = sum(1 for p in predictions if p["result_type"] == "under")
 
+    ml_count = sum(1 for p in predictions if p.get("model_type") in ("ml", "ensemble"))
+    stat_count = sum(1 for p in predictions if p.get("model_type") == "statistical")
+
     predictions.sort(key=lambda x: (-x["error_abs"], -x["actual_qty"]))
 
     weekday_kr = ["월", "화", "수", "목", "금", "토", "일"]
@@ -177,8 +180,8 @@ def run_backtest(
             "over": over,
             "under": under,
             "missed": len(missed_items),
-            "ml_count": 0,
-            "stat_count": len(predictions),
+            "ml_count": ml_count,
+            "stat_count": stat_count,
         },
         "items": predictions,
         "missed_items": missed_items,

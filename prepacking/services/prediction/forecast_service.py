@@ -1,9 +1,12 @@
 """
 forecast_service — 통계 + ML 앙상블 예측
 ────────────────────────────────────────
-1단계: 경량 통계 예측 (출하일 평균 기반)
-2단계: 답안지 기반 ML 예측 (전체 SKU 통합 모델)
-3단계: 앙상블 — ML 성공 시 ML 우선, 실패 시 통계 폴백
+핵심 변경: 출하 확률(shipping probability)을 반영하여
+실제 출하가 없을 가능성이 높은 SKU는 예측 0으로 처리.
+
+1단계: 출하 확률 계산 (같은 요일 기준)
+2단계: 확률이 임계값 이상일 때만 수량 예측
+3단계: ML 모델과 앙상블
 """
 from __future__ import annotations
 
@@ -18,6 +21,8 @@ from prepacking.services.prediction import ml_forecast_service
 
 logger = logging.getLogger(__name__)
 
+SHIP_PROB_THRESHOLD = 0.15
+
 
 def _active_avg(daily: dict[str, int], td: dt.date, days: int) -> tuple[float, int]:
     """최근 N일 중 출하일만의 평균과 출하일수를 반환."""
@@ -31,22 +36,53 @@ def _active_avg(daily: dict[str, int], td: dt.date, days: int) -> tuple[float, i
     return avg, len(vals)
 
 
-def _same_weekday_avg(daily: dict[str, int], td: dt.date, weeks: int) -> float:
-    """같은 요일 최근 N주 중 출하가 있던 날만의 평균 수량."""
-    nonzero = []
+def _same_weekday_stats(daily: dict[str, int], td: dt.date, weeks: int) -> tuple[float, float, int]:
+    """같은 요일 최근 N주의 (출하일 평균, 출하 확률, 총 주수)."""
+    total_weeks = 0
+    ship_weeks = 0
+    ship_vals = []
     for w in range(1, weeks + 1):
         past_d = td - dt.timedelta(weeks=w)
         v = daily.get(past_d.isoformat(), 0)
+        total_weeks += 1
         if v > 0:
-            nonzero.append(float(v))
-    return sum(nonzero) / len(nonzero) if nonzero else 0.0
+            ship_weeks += 1
+            ship_vals.append(float(v))
+    avg = sum(ship_vals) / len(ship_vals) if ship_vals else 0.0
+    prob = ship_weeks / total_weeks if total_weeks > 0 else 0.0
+    return avg, prob, total_weeks
 
 
-def _stat_predict(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> int:
-    """경량 통계 예측 — 출하일 평균 기반."""
+def _overall_ship_probability(daily: dict[str, int], td: dt.date, days: int) -> float:
+    """최근 N일 중 출하일 비율."""
+    total = 0
+    active = 0
+    for i in range(1, days + 1):
+        d = td - dt.timedelta(days=i)
+        ds = d.isoformat()
+        if ds in daily:
+            total += 1
+            if daily[ds] > 0:
+                active += 1
+        else:
+            total += 1
+    return active / total if total > 0 else 0.0
+
+
+def _stat_predict(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> tuple[int, float]:
+    """
+    경량 통계 예측 — 출하 확률을 반영.
+    반환: (예측 수량, 출하 확률)
+    """
+    wd_avg, wd_prob, wd_weeks = _same_weekday_stats(daily, td, weeks_back)
     avg_14, active_14 = _active_avg(daily, td, 14)
     avg_30, active_30 = _active_avg(daily, td, 30)
-    wd_avg = _same_weekday_avg(daily, td, weeks_back)
+
+    overall_prob = _overall_ship_probability(daily, td, 30)
+    ship_prob = max(wd_prob, overall_prob * 0.5) if wd_weeks >= 2 else overall_prob
+
+    if ship_prob < SHIP_PROB_THRESHOLD:
+        return 0, ship_prob
 
     signals: list[tuple[float, float]] = []
     if active_14 >= 1:
@@ -60,11 +96,15 @@ def _stat_predict(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> in
         total_qty = sum(daily.values())
         active_total = len([v for v in daily.values() if v > 0])
         if active_total > 0:
-            return max(1, int(round(total_qty / active_total)))
-        return 0
+            raw = total_qty / active_total
+            return max(1, int(round(raw * ship_prob))), ship_prob
+        return 0, ship_prob
 
     total_w = sum(w for _, w in signals)
-    return max(0, int(round(sum(v * w for v, w in signals) / total_w)))
+    raw_qty = sum(v * w for v, w in signals) / total_w
+
+    adjusted = raw_qty * min(1.0, ship_prob * 2.0)
+    return max(0, int(round(adjusted))), ship_prob
 
 
 def predict_for_date(
@@ -123,7 +163,7 @@ def predict_for_date(
     for target_type, row in all_rows:
         daily = {k: int(v) for k, v in row["daily"].items()}
 
-        stat_qty = _stat_predict(daily, td, weeks_back)
+        stat_qty, ship_prob = _stat_predict(daily, td, weeks_back)
 
         if target_type == "combination":
             ckey = row.get("combination_key", "")
@@ -147,7 +187,7 @@ def predict_for_date(
 
         avg_14, _ = _active_avg(daily, td, 14)
         avg_30, _ = _active_avg(daily, td, 30)
-        wd_avg = _same_weekday_avg(daily, td, weeks_back)
+        wd_avg, _, _ = _same_weekday_stats(daily, td, weeks_back)
 
         data_days = weekday_pattern_service.distinct_active_days(
             daily, target_date, lookback_days
@@ -181,6 +221,7 @@ def predict_for_date(
             "weekday_basis": wb,
             "frequency": row["frequency"],
             "model_used": model_used,
+            "ship_probability": round(ship_prob, 3),
             "gpt_reason": "",
             "gpt_confidence": "",
         }

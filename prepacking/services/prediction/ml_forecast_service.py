@@ -4,10 +4,8 @@ ml_forecast_service — 답안지 기반 통합 ML 모델
 핵심: 전체 SKU/조합의 과거 출하 데이터를 답안지로 사용하여
 하나의 GradientBoostingRegressor 모델을 학습.
 
-- SKU별 개별 모델 X → 전체 통합 모델 1개
-- 학습 데이터: 과거 60일 × 전체 SKU = 수만 건
-- 학습 시간: 1~2초 (모델 1개)
-- 캐싱: supplier+날짜 기준으로 캐시하여 재학습 방지
+변경: 0 출하일도 학습에 포함하여 "출하 안 하는 날" 패턴도 학습.
+출하 확률 피처 추가.
 """
 from __future__ import annotations
 
@@ -25,11 +23,12 @@ logger = logging.getLogger(__name__)
 
 _MODEL_CACHE: dict[str, dict] = {}
 TRAIN_DAYS = 60
-MIN_SAMPLES = 30
+MIN_SAMPLES = 50
 FEATURE_NAMES = [
     "active_avg_14", "active_avg_30", "active_avg_60",
     "active_days_14", "active_days_30",
-    "same_wd_avg", "same_wd_count",
+    "same_wd_avg", "same_wd_count", "same_wd_prob",
+    "overall_ship_prob",
     "last_qty", "max_14", "median_14",
     "frequency_ratio",
     "wd_0", "wd_1", "wd_2", "wd_3", "wd_4", "wd_5", "wd_6",
@@ -37,10 +36,6 @@ FEATURE_NAMES = [
 
 
 def _load_all_sku_daily(supplier_name: str, date_from: str, date_to: str) -> dict[str, dict[str, int]]:
-    """
-    supplier의 전체 SKU별 일별 출하량을 로드.
-    반환: { "상품명||옵션명": { "2026-01-05": 10, ... }, ... }
-    """
     with get_pp_connection() as con:
         rows = con.execute(
             """
@@ -67,8 +62,6 @@ def _load_all_sku_daily(supplier_name: str, date_from: str, date_to: str) -> dic
 
 
 def _compute_features(daily: dict[str, int], td: dt.date) -> dict[str, float]:
-    """하나의 SKU에 대해 td 시점의 피처를 계산."""
-
     def _active_avg(days: int) -> tuple[float, int]:
         vals = []
         for i in range(1, days + 1):
@@ -78,20 +71,30 @@ def _compute_features(daily: dict[str, int], td: dt.date) -> dict[str, float]:
                 vals.append(float(v))
         return (sum(vals) / len(vals) if vals else 0.0), len(vals)
 
-    def _same_wd() -> tuple[float, int]:
+    def _same_wd_stats() -> tuple[float, int, float]:
+        total = 0
         nonzero = []
         for w in range(1, 9):
             past_d = td - dt.timedelta(weeks=w)
             v = daily.get(past_d.isoformat(), 0)
+            total += 1
             if v > 0:
                 nonzero.append(float(v))
         avg = sum(nonzero) / len(nonzero) if nonzero else 0.0
-        return avg, len(nonzero)
+        prob = len(nonzero) / total if total > 0 else 0.0
+        return avg, len(nonzero), prob
 
     avg_14, active_14 = _active_avg(14)
     avg_30, active_30 = _active_avg(30)
     avg_60, _ = _active_avg(60)
-    wd_avg, wd_count = _same_wd()
+    wd_avg, wd_count, wd_prob = _same_wd_stats()
+
+    ship_days_30 = 0
+    for i in range(1, 31):
+        d = td - dt.timedelta(days=i)
+        if daily.get(d.isoformat(), 0) > 0:
+            ship_days_30 += 1
+    overall_ship_prob = ship_days_30 / 30.0
 
     recent_14_vals = []
     for i in range(1, 15):
@@ -126,6 +129,8 @@ def _compute_features(daily: dict[str, int], td: dt.date) -> dict[str, float]:
         "active_days_30": float(active_30),
         "same_wd_avg": wd_avg,
         "same_wd_count": float(wd_count),
+        "same_wd_prob": wd_prob,
+        "overall_ship_prob": overall_ship_prob,
         "last_qty": last_qty,
         "max_14": max_14,
         "median_14": median_14,
@@ -144,29 +149,36 @@ def _build_training_data(
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     과거 train_days일에 대해 전체 SKU의 (피처, 실제출하량) 쌍을 생성.
-    답안지 = 각 날짜의 실제 출하량.
+    0 출하일도 포함하여 "출하 안 하는 날" 패턴도 학습.
     """
     td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
 
     X_rows = []
     y_rows = []
-    max_samples = 10000
+    max_samples = 15000
+    zero_count = 0
+    nonzero_count = 0
 
     for day_offset in range(1, train_days + 1):
         train_date = td - dt.timedelta(days=day_offset)
 
         for sku_key, daily in all_sku_daily.items():
             actual_qty = daily.get(train_date.isoformat(), 0)
-            if actual_qty <= 0:
-                continue
 
             features = _compute_features(daily, train_date)
             if features["active_avg_14"] <= 0 and features["active_avg_30"] <= 0 and features["same_wd_avg"] <= 0:
                 continue
 
+            if actual_qty <= 0:
+                zero_count += 1
+                if zero_count > nonzero_count * 3:
+                    continue
+            else:
+                nonzero_count += 1
+
             row = [features.get(n, 0.0) for n in FEATURE_NAMES]
             X_rows.append(row)
-            y_rows.append(float(actual_qty))
+            y_rows.append(float(max(0, actual_qty)))
 
             if len(X_rows) >= max_samples:
                 break
@@ -184,11 +196,6 @@ def train_and_predict(
     target_date: str,
     sku_daily_map: dict[str, dict[str, int]],
 ) -> dict[str, int]:
-    """
-    통합 모델을 학습하고, 각 SKU에 대해 예측값을 반환.
-    반환: { "상품명||옵션명": predicted_qty, ... }
-    캐시 키: supplier + target_date
-    """
     cache_key = f"{supplier_name}||{target_date}"
 
     cached = _MODEL_CACHE.get(cache_key)
@@ -226,10 +233,10 @@ def train_and_predict(
 
         t0 = time.time()
         model = GradientBoostingRegressor(
-            n_estimators=80,
-            max_depth=3,
+            n_estimators=100,
+            max_depth=4,
             learning_rate=0.1,
-            min_samples_leaf=3,
+            min_samples_leaf=5,
             subsample=0.8,
             random_state=42,
         )
@@ -242,8 +249,10 @@ def train_and_predict(
         train_accuracy = max(0.0, 1.0 - mae / max(mean_y, 1.0))
 
         logger.info(
-            "ML trained: %s | samples=%d | accuracy=%.1f%% | build=%.2fs | train=%.2fs",
-            supplier_name, len(X_train), train_accuracy * 100, t_build, t_train,
+            "ML trained: %s | samples=%d (zero_ratio=%.0f%%) | accuracy=%.1f%% | build=%.2fs | train=%.2fs",
+            supplier_name, len(X_train),
+            100 * sum(1 for y in y_train if y == 0) / len(y_train),
+            train_accuracy * 100, t_build, t_train,
         )
 
     except Exception as exc:
