@@ -1962,9 +1962,9 @@ function ValidationTab({ supplierName, showToast }: { supplierName: string; show
               <div style={{ fontSize: 32, fontWeight: 800, color: result.summary.accuracy >= 60 ? '#16a34a' : result.summary.accuracy >= 30 ? '#f59e0b' : '#dc2626' }}>
                 {result.summary.accuracy}%
               </div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 4, fontSize: 11 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 4, fontSize: 11 }}>
                 <span style={{ color: '#2563eb' }}>총합 {(result.summary as Record<string, unknown>).acc_volume ?? '-'}%</span>
-                <span style={{ color: '#16a34a' }}>SKU {(result.summary as Record<string, unknown>).acc_sku_match ?? '-'}%</span>
+                <span style={{ color: '#16a34a' }}>방향 {(result.summary as Record<string, unknown>).acc_direction ?? '-'}%</span>
                 <span style={{ color: '#7c3aed' }}>수량 {(result.summary as Record<string, unknown>).acc_qty_close ?? '-'}%</span>
               </div>
             </div>

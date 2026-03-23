@@ -78,9 +78,9 @@ def run_benchmark(body: dict | None = None) -> dict:
                 sup_results.append({
                     "date": d,
                     "accuracy": s["accuracy"],
-                    "acc_volume": s["acc_volume"],
-                    "acc_sku_match": s["acc_sku_match"],
-                    "acc_qty_close": s["acc_qty_close"],
+                    "acc_volume": s.get("acc_volume", 0),
+                    "acc_direction": s.get("acc_direction", 0),
+                    "acc_qty_close": s.get("acc_qty_close", 0),
                     "total_predicted": s["total_predicted"],
                     "total_actual": s["total_actual"],
                     "matched": s["matched"],
@@ -92,12 +92,12 @@ def run_benchmark(body: dict | None = None) -> dict:
         if sup_results:
             avg_acc = sum(r["accuracy"] for r in sup_results) / len(sup_results)
             avg_vol = sum(r["acc_volume"] for r in sup_results) / len(sup_results)
-            avg_sku = sum(r["acc_sku_match"] for r in sup_results) / len(sup_results)
+            avg_dir = sum(r["acc_direction"] for r in sup_results) / len(sup_results)
             avg_qty = sum(r["acc_qty_close"] for r in sup_results) / len(sup_results)
             supplier_avgs[sup] = {
                 "avg_accuracy": round(avg_acc, 1),
                 "avg_volume": round(avg_vol, 1),
-                "avg_sku_match": round(avg_sku, 1),
+                "avg_direction": round(avg_dir, 1),
                 "avg_qty_close": round(avg_qty, 1),
                 "test_days": len(sup_results),
                 "details": sup_results,

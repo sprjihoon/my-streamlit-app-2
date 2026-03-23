@@ -95,9 +95,9 @@ def _analyze_supplier(
     avg_cv = float(np.mean(cvs)) if cvs else 1.0
 
     # 업체 유형 결정
-    if total_skus <= 50 and avg_qty >= 10 and avg_cv < 0.8:
+    if total_skus <= 30 and avg_qty >= 15 and avg_cv < 0.7:
         stype = "stable_few"
-    elif total_skus >= 150 or (avg_qty < 5 and avg_cv > 0.6):
+    elif total_skus >= 200 or (avg_qty < 3 and avg_cv > 0.8):
         stype = "volatile_many"
     else:
         stype = "mixed"
@@ -110,12 +110,12 @@ def _analyze_supplier(
             avg_ship_prob=avg_ship_prob,
             volatility=avg_cv,
             supplier_type=stype,
-            prob_threshold=0.17,
-            blend_recent_weight=0.55,
-            trend_scale_min=0.7,
-            trend_scale_max=1.3,
+            prob_threshold=0.13,
+            blend_recent_weight=0.50,
+            trend_scale_min=0.75,
+            trend_scale_max=1.25,
             min_data_days=7,
-            fallback_prob=0.30,
+            fallback_prob=0.20,
             fallback_ratio=0.8,
         )
     elif stype == "volatile_many":
@@ -125,12 +125,12 @@ def _analyze_supplier(
             volatility=avg_cv,
             avg_ship_prob=avg_ship_prob,
             supplier_type=stype,
-            prob_threshold=0.33,
+            prob_threshold=0.25,
             blend_recent_weight=0.35,
-            trend_scale_min=0.85,
-            trend_scale_max=1.15,
+            trend_scale_min=0.90,
+            trend_scale_max=1.10,
             min_data_days=10,
-            fallback_prob=0.40,
+            fallback_prob=0.30,
             fallback_ratio=0.6,
         )
     else:
@@ -140,12 +140,12 @@ def _analyze_supplier(
             avg_ship_prob=avg_ship_prob,
             volatility=avg_cv,
             supplier_type=stype,
-            prob_threshold=0.25,
+            prob_threshold=0.17,
             blend_recent_weight=0.45,
-            trend_scale_min=0.75,
-            trend_scale_max=1.25,
-            min_data_days=10,
-            fallback_prob=0.35,
+            trend_scale_min=0.80,
+            trend_scale_max=1.20,
+            min_data_days=7,
+            fallback_prob=0.25,
             fallback_ratio=0.7,
         )
 
