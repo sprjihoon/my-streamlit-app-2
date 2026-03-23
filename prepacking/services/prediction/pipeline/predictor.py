@@ -172,15 +172,16 @@ def _load_or_analyze_profile(
     sku_series_map: dict[str, pd.Series],
     td_ts: pd.Timestamp,
 ) -> SupplierProfile:
-    """DB에서 캘리브레이션된 파라미터를 로드. 없으면 자동 분석."""
+    """DB에서 캘리브레이션된 파라미터를 로드. 정확도 70% 이상일 때만 사용."""
+    base = _analyze_supplier(sku_series_map, td_ts)
+
     try:
         from prepacking.services.prediction.pipeline.calibration import load_supplier_params
         saved = load_supplier_params(supplier_name)
     except Exception:
         saved = None
 
-    if saved:
-        base = _analyze_supplier(sku_series_map, td_ts)
+    if saved and saved.get("calibration_accuracy", 0) >= 70.0:
         return SupplierProfile(
             total_skus=base.total_skus,
             avg_qty_per_active_day=base.avg_qty_per_active_day,
@@ -197,7 +198,7 @@ def _load_or_analyze_profile(
             calibrated=True,
         )
 
-    return _analyze_supplier(sku_series_map, td_ts)
+    return base
 
 
 # ──────────────────────────────────────────────

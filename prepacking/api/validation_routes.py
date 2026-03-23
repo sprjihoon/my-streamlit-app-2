@@ -119,3 +119,30 @@ def post_calibrate(body: PPValidationRequest) -> dict:
         "calibrated_params": saved,
         "summary": result["summary"],
     }
+
+
+@router.delete("/calibration/{supplier_name}")
+def delete_calibration(supplier_name: str) -> dict:
+    """업체의 캘리브레이션 결과를 초기화."""
+    from prepacking.database import get_pp_connection
+
+    with get_pp_connection() as con:
+        con.execute(
+            "DELETE FROM pp_supplier_params WHERE supplier_name = ?",
+            (supplier_name,),
+        )
+        con.commit()
+
+    return {"deleted": True, "supplier_name": supplier_name}
+
+
+@router.delete("/calibration")
+def delete_all_calibrations() -> dict:
+    """모든 업체의 캘리브레이션 결과를 초기화."""
+    from prepacking.database import get_pp_connection
+
+    with get_pp_connection() as con:
+        con.execute("DELETE FROM pp_supplier_params")
+        con.commit()
+
+    return {"deleted_all": True}
