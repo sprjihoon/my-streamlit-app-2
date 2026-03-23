@@ -172,13 +172,14 @@ def _seasonal_naive_predict(
     td: pd.Timestamp,
 ) -> tuple[int, float, str]:
     """
-    SeasonalNaive 예측 — 같은 요일 최근 값 기반.
+    SeasonalNaive 예측 — 같은 요일 최근 4주 중앙값 기반.
 
-    1차: 7일 전 값 사용
-    2차: 7일 전이 0이면, 최근 4주 같은 요일 중앙값 사용
-    3차: 4주 모두 0이면 → 0
+    중앙값을 사용하면:
+    - 이상치에 강건 (한 주만 비정상적으로 높아도 영향 적음)
+    - 0이 많으면 자연스럽게 0으로 수렴
+    - 변동성이 큰 SKU에서도 안정적
 
-    이상치 보정: 7일 전 값이 4주 중앙값의 3배 이상이면 중앙값 사용.
+    출하 확률이 25% 미만이면 0으로 예측.
     """
     cutoff = td - pd.Timedelta(days=1)
     past = series[series.index <= cutoff]
@@ -186,9 +187,9 @@ def _seasonal_naive_predict(
     if past.empty:
         return 0, 0.0, "no_data"
 
-    # 같은 요일 최근 4주 데이터 수집 (0 포함)
+    # 같은 요일 최근 6주 데이터 수집 (0 포함)
     wd_vals: list[float] = []
-    for w in range(1, 5):
+    for w in range(1, 7):
         d = td - pd.Timedelta(weeks=w)
         if d in past.index:
             wd_vals.append(float(past[d]))
@@ -202,29 +203,31 @@ def _seasonal_naive_predict(
     ship_count = len([v for v in wd_vals if v > 0])
     ship_prob = ship_count / len(wd_vals)
 
-    # 7일 전 값 (primary)
+    # 출하 확률이 너무 낮으면 0
+    if ship_prob < 0.25:
+        return 0, ship_prob, f"low_prob({ship_prob:.0%})"
+
+    # 중앙값 (0 포함) — 핵심 예측값
+    median_val = float(np.median(wd_vals))
+
+    # 최근 1주 가중: 7일 전 값과 중앙값의 가중 평균
     d_7 = td - pd.Timedelta(weeks=1)
     val_7 = float(past[d_7]) if d_7 in past.index else 0.0
 
-    # 4주 중앙값
-    median_4w = float(np.median(wd_vals))
-
-    # 예측 결정
-    if val_7 > 0:
-        # 이상치 보정: 7일 전 값이 중앙값의 3배 이상이면 중앙값 사용
-        if median_4w > 0 and val_7 > median_4w * 3:
-            predicted = int(round(median_4w))
-            method = f"seasonal_capped(7d={val_7:.0f},med={median_4w:.0f})"
-        else:
-            predicted = int(round(val_7))
-            method = f"seasonal_7d({val_7:.0f})"
-    elif median_4w > 0:
-        # 7일 전이 0이지만 다른 주에 출하가 있었음
-        predicted = int(round(median_4w))
-        method = f"median_4w({median_4w:.0f},prob={ship_prob:.0%})"
+    if val_7 > 0 and median_val > 0:
+        # 7일 전 값 60% + 중앙값 40%
+        blended = val_7 * 0.6 + median_val * 0.4
+        predicted = max(0, int(round(blended)))
+        method = f"blend(7d={val_7:.0f},med={median_val:.0f})"
+    elif median_val > 0:
+        predicted = max(0, int(round(median_val)))
+        method = f"median({median_val:.0f},prob={ship_prob:.0%})"
+    elif val_7 > 0:
+        predicted = max(0, int(round(val_7 * ship_prob)))
+        method = f"7d_prob({val_7:.0f}*{ship_prob:.0%})"
     else:
         predicted = 0
-        method = "zero_all_weeks"
+        method = "zero"
 
     return predicted, ship_prob, method
 
