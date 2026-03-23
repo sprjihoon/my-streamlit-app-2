@@ -259,8 +259,6 @@ def predict_for_date(
         if s is not None:
             sku_series_map[f"combo||{ckey}"] = s
 
-    # 1) DB에서 캘리브레이션된 파라미터 로드 시도
-    # 2) 없으면 자동 분석으로 폴백
     profile = _load_or_analyze_profile(supplier_name, sku_series_map, td_ts)
     logger.info(
         "Supplier profile: %s — type=%s, skus=%d, "
@@ -272,14 +270,34 @@ def predict_for_date(
         profile.fallback_prob, profile.fallback_ratio,
     )
 
-    # 트렌드 스케일링
+    # ═══════════════════════════════════════════════
+    # 다품종(volatile_many) 전용: Top-Down 예측
+    # 총합 먼저 → SKU 분배
+    # ═══════════════════════════════════════════════
+    if profile.supplier_type == "volatile_many":
+        out = _predict_topdown(
+            all_rows, sku_series_map, td_ts, weeks_back,
+            profile, wb, supplier_name, target_date, lookback_days,
+        )
+        _last_context.clear()
+        _last_context.update({
+            "supplier_name": supplier_name,
+            "target_date": target_date,
+            "td_ts": td_ts,
+            "sku_series_map": sku_series_map,
+            "all_rows": all_rows,
+        })
+        return out
+
+    # ═══════════════════════════════════════════════
+    # 일반 업체: Bottom-Up 예측 (기존 로직)
+    # ═══════════════════════════════════════════════
     trend_scale = _compute_supplier_trend_scale(
         sku_series_map, td_ts,
         scale_min=profile.trend_scale_min,
         scale_max=profile.trend_scale_max,
     )
 
-    # === 1차: 통계 예측 수집 ===
     out: list[dict] = []
     stat_predictions: dict[str, int] = {}
 
@@ -305,8 +323,6 @@ def predict_for_date(
             method_detail += f",scale={trend_scale:.2f}"
 
         stat_predictions[series_key] = predicted_qty
-        ml_qty = 0
-        ml_model_type = "statistical"
 
         daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
         data_days = weekday_pattern_service.distinct_active_days(
@@ -343,8 +359,8 @@ def predict_for_date(
             "items": row.get("items", []),
             "predicted_qty": predicted_qty,
             "stat_qty": stat_predictions.get(series_key, 0),
-            "ml_qty": ml_qty,
-            "ml_model_type": ml_model_type,
+            "ml_qty": 0,
+            "ml_model_type": "statistical",
             "ml_accuracy": 0,
             "ml_samples": 0,
             "confidence_score": round(base_conf, 3),
@@ -353,14 +369,14 @@ def predict_for_date(
             "recent_same_weekday_avg": round(wd_avg, 1),
             "weekday_basis": wb,
             "frequency": row.get("frequency", 0),
-            "model_used": ml_model_type,
+            "model_used": "statistical",
             "ship_probability": round(ship_prob, 3),
             "gpt_reason": f"[{profile.supplier_type}] {method_detail}",
             "gpt_confidence": "",
         }
         out.append(entry)
 
-    # === 2차: ML 앙상블 (통계 예측 완료 후) ===
+    # ML 앙상블 (10~200 SKU만)
     try:
         from prepacking.services.prediction.pipeline.ml_predictor import build_ml_predictions
         sku_count = len(sku_series_map)
@@ -392,10 +408,8 @@ def predict_for_date(
     except Exception as exc:
         logger.warning("ML prediction failed, stat only: %s", exc)
 
-    # === 3차: 총합 보정 — 과다예측 방지 ===
     _apply_volume_cap(out, sku_series_map, td_ts, weeks_back)
 
-    # LLM 이상치 검증 (use_gpt=True일 때만)
     if use_gpt and out:
         try:
             from prepacking.services.prediction.pipeline.llm_reviewer import review_predictions
@@ -403,7 +417,6 @@ def predict_for_date(
         except Exception as exc:
             logger.warning("LLM review skipped: %s", exc)
 
-    # 캘리브레이션에서 재활용할 수 있도록 컨텍스트 캐시
     _last_context.clear()
     _last_context.update({
         "supplier_name": supplier_name,
@@ -417,7 +430,260 @@ def predict_for_date(
 
 
 # ──────────────────────────────────────────────
-# 적응형 예측 함수
+# Top-Down 예측 (다품종 전용)
+# ──────────────────────────────────────────────
+def _predict_topdown(
+    all_rows: list[tuple[str, dict]],
+    sku_series_map: dict[str, pd.Series],
+    td: pd.Timestamp,
+    weeks_back: int,
+    profile: SupplierProfile,
+    wb: str,
+    supplier_name: str,
+    target_date: str,
+    lookback_days: int,
+) -> list[dict]:
+    """
+    다품종 업체(아바마 등) 전용 Top-Down 예측.
+
+    전략:
+    1. 업체 전체 총합을 같은 요일 기준으로 예측
+    2. 최근 2주(7일전, 14일전) 같은 요일에 실제 출고된 SKU만 후보
+    3. 후보 SKU에 과거 비율 기반으로 총합을 분배
+    """
+    from prepacking.common.utils import normalize_sku_name
+    from prepacking.services.analysis import weekday_pattern_service
+    from prepacking.services.prediction import confidence_service
+
+    cutoff = td - pd.Timedelta(days=1)
+
+    # ── Step 1: 업체 전체 총합 예측 ──
+    wd_totals: list[float] = []
+    wd_weights: list[float] = []
+    for w in range(1, weeks_back + 1):
+        d = td - pd.Timedelta(weeks=w)
+        day_total = 0.0
+        for series in sku_series_map.values():
+            if d in series.index:
+                day_total += float(series[d])
+        wd_totals.append(day_total)
+        wd_weights.append(0.85 ** (w - 1))
+
+    # 0이 아닌 주만 사용하되, 0인 주도 "출고 없는 날"로 확률 계산에 반영
+    active_totals = [(t, w) for t, w in zip(wd_totals, wd_weights) if t > 0]
+    ship_day_prob = len(active_totals) / len(wd_totals) if wd_totals else 0
+
+    if not active_totals or ship_day_prob < 0.25:
+        logger.info("TopDown %s: skip (ship_day_prob=%.0f%%)", supplier_name, ship_day_prob * 100)
+        return _build_zero_entries(all_rows, sku_series_map, td, weeks_back, wb, profile, supplier_name, target_date, lookback_days)
+
+    w_sum = sum(w for _, w in active_totals)
+    expected_total = sum(t * w for t, w in active_totals) / w_sum
+
+    # 최근 2주 같은 요일 값으로 보정
+    d_7 = td - pd.Timedelta(weeks=1)
+    d_14 = td - pd.Timedelta(weeks=2)
+    total_7 = sum(float(s[d_7]) if d_7 in s.index else 0 for s in sku_series_map.values())
+    total_14 = sum(float(s[d_14]) if d_14 in s.index else 0 for s in sku_series_map.values())
+
+    if total_7 > 0 and total_14 > 0:
+        predicted_total = total_7 * 0.6 + total_14 * 0.2 + expected_total * 0.2
+    elif total_7 > 0:
+        predicted_total = total_7 * 0.7 + expected_total * 0.3
+    elif total_14 > 0:
+        predicted_total = total_14 * 0.5 + expected_total * 0.5
+    else:
+        predicted_total = expected_total * ship_day_prob
+
+    predicted_total = max(0, int(round(predicted_total)))
+
+    logger.info(
+        "TopDown %s: expected=%.0f, 7d=%.0f, 14d=%.0f → pred_total=%d",
+        supplier_name, expected_total, total_7, total_14, predicted_total,
+    )
+
+    if predicted_total == 0:
+        return _build_zero_entries(all_rows, sku_series_map, td, weeks_back, wb, profile, supplier_name, target_date, lookback_days)
+
+    # ── Step 2: 후보 SKU 선정 + 비율 계산 ──
+    # 7일전에 출고된 SKU → 1순위, 14일전만 출고된 SKU → 2순위
+    sku_share: dict[str, float] = {}
+    for key, series in sku_series_map.items():
+        val_7 = float(series[d_7]) if d_7 in series.index else 0.0
+        val_14 = float(series[d_14]) if d_14 in series.index else 0.0
+        if val_7 > 0:
+            sku_share[key] = val_7
+        elif val_14 > 0:
+            sku_share[key] = val_14 * 0.5
+
+    if not sku_share:
+        # 최근 2주 같은 요일에 아무것도 안 나갔으면 최근 3주 중 가장 가까운 주 사용
+        d_21 = td - pd.Timedelta(weeks=3)
+        for key, series in sku_series_map.items():
+            val_21 = float(series[d_21]) if d_21 in series.index else 0.0
+            if val_21 > 0:
+                sku_share[key] = val_21 * 0.3
+
+    if not sku_share:
+        return _build_zero_entries(all_rows, sku_series_map, td, weeks_back, wb, profile, supplier_name, target_date, lookback_days)
+
+    share_total = sum(sku_share.values())
+
+    # ── Step 3: 총합을 SKU에 분배 ──
+    sku_allocated: dict[str, int] = {}
+    allocated_sum = 0
+    for key, share in sku_share.items():
+        ratio = share / share_total
+        qty = max(1, int(round(predicted_total * ratio)))
+        sku_allocated[key] = qty
+        allocated_sum += qty
+
+    # 분배 합이 총합과 다르면 가장 큰 SKU에서 조정
+    if allocated_sum != predicted_total and sku_allocated:
+        diff = predicted_total - allocated_sum
+        largest_key = max(sku_allocated, key=sku_allocated.get)
+        sku_allocated[largest_key] = max(1, sku_allocated[largest_key] + diff)
+
+    # ── Step 4: 결과 조립 ──
+    out: list[dict] = []
+    for target_type, row in all_rows:
+        if target_type == "combination":
+            ckey = row.get("combination_key", "")
+            series_key = f"combo||{ckey}"
+        else:
+            pn = normalize_sku_name(row.get("target_code", ""))
+            on = normalize_sku_name(row.get("option_name", ""))
+            series_key = f"{pn}||{on}"
+
+        series = sku_series_map.get(series_key)
+        if series is None or series.empty:
+            continue
+
+        predicted_qty = sku_allocated.get(series_key, 0)
+        ship_prob = sku_share.get(series_key, 0) / share_total if share_total > 0 else 0
+
+        past = series[series.index <= cutoff]
+        avg_14 = float(past.tail(14).mean()) if len(past) >= 1 else 0.0
+        avg_30 = float(past.tail(30).mean()) if len(past) >= 1 else 0.0
+
+        wd_vals = []
+        for w in range(1, weeks_back + 1):
+            d = td - pd.Timedelta(weeks=w)
+            if d in series.index:
+                wd_vals.append(float(series[d]))
+            else:
+                wd_vals.append(0.0)
+        wd_active = [v for v in wd_vals if v > 0]
+        wd_avg = np.mean(wd_active) if wd_active else 0.0
+
+        daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
+        data_days = weekday_pattern_service.distinct_active_days(
+            daily_dict, target_date, lookback_days
+        )
+        var = _variability_coeff(series, td)
+        base_conf = confidence_service.calculate_confidence(
+            row.get("frequency", 0), var, data_days
+        )
+
+        method = f"topdown(total={predicted_total},share={ship_prob:.1%})"
+
+        entry = {
+            "target_type": target_type,
+            "target_name": row.get("target_name", ""),
+            "target_code": row.get("target_code", row.get("combination_key", "")),
+            "sku_code": row.get("sku_code", ""),
+            "barcode": row.get("barcode", ""),
+            "option_name": row.get("option_name", ""),
+            "combination_key": row.get("combination_key", ""),
+            "items": row.get("items", []),
+            "predicted_qty": predicted_qty,
+            "stat_qty": predicted_qty,
+            "ml_qty": 0,
+            "ml_model_type": "topdown",
+            "ml_accuracy": 0,
+            "ml_samples": 0,
+            "confidence_score": round(base_conf, 3),
+            "recent_7d_avg": round(avg_14, 1),
+            "recent_30d_avg": round(avg_30, 1),
+            "recent_same_weekday_avg": round(wd_avg, 1),
+            "weekday_basis": wb,
+            "frequency": row.get("frequency", 0),
+            "model_used": "topdown",
+            "ship_probability": round(ship_prob, 3),
+            "gpt_reason": f"[volatile_many] {method}",
+            "gpt_confidence": "",
+        }
+        out.append(entry)
+
+    return out
+
+
+def _build_zero_entries(
+    all_rows: list[tuple[str, dict]],
+    sku_series_map: dict[str, pd.Series],
+    td: pd.Timestamp,
+    weeks_back: int,
+    wb: str,
+    profile: SupplierProfile,
+    supplier_name: str,
+    target_date: str,
+    lookback_days: int,
+) -> list[dict]:
+    """모든 SKU를 0으로 반환 (출고 없을 것으로 예측)."""
+    from prepacking.common.utils import normalize_sku_name
+
+    out: list[dict] = []
+    cutoff = td - pd.Timedelta(days=1)
+
+    for target_type, row in all_rows:
+        if target_type == "combination":
+            series_key = f"combo||{row.get('combination_key', '')}"
+        else:
+            pn = normalize_sku_name(row.get("target_code", ""))
+            on = normalize_sku_name(row.get("option_name", ""))
+            series_key = f"{pn}||{on}"
+
+        series = sku_series_map.get(series_key)
+        if series is None or series.empty:
+            continue
+
+        past = series[series.index <= cutoff]
+        avg_14 = float(past.tail(14).mean()) if len(past) >= 1 else 0.0
+        avg_30 = float(past.tail(30).mean()) if len(past) >= 1 else 0.0
+
+        entry = {
+            "target_type": target_type,
+            "target_name": row.get("target_name", ""),
+            "target_code": row.get("target_code", row.get("combination_key", "")),
+            "sku_code": row.get("sku_code", ""),
+            "barcode": row.get("barcode", ""),
+            "option_name": row.get("option_name", ""),
+            "combination_key": row.get("combination_key", ""),
+            "items": row.get("items", []),
+            "predicted_qty": 0,
+            "stat_qty": 0,
+            "ml_qty": 0,
+            "ml_model_type": "topdown",
+            "ml_accuracy": 0,
+            "ml_samples": 0,
+            "confidence_score": 0,
+            "recent_7d_avg": round(avg_14, 1),
+            "recent_30d_avg": round(avg_30, 1),
+            "recent_same_weekday_avg": 0,
+            "weekday_basis": wb,
+            "frequency": row.get("frequency", 0),
+            "model_used": "topdown",
+            "ship_probability": 0,
+            "gpt_reason": "[volatile_many] topdown_zero",
+            "gpt_confidence": "",
+        }
+        out.append(entry)
+
+    return out
+
+
+# ──────────────────────────────────────────────
+# 적응형 예측 함수 (일반 업체용)
 # ──────────────────────────────────────────────
 def _adaptive_predict(
     series: pd.Series,
