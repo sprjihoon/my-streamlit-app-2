@@ -121,33 +121,33 @@ def debug_data(supplier: str = ""):
 
 @router.post("/debug-post")
 def debug_post(body: PPAnalysisRequest) -> dict:
-    """POST body 인코딩 디버그."""
-    supplier_bytes = body.supplier_name.encode("utf-8")
-    d_from, d_to = _resolve_dates(body.supplier_name, body.date_from, body.date_to)
-    result = analyze_repeat_skus(body.supplier_name, d_from, d_to, body.min_count)
-    with get_pp_connection() as con:
-        exact_match = con.execute(
-            "SELECT COUNT(*) FROM pp_shipping_stats WHERE supplier_name = ?",
-            (body.supplier_name,),
-        ).fetchone()[0]
-        trim_match = con.execute(
-            "SELECT COUNT(*) FROM pp_shipping_stats WHERE TRIM(supplier_name) = TRIM(?)",
-            (body.supplier_name.strip(),),
-        ).fetchone()[0]
-        like_match = con.execute(
-            "SELECT COUNT(*) FROM pp_shipping_stats WHERE supplier_name LIKE ?",
-            (f"%{body.supplier_name.strip()[:4]}%",),
-        ).fetchone()[0]
+    """POST body 인코딩 디버그 + forecast 테스트."""
+    from prepacking.services.analysis import repeat_sku_service as rss
+    from prepacking.services.analysis import weekday_pattern_service as wps
+
+    supplier = body.supplier_name
+    target = body.date_from or "2026-03-24"
+    lookback_days = max(8 * 7 + 45, 120)
+
+    skus = rss.load_repeat_sku_daily_totals(supplier, target, lookback_days)
+    sku_sample = skus[:2] if skus else []
+
+    weeks_data = []
+    for row in sku_sample:
+        daily = {k: int(v) for k, v in row["daily"].items()}
+        weeks = wps.bucket_weekly_totals(daily, target, 8)
+        weeks_data.append({
+            "target_name": row["target_name"],
+            "daily_keys_count": len(daily),
+            "daily_sample": dict(list(daily.items())[:5]),
+            "weekly_buckets": weeks,
+            "frequency": row["frequency"],
+        })
+
     return {
-        "supplier_name": body.supplier_name,
-        "supplier_name_hex": supplier_bytes.hex(),
-        "supplier_name_len": len(body.supplier_name),
-        "date_from": body.date_from,
-        "date_to": body.date_to,
-        "resolved_from": d_from,
-        "resolved_to": d_to,
-        "result_count": len(result),
-        "exact_match_rows": exact_match,
-        "trim_match_rows": trim_match,
-        "like_match_rows": like_match,
+        "supplier": supplier,
+        "target_date": target,
+        "lookback_days": lookback_days,
+        "sku_count": len(skus),
+        "sku_sample_forecast": weeks_data,
     }
