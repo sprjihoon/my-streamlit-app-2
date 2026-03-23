@@ -34,7 +34,7 @@ def _upload_item_from_row(r: dict) -> PPUploadListItem:
 @router.post("/upload", response_model=PPUploadResponse)
 async def post_upload(
     file: UploadFile = File(),
-    supplier_name: str = Form(),
+    supplier_name: str = Form(""),
     uploaded_by: str = Form(""),
     note: str = Form(""),
 ) -> PPUploadResponse:
@@ -53,6 +53,23 @@ async def post_upload(
         data_start_date=pp_optional_date_str(result.get("data_start_date")),
         data_end_date=pp_optional_date_str(result.get("data_end_date")),
     )
+
+
+@router.get("/suppliers")
+def get_suppliers() -> list[str]:
+    """Return distinct supplier names from pp_shipping_stats."""
+    from prepacking.database import get_pp_connection
+
+    with get_pp_connection() as con:
+        cur = con.execute(
+            """
+            SELECT DISTINCT TRIM(supplier_name) AS name
+            FROM pp_shipping_stats
+            WHERE supplier_name IS NOT NULL AND TRIM(supplier_name) != ''
+            ORDER BY name
+            """
+        )
+        return [row[0] for row in cur.fetchall()]
 
 
 @router.get("/list", response_model=list[PPUploadListItem])

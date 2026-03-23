@@ -22,7 +22,7 @@ def _safe_dest_name(original: str) -> str:
 
 
 def upload_shipping_stats(
-    file_path: str, supplier_name: str, uploaded_by: str = "", note: str = ""
+    file_path: str, supplier_name: str = "", uploaded_by: str = "", note: str = ""
 ) -> dict:
     ensure_pp_tables()
     PP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -50,11 +50,12 @@ def upload_shipping_stats(
         batch = []
         for r in rows:
             raw = json.dumps(dict(r), ensure_ascii=False)
+            row_supplier = (r.get("supplier_name") or "").strip() or supplier_name
             batch.append(
                 (
                     upload_id,
                     r.get("shipping_date") or None,
-                    supplier_name,
+                    row_supplier,
                     r.get("order_no") or "",
                     r.get("invoice_no") or "",
                     r.get("combo_no") or "",

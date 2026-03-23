@@ -24,152 +24,170 @@ async function ppFetch<T = unknown>(endpoint: string, options?: RequestInit): Pr
 // TypeScript interfaces
 // ---------------------------------------------------------------------------
 interface UploadRecord {
-  id: number;
-  filename: string;
-  supplier_name: string;
+  upload_id: number;
+  file_name: string;
+  file_version: number;
+  uploaded_at: string;
   uploaded_by: string;
-  note: string;
   row_count: number;
-  created_at: string;
+  applied_yn: boolean;
+  note: string;
 }
 
 interface RepeatSku {
-  sku: string;
-  product_name: string;
-  count: number;
-  total_qty: number;
-  avg_qty: number;
-  last_date: string;
+  sku_name: string;
+  option_name: string;
+  total_count: number;
+  daily_avg: number;
+  weekday_counts: Record<string, number>;
+  first_seen: string;
+  last_seen: string;
 }
 
 interface RepeatCombination {
-  skus: string[];
-  count: number;
-  total_qty: number;
-  avg_qty: number;
-  last_date: string;
+  combination_key: string;
+  items: { sku_code: string; product_name: string; option_name: string; qty: number; inner_qty: number }[];
+  total_count: number;
+  daily_avg: number;
+  weekday_counts: Record<string, number>;
+  first_seen: string;
+  last_seen: string;
 }
 
 interface WeekdayPattern {
-  sku: string;
-  product_name: string;
+  name: string;
   weekday_counts: Record<string, number>;
-  peak_day: string;
-  total: number;
+  weekday_avgs: Record<string, number>;
+  peak_day: number;
+  variability: number;
+}
+
+interface WeekdayResponse {
+  sku_patterns: WeekdayPattern[];
+  combo_patterns: WeekdayPattern[];
+  overall: {
+    total_orders_by_weekday: Record<string, number>;
+    avg_orders_by_weekday: Record<string, number>;
+  };
 }
 
 interface Recommendation {
-  id: number;
+  recommendation_id: number;
   supplier_name: string;
   target_date: string;
-  sku: string;
-  product_name: string;
-  recommended_qty: number;
-  confidence: number;
+  target_type: string;
+  target_code: string;
+  target_name: string;
+  predicted_qty: number;
+  confidence_score: number;
   risk_score: number;
-  reason: string;
+  recommendation_reason: string;
   status: string;
   created_at: string;
 }
 
 interface Execution {
-  id: number;
+  execution_id: number;
   recommendation_id: number;
-  sku: string;
-  product_name: string;
+  target_code: string;
+  target_name: string;
   executed_qty: number;
   executed_by: string;
-  location_code: string;
+  executed_at: string;
+  execution_status: string;
   memo: string;
-  created_at: string;
 }
 
 interface StockItem {
-  id: number;
-  sku: string;
-  product_name: string;
-  qty: number;
+  prepack_stock_id: number;
+  target_code: string;
+  target_name: string;
+  current_qty: number;
+  available_qty: number;
   location_code: string;
   supplier_name: string;
-  created_at: string;
-  expires_at: string;
+  pack_status: string;
+  packed_at: string;
+  expiry_at: string;
 }
 
 interface StockSummary {
-  total_skus: number;
-  total_qty: number;
-  total_locations: number;
-  expiring_soon: number;
-  by_location: { location_code: string; qty: number }[];
+  total_packed: number;
+  total_available: number;
+  by_status: Record<string, number>;
+  by_location: Record<string, number>;
 }
 
 interface Location {
-  id: number;
   location_code: string;
   location_name: string;
-  zone: string;
+  location_zone: string;
   location_type: string;
   max_capacity: number;
-  current_qty: number;
-  active: boolean;
+  current_capacity: number;
+  is_active: number;
+  note: string;
 }
 
 interface MoveRecord {
-  id: number;
-  stock_id: number;
-  sku: string;
+  location_history_id: number;
+  prepack_stock_id: number;
+  target_name: string;
+  action_type: string;
   from_location: string;
   to_location: string;
   qty: number;
-  moved_by: string;
-  reason: string;
-  created_at: string;
+  action_by: string;
+  action_reason: string;
+  action_at: string;
 }
 
 interface AccuracySummary {
-  overall_accuracy: number;
-  total_predictions: number;
-  correct: number;
-  over_predicted: number;
-  under_predicted: number;
-  by_sku: { sku: string; accuracy: number; predictions: number }[];
+  avg_accuracy: number;
+  avg_mape: number;
+  total_validated: number;
+  matched_count: number;
+  over_count: number;
+  under_count: number;
+  missed_count: number;
 }
 
-interface FailureRecord {
-  id: number;
-  sku: string;
-  product_name: string;
-  predicted_qty: number;
-  actual_qty: number;
-  difference: number;
-  target_date: string;
-  reason: string;
+interface FailureAnalysis {
+  total_failures: number;
+  by_reason: Record<string, number>;
+  top_failed_skus: { sku_or_name: string; error_weight: number }[];
+  improvement_suggestions: string[];
 }
 
 interface OverviewReport {
-  period_days: number;
   total_recommendations: number;
-  total_executions: number;
-  total_stock_qty: number;
-  accuracy: number;
-  top_skus: { sku: string; qty: number }[];
-  status_breakdown: Record<string, number>;
+  approved_count: number;
+  rejected_count: number;
+  executed_count: number;
+  total_produced_qty: number;
+  total_used_qty: number;
+  utilization_rate: number;
+  active_stock_count: number;
+  avg_confidence: number;
 }
 
 interface ValidationReport {
-  period_days: number;
-  accuracy: number;
-  total_validations: number;
-  pass_rate: number;
-  failures: FailureRecord[];
+  total_validated: number;
+  avg_accuracy: number;
+  avg_mape: number;
+  by_result: Record<string, number>;
+  unwrap_rate: number;
+  top_accurate_skus: { sku_key: string; accuracy: number; samples: number }[];
+  top_inaccurate_skus: { sku_key: string; accuracy: number; samples: number }[];
+  daily_accuracy_trend: { date: string; accuracy: number }[];
 }
 
 interface AiUsageReport {
-  period_days: number;
   total_calls: number;
   total_tokens: number;
-  avg_latency_ms: number;
-  by_date: { date: string; calls: number; tokens: number }[];
+  total_cost: number;
+  avg_latency: number;
+  success_rate: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,11 +210,18 @@ type TabKey = (typeof TABS)[number]['key'];
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
+  recommended: { bg: '#fef3c7', fg: '#92400e' },
   pending: { bg: '#fef3c7', fg: '#92400e' },
   approved: { bg: '#d1fae5', fg: '#065f46' },
+  modified: { bg: '#e0e7ff', fg: '#3730a3' },
+  held: { bg: '#e0e7ff', fg: '#3730a3' },
   rejected: { bg: '#fee2e2', fg: '#991b1b' },
-  hold: { bg: '#e0e7ff', fg: '#3730a3' },
   executed: { bg: '#dbeafe', fg: '#1e40af' },
+  expired: { bg: '#f3f4f6', fg: '#6b7280' },
+  matched: { bg: '#d1fae5', fg: '#065f46' },
+  over: { bg: '#fef3c7', fg: '#92400e' },
+  under: { bg: '#fee2e2', fg: '#991b1b' },
+  missed: { bg: '#fee2e2', fg: '#991b1b' },
 };
 
 // ---------------------------------------------------------------------------
@@ -372,11 +397,24 @@ function Spinner() {
 export default function PrepackingPage() {
   const [tab, setTab] = useState<TabKey>('upload');
   const [supplierName, setSupplierName] = useState('');
+  const [supplierList, setSupplierList] = useState<string[]>([]);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ msg, type });
   }, []);
+
+  const loadSuppliers = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/pp/upload/suppliers`);
+      if (res.ok) {
+        const data: string[] = await res.json();
+        setSupplierList(data);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadSuppliers(); }, [loadSuppliers]);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif' }}>
@@ -387,14 +425,17 @@ export default function PrepackingPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>📦 프리패킹 관리</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>업체명</label>
-            <input
-              type="text"
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>공급처</label>
+            <select
               value={supplierName}
               onChange={(e) => setSupplierName(e.target.value)}
-              placeholder="업체명 입력"
-              style={{ ...inputStyle, width: 200 }}
-            />
+              style={{ ...inputStyle, width: 220 }}
+            >
+              <option value="">전체 (공급처 선택)</option>
+              {supplierList.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -426,7 +467,7 @@ export default function PrepackingPage() {
 
       {/* Content */}
       <div style={{ maxWidth: 1280, margin: '0 auto', padding: '20px 24px' }}>
-        {tab === 'upload' && <UploadTab supplierName={supplierName} showToast={showToast} />}
+        {tab === 'upload' && <UploadTab supplierName={supplierName} showToast={showToast} onUploadDone={loadSuppliers} />}
         {tab === 'analysis' && <AnalysisTab supplierName={supplierName} showToast={showToast} />}
         {tab === 'recommend' && <RecommendTab supplierName={supplierName} showToast={showToast} />}
         {tab === 'execute' && <ExecuteTab supplierName={supplierName} showToast={showToast} />}
@@ -443,7 +484,7 @@ export default function PrepackingPage() {
 // ===========================================================================
 // TAB: 업로드
 // ===========================================================================
-function UploadTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
+function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void; onUploadDone?: () => void }) {
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -452,10 +493,11 @@ function UploadTab({ supplierName, showToast }: { supplierName: string; showToas
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadUploads = useCallback(async () => {
-    if (!supplierName) return;
     setLoading(true);
     try {
-      const data = await ppFetch<UploadRecord[]>(`/pp/upload/list?supplier_name=${encodeURIComponent(supplierName)}&limit=50`);
+      let q = '/pp/upload/list?limit=50';
+      if (supplierName) q += `&supplier_name=${encodeURIComponent(supplierName)}`;
+      const data = await ppFetch<UploadRecord[]>(q);
       setUploads(Array.isArray(data) ? data : []);
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : '업로드 목록 조회 실패', 'error');
@@ -469,20 +511,20 @@ function UploadTab({ supplierName, showToast }: { supplierName: string; showToas
   const handleUpload = async () => {
     const file = fileRef.current?.files?.[0];
     if (!file) { showToast('파일을 선택해주세요', 'error'); return; }
-    if (!supplierName) { showToast('업체명을 입력해주세요', 'error'); return; }
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append('file', file);
-      fd.append('supplier_name', supplierName);
+      fd.append('supplier_name', '');
       fd.append('uploaded_by', uploadedBy || 'unknown');
       fd.append('note', note);
       const res = await fetch(`${API_BASE}/pp/upload/upload`, { method: 'POST', body: fd });
       if (!res.ok) throw new Error(await res.text());
-      showToast('업로드 완료', 'success');
+      showToast('업로드 완료! 파일 내 공급처 정보가 자동 반영됩니다.', 'success');
       if (fileRef.current) fileRef.current.value = '';
       setNote('');
       loadUploads();
+      onUploadDone?.();
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : '업로드 실패', 'error');
     } finally {
@@ -551,9 +593,9 @@ function UploadTab({ supplierName, showToast }: { supplierName: string; showToas
                 <tr>
                   <th style={thStyle}>ID</th>
                   <th style={thStyle}>파일명</th>
-                  <th style={thStyle}>업체명</th>
                   <th style={thStyle}>업로더</th>
                   <th style={thStyle}>행 수</th>
+                  <th style={thStyle}>적용</th>
                   <th style={thStyle}>메모</th>
                   <th style={thStyle}>업로드일</th>
                   <th style={thStyle}>작업</th>
@@ -561,16 +603,16 @@ function UploadTab({ supplierName, showToast }: { supplierName: string; showToas
               </thead>
               <tbody>
                 {uploads.map((u, i) => (
-                  <tr key={u.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{u.id}</td>
-                    <td style={tdStyle}>{u.filename}</td>
-                    <td style={tdStyle}>{u.supplier_name}</td>
+                  <tr key={u.upload_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                    <td style={tdStyle}>{u.upload_id}</td>
+                    <td style={tdStyle}>{u.file_name}</td>
                     <td style={tdStyle}>{u.uploaded_by}</td>
                     <td style={tdStyle}>{u.row_count?.toLocaleString()}</td>
+                    <td style={tdStyle}>{u.applied_yn ? '적용' : '-'}</td>
                     <td style={tdStyle}>{u.note || '-'}</td>
-                    <td style={tdStyle}>{u.created_at?.slice(0, 16)}</td>
+                    <td style={tdStyle}>{u.uploaded_at?.slice(0, 16)}</td>
                     <td style={tdStyle}>
-                      <button onClick={() => handleDelete(u.id)} style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}>삭제</button>
+                      <button onClick={() => handleDelete(u.upload_id)} style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}>삭제</button>
                     </td>
                   </tr>
                 ))}
@@ -606,7 +648,10 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
       const data = await ppFetch<unknown>(ep, { method: 'POST', body: body() });
       if (type === 'skus') setRepeatSkus(data as RepeatSku[]);
       else if (type === 'combos') setRepeatCombos(data as RepeatCombination[]);
-      else setWeekday(data as WeekdayPattern[]);
+      else {
+        const resp = data as WeekdayResponse;
+        setWeekday(resp.sku_patterns || []);
+      }
       setSubTab(type);
       showToast('분석 완료', 'success');
     } catch (e: unknown) {
@@ -659,23 +704,23 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>SKU</th>
                     <th style={thStyle}>상품명</th>
-                    <th style={thStyle}>반복 횟수</th>
+                    <th style={thStyle}>옵션</th>
                     <th style={thStyle}>총 수량</th>
-                    <th style={thStyle}>평균 수량</th>
-                    <th style={thStyle}>최근 출고일</th>
+                    <th style={thStyle}>일평균</th>
+                    <th style={thStyle}>첫 출고</th>
+                    <th style={thStyle}>최근 출고</th>
                   </tr>
                 </thead>
                 <tbody>
                   {repeatSkus.map((s, i) => (
-                    <tr key={s.sku} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku}</td>
-                      <td style={tdStyle}>{s.product_name}</td>
-                      <td style={tdStyle}>{s.count}</td>
-                      <td style={tdStyle}>{s.total_qty.toLocaleString()}</td>
-                      <td style={tdStyle}>{s.avg_qty.toFixed(1)}</td>
-                      <td style={tdStyle}>{s.last_date}</td>
+                    <tr key={`${s.sku_name}-${s.option_name}`} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku_name}</td>
+                      <td style={tdStyle}>{s.option_name || '-'}</td>
+                      <td style={tdStyle}>{s.total_count.toLocaleString()}</td>
+                      <td style={tdStyle}>{s.daily_avg.toFixed(1)}</td>
+                      <td style={tdStyle}>{s.first_seen}</td>
+                      <td style={tdStyle}>{s.last_seen}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -693,11 +738,11 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>SKU 조합</th>
+                    <th style={thStyle}>조합 구성</th>
                     <th style={thStyle}>반복 횟수</th>
-                    <th style={thStyle}>총 수량</th>
-                    <th style={thStyle}>평균 수량</th>
-                    <th style={thStyle}>최근일</th>
+                    <th style={thStyle}>일평균</th>
+                    <th style={thStyle}>첫 출고</th>
+                    <th style={thStyle}>최근 출고</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -705,15 +750,17 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
                     <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {c.skus.map((s) => (
-                            <span key={s} style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{s}</span>
+                          {c.items.map((item, idx) => (
+                            <span key={idx} style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+                              {item.product_name || item.sku_code} x{item.qty}
+                            </span>
                           ))}
                         </div>
                       </td>
-                      <td style={tdStyle}>{c.count}</td>
-                      <td style={tdStyle}>{c.total_qty.toLocaleString()}</td>
-                      <td style={tdStyle}>{c.avg_qty.toFixed(1)}</td>
-                      <td style={tdStyle}>{c.last_date}</td>
+                      <td style={tdStyle}>{c.total_count}</td>
+                      <td style={tdStyle}>{c.daily_avg.toFixed(1)}</td>
+                      <td style={tdStyle}>{c.first_seen}</td>
+                      <td style={tdStyle}>{c.last_seen}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -731,21 +778,21 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    <th style={thStyle}>SKU</th>
-                    <th style={thStyle}>상품명</th>
-                    {WEEKDAYS.map((d) => <th key={d} style={{ ...thStyle, textAlign: 'center', minWidth: 50 }}>{d}</th>)}
+                    <th style={thStyle}>이름</th>
+                    {[0,1,2,3,4,5,6].map((d) => <th key={d} style={{ ...thStyle, textAlign: 'center', minWidth: 50 }}>{WEEKDAYS[d]}</th>)}
                     <th style={{ ...thStyle, textAlign: 'center' }}>피크</th>
                     <th style={{ ...thStyle, textAlign: 'right' }}>합계</th>
                   </tr>
                 </thead>
                 <tbody>
                   {weekday.map((w, i) => {
-                    const maxVal = Math.max(...WEEKDAYS.map((d) => w.weekday_counts[d] || 0));
+                    const vals = [0,1,2,3,4,5,6].map((d) => w.weekday_counts[d] || 0);
+                    const maxVal = Math.max(...vals);
+                    const total = vals.reduce((a, b) => a + b, 0);
                     return (
-                      <tr key={w.sku} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                        <td style={{ ...tdStyle, fontWeight: 600 }}>{w.sku}</td>
-                        <td style={tdStyle}>{w.product_name}</td>
-                        {WEEKDAYS.map((d) => {
+                      <tr key={w.name} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                        <td style={{ ...tdStyle, fontWeight: 600 }}>{w.name}</td>
+                        {[0,1,2,3,4,5,6].map((d) => {
                           const v = w.weekday_counts[d] || 0;
                           return (
                             <td key={d} style={{ ...tdStyle, textAlign: 'center' }}>
@@ -759,7 +806,7 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
                                   fontSize: 12,
                                   fontWeight: 600,
                                   background: heatColor(v, maxVal),
-                                  color: v / maxVal > 0.6 ? '#fff' : '#374151',
+                                  color: maxVal > 0 && v / maxVal > 0.6 ? '#fff' : '#374151',
                                 }}
                               >
                                 {v}
@@ -768,9 +815,9 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
                           );
                         })}
                         <td style={{ ...tdStyle, textAlign: 'center' }}>
-                          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{w.peak_day}</span>
+                          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[w.peak_day]}</span>
                         </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{w.total.toLocaleString()}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{total.toLocaleString()}</td>
                       </tr>
                     );
                   })}
@@ -854,10 +901,12 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
             <label style={labelStyle}>상태 필터</label>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={inputStyle}>
               <option value="">전체</option>
-              <option value="pending">대기</option>
+              <option value="recommended">추천</option>
               <option value="approved">승인</option>
+              <option value="modified">수정</option>
+              <option value="held">보류</option>
               <option value="rejected">거절</option>
-              <option value="hold">보류</option>
+              <option value="executed">실행됨</option>
             </select>
           </div>
           <button onClick={generate} disabled={generating} style={{ ...btnSuccess, opacity: generating ? 0.6 : 1 }}>
@@ -887,25 +936,25 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
               </thead>
               <tbody>
                 {recs.map((r, i) => (
-                  <tr key={r.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{r.id}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{r.sku}</td>
-                    <td style={tdStyle}>{r.product_name}</td>
-                    <td style={{ ...tdStyle, fontWeight: 700, color: '#2563eb' }}>{r.recommended_qty}</td>
+                  <tr key={r.recommendation_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                    <td style={tdStyle}>{r.recommendation_id}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{r.target_code}</td>
+                    <td style={tdStyle}>{r.target_name}</td>
+                    <td style={{ ...tdStyle, fontWeight: 700, color: '#2563eb' }}>{r.predicted_qty}</td>
                     <td style={{ ...tdStyle, minWidth: 120 }}>
-                      <ConfidenceBar value={r.confidence} color="#16a34a" />
+                      <ConfidenceBar value={r.confidence_score} color="#16a34a" />
                     </td>
                     <td style={{ ...tdStyle, minWidth: 120 }}>
                       <ConfidenceBar value={r.risk_score} color={r.risk_score > 0.7 ? '#dc2626' : r.risk_score > 0.4 ? '#f59e0b' : '#16a34a'} />
                     </td>
-                    <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.reason}>{r.reason}</td>
+                    <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.recommendation_reason}>{r.recommendation_reason}</td>
                     <td style={tdStyle}><Badge status={r.status} /></td>
                     <td style={tdStyle}>
-                      {r.status === 'pending' && (
+                      {(r.status === 'recommended' || r.status === 'pending') && (
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <button onClick={() => handleAction(r.id, 'approve')} style={{ ...btnSuccess, padding: '4px 8px', fontSize: 11 }}>승인</button>
-                          <button onClick={() => handleAction(r.id, 'hold')} style={{ ...btnWarning, padding: '4px 8px', fontSize: 11 }}>보류</button>
-                          <button onClick={() => handleAction(r.id, 'reject')} style={{ ...btnDanger, padding: '4px 8px', fontSize: 11 }}>거절</button>
+                          <button onClick={() => handleAction(r.recommendation_id, 'approve')} style={{ ...btnSuccess, padding: '4px 8px', fontSize: 11 }}>승인</button>
+                          <button onClick={() => handleAction(r.recommendation_id, 'hold')} style={{ ...btnWarning, padding: '4px 8px', fontSize: 11 }}>보류</button>
+                          <button onClick={() => handleAction(r.recommendation_id, 'reject')} style={{ ...btnDanger, padding: '4px 8px', fontSize: 11 }}>거절</button>
                         </div>
                       )}
                     </td>
@@ -1015,23 +1064,23 @@ function ExecuteTab({ supplierName, showToast }: { supplierName: string; showToa
                   <th style={thStyle}>상품명</th>
                   <th style={thStyle}>실행 수량</th>
                   <th style={thStyle}>실행자</th>
-                  <th style={thStyle}>로케이션</th>
+                  <th style={thStyle}>상태</th>
                   <th style={thStyle}>메모</th>
                   <th style={thStyle}>실행일</th>
                 </tr>
               </thead>
               <tbody>
                 {executions.map((ex, i) => (
-                  <tr key={ex.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{ex.id}</td>
+                  <tr key={ex.execution_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                    <td style={tdStyle}>{ex.execution_id}</td>
                     <td style={tdStyle}>{ex.recommendation_id}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{ex.sku}</td>
-                    <td style={tdStyle}>{ex.product_name}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{ex.target_code}</td>
+                    <td style={tdStyle}>{ex.target_name}</td>
                     <td style={{ ...tdStyle, fontWeight: 700, color: '#2563eb' }}>{ex.executed_qty}</td>
                     <td style={tdStyle}>{ex.executed_by}</td>
-                    <td style={tdStyle}>{ex.location_code}</td>
+                    <td style={tdStyle}>{ex.execution_status}</td>
                     <td style={tdStyle}>{ex.memo || '-'}</td>
-                    <td style={tdStyle}>{ex.created_at?.slice(0, 16)}</td>
+                    <td style={tdStyle}>{ex.executed_at?.slice(0, 16)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1088,20 +1137,20 @@ function StockTab({ supplierName, showToast }: { supplierName: string; showToast
       {summary && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
           <div style={statCard('#2563eb')}>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 SKU</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{summary.total_skus}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 재고량</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{summary.total_packed.toLocaleString()}</div>
           </div>
           <div style={statCard('#16a34a')}>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 수량</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{summary.total_qty.toLocaleString()}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>가용 수량</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{summary.total_available.toLocaleString()}</div>
           </div>
           <div style={statCard('#f59e0b')}>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>로케이션 수</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{summary.total_locations}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{Object.keys(summary.by_location).length}</div>
           </div>
           <div style={statCard('#dc2626')}>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>만료 임박</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{summary.expiring_soon}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>상태 종류</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{Object.keys(summary.by_status).length}</div>
           </div>
         </div>
       )}
@@ -1142,15 +1191,15 @@ function StockTab({ supplierName, showToast }: { supplierName: string; showToast
               </thead>
               <tbody>
                 {stock.map((s, i) => (
-                  <tr key={s.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{s.id}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku}</td>
-                    <td style={tdStyle}>{s.product_name}</td>
-                    <td style={{ ...tdStyle, fontWeight: 700 }}>{s.qty}</td>
+                  <tr key={s.prepack_stock_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                    <td style={tdStyle}>{s.prepack_stock_id}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{s.target_code}</td>
+                    <td style={tdStyle}>{s.target_name}</td>
+                    <td style={{ ...tdStyle, fontWeight: 700 }}>{s.current_qty}</td>
                     <td style={tdStyle}>{s.location_code}</td>
-                    <td style={tdStyle}>{s.expires_at?.slice(0, 10) || '-'}</td>
+                    <td style={tdStyle}>{s.expiry_at?.slice(0, 10) || '-'}</td>
                     <td style={tdStyle}>
-                      <button onClick={() => setUseForm({ id: s.id, qty: '' })} style={{ ...btnWarning, padding: '4px 10px', fontSize: 12 }}>사용</button>
+                      <button onClick={() => setUseForm({ id: s.prepack_stock_id, qty: '' })} style={{ ...btnWarning, padding: '4px 10px', fontSize: 12 }}>사용</button>
                     </td>
                   </tr>
                 ))}
@@ -1160,14 +1209,14 @@ function StockTab({ supplierName, showToast }: { supplierName: string; showToast
         )}
       </div>
 
-      {summary && summary.by_location.length > 0 && (
+      {summary && Object.keys(summary.by_location).length > 0 && (
         <div style={card}>
           <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>로케이션별 재고</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {summary.by_location.map((loc) => (
-              <div key={loc.location_code} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', textAlign: 'center' }}>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{loc.location_code}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>{loc.qty}</div>
+            {Object.entries(summary.by_location).map(([locCode, qty]) => (
+              <div key={locCode} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>{locCode || '미지정'}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>{qty}</div>
               </div>
             ))}
           </div>
@@ -1347,15 +1396,15 @@ function LocationTab({ supplierName, showToast }: { supplierName: string; showTo
               </thead>
               <tbody>
                 {locations.map((loc, i) => {
-                  const usage = loc.max_capacity > 0 ? loc.current_qty / loc.max_capacity : 0;
+                  const usage = loc.max_capacity > 0 ? loc.current_capacity / loc.max_capacity : 0;
                   return (
-                    <tr key={loc.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                    <tr key={loc.location_code} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{loc.location_code}</td>
                       <td style={tdStyle}>{loc.location_name}</td>
-                      <td style={tdStyle}>{loc.zone}</td>
+                      <td style={tdStyle}>{loc.location_zone}</td>
                       <td style={tdStyle}>{loc.location_type}</td>
                       <td style={tdStyle}>{loc.max_capacity}</td>
-                      <td style={tdStyle}>{loc.current_qty}</td>
+                      <td style={tdStyle}>{loc.current_capacity}</td>
                       <td style={{ ...tdStyle, minWidth: 120 }}>
                         <ConfidenceBar value={usage} color={usage > 0.9 ? '#dc2626' : usage > 0.7 ? '#f59e0b' : '#16a34a'} />
                       </td>
@@ -1376,7 +1425,7 @@ function LocationTab({ supplierName, showToast }: { supplierName: string; showTo
 // ===========================================================================
 function ValidationTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
   const [accuracy, setAccuracy] = useState<AccuracySummary | null>(null);
-  const [failures, setFailures] = useState<FailureRecord[]>([]);
+  const [failures, setFailures] = useState<FailureAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [targetDate, setTargetDate] = useState('');
@@ -1388,10 +1437,10 @@ function ValidationTab({ supplierName, showToast }: { supplierName: string; show
     try {
       const [acc, fail] = await Promise.all([
         ppFetch<AccuracySummary>(`/pp/validation/accuracy?supplier_name=${encodeURIComponent(supplierName)}&days=${days}`),
-        ppFetch<FailureRecord[]>(`/pp/validation/failures?supplier_name=${encodeURIComponent(supplierName)}&days=${days}`),
+        ppFetch<FailureAnalysis>(`/pp/validation/failures?supplier_name=${encodeURIComponent(supplierName)}&days=${days}`),
       ]);
       setAccuracy(acc);
-      setFailures(Array.isArray(fail) ? fail : []);
+      setFailures(fail);
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : '검증 데이터 조회 실패', 'error');
     } finally {
@@ -1440,91 +1489,79 @@ function ValidationTab({ supplierName, showToast }: { supplierName: string; show
           {accuracy && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
               <div style={statCard('#2563eb')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>전체 정확도</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: accuracy.overall_accuracy >= 0.8 ? '#16a34a' : accuracy.overall_accuracy >= 0.5 ? '#f59e0b' : '#dc2626' }}>
-                  {(accuracy.overall_accuracy * 100).toFixed(1)}%
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>평균 정확도</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: accuracy.avg_accuracy >= 0.8 ? '#16a34a' : accuracy.avg_accuracy >= 0.5 ? '#f59e0b' : '#dc2626' }}>
+                  {(accuracy.avg_accuracy * 100).toFixed(1)}%
                 </div>
               </div>
               <div style={statCard('#16a34a')}>
-                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 예측</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{accuracy.total_predictions}</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 검증</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{accuracy.total_validated}</div>
               </div>
               <div style={statCard('#16a34a')}>
                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>정확</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{accuracy.correct}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{accuracy.matched_count}</div>
               </div>
               <div style={statCard('#f59e0b')}>
                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>과다 예측</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{accuracy.over_predicted}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{accuracy.over_count}</div>
               </div>
               <div style={statCard('#dc2626')}>
                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>과소 예측</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{accuracy.under_predicted}</div>
-              </div>
-            </div>
-          )}
-
-          {accuracy && accuracy.by_sku.length > 0 && (
-            <div style={card}>
-              <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>SKU별 정확도</h3>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={thStyle}>SKU</th>
-                      <th style={thStyle}>정확도</th>
-                      <th style={thStyle}>예측 수</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {accuracy.by_sku.map((s, i) => (
-                      <tr key={s.sku} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                        <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku}</td>
-                        <td style={{ ...tdStyle, minWidth: 160 }}>
-                          <ConfidenceBar value={s.accuracy} color={s.accuracy >= 0.8 ? '#16a34a' : s.accuracy >= 0.5 ? '#f59e0b' : '#dc2626'} />
-                        </td>
-                        <td style={tdStyle}>{s.predictions}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{accuracy.under_count}</div>
               </div>
             </div>
           )}
 
           <div style={card}>
             <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>실패 분석</h3>
-            {failures.length === 0 ? <Empty message="실패 기록이 없습니다." /> : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={thStyle}>SKU</th>
-                      <th style={thStyle}>상품명</th>
-                      <th style={thStyle}>예측</th>
-                      <th style={thStyle}>실제</th>
-                      <th style={thStyle}>차이</th>
-                      <th style={thStyle}>대상일</th>
-                      <th style={thStyle}>사유</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {failures.map((f, i) => (
-                      <tr key={f.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                        <td style={{ ...tdStyle, fontWeight: 600 }}>{f.sku}</td>
-                        <td style={tdStyle}>{f.product_name}</td>
-                        <td style={tdStyle}>{f.predicted_qty}</td>
-                        <td style={tdStyle}>{f.actual_qty}</td>
-                        <td style={{ ...tdStyle, fontWeight: 700, color: f.difference > 0 ? '#dc2626' : '#16a34a' }}>
-                          {f.difference > 0 ? '+' : ''}{f.difference}
-                        </td>
-                        <td style={tdStyle}>{f.target_date}</td>
-                        <td style={tdStyle}>{f.reason}</td>
-                      </tr>
+            {!failures || failures.total_failures === 0 ? <Empty message="실패 기록이 없습니다." /> : (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>사유별 분포</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {Object.entries(failures.by_reason).map(([reason, count]) => (
+                      <div key={reason} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 16px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 12, color: '#6b7280' }}>{reason}</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>{count}</div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                </div>
+                {failures.top_failed_skus.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>실패 상위 SKU</h4>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            <th style={thStyle}>SKU/상품명</th>
+                            <th style={thStyle}>오차 가중치</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {failures.top_failed_skus.map((f, i) => (
+                            <tr key={f.sku_or_name} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                              <td style={{ ...tdStyle, fontWeight: 600 }}>{f.sku_or_name}</td>
+                              <td style={{ ...tdStyle, color: '#dc2626', fontWeight: 700 }}>{f.error_weight.toFixed(1)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                {failures.improvement_suggestions.length > 0 && (
+                  <div>
+                    <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>개선 제안</h4>
+                    <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      {failures.improvement_suggestions.map((s, i) => (
+                        <li key={i} style={{ fontSize: 13, color: '#374151', marginBottom: 4 }}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>
@@ -1615,60 +1652,36 @@ function ReportTab({ supplierName, showToast }: { supplierName: string; showToas
                   <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.total_recommendations}</div>
                 </div>
                 <div style={statCard('#16a34a')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 실행</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.total_executions}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>승인</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.approved_count}</div>
+                </div>
+                <div style={statCard('#dc2626')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>거절</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{overview.rejected_count}</div>
                 </div>
                 <div style={statCard('#f59e0b')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>재고 수량</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.total_stock_qty.toLocaleString()}</div>
-                </div>
-                <div style={statCard('#16a34a')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>정확도</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: overview.accuracy >= 0.8 ? '#16a34a' : '#f59e0b' }}>
-                    {(overview.accuracy * 100).toFixed(1)}%
-                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>실행</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.executed_count}</div>
                 </div>
               </div>
-
-              {overview.status_breakdown && (
-                <div style={card}>
-                  <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>상태별 분포</h3>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                    {Object.entries(overview.status_breakdown).map(([status, count]) => (
-                      <div key={status} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 20px', textAlign: 'center' }}>
-                        <Badge status={status} />
-                        <div style={{ fontSize: 24, fontWeight: 800, marginTop: 8 }}>{count}</div>
-                      </div>
-                    ))}
-                  </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+                <div style={statCard('#2563eb')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>생산 수량</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.total_produced_qty.toLocaleString()}</div>
                 </div>
-              )}
-
-              {overview.top_skus.length > 0 && (
-                <div style={card}>
-                  <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>Top SKU</h3>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={thStyle}>순위</th>
-                          <th style={thStyle}>SKU</th>
-                          <th style={thStyle}>수량</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {overview.top_skus.map((s, i) => (
-                          <tr key={s.sku} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                            <td style={tdStyle}>{i + 1}</td>
-                            <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku}</td>
-                            <td style={tdStyle}>{s.qty.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                <div style={statCard('#16a34a')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>사용 수량</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{overview.total_used_qty.toLocaleString()}</div>
                 </div>
-              )}
+                <div style={statCard('#f59e0b')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>활용률</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{(overview.utilization_rate * 100).toFixed(1)}%</div>
+                </div>
+                <div style={statCard('#16a34a')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>평균 신뢰도</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{(overview.avg_confidence * 100).toFixed(1)}%</div>
+                </div>
+              </div>
             </>
           )}
 
@@ -1676,98 +1689,62 @@ function ReportTab({ supplierName, showToast }: { supplierName: string; showToas
             <>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
                 <div style={statCard('#2563eb')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>정확도</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: valReport.accuracy >= 0.8 ? '#16a34a' : '#f59e0b' }}>
-                    {(valReport.accuracy * 100).toFixed(1)}%
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>평균 정확도</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: valReport.avg_accuracy >= 0.8 ? '#16a34a' : '#f59e0b' }}>
+                    {(valReport.avg_accuracy * 100).toFixed(1)}%
                   </div>
                 </div>
                 <div style={statCard('#16a34a')}>
                   <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 검증</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{valReport.total_validations}</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{valReport.total_validated}</div>
                 </div>
-                <div style={statCard('#16a34a')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>통과율</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#16a34a' }}>{(valReport.pass_rate * 100).toFixed(1)}%</div>
+                <div style={statCard('#f59e0b')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>MAPE</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{(valReport.avg_mape * 100).toFixed(1)}%</div>
+                </div>
+                <div style={statCard('#dc2626')}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>해체율</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: '#dc2626' }}>{(valReport.unwrap_rate * 100).toFixed(1)}%</div>
                 </div>
               </div>
 
-              {valReport.failures.length > 0 && (
-                <div style={card}>
-                  <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>실패 내역</h3>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={thStyle}>SKU</th>
-                          <th style={thStyle}>예측</th>
-                          <th style={thStyle}>실제</th>
-                          <th style={thStyle}>차이</th>
-                          <th style={thStyle}>대상일</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {valReport.failures.map((f, i) => (
-                          <tr key={f.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                            <td style={{ ...tdStyle, fontWeight: 600 }}>{f.sku}</td>
-                            <td style={tdStyle}>{f.predicted_qty}</td>
-                            <td style={tdStyle}>{f.actual_qty}</td>
-                            <td style={{ ...tdStyle, color: f.difference > 0 ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
-                              {f.difference > 0 ? '+' : ''}{f.difference}
-                            </td>
-                            <td style={tdStyle}>{f.target_date}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+              <div style={card}>
+                <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>결과별 분포</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                  {Object.entries(valReport.by_result).map(([result, count]) => (
+                    <div key={result} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 20px', textAlign: 'center' }}>
+                      <Badge status={result} />
+                      <div style={{ fontSize: 24, fontWeight: 800, marginTop: 8 }}>{count}</div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
             </>
           )}
 
           {subTab === 'ai' && aiReport && (
-            <>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-                <div style={statCard('#2563eb')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 호출</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{aiReport.total_calls.toLocaleString()}</div>
-                </div>
-                <div style={statCard('#16a34a')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 토큰</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{aiReport.total_tokens.toLocaleString()}</div>
-                </div>
-                <div style={statCard('#f59e0b')}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>평균 지연 (ms)</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{aiReport.avg_latency_ms.toFixed(0)}</div>
-                </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+              <div style={statCard('#2563eb')}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 호출</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{aiReport.total_calls.toLocaleString()}</div>
               </div>
-
-              {aiReport.by_date.length > 0 && (
-                <div style={card}>
-                  <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>일별 AI 사용량</h3>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={thStyle}>날짜</th>
-                          <th style={thStyle}>호출 수</th>
-                          <th style={thStyle}>토큰 수</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {aiReport.by_date.map((d, i) => (
-                          <tr key={d.date} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                            <td style={tdStyle}>{d.date}</td>
-                            <td style={tdStyle}>{d.calls.toLocaleString()}</td>
-                            <td style={tdStyle}>{d.tokens.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </>
+              <div style={statCard('#16a34a')}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 토큰</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{aiReport.total_tokens.toLocaleString()}</div>
+              </div>
+              <div style={statCard('#f59e0b')}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>총 비용 (USD)</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>${aiReport.total_cost.toFixed(4)}</div>
+              </div>
+              <div style={statCard('#dc2626')}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>평균 지연 (ms)</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{aiReport.avg_latency.toFixed(0)}</div>
+              </div>
+              <div style={statCard('#16a34a')}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>성공률</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{(aiReport.success_rate * 100).toFixed(1)}%</div>
+              </div>
+            </div>
           )}
 
           {!loading && !overview && subTab === 'overview' && <Empty message="업체명을 입력하고 조회해주세요." />}
@@ -1898,13 +1875,13 @@ function SettingsTab({ supplierName, showToast }: { supplierName: string; showTo
               </thead>
               <tbody>
                 {expiring.map((s, i) => (
-                  <tr key={s.id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{s.id}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku}</td>
-                    <td style={tdStyle}>{s.product_name}</td>
-                    <td style={tdStyle}>{s.qty}</td>
+                  <tr key={s.prepack_stock_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                    <td style={tdStyle}>{s.prepack_stock_id}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{s.target_code}</td>
+                    <td style={tdStyle}>{s.target_name}</td>
+                    <td style={tdStyle}>{s.current_qty}</td>
                     <td style={tdStyle}>{s.location_code}</td>
-                    <td style={{ ...tdStyle, color: '#dc2626', fontWeight: 600 }}>{s.expires_at?.slice(0, 10)}</td>
+                    <td style={{ ...tdStyle, color: '#dc2626', fontWeight: 600 }}>{s.expiry_at?.slice(0, 10)}</td>
                   </tr>
                 ))}
               </tbody>
