@@ -254,20 +254,40 @@ def _build_target_features(daily: dict[str, int], td: dt.date) -> dict | None:
 
 
 def _fallback_statistical(daily: dict[str, int], td: dt.date, frequency: int) -> dict:
-    """기존 가중이동평균 폴백."""
+    """일평균 기반 폴백 (같은 요일만 보지 않고 전체 최근 데이터 활용)."""
+    avg_7 = sum(daily.get((td - dt.timedelta(days=i)).isoformat(), 0) for i in range(1, 8)) / 7.0
+    avg_14 = sum(daily.get((td - dt.timedelta(days=i)).isoformat(), 0) for i in range(1, 15)) / 14.0
+
     same_wd_vals = []
     for w in range(1, 9):
         past_d = td - dt.timedelta(weeks=w)
         same_wd_vals.append(float(daily.get(past_d.isoformat(), 0)))
+    same_wd_nonzero = [v for v in same_wd_vals if v > 0]
+    avg_same_wd = sum(same_wd_vals) / len(same_wd_vals) if same_wd_vals else 0.0
 
-    if not same_wd_vals:
-        return {"predicted_qty": 0, "model_type": "statistical", "confidence_boost": 0.0}
+    signals: list[tuple[float, float]] = []
+    if avg_7 > 0:
+        signals.append((avg_7, 3.0))
+    if avg_14 > 0:
+        signals.append((avg_14, 2.0))
+    if avg_same_wd > 0:
+        signals.append((avg_same_wd, 2.0))
 
-    n = len(same_wd_vals)
-    weights = [float(i + 1) for i in range(n)]
-    num = sum(w * v for w, v in zip(weights, same_wd_vals))
-    den = sum(weights)
-    pred = num / den if den else 0.0
+    if not signals:
+        total_qty = sum(daily.values())
+        active = len([v for v in daily.values() if v > 0])
+        if active > 0:
+            pred = total_qty / active
+        else:
+            pred = 0.0
+        return {
+            "predicted_qty": max(0, int(round(pred))),
+            "model_type": "statistical",
+            "confidence_boost": 0.0,
+        }
+
+    total_w = sum(w for _, w in signals)
+    pred = sum(v * w for v, w in signals) / total_w
 
     return {
         "predicted_qty": max(0, int(round(pred))),

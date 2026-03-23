@@ -1,79 +1,151 @@
 """
-forecast_service — AI 하이브리드 예측 파이프라인
-───────────────────────────────────────────────
-1단계: ML(GradientBoosting) 예측
-2단계: GPT 보정 (ML 결과 + 통계 데이터를 GPT에게 전달하여 최종 수량 결정)
-3단계: 폴백 — ML/GPT 모두 실패 시 기존 가중이동평균
+forecast_service — 다중 시그널 앙상블 예측
+──────────────────────────────────────────
+시그널 1: 최근 7일 일평균 (가장 최근 트렌드)
+시그널 2: 최근 14일 일평균
+시그널 3: 최근 30일 일평균
+시그널 4: 같은 요일 최근 8주 가중평균
+시그널 5: ML(GradientBoosting) 예측
+
+가중 앙상블로 최종 예측. 데이터가 많을수록 ML 비중 증가.
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
-import statistics
-
-import numpy as np
+import math
 
 from prepacking.services.analysis import repeat_combination_service, repeat_sku_service, weekday_pattern_service
 from prepacking.services.prediction import confidence_service
 from prepacking.services.prediction import ml_forecast_service
-from prepacking.services.prediction import gpt_adjust_service
 
 logger = logging.getLogger(__name__)
 
-WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
+
+def _ensemble_predict(
+    daily: dict[str, int],
+    target_date: str,
+    frequency: int,
+    weeks_back: int = 8,
+) -> dict:
+    """다중 시그널 앙상블 예측."""
+    td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+
+    avg_7 = _window_avg(daily, td, 7)
+    avg_14 = _window_avg(daily, td, 14)
+    avg_30 = _window_avg(daily, td, 30)
+
+    same_wd = _same_weekday_weighted(daily, td, weeks_back)
+
+    active_7 = _active_days(daily, td, 7)
+    active_30 = _active_days(daily, td, 30)
+
+    signals: list[tuple[float, float]] = []
+
+    if active_7 >= 1:
+        signals.append((avg_7, 3.0))
+    if active_30 >= 2:
+        signals.append((avg_14, 2.0))
+    if active_30 >= 3:
+        signals.append((avg_30, 1.5))
+    if same_wd > 0:
+        signals.append((same_wd, 2.5))
+
+    ml_result = ml_forecast_service.predict_ml(daily, target_date, frequency)
+    ml_qty = ml_result.get("predicted_qty", 0)
+    ml_type = ml_result.get("model_type", "statistical")
+    ml_accuracy = ml_result.get("train_accuracy", 0.0)
+    ml_samples = ml_result.get("train_samples", 0)
+    confidence_boost = ml_result.get("confidence_boost", 0.0)
+
+    if ml_type == "ml" and ml_qty > 0:
+        ml_weight = 2.0 + min(2.0, ml_accuracy * 3.0)
+        signals.append((float(ml_qty), ml_weight))
+
+    if not signals:
+        total_qty = sum(daily.values())
+        total_days = len([v for v in daily.values() if v > 0])
+        if total_days > 0:
+            fallback = total_qty / total_days
+            return {
+                "predicted_qty": max(1, int(round(fallback))),
+                "stat_qty": max(1, int(round(fallback))),
+                "ml_qty": ml_qty,
+                "ml_model_type": ml_type,
+                "ml_accuracy": ml_accuracy,
+                "ml_samples": ml_samples,
+                "confidence_boost": confidence_boost,
+                "avg_7": avg_7, "avg_14": avg_14, "avg_30": avg_30,
+                "avg_same_wd": same_wd,
+            }
+        return {
+            "predicted_qty": 0, "stat_qty": 0, "ml_qty": 0,
+            "ml_model_type": "none", "ml_accuracy": 0, "ml_samples": 0,
+            "confidence_boost": 0, "avg_7": 0, "avg_14": 0, "avg_30": 0,
+            "avg_same_wd": 0,
+        }
+
+    total_w = sum(w for _, w in signals)
+    ensemble = sum(v * w for v, w in signals) / total_w
+    stat_qty = max(0, int(round(ensemble)))
+
+    return {
+        "predicted_qty": stat_qty,
+        "stat_qty": stat_qty,
+        "ml_qty": ml_qty,
+        "ml_model_type": ml_type,
+        "ml_accuracy": ml_accuracy,
+        "ml_samples": ml_samples,
+        "confidence_boost": confidence_boost,
+        "avg_7": avg_7, "avg_14": avg_14, "avg_30": avg_30,
+        "avg_same_wd": same_wd,
+    }
 
 
-def _weighted_moving_average(values: list[float]) -> float:
-    if not values:
-        return 0.0
-    n = len(values)
-    weights = [float(i + 1) for i in range(n)]
-    num = sum(w * v for w, v in zip(weights, values))
-    den = sum(weights)
-    return num / den if den else 0.0
+def _window_avg(daily: dict[str, int], td: dt.date, days: int) -> float:
+    total = 0
+    for i in range(1, days + 1):
+        d = td - dt.timedelta(days=i)
+        total += daily.get(d.isoformat(), 0)
+    return total / days
 
 
-def _variability_coefficient(values: list[float]) -> float:
-    if len(values) < 2:
-        return 0.0
-    m = statistics.mean(values)
-    if m <= 1e-9:
-        spread = statistics.pstdev(values) if len(values) > 1 else 0.0
-        return min(1.0, spread)
-    return min(1.0, statistics.pstdev(values) / m)
+def _active_days(daily: dict[str, int], td: dt.date, days: int) -> int:
+    count = 0
+    for i in range(1, days + 1):
+        d = td - dt.timedelta(days=i)
+        if daily.get(d.isoformat(), 0) > 0:
+            count += 1
+    return count
 
 
-def _same_weekday_values(daily: dict[str, int], target_date: str, weeks: int = 12) -> list[float]:
-    """같은 요일 과거 N주 출하량 리스트."""
-    import datetime as dt
-    try:
-        td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
-    except (ValueError, IndexError):
-        return []
+def _same_weekday_weighted(daily: dict[str, int], td: dt.date, weeks: int) -> float:
     vals = []
     for w in range(1, weeks + 1):
         past_d = td - dt.timedelta(weeks=w)
         vals.append(float(daily.get(past_d.isoformat(), 0)))
-    return vals
-
-
-def _compute_trend(daily: dict[str, int], target_date: str, days: int = 14) -> float:
-    """최근 N일 추세 기울기."""
-    import datetime as dt
-    try:
-        td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
-    except (ValueError, IndexError):
+    nonzero = [v for v in vals if v > 0]
+    if not nonzero:
         return 0.0
+    n = len(vals)
+    weights = [float(i + 1) for i in range(n)]
+    num = sum(w * v for w, v in zip(weights, vals))
+    den = sum(weights)
+    return num / den if den else 0.0
+
+
+def _variability_coefficient(daily: dict[str, int], td: dt.date, days: int = 30) -> float:
+    import statistics
     vals = []
-    for i in range(days, 0, -1):
+    for i in range(1, days + 1):
         d = td - dt.timedelta(days=i)
         vals.append(float(daily.get(d.isoformat(), 0)))
-    if len(vals) < 3:
+    if len(vals) < 2:
         return 0.0
-    x = np.arange(len(vals), dtype=float)
-    y = np.array(vals, dtype=float)
-    if np.std(x) == 0:
-        return 0.0
-    return float(np.polyfit(x, y, 1)[0])
+    m = statistics.mean(vals)
+    if m <= 1e-9:
+        return min(1.0, statistics.pstdev(vals))
+    return min(1.0, statistics.pstdev(vals) / m)
 
 
 MAX_GPT_ITEMS = 10
@@ -89,6 +161,12 @@ def predict_for_date(
         weeks_back = 1
     lookback_days = max(weeks_back * 7 + 45, 120)
     wb = weekday_pattern_service.weekday_basis_for(target_date)
+
+    try:
+        td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
+    except (ValueError, IndexError):
+        td = dt.date.today()
+
     skus = repeat_sku_service.load_repeat_sku_daily_totals(
         supplier_name, target_date, lookback_days
     )
@@ -103,43 +181,22 @@ def predict_for_date(
     for row in combos:
         all_rows.append(("combination", row))
 
-    gpt_batch: list[dict] = []
-
     for target_type, row in all_rows:
         daily = {k: int(v) for k, v in row["daily"].items()}
 
-        stat_weeks = weekday_pattern_service.bucket_weekly_totals(
-            daily, target_date, weeks_back
-        )
-        stat_pred = _weighted_moving_average(stat_weeks)
-        stat_qty = max(0, int(round(stat_pred)))
+        result = _ensemble_predict(daily, target_date, row["frequency"], weeks_back)
 
-        var = _variability_coefficient(stat_weeks)
+        var = _variability_coefficient(daily, td, 30)
         data_days = weekday_pattern_service.distinct_active_days(
             daily, target_date, lookback_days
         )
         base_conf = confidence_service.calculate_confidence(
             row["frequency"], var, data_days
         )
+        final_conf = min(1.0, base_conf + result.get("confidence_boost", 0.0))
 
-        ml_result = ml_forecast_service.predict_ml(
-            daily, target_date, row["frequency"],
-        )
-        ml_qty = ml_result.get("predicted_qty", 0)
-        ml_type = ml_result.get("model_type", "statistical")
-        ml_accuracy = ml_result.get("train_accuracy", 0.0)
-        ml_samples = ml_result.get("train_samples", 0)
-        confidence_boost = ml_result.get("confidence_boost", 0.0)
-
-        same_wd_vals = _same_weekday_values(daily, target_date, 4)
-        trend = _compute_trend(daily, target_date, 14)
-        avg_7 = weekday_pattern_service.window_average_daily(daily, target_date, 7)
-        avg_14 = weekday_pattern_service.window_average_daily(daily, target_date, 14) if hasattr(weekday_pattern_service, 'window_average_daily') else avg_7
-        avg_30 = weekday_pattern_service.window_average_daily(daily, target_date, 30)
-        avg_same_wd = weekday_pattern_service.recent_same_weekday_average(daily, target_date)
-
-        best_qty = ml_qty if ml_type == "ml" else stat_qty
-        final_conf = min(1.0, base_conf + confidence_boost)
+        ml_type = result.get("ml_model_type", "statistical")
+        model_label = "ml" if ml_type == "ml" else "ensemble"
 
         entry = {
             "target_type": target_type,
@@ -150,88 +207,22 @@ def predict_for_date(
             "option_name": row.get("option_name", ""),
             "combination_key": row.get("combination_key", ""),
             "items": row.get("items", []),
-            "predicted_qty": best_qty,
-            "stat_qty": stat_qty,
-            "ml_qty": ml_qty,
+            "predicted_qty": result["predicted_qty"],
+            "stat_qty": result["stat_qty"],
+            "ml_qty": result.get("ml_qty", 0),
             "ml_model_type": ml_type,
-            "ml_accuracy": round(ml_accuracy, 3),
-            "ml_samples": ml_samples,
+            "ml_accuracy": round(result.get("ml_accuracy", 0), 3),
+            "ml_samples": result.get("ml_samples", 0),
             "confidence_score": round(final_conf, 3),
-            "recent_7d_avg": round(avg_7, 1),
-            "recent_30d_avg": round(avg_30, 1),
-            "recent_same_weekday_avg": round(avg_same_wd, 1),
+            "recent_7d_avg": round(result.get("avg_7", 0), 1),
+            "recent_30d_avg": round(result.get("avg_30", 0), 1),
+            "recent_same_weekday_avg": round(result.get("avg_same_wd", 0), 1),
             "weekday_basis": wb,
             "frequency": row["frequency"],
-            "model_used": ml_type,
+            "model_used": model_label,
             "gpt_reason": "",
             "gpt_confidence": "",
         }
-
-        gpt_batch.append({
-            "entry": entry,
-            "supplier_name": supplier_name,
-            "target_date": target_date,
-            "weekday_idx": wb,
-            "avg_14d": round(avg_14, 1),
-            "same_wd_vals": same_wd_vals,
-            "cv": round(var, 3),
-            "trend": round(trend, 3),
-        })
-
-    gpt_count = 0
-    for item in gpt_batch:
-        entry = item["entry"]
-        best_qty = entry["predicted_qty"]
-
-        if best_qty <= 0:
-            entry["model_used"] = entry.get("ml_model_type", "statistical")
-            out.append(entry)
-            continue
-
-        if not use_gpt or gpt_count >= MAX_GPT_ITEMS:
-            entry["model_used"] = entry.get("ml_model_type", "statistical")
-            out.append(entry)
-            continue
-
-        gpt_count += 1
-        try:
-            gpt_result = gpt_adjust_service.adjust_with_gpt(
-                supplier_name=item["supplier_name"],
-                target_name=entry["target_name"],
-                target_type=entry["target_type"],
-                target_date=item["target_date"],
-                weekday_idx=item["weekday_idx"],
-                ml_qty=entry["ml_qty"],
-                ml_accuracy=entry["ml_accuracy"],
-                ml_samples=entry.get("ml_samples", 0),
-                stat_qty=entry["stat_qty"],
-                avg_7d=entry["recent_7d_avg"],
-                avg_14d=item["avg_14d"],
-                avg_30d=entry["recent_30d_avg"],
-                avg_same_wd=entry["recent_same_weekday_avg"],
-                same_wd_history=item["same_wd_vals"],
-                cv=item["cv"],
-                trend=item["trend"],
-                frequency=entry["frequency"],
-            )
-
-            if gpt_result.get("used_gpt"):
-                entry["predicted_qty"] = gpt_result["adjusted_qty"]
-                entry["gpt_reason"] = gpt_result.get("reason", "")
-                entry["gpt_confidence"] = gpt_result.get("confidence", "")
-                entry["model_used"] = f"{entry['ml_model_type']}+gpt"
-                gpt_conf_map = {"high": 0.15, "medium": 0.05, "low": -0.05}
-                gpt_boost = gpt_conf_map.get(gpt_result.get("confidence", ""), 0.0)
-                entry["confidence_score"] = round(
-                    min(1.0, max(0.0, entry["confidence_score"] + gpt_boost)), 3
-                )
-            else:
-                entry["gpt_reason"] = gpt_result.get("reason", "")
-                entry["model_used"] = entry.get("ml_model_type", "statistical")
-
-        except Exception as exc:
-            logger.warning("GPT adjust skipped for %s: %s", entry["target_name"], exc)
-            entry["model_used"] = entry.get("ml_model_type", "statistical")
 
         out.append(entry)
 
