@@ -272,36 +272,9 @@ def predict_for_date(
         scale_max=profile.trend_scale_max,
     )
 
-    # === ML 예측 (통계 예측 먼저 수집 후 ML과 앙상블) ===
-    stat_predictions: dict[str, int] = {}
-    for target_type, row in all_rows:
-        if target_type == "combination":
-            sk = f"combo||{row.get('combination_key', '')}"
-        else:
-            pn = normalize_sku_name(row.get("target_code", ""))
-            on = normalize_sku_name(row.get("option_name", ""))
-            sk = f"{pn}||{on}"
-        series = sku_series_map.get(sk)
-        if series is None or series.empty:
-            continue
-        sq, _, _ = _adaptive_predict(series, td_ts, profile)
-        if sq > 0 and trend_scale != 1.0:
-            sq = max(1, int(round(sq * trend_scale)))
-        stat_predictions[sk] = sq
-
-    ml_results: dict[str, dict] = {}
-    try:
-        from prepacking.services.prediction.pipeline.ml_predictor import build_ml_predictions
-        sku_count = len(sku_series_map)
-        if 10 <= sku_count <= 200:
-            ml_results = build_ml_predictions(sku_series_map, td_ts, stat_predictions)
-            logger.info("ML predictions generated for %d/%d SKUs", len(ml_results), sku_count)
-        else:
-            logger.info("ML skipped: %d SKUs (need 10-200)", sku_count)
-    except Exception as exc:
-        logger.warning("ML prediction failed, using stat only: %s", exc)
-
+    # === 1차: 통계 예측 수집 ===
     out: list[dict] = []
+    stat_predictions: dict[str, int] = {}
 
     for target_type, row in all_rows:
         if target_type == "combination":
@@ -324,15 +297,9 @@ def predict_for_date(
             predicted_qty = max(1, int(round(predicted_qty * trend_scale)))
             method_detail += f",scale={trend_scale:.2f}"
 
-        # ML 앙상블 적용
-        ml_info = ml_results.get(series_key, {})
+        stat_predictions[series_key] = predicted_qty
         ml_qty = 0
         ml_model_type = "statistical"
-        if ml_info:
-            predicted_qty = ml_info["final_qty"]
-            ml_qty = ml_info["ml_qty"]
-            ml_model_type = ml_info["model_used"]
-            method_detail = f"{ml_model_type}(stat={ml_info['stat_qty']},ml={ml_qty},p={ml_info['ml_ship_prob']:.0%})"
 
         daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
         data_days = weekday_pattern_service.distinct_active_days(
@@ -385,6 +352,38 @@ def predict_for_date(
             "gpt_confidence": "",
         }
         out.append(entry)
+
+    # === 2차: ML 앙상블 (통계 예측 완료 후) ===
+    try:
+        from prepacking.services.prediction.pipeline.ml_predictor import build_ml_predictions
+        sku_count = len(sku_series_map)
+        if 10 <= sku_count <= 200:
+            ml_results = build_ml_predictions(sku_series_map, td_ts, stat_predictions)
+            if ml_results:
+                logger.info("ML ensemble: %d/%d SKUs", len(ml_results), sku_count)
+                for entry in out:
+                    tt = entry.get("target_type", "")
+                    if tt == "combination":
+                        sk = f"combo||{entry.get('combination_key', '')}"
+                    else:
+                        pn = normalize_sku_name(entry.get("target_code", ""))
+                        on = normalize_sku_name(entry.get("option_name", ""))
+                        sk = f"{pn}||{on}"
+                    ml_info = ml_results.get(sk)
+                    if ml_info:
+                        entry["predicted_qty"] = ml_info["final_qty"]
+                        entry["ml_qty"] = ml_info["ml_qty"]
+                        entry["ml_model_type"] = ml_info["model_used"]
+                        entry["model_used"] = ml_info["model_used"]
+                        entry["gpt_reason"] = (
+                            f"[{profile.supplier_type}] "
+                            f"{ml_info['model_used']}(stat={ml_info['stat_qty']},"
+                            f"ml={ml_info['ml_qty']},p={ml_info['ml_ship_prob']:.0%})"
+                        )
+        else:
+            logger.info("ML skipped: %d SKUs (need 10-200)", sku_count)
+    except Exception as exc:
+        logger.warning("ML prediction failed, stat only: %s", exc)
 
     # LLM 이상치 검증 (use_gpt=True일 때만)
     if use_gpt and out:
