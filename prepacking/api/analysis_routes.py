@@ -89,6 +89,16 @@ def debug_data(supplier: str = ""):
             sup_count = 0
             sup_date_compare = 0
             sup_raw_date_sample = []
+    resolved = _resolve_dates(supplier, "", "") if supplier else ("", "")
+    try:
+        from prepacking.services.analysis.repeat_sku_service import analyze_repeat_skus as _ars
+        sku_result = _ars(supplier, resolved[0], resolved[1], 1) if supplier else []
+        sku_count = len(sku_result)
+        sku_first3 = sku_result[:3]
+    except Exception as exc:
+        sku_count = -1
+        sku_first3 = [{"error": str(exc)}]
+
     return {
         "total_rows": total,
         "rows_with_date": with_date,
@@ -103,4 +113,7 @@ def debug_data(supplier: str = ""):
             {"value": r[0], "type": r[1], "length": r[2]}
             for r in sup_raw_date_sample
         ],
+        "resolved_dates": {"from": resolved[0], "to": resolved[1]},
+        "sku_analysis_count": sku_count,
+        "sku_analysis_first3": sku_first3,
     }
