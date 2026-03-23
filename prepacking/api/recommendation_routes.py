@@ -53,11 +53,13 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
             suppliers = [r[0] for r in cur.fetchall()]
 
     all_items: list[dict] = []
+    errors: list[str] = []
     for sup in suppliers:
         try:
             preds = forecast_service.predict_for_date(sup, target)
         except Exception as exc:
-            logger.warning("forecast failed for supplier=%s: %s", sup, exc)
+            logger.exception("forecast failed for supplier=%s: %s", sup, exc)
+            errors.append(f"{sup}: {exc}")
             continue
         for p in preds:
             qty = int(p.get("predicted_qty", 0))
@@ -102,6 +104,7 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
         "combination_count": len(combo_items),
         "single_sku_count": len(sku_items),
         "items": all_items,
+        "errors": errors if errors else [],
     }
 
 

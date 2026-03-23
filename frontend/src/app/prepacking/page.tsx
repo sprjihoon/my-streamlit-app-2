@@ -1001,6 +1001,7 @@ interface WorkOrderResult {
   combination_count: number;
   single_sku_count: number;
   items: WorkOrderItem[];
+  errors?: string[];
 }
 
 function RecommendTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
@@ -1023,7 +1024,10 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
       });
       setResult(data);
       if (data.total_items === 0) {
-        showToast('예측 데이터가 없습니다. 배송통계 파일을 먼저 업로드해주세요.', 'info');
+        const errMsg = data.errors && data.errors.length > 0
+          ? `예측 실패: ${data.errors[0]}`
+          : '예측 데이터가 없습니다. 배송통계 파일을 먼저 업로드해주세요.';
+        showToast(errMsg, 'error');
       } else {
         showToast(`${data.weekday_name}요일 작업지시 생성 완료: ${data.total_items}건`, 'success');
       }
@@ -1265,121 +1269,230 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
 // TAB: 실행
 // ===========================================================================
 function ExecuteTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
-  const [executions, setExecutions] = useState<Execution[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ recommendation_id: '', executed_qty: '', executed_by: '', location_code: '', memo: '' });
-  const [submitting, setSubmitting] = useState(false);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
 
-  const loadExecs = useCallback(async () => {
-    if (!supplierName) return;
+  const [targetDate, setTargetDate] = useState(tomorrowStr);
+  const [workItems, setWorkItems] = useState<WorkOrderItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [qtyMap, setQtyMap] = useState<Record<string, string>>({});
+  const [submittingKey, setSubmittingKey] = useState('');
+  const [executions, setExecutions] = useState<Execution[]>([]);
+  const [histLoading, setHistLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'work' | 'history'>('work');
+
+  const loadWork = async () => {
     setLoading(true);
     try {
-      const data = await ppFetch<Execution[]>(`/pp/executions/?supplier_name=${encodeURIComponent(supplierName)}`);
-      setExecutions(Array.isArray(data) ? data : []);
+      const data = await ppFetch<WorkOrderResult>('/pp/recommendations/work-order', {
+        method: 'POST',
+        body: JSON.stringify({ target_date: targetDate, supplier_name: supplierName }),
+      });
+      setWorkItems(data.items || []);
+      const initQty: Record<string, string> = {};
+      (data.items || []).forEach((it, i) => {
+        initQty[`${it.target_code || it.target_name}-${i}`] = String(it.predicted_qty);
+      });
+      setQtyMap(initQty);
+      if (data.total_items === 0) showToast('예측 항목이 없습니다.', 'info');
     } catch (e: unknown) {
-      showToast(e instanceof Error ? e.message : '실행 이력 조회 실패', 'error');
+      showToast(e instanceof Error ? e.message : '작업 목록 조회 실패', 'error');
     } finally {
       setLoading(false);
     }
-  }, [supplierName, showToast]);
+  };
 
-  useEffect(() => { loadExecs(); }, [loadExecs]);
+  const loadHistory = useCallback(async () => {
+    if (!supplierName) return;
+    setHistLoading(true);
+    try {
+      const data = await ppFetch<Execution[]>(`/pp/executions/?supplier_name=${encodeURIComponent(supplierName)}`);
+      setExecutions(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ } finally {
+      setHistLoading(false);
+    }
+  }, [supplierName]);
 
-  const handleExecute = async () => {
-    if (!form.recommendation_id || !form.executed_qty) { showToast('추천 ID와 실행 수량을 입력해주세요', 'error'); return; }
-    setSubmitting(true);
+  useEffect(() => { if (viewMode === 'history') loadHistory(); }, [viewMode, loadHistory]);
+
+  const handleExecute = async (item: WorkOrderItem, idx: number) => {
+    const key = `${item.target_code || item.target_name}-${idx}`;
+    const qty = Number(qtyMap[key] || 0);
+    if (qty <= 0) { showToast('수량을 입력해주세요', 'error'); return; }
+    setSubmittingKey(key);
     try {
       await ppFetch('/pp/executions/', {
         method: 'POST',
         body: JSON.stringify({
-          recommendation_id: Number(form.recommendation_id),
-          executed_qty: Number(form.executed_qty),
-          executed_by: form.executed_by || 'user',
-          location_code: form.location_code,
-          memo: form.memo,
+          recommendation_id: 0,
+          executed_qty: qty,
+          executed_by: 'user',
+          location_code: '',
+          memo: `${item.target_name} / ${item.supplier_name} / ${targetDate}`,
         }),
       });
-      showToast('실행 완료', 'success');
-      setForm({ recommendation_id: '', executed_qty: '', executed_by: '', location_code: '', memo: '' });
-      loadExecs();
+      showToast(`${item.target_name} ${qty}개 실행 완료`, 'success');
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : '실행 실패', 'error');
     } finally {
-      setSubmitting(false);
+      setSubmittingKey('');
     }
   };
 
   return (
     <>
-      <div style={card}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>▶️ 실행 등록</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-          <div style={{ flex: '0 0 120px' }}>
-            <label style={labelStyle}>추천 ID</label>
-            <input type="number" value={form.recommendation_id} onChange={(e) => setForm({ ...form, recommendation_id: e.target.value })} style={inputStyle} />
-          </div>
-          <div style={{ flex: '0 0 100px' }}>
-            <label style={labelStyle}>실행 수량</label>
-            <input type="number" value={form.executed_qty} onChange={(e) => setForm({ ...form, executed_qty: e.target.value })} style={inputStyle} />
-          </div>
-          <div style={{ flex: '0 0 120px' }}>
-            <label style={labelStyle}>실행자</label>
-            <input value={form.executed_by} onChange={(e) => setForm({ ...form, executed_by: e.target.value })} style={inputStyle} />
-          </div>
-          <div style={{ flex: '0 0 120px' }}>
-            <label style={labelStyle}>로케이션</label>
-            <input value={form.location_code} onChange={(e) => setForm({ ...form, location_code: e.target.value })} placeholder="예: A-01" style={inputStyle} />
-          </div>
-          <div style={{ flex: '1 1 160px' }}>
-            <label style={labelStyle}>메모</label>
-            <input value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} style={inputStyle} />
-          </div>
-          <button onClick={handleExecute} disabled={submitting} style={{ ...btnPrimary, opacity: submitting ? 0.6 : 1 }}>
-            {submitting ? '처리 중...' : '실행'}
-          </button>
-        </div>
+      {/* Mode toggle */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+        <button onClick={() => setViewMode('work')} style={{
+          padding: '8px 20px', border: viewMode === 'work' ? '2px solid #2563eb' : '1px solid #d1d5db',
+          background: viewMode === 'work' ? '#eff6ff' : '#fff', color: viewMode === 'work' ? '#2563eb' : '#6b7280',
+          borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+        }}>작업 실행</button>
+        <button onClick={() => setViewMode('history')} style={{
+          padding: '8px 20px', border: viewMode === 'history' ? '2px solid #2563eb' : '1px solid #d1d5db',
+          background: viewMode === 'history' ? '#eff6ff' : '#fff', color: viewMode === 'history' ? '#2563eb' : '#6b7280',
+          borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+        }}>실행 이력</button>
       </div>
 
-      <div style={card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>실행 이력</h3>
-          <button onClick={loadExecs} style={btnOutline}>새로고침</button>
-        </div>
-        {loading ? <Spinner /> : executions.length === 0 ? <Empty message="실행 이력이 없습니다." /> : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>ID</th>
-                  <th style={thStyle}>추천 ID</th>
-                  <th style={thStyle}>SKU</th>
-                  <th style={thStyle}>상품명</th>
-                  <th style={thStyle}>실행 수량</th>
-                  <th style={thStyle}>실행자</th>
-                  <th style={thStyle}>상태</th>
-                  <th style={thStyle}>메모</th>
-                  <th style={thStyle}>실행일</th>
-                </tr>
-              </thead>
-              <tbody>
-                {executions.map((ex, i) => (
-                  <tr key={ex.execution_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                    <td style={tdStyle}>{ex.execution_id}</td>
-                    <td style={tdStyle}>{ex.recommendation_id}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{ex.target_code}</td>
-                    <td style={tdStyle}>{ex.target_name}</td>
-                    <td style={{ ...tdStyle, fontWeight: 700, color: '#2563eb' }}>{ex.executed_qty}</td>
-                    <td style={tdStyle}>{ex.executed_by}</td>
-                    <td style={tdStyle}>{ex.execution_status}</td>
-                    <td style={tdStyle}>{ex.memo || '-'}</td>
-                    <td style={tdStyle}>{ex.executed_at?.slice(0, 16)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {viewMode === 'work' && (
+        <>
+          <div style={card}>
+            <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700 }}>▶️ 프리패킹 실행</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#6b7280' }}>
+              작업지시서를 불러온 뒤, 각 항목의 수량을 확인하고 실행 버튼을 누르세요.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+              <div style={{ flex: '0 0 160px' }}>
+                <label style={labelStyle}>대상일</label>
+                <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} style={inputStyle} />
+              </div>
+              <button onClick={loadWork} disabled={loading} style={{ ...btnPrimary, opacity: loading ? 0.6 : 1 }}>
+                {loading ? '조회 중...' : '작업 목록 불러오기'}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+
+          {loading && <Spinner />}
+
+          {!loading && workItems.length > 0 && (
+            <div style={card}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>작업 목록 ({workItems.length}건)</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, width: 36 }}>#</th>
+                      <th style={thStyle}>유형</th>
+                      <th style={thStyle}>상품/조합명</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>AI 예측</th>
+                      <th style={{ ...thStyle, textAlign: 'center', width: 100 }}>실행 수량</th>
+                      <th style={{ ...thStyle, textAlign: 'center', width: 80 }}>실행</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workItems.map((item, i) => {
+                      const key = `${item.target_code || item.target_name}-${i}`;
+                      const isCombo = item.target_type === 'combination';
+                      const isBusy = submittingKey === key;
+                      return (
+                        <tr key={key} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+                          <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
+                          <td style={tdStyle}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
+                              background: isCombo ? '#ede9fe' : '#fef3c7',
+                              color: isCombo ? '#7c3aed' : '#92400e',
+                            }}>
+                              {isCombo ? '조합' : 'SKU'}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 300 }}>
+                            <span title={item.target_name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {item.target_name}
+                            </span>
+                            {item.barcode && <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{item.barcode}</div>}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#2563eb' }}>
+                            {item.predicted_qty.toLocaleString()}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            <input
+                              type="number"
+                              min={0}
+                              value={qtyMap[key] || ''}
+                              onChange={(e) => setQtyMap({ ...qtyMap, [key]: e.target.value })}
+                              style={{ ...inputStyle, width: 80, textAlign: 'center', fontWeight: 700, margin: 0 }}
+                            />
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            <button
+                              onClick={() => handleExecute(item, i)}
+                              disabled={isBusy}
+                              style={{
+                                padding: '6px 14px', border: 'none', borderRadius: 6,
+                                background: isBusy ? '#d1d5db' : '#16a34a', color: '#fff',
+                                fontSize: 12, fontWeight: 700, cursor: isBusy ? 'default' : 'pointer',
+                              }}
+                            >
+                              {isBusy ? '...' : '실행'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {!loading && workItems.length === 0 && (
+            <div style={{ ...card, textAlign: 'center', padding: '48px 20px' }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>▶️</div>
+              <div style={{ fontSize: 15, color: '#6b7280' }}>대상일을 선택하고 &quot;작업 목록 불러오기&quot;를 눌러주세요.</div>
+            </div>
+          )}
+        </>
+      )}
+
+      {viewMode === 'history' && (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>실행 이력</h3>
+            <button onClick={loadHistory} style={btnOutline}>새로고침</button>
+          </div>
+          {histLoading ? <Spinner /> : executions.length === 0 ? <Empty message="실행 이력이 없습니다." /> : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>ID</th>
+                    <th style={thStyle}>상품명</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>실행 수량</th>
+                    <th style={thStyle}>실행자</th>
+                    <th style={thStyle}>메모</th>
+                    <th style={thStyle}>실행일</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {executions.map((ex, i) => (
+                    <tr key={ex.execution_id} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                      <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{ex.execution_id}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{ex.target_name || ex.target_code}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>{ex.executed_qty}</td>
+                      <td style={tdStyle}>{ex.executed_by}</td>
+                      <td style={{ ...tdStyle, fontSize: 12, color: '#6b7280', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ex.memo || '-'}</td>
+                      <td style={{ ...tdStyle, fontSize: 12 }}>{ex.executed_at?.slice(0, 16)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </>
   );
 }

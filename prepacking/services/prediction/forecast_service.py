@@ -152,6 +152,7 @@ def predict_for_date(
             "ml_qty": ml_qty,
             "ml_model_type": ml_type,
             "ml_accuracy": round(ml_accuracy, 3),
+            "ml_samples": ml_samples,
             "confidence_score": round(final_conf, 3),
             "recent_7d_avg": round(avg_7, 1),
             "recent_30d_avg": round(avg_30, 1),
@@ -179,6 +180,7 @@ def predict_for_date(
         best_qty = entry["predicted_qty"]
 
         if best_qty <= 0:
+            entry["model_used"] = entry.get("ml_model_type", "statistical")
             out.append(entry)
             continue
 
@@ -191,7 +193,7 @@ def predict_for_date(
                 weekday_idx=item["weekday_idx"],
                 ml_qty=entry["ml_qty"],
                 ml_accuracy=entry["ml_accuracy"],
-                ml_samples=ml_samples,
+                ml_samples=entry.get("ml_samples", 0),
                 stat_qty=entry["stat_qty"],
                 avg_7d=entry["recent_7d_avg"],
                 avg_14d=item["avg_14d"],
@@ -215,10 +217,11 @@ def predict_for_date(
                 )
             else:
                 entry["gpt_reason"] = gpt_result.get("reason", "")
-                entry["model_used"] = entry["ml_model_type"]
+                entry["model_used"] = entry.get("ml_model_type", "statistical")
 
         except Exception as exc:
             logger.warning("GPT adjust skipped for %s: %s", entry["target_name"], exc)
+            entry["model_used"] = entry.get("ml_model_type", "statistical")
 
         out.append(entry)
 
