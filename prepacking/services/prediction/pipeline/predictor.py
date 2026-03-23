@@ -351,10 +351,25 @@ def _adaptive_predict(
     d_7 = td - pd.Timedelta(weeks=1)
     val_7 = float(past[d_7]) if d_7 in past.index else 0.0
 
-    rw = profile.blend_recent_weight  # 7일전 가중치
+    rw = profile.blend_recent_weight
 
+    if profile.supplier_type == "volatile_many":
+        # 다품종 소량: 7일전 값 우선, 0이면 0
+        if val_7 > 0:
+            blended = val_7 * rw + median_active * (1 - rw)
+            predicted = max(1, int(round(blended)))
+            method = f"vol(7d={val_7:.0f},medA={median_active:.0f})"
+        elif ship_prob >= 0.67 and median_active > 0:
+            # 매우 자주 출하되는 SKU만 중앙값 폴백
+            predicted = max(1, int(round(median_active * 0.5)))
+            method = f"vol_fb(medA={median_active:.0f}*0.5,p={ship_prob:.0%})"
+        else:
+            predicted = 0
+            method = f"vol_zero(7d=0,p={ship_prob:.0%})"
+        return predicted, ship_prob, method
+
+    # stable_few / mixed
     if ship_prob >= 0.5:
-        # 자주 출하되는 SKU
         if val_7 > 0:
             blended = val_7 * rw + median_active * (1 - rw)
         else:
@@ -362,7 +377,6 @@ def _adaptive_predict(
         predicted = max(0, int(round(blended)))
         method = f"freq(7d={val_7:.0f},medA={median_active:.0f},rw={rw:.1f})"
     else:
-        # 비정기 SKU — 전체 중앙값 기반
         if median_all > 0:
             predicted = max(0, int(round(median_all)))
             method = f"rare_med({median_all:.0f},p={ship_prob:.0%})"
