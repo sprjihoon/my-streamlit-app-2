@@ -21,24 +21,24 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 그리드서치 파라미터 공간 (축소 — 속도 우선)
+# 그리드서치 파라미터 공간 (최소화 — Railway 타임아웃 대응)
 PARAM_GRID = {
     "prob_threshold": [0.17, 0.33, 0.50],
     "blend_recent_weight": [0.3, 0.5],
-    "fallback_prob": [0.40, 0.50, 0.67],
-    "fallback_ratio": [0.3, 0.5, 0.7],
+    "fallback_prob": [0.40, 0.60],
+    "fallback_ratio": [0.3, 0.7],
     "trend_scale_range": [
         (0.85, 1.15),
-        (0.7, 1.3),
         (1.0, 1.0),
     ],
 }
+# 3*2*2*2*2 = 48 조합 × 3 날짜 = 144 시뮬레이션
 
 
 def calibrate_supplier(
     supplier_name: str,
     test_dates: list[str] | None = None,
-    max_dates: int = 5,
+    max_dates: int = 3,
 ) -> dict:
     """
     업체의 최적 예측 파라미터를 찾아 DB에 저장한다.
@@ -166,8 +166,7 @@ def _auto_select_test_dates(supplier_name: str, max_dates: int = 8) -> list[str]
     if len(all_dates) <= 2:
         return []
 
-    # 최근 날짜는 제외 (예측 대상이므로), 그 다음부터 선택
-    # 최소 7일 간격으로 분산 선택
+    # 최근 날짜는 제외, 7일 이상 간격으로 분산 선택
     selected = []
     last_selected = None
     for d_str in all_dates[1:]:
@@ -176,7 +175,7 @@ def _auto_select_test_dates(supplier_name: str, max_dates: int = 8) -> list[str]
         except ValueError:
             continue
 
-        if last_selected is None or (last_selected - d).days >= 5:
+        if last_selected is None or (last_selected - d).days >= 7:
             selected.append(d_str[:10])
             last_selected = d
             if len(selected) >= max_dates:
