@@ -150,6 +150,7 @@ def _build_training_data(
 
     X_rows = []
     y_rows = []
+    max_samples = 10000
 
     for day_offset in range(1, train_days + 1):
         train_date = td - dt.timedelta(days=day_offset)
@@ -166,6 +167,11 @@ def _build_training_data(
             row = [features.get(n, 0.0) for n in FEATURE_NAMES]
             X_rows.append(row)
             y_rows.append(float(actual_qty))
+
+            if len(X_rows) >= max_samples:
+                break
+        if len(X_rows) >= max_samples:
+            break
 
     if not X_rows:
         return np.array([]), np.array([])
@@ -191,16 +197,25 @@ def train_and_predict(
 
     td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
 
-    data_end = (td - dt.timedelta(days=1)).isoformat()
-    data_start = (td - dt.timedelta(days=120)).isoformat()
-    all_sku_daily = _load_all_sku_daily(supplier_name, data_start, data_end)
+    if sku_daily_map:
+        all_sku_daily = {k: v for k, v in sku_daily_map.items()}
+    else:
+        data_end = (td - dt.timedelta(days=1)).isoformat()
+        data_start = (td - dt.timedelta(days=120)).isoformat()
+        all_sku_daily = _load_all_sku_daily(supplier_name, data_start, data_end)
 
     if not all_sku_daily:
         return {}
 
-    t0 = time.time()
+    t_start = time.time()
+    MAX_TOTAL_SECONDS = 15
+
     X_train, y_train = _build_training_data(all_sku_daily, target_date, TRAIN_DAYS)
-    t_build = time.time() - t0
+    t_build = time.time() - t_start
+
+    if t_build > MAX_TOTAL_SECONDS:
+        logger.warning("ML: build took %.1fs, skipping for %s", t_build, supplier_name)
+        return {}
 
     if len(X_train) < MIN_SAMPLES:
         logger.info("ML: insufficient training data (%d samples) for %s", len(X_train), supplier_name)
@@ -211,8 +226,8 @@ def train_and_predict(
 
         t0 = time.time()
         model = GradientBoostingRegressor(
-            n_estimators=100,
-            max_depth=4,
+            n_estimators=80,
+            max_depth=3,
             learning_rate=0.1,
             min_samples_leaf=3,
             subsample=0.8,
