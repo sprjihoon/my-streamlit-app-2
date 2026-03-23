@@ -15,10 +15,67 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 
-from prepacking.services.prediction.pipeline.features import (
-    compute_features_for_date,
-    get_feature_names,
-)
+_LIGHT_FEATURE_NAMES = [
+    "lag_7", "lag_14", "wd_avg", "wd_ship_prob", "wd_count",
+    "roll_mean_7", "roll_mean_14", "roll_ship_prob_7", "roll_ship_prob_14",
+    "weekday", "is_monday", "is_friday", "trend_7d",
+    "days_since_last_ship", "last_ship_qty",
+]
+
+
+def _light_features(series: pd.Series, as_of: pd.Timestamp) -> list[float]:
+    """경량 피처 — 15개만 빠르게 계산."""
+    cutoff = as_of - pd.Timedelta(days=1)
+    hist = series[series.index <= cutoff]
+    if hist.empty:
+        return [0.0] * len(_LIGHT_FEATURE_NAMES)
+
+    feats = {}
+    # lag
+    for lag in [7, 14]:
+        d = as_of - pd.Timedelta(days=lag)
+        feats[f"lag_{lag}"] = float(hist[d]) if d in hist.index else 0.0
+
+    # weekday stats
+    wd_vals = []
+    for w in range(1, 7):
+        d = as_of - pd.Timedelta(weeks=w)
+        if d in hist.index:
+            wd_vals.append(float(hist[d]))
+        elif d >= hist.index.min():
+            wd_vals.append(0.0)
+    wd_active = [v for v in wd_vals if v > 0]
+    feats["wd_avg"] = float(np.mean(wd_active)) if wd_active else 0.0
+    feats["wd_ship_prob"] = len(wd_active) / max(len(wd_vals), 1) if wd_vals else 0.0
+    feats["wd_count"] = float(len(wd_vals))
+
+    # rolling
+    for w in [7, 14]:
+        window = hist.tail(w)
+        feats[f"roll_mean_{w}"] = float(window.mean()) if len(window) > 0 else 0.0
+        active = window[window > 0]
+        feats[f"roll_ship_prob_{w}"] = len(active) / max(len(window), 1)
+
+    # calendar
+    feats["weekday"] = float(as_of.weekday())
+    feats["is_monday"] = 1.0 if as_of.weekday() == 0 else 0.0
+    feats["is_friday"] = 1.0 if as_of.weekday() == 4 else 0.0
+
+    # trend
+    r7 = hist.tail(7).mean() if len(hist) >= 7 else float(hist.mean())
+    p7 = hist.iloc[-14:-7].mean() if len(hist) >= 14 else 0.0
+    feats["trend_7d"] = (r7 / max(p7, 0.1)) if p7 > 0 else 1.0
+
+    # recency
+    active_hist = hist[hist > 0]
+    if not active_hist.empty:
+        feats["days_since_last_ship"] = float((as_of - active_hist.index[-1]).days)
+        feats["last_ship_qty"] = float(active_hist.iloc[-1])
+    else:
+        feats["days_since_last_ship"] = 999.0
+        feats["last_ship_qty"] = 0.0
+
+    return [feats.get(fn, 0.0) for fn in _LIGHT_FEATURE_NAMES]
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +90,7 @@ def build_ml_predictions(
     sku_series_map: dict[str, pd.Series],
     td_ts: pd.Timestamp,
     stat_predictions: dict[str, int],
-    max_train_skus: int = 80,
+    max_train_skus: int = 30,
 ) -> dict[str, dict]:
     """
     ML 예측을 생성하여 통계 예측과 앙상블한다.
@@ -42,7 +99,6 @@ def build_ml_predictions(
     import time
     start_time = time.time()
 
-    feature_names = get_feature_names()
     train_X, train_y_cls, train_y_reg = [], [], []
 
     # 활성 SKU만 선택 (최근 출하가 있는 것 우선)
@@ -52,17 +108,15 @@ def build_ml_predictions(
         reverse=True,
     )[:max_train_skus]
 
-    # 학습 데이터: 최근 4주만 (속도 최적화)
+    # 학습 데이터: 최근 3주만 (속도 최적화)
     for series_key in active_keys:
         series = sku_series_map[series_key]
-        for w in range(2, 6):
+        for w in range(2, 5):
             past_date = td_ts - pd.Timedelta(weeks=w)
             if past_date < series.index.min() + pd.Timedelta(days=14):
                 continue
 
-            feats = compute_features_for_date(series, past_date)
-            feat_vec = [feats.get(fn, 0.0) for fn in feature_names]
-
+            feat_vec = _light_features(series, past_date)
             actual_val = float(series[past_date]) if past_date in series.index else 0.0
             train_X.append(feat_vec)
             train_y_cls.append(1 if actual_val > 0 else 0)
@@ -106,8 +160,7 @@ def build_ml_predictions(
 
     for series_key in active_keys:
         series = sku_series_map[series_key]
-        feats = compute_features_for_date(series, td_ts)
-        feat_vec = np.array([[feats.get(fn, 0.0) for fn in feature_names]])
+        feat_vec = np.array([_light_features(series, td_ts)])
 
         # 분류: 출하 확률
         try:
