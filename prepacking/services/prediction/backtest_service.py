@@ -93,12 +93,13 @@ def run_backtest(
             actual_key = f"{pn_norm}||{on_norm}"
             actual_qty = actual_remaining.pop(actual_key, 0)
 
+        if best_qty == 0 and actual_qty == 0:
+            continue
+
         error_abs = abs(best_qty - actual_qty)
         error_pct = (error_abs / actual_qty * 100) if actual_qty > 0 else (100.0 if best_qty > 0 else 0.0)
 
-        if best_qty == 0 and actual_qty == 0:
-            result_type = "matched"
-        elif abs(best_qty - actual_qty) <= max(1, int(actual_qty * 0.2)):
+        if actual_qty > 0 and abs(best_qty - actual_qty) <= max(1, int(actual_qty * 0.2)):
             result_type = "matched"
         elif best_qty > actual_qty:
             result_type = "over"
