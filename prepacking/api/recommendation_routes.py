@@ -28,6 +28,9 @@ WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 @router.post("/work-order")
 def post_work_order(body: PPWorkOrderRequest) -> dict:
     """내일(또는 지정일) 프리패킹 작업 지시서를 생성. DB 저장 없이 바로 반환."""
+    import logging
+    logger = logging.getLogger(__name__)
+
     target = body.target_date
     try:
         td = dt.datetime.strptime(target[:10], "%Y-%m-%d").date()
@@ -51,7 +54,11 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
 
     all_items: list[dict] = []
     for sup in suppliers:
-        preds = forecast_service.predict_for_date(sup, target)
+        try:
+            preds = forecast_service.predict_for_date(sup, target)
+        except Exception as exc:
+            logger.warning("forecast failed for supplier=%s: %s", sup, exc)
+            continue
         for p in preds:
             qty = int(p.get("predicted_qty", 0))
             if qty <= 0:
