@@ -112,17 +112,17 @@ def _analyze_supplier(
             min_data_days=7,
         )
     elif stype == "volatile_many":
-        # 다품종 소량: 보수적, 중앙값 중심, 트렌드 약하게
+        # 다품종 소량: 매우 보수적, 중앙값 중심, 트렌드 거의 무시
         return SupplierProfile(
             total_skus=total_skus,
             avg_qty_per_active_day=avg_qty,
             volatility=avg_cv,
             avg_ship_prob=avg_ship_prob,
             supplier_type=stype,
-            prob_threshold=0.40,
+            prob_threshold=0.50,
             blend_recent_weight=0.3,
-            trend_scale_min=0.8,
-            trend_scale_max=1.2,
+            trend_scale_min=0.85,
+            trend_scale_max=1.15,
             min_data_days=14,
         )
     else:
