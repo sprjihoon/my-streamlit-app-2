@@ -953,6 +953,12 @@ interface WorkOrderItem {
   combination_key: string;
   items: SkuDetail[];
   predicted_qty: number;
+  stat_qty: number;
+  ml_qty: number;
+  model_used: string;
+  ml_accuracy: number;
+  gpt_reason: string;
+  gpt_confidence: string;
   confidence_score: number;
   recent_7d_avg: number;
   recent_30d_avg: number;
@@ -1058,6 +1064,22 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
               <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>단일 SKU</div>
               <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{result.single_sku_count}</div>
             </div>
+            {(() => {
+              const items = result.items || [];
+              const gptCount = items.filter((it: WorkOrderItem) => it.model_used?.includes('gpt')).length;
+              const mlCount = items.filter((it: WorkOrderItem) => it.model_used?.includes('ml')).length;
+              const statCount = items.length - mlCount;
+              return (
+                <div style={{ ...card, borderLeft: '4px solid #8b5cf6', flex: '1 1 200px', marginBottom: 0, textAlign: 'center' }}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>AI 예측 모델</div>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 12, fontSize: 13, fontWeight: 600 }}>
+                    {gptCount > 0 && <span style={{ color: '#8b5cf6' }}>GPT {gptCount}</span>}
+                    {mlCount > 0 && <span style={{ color: '#2563eb' }}>ML {mlCount}</span>}
+                    {statCount > 0 && <span style={{ color: '#6b7280' }}>통계 {statCount}</span>}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Filter + table */}
@@ -1089,19 +1111,23 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                       {!supplierName && <th style={thStyle}>공급처</th>}
                       <th style={thStyle}>상품/조합명</th>
                       <th style={thStyle}>바코드</th>
-                      <th style={{ ...thStyle, textAlign: 'center' }}>구성 SKU</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>예측 수량</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>구성</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>AI 예측</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>예측 모델</th>
                       <th style={{ ...thStyle, textAlign: 'center' }}>신뢰도</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>출현 일수</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>출현</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.map((item, i) => {
                       const isCombo = item.target_type === 'combination';
                       const skuItems = item.items || [];
+                      const hasGpt = item.model_used?.includes('gpt');
+                      const hasMl = item.model_used?.includes('ml');
+                      const modelLabel = hasGpt ? (hasMl ? 'ML+GPT' : 'GPT') : hasMl ? 'ML' : '통계';
+                      const modelColor = hasGpt ? '#8b5cf6' : hasMl ? '#2563eb' : '#6b7280';
                       return (
                         <React.Fragment key={`${item.target_code}-${item.supplier_name}-${i}`}>
-                          {/* Main row */}
                           <tr style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
                             <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }} rowSpan={isCombo && skuItems.length > 0 ? skuItems.length + 1 : 1}>
                               {i + 1}
@@ -1128,8 +1154,29 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                             <td style={{ ...tdStyle, textAlign: 'center', fontSize: 13 }}>
                               {isCombo ? `${skuItems.length}종` : '1종'}
                             </td>
-                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#2563eb' }}>
-                              {item.predicted_qty.toLocaleString()}
+                            <td style={{ ...tdStyle, textAlign: 'right' }}>
+                              <div style={{ fontWeight: 800, fontSize: 16, color: '#2563eb' }}>
+                                {item.predicted_qty.toLocaleString()}
+                              </div>
+                              {(item.stat_qty > 0 || item.ml_qty > 0) && item.predicted_qty !== item.stat_qty && (
+                                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
+                                  통계:{item.stat_qty} {item.ml_qty > 0 && item.ml_qty !== item.stat_qty ? `ML:${item.ml_qty}` : ''}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              <span style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700,
+                                background: hasGpt ? '#f3e8ff' : hasMl ? '#dbeafe' : '#f3f4f6',
+                                color: modelColor,
+                              }}>
+                                {modelLabel}
+                              </span>
+                              {item.gpt_reason && (
+                                <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.gpt_reason}>
+                                  {item.gpt_reason}
+                                </div>
+                              )}
                             </td>
                             <td style={{ ...tdStyle, textAlign: 'center' }}>
                               <span style={{
@@ -1141,7 +1188,6 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                             </td>
                             <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.frequency}일</td>
                           </tr>
-                          {/* Sub-rows for combination SKU details */}
                           {isCombo && skuItems.map((sku, si) => (
                             <tr key={`${item.target_code}-sku-${si}`} style={{ background: i % 2 === 0 ? '#f0f4ff' : '#eef2ff' }}>
                               <td style={{ ...tdStyle, paddingLeft: 24, fontSize: 12, color: '#6b7280' }}>
@@ -1159,7 +1205,7 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                               <td style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: '#6b7280' }}>
                                 x{sku.qty}
                               </td>
-                              <td colSpan={3} style={tdStyle} />
+                              <td colSpan={4} style={tdStyle} />
                             </tr>
                           ))}
                         </React.Fragment>

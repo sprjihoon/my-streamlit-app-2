@@ -314,6 +314,23 @@ DDL = textwrap.dedent("""\
         error_message   TEXT DEFAULT '',
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    /* 16. ML 예측 정확도 추적 */
+    CREATE TABLE IF NOT EXISTS pp_forecast_accuracy(
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_date     TEXT NOT NULL,
+        supplier_name   TEXT NOT NULL,
+        target_type     TEXT DEFAULT 'single_sku',
+        target_code     TEXT DEFAULT '',
+        model_type      TEXT DEFAULT 'ml',
+        predicted_qty   INTEGER DEFAULT 0,
+        actual_qty      INTEGER DEFAULT 0,
+        error_abs       INTEGER DEFAULT 0,
+        error_pct       REAL DEFAULT 0,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_pp_fa_date ON pp_forecast_accuracy(target_date);
+    CREATE INDEX IF NOT EXISTS idx_pp_fa_supplier ON pp_forecast_accuracy(supplier_name);
 """)
 
 
