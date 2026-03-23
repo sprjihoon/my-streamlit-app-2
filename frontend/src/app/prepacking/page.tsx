@@ -702,37 +702,38 @@ function UploadTab({ supplierName, showToast, onUploadDone }: { supplierName: st
 // TAB: 분석
 // ===========================================================================
 function AnalysisTab({ supplierName, showToast }: { supplierName: string; showToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
   const [minCount, setMinCount] = useState(3);
   const [subTab, setSubTab] = useState<'skus' | 'combos' | 'weekday'>('skus');
   const [repeatSkus, setRepeatSkus] = useState<RepeatSku[]>([]);
   const [repeatCombos, setRepeatCombos] = useState<RepeatCombination[]>([]);
   const [weekday, setWeekday] = useState<WeekdayPattern[]>([]);
   const [loading, setLoading] = useState(false);
+  const [analyzed, setAnalyzed] = useState(false);
 
-  const body = () => JSON.stringify({ supplier_name: supplierName, date_from: dateFrom, date_to: dateTo, min_count: minCount });
+  const reqBody = () => JSON.stringify({ supplier_name: supplierName, min_count: minCount });
 
-  const analyze = async (type: 'skus' | 'combos' | 'weekday') => {
-    if (!supplierName) { showToast('업체명을 입력해주세요', 'error'); return; }
+  const analyzeAll = useCallback(async () => {
+    if (!supplierName) { showToast('공급처를 선택해주세요', 'error'); return; }
     setLoading(true);
     try {
-      const ep = type === 'skus' ? '/pp/analysis/repeat-skus' : type === 'combos' ? '/pp/analysis/repeat-combinations' : '/pp/analysis/weekday-patterns';
-      const data = await ppFetch<unknown>(ep, { method: 'POST', body: body() });
-      if (type === 'skus') setRepeatSkus(data as RepeatSku[]);
-      else if (type === 'combos') setRepeatCombos(data as RepeatCombination[]);
-      else {
-        const resp = data as WeekdayResponse;
-        setWeekday(resp.sku_patterns || []);
-      }
-      setSubTab(type);
-      showToast('분석 완료', 'success');
+      const [skuData, comboData, wdData] = await Promise.all([
+        ppFetch<RepeatSku[]>('/pp/analysis/repeat-skus', { method: 'POST', body: JSON.stringify({ supplier_name: supplierName, min_count: minCount }) }),
+        ppFetch<RepeatCombination[]>('/pp/analysis/repeat-combinations', { method: 'POST', body: JSON.stringify({ supplier_name: supplierName, min_count: minCount }) }),
+        ppFetch<WeekdayResponse>('/pp/analysis/weekday-patterns', { method: 'POST', body: JSON.stringify({ supplier_name: supplierName, min_count: minCount }) }),
+      ]);
+      setRepeatSkus(Array.isArray(skuData) ? skuData : []);
+      setRepeatCombos(Array.isArray(comboData) ? comboData : []);
+      setWeekday(wdData?.sku_patterns || []);
+      setAnalyzed(true);
+      showToast('전체 분석 완료', 'success');
     } catch (e: unknown) {
       showToast(e instanceof Error ? e.message : '분석 실패', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [supplierName, minCount, showToast]);
+
+  void reqBody;
 
   const heatColor = (val: number, max: number) => {
     if (max === 0) return '#f3f4f6';
@@ -747,157 +748,180 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
   return (
     <>
       <div style={card}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>📊 분석 조건</h3>
+        <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>📊 배송 데이터 분석</h3>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: '#6b7280' }}>
+          업로드된 전체 데이터를 기반으로 반복 SKU, 반복 조합, 요일 패턴을 한번에 분석합니다.
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-          <div style={{ flex: '0 0 160px' }}>
-            <label style={labelStyle}>시작일</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: '0 0 160px' }}>
-            <label style={labelStyle}>종료일</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: '0 0 100px' }}>
-            <label style={labelStyle}>최소 횟수</label>
+          <div style={{ flex: '0 0 120px' }}>
+            <label style={labelStyle}>최소 반복 횟수</label>
             <input type="number" value={minCount} onChange={(e) => setMinCount(Number(e.target.value))} min={1} style={inputStyle} />
           </div>
-          <button onClick={() => analyze('skus')} disabled={loading} style={btnPrimary}>반복 SKU</button>
-          <button onClick={() => analyze('combos')} disabled={loading} style={btnPrimary}>반복 조합</button>
-          <button onClick={() => analyze('weekday')} disabled={loading} style={btnPrimary}>요일 패턴</button>
+          <button onClick={analyzeAll} disabled={loading || !supplierName} style={{ ...btnPrimary, padding: '10px 24px', fontSize: 15, opacity: (loading || !supplierName) ? 0.5 : 1 }}>
+            {loading ? '분석 중...' : '분석 실행'}
+          </button>
         </div>
+        {!supplierName && <p style={{ margin: '12px 0 0', fontSize: 13, color: '#f59e0b' }}>상단에서 공급처를 먼저 선택해주세요.</p>}
       </div>
 
       {loading && <Spinner />}
 
-      {!loading && subTab === 'skus' && (
-        <div style={card}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>반복 SKU 분석</h3>
-          {repeatSkus.length === 0 ? <Empty message="분석 결과가 없습니다. 조건을 설정하고 분석을 실행해주세요." /> : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>상품명</th>
-                    <th style={thStyle}>옵션</th>
-                    <th style={thStyle}>총 수량</th>
-                    <th style={thStyle}>일평균</th>
-                    <th style={thStyle}>첫 출고</th>
-                    <th style={thStyle}>최근 출고</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {repeatSkus.map((s, i) => (
-                    <tr key={`${s.sku_name}-${s.option_name}`} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku_name}</td>
-                      <td style={tdStyle}>{s.option_name || '-'}</td>
-                      <td style={tdStyle}>{s.total_count.toLocaleString()}</td>
-                      <td style={tdStyle}>{s.daily_avg.toFixed(1)}</td>
-                      <td style={tdStyle}>{s.first_seen}</td>
-                      <td style={tdStyle}>{s.last_seen}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {!loading && analyzed && (
+        <>
+          {/* Summary */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div style={{ ...card, borderLeft: '4px solid #2563eb', flex: '1 1 160px', marginBottom: 0, textAlign: 'center', cursor: 'pointer', background: subTab === 'skus' ? '#eff6ff' : '#fff' }} onClick={() => setSubTab('skus')}>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>반복 SKU</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#2563eb' }}>{repeatSkus.length}</div>
             </div>
-          )}
-        </div>
-      )}
-
-      {!loading && subTab === 'combos' && (
-        <div style={card}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>반복 조합 분석</h3>
-          {repeatCombos.length === 0 ? <Empty message="분석 결과가 없습니다." /> : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>조합 구성</th>
-                    <th style={thStyle}>반복 횟수</th>
-                    <th style={thStyle}>일평균</th>
-                    <th style={thStyle}>첫 출고</th>
-                    <th style={thStyle}>최근 출고</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {repeatCombos.map((c, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                      <td style={tdStyle}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {c.items.map((item, idx) => (
-                            <span key={idx} style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
-                              {item.product_name || item.sku_code} x{item.qty}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={tdStyle}>{c.total_count}</td>
-                      <td style={tdStyle}>{c.daily_avg.toFixed(1)}</td>
-                      <td style={tdStyle}>{c.first_seen}</td>
-                      <td style={tdStyle}>{c.last_seen}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ ...card, borderLeft: '4px solid #7c3aed', flex: '1 1 160px', marginBottom: 0, textAlign: 'center', cursor: 'pointer', background: subTab === 'combos' ? '#f5f3ff' : '#fff' }} onClick={() => setSubTab('combos')}>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>반복 조합</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#7c3aed' }}>{repeatCombos.length}</div>
             </div>
-          )}
-        </div>
-      )}
+            <div style={{ ...card, borderLeft: '4px solid #f59e0b', flex: '1 1 160px', marginBottom: 0, textAlign: 'center', cursor: 'pointer', background: subTab === 'weekday' ? '#fffbeb' : '#fff' }} onClick={() => setSubTab('weekday')}>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>요일 패턴</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#f59e0b' }}>{weekday.length}</div>
+            </div>
+          </div>
 
-      {!loading && subTab === 'weekday' && (
-        <div style={card}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>요일별 패턴 (히트맵)</h3>
-          {weekday.length === 0 ? <Empty message="분석 결과가 없습니다." /> : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>이름</th>
-                    {[0,1,2,3,4,5,6].map((d) => <th key={d} style={{ ...thStyle, textAlign: 'center', minWidth: 50 }}>{WEEKDAYS[d]}</th>)}
-                    <th style={{ ...thStyle, textAlign: 'center' }}>피크</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>합계</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {weekday.map((w, i) => {
-                    const vals = [0,1,2,3,4,5,6].map((d) => w.weekday_counts[d] || 0);
-                    const maxVal = Math.max(...vals);
-                    const total = vals.reduce((a, b) => a + b, 0);
-                    return (
-                      <tr key={w.name} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                        <td style={{ ...tdStyle, fontWeight: 600 }}>{w.name}</td>
-                        {[0,1,2,3,4,5,6].map((d) => {
-                          const v = w.weekday_counts[d] || 0;
-                          return (
-                            <td key={d} style={{ ...tdStyle, textAlign: 'center' }}>
-                              <div
-                                style={{
-                                  display: 'inline-block',
-                                  width: 36,
-                                  height: 28,
-                                  lineHeight: '28px',
-                                  borderRadius: 6,
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  background: heatColor(v, maxVal),
-                                  color: maxVal > 0 && v / maxVal > 0.6 ? '#fff' : '#374151',
-                                }}
-                              >
-                                {v}
-                              </div>
-                            </td>
-                          );
-                        })}
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>
-                          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[w.peak_day]}</span>
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{total.toLocaleString()}</td>
+          {/* Sub-tab content */}
+          {subTab === 'skus' && (
+            <div style={card}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>반복 SKU ({repeatSkus.length}건)</h3>
+              {repeatSkus.length === 0 ? <Empty message="반복 SKU가 없습니다." /> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thStyle, width: 40 }}>#</th>
+                        <th style={thStyle}>상품명</th>
+                        <th style={thStyle}>옵션</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>총 수량</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>일평균</th>
+                        <th style={thStyle}>첫 출고</th>
+                        <th style={thStyle}>최근 출고</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {repeatSkus.map((s, i) => (
+                        <tr key={`${s.sku_name}-${s.option_name}`} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                          <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{s.sku_name}</td>
+                          <td style={tdStyle}>{s.option_name || '-'}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#2563eb' }}>{s.total_count.toLocaleString()}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{s.daily_avg.toFixed(1)}</td>
+                          <td style={tdStyle}>{s.first_seen}</td>
+                          <td style={tdStyle}>{s.last_seen}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
+
+          {subTab === 'combos' && (
+            <div style={card}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>반복 조합 ({repeatCombos.length}건)</h3>
+              {repeatCombos.length === 0 ? <Empty message="반복 조합이 없습니다." /> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thStyle, width: 40 }}>#</th>
+                        <th style={thStyle}>조합 구성</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>반복 횟수</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>일평균</th>
+                        <th style={thStyle}>첫 출고</th>
+                        <th style={thStyle}>최근 출고</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repeatCombos.map((c, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                          <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
+                          <td style={tdStyle}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {c.items.map((item, idx) => (
+                                <span key={idx} style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+                                  {item.product_name || item.sku_code} x{item.qty}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#7c3aed' }}>{c.total_count}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{c.daily_avg.toFixed(1)}</td>
+                          <td style={tdStyle}>{c.first_seen}</td>
+                          <td style={tdStyle}>{c.last_seen}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {subTab === 'weekday' && (
+            <div style={card}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 700 }}>요일별 패턴 ({weekday.length}건)</h3>
+              {weekday.length === 0 ? <Empty message="요일 패턴이 없습니다." /> : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>이름</th>
+                        {[0,1,2,3,4,5,6].map((d) => <th key={d} style={{ ...thStyle, textAlign: 'center', minWidth: 50 }}>{WEEKDAYS[d]}</th>)}
+                        <th style={{ ...thStyle, textAlign: 'center' }}>피크</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>합계</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {weekday.map((w, i) => {
+                        const vals = [0,1,2,3,4,5,6].map((d) => w.weekday_counts[d] || 0);
+                        const maxVal = Math.max(...vals);
+                        const total = vals.reduce((a, b) => a + b, 0);
+                        return (
+                          <tr key={w.name} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                            <td style={{ ...tdStyle, fontWeight: 600 }}>{w.name}</td>
+                            {[0,1,2,3,4,5,6].map((d) => {
+                              const v = w.weekday_counts[d] || 0;
+                              return (
+                                <td key={d} style={{ ...tdStyle, textAlign: 'center' }}>
+                                  <div style={{
+                                    display: 'inline-block', width: 36, height: 28, lineHeight: '28px',
+                                    borderRadius: 6, fontSize: 12, fontWeight: 600,
+                                    background: heatColor(v, maxVal),
+                                    color: maxVal > 0 && v / maxVal > 0.6 ? '#fff' : '#374151',
+                                  }}>{v}</div>
+                                </td>
+                              );
+                            })}
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>{WEEKDAYS[w.peak_day]}</span>
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{total.toLocaleString()}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {!loading && !analyzed && (
+        <div style={{ ...card, textAlign: 'center', padding: '48px 20px' }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 8 }}>배송 데이터 분석</div>
+          <div style={{ fontSize: 14, color: '#9ca3af' }}>
+            공급처를 선택하고 &quot;분석 실행&quot; 버튼을 누르면<br />
+            업로드된 전체 데이터를 기반으로 분석합니다.
+          </div>
         </div>
       )}
     </>

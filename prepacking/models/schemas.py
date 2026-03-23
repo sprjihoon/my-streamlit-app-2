@@ -37,8 +37,8 @@ class PPUploadListItem(BaseModel):
 
 class PPAnalysisRequest(BaseModel):
     supplier_name: str
-    date_from: str
-    date_to: str
+    date_from: str = ""
+    date_to: str = ""
     min_count: int = Field(default=3, ge=1)
 
 
