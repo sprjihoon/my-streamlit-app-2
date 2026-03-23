@@ -4,6 +4,7 @@ import datetime as dt
 import logging
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from prepacking.database import get_pp_connection
 from prepacking.models.schemas import PPApprovalRequest, PPRecommendationRequest, PPWorkOrderRequest
@@ -106,6 +107,29 @@ def post_work_order(body: PPWorkOrderRequest) -> dict:
         "items": all_items,
         "errors": errors if errors else [],
     }
+
+
+@router.post("/work-order/pdf")
+def post_work_order_pdf(body: PPWorkOrderRequest) -> Response:
+    """작업지시서를 PDF로 생성하여 반환."""
+    from prepacking.services.prediction.work_order_pdf import generate_work_order_pdf
+
+    result = post_work_order(body)
+    try:
+        pdf_bytes = generate_work_order_pdf(result)
+    except Exception as exc:
+        logger.exception("PDF generation failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"PDF 생성 실패: {exc}") from exc
+
+    target = result.get("target_date", "unknown")
+    supplier = result.get("supplier_filter", "") or "전체"
+    filename = f"작업지시서_{target}_{supplier}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/generate")

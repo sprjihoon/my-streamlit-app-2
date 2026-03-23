@@ -1064,6 +1064,37 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
           <button onClick={generate} disabled={loading} style={{ ...btnPrimary, padding: '10px 24px', fontSize: 15, opacity: loading ? 0.6 : 1 }}>
             {loading ? '분석 중...' : '작업지시 생성'}
           </button>
+          {result && result.total_items > 0 && (
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(`${API_BASE}/pp/recommendations/work-order/pdf`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_date: targetDate, supplier_name: supplierName }),
+                  });
+                  if (!res.ok) throw new Error('PDF 생성 실패');
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `작업지시서_${targetDate}_${supplierName || '전체'}.pdf`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  showToast('PDF 다운로드 완료', 'success');
+                } catch (e: unknown) {
+                  showToast(e instanceof Error ? e.message : 'PDF 다운로드 실패', 'error');
+                }
+              }}
+              style={{
+                padding: '10px 20px', fontSize: 14, fontWeight: 700,
+                background: '#fff', color: '#dc2626', border: '2px solid #dc2626',
+                borderRadius: 8, cursor: 'pointer',
+              }}
+            >
+              📄 PDF 출력
+            </button>
+          )}
         </div>
       </div>
 
