@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from prepacking.models.schemas import PPValidationRequest
+from prepacking.models.schemas import PPWalkForwardRequest
 from prepacking.services.prediction.backtest_service import run_backtest
 from prepacking.services.validation.accuracy_service import get_accuracy_summary
 from prepacking.services.validation.failure_analysis_service import analyze_failures
@@ -58,4 +59,36 @@ def post_backtest(body: PPValidationRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if "error" in result:
         raise HTTPException(status_code=400, detail=result.get("message", result["error"]))
+    return result
+
+
+@router.post("/walk-forward")
+def post_walk_forward(body: PPWalkForwardRequest) -> dict:
+    """Walk-forward validation — 시간순 검증 + baseline 비교."""
+    from prepacking.services.prediction.pipeline.data_loader import load_daily_series
+    from prepacking.services.prediction.pipeline.validation import walk_forward_validate
+    from prepacking.services.prediction.pipeline.models import create_best_model
+
+    if not (body.supplier_name or "").strip():
+        raise HTTPException(status_code=400, detail="supplier_name_required")
+
+    try:
+        daily_df = load_daily_series(body.supplier_name)
+        if daily_df.empty:
+            raise HTTPException(status_code=400, detail="no_data")
+
+        result = walk_forward_validate(
+            daily_df=daily_df,
+            test_start=body.test_start,
+            test_end=body.test_end,
+            model_factory=lambda: create_best_model(),
+            train_min_days=body.train_min_days,
+            max_skus=body.max_skus,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("walk-forward validation failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return result

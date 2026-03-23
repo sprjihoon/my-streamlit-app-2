@@ -1,8 +1,7 @@
 """
-backtest_service — 예측 정확도 백테스트
-──────────────────────────────────────
-forecast_service의 경량 통계 예측을 사용하여
-과거 특정일 실제 데이터와 비교.
+backtest_service — 예측 정확도 백테스트 (v2)
+──────────────────────────────────────────
+새 파이프라인 기반. MAE/RMSE/WAPE/sMAPE 메트릭 추가.
 """
 from __future__ import annotations
 
@@ -10,18 +9,17 @@ import datetime as dt
 import logging
 from collections import defaultdict
 
+import numpy as np
+
 from prepacking.common.utils import normalize_sku_name, safe_int, safe_str
 from prepacking.database import get_pp_connection
 from prepacking.services.prediction import forecast_service
+from prepacking.services.prediction.pipeline.metrics import compute_all_metrics
 
 logger = logging.getLogger(__name__)
 
 
 def _load_actual_shipments(supplier_name: str, target_date: str) -> dict[str, int]:
-    """
-    특정일의 실제 출하 데이터를 DB에서 조회.
-    key = normalize된 "상품명||옵션명", value = 총 수량
-    """
     with get_pp_connection() as con:
         rows = con.execute(
             """
@@ -141,9 +139,19 @@ def run_backtest(
             "result_type": "missed",
         })
 
-    total_predicted = sum(p["predicted_qty"] for p in predictions)
-    total_actual = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
-    total_error = sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)
+    # === 새 메트릭 계산 ===
+    all_actual = []
+    all_predicted = []
+    for p in predictions:
+        all_actual.append(p["actual_qty"])
+        all_predicted.append(p["predicted_qty"])
+    for m in missed_items:
+        all_actual.append(m["actual_qty"])
+        all_predicted.append(0)
+
+    y_true = np.array(all_actual, dtype=float)
+    y_pred = np.array(all_predicted, dtype=float)
+    detailed_metrics = compute_all_metrics(y_true, y_pred) if len(y_true) > 0 else {}
 
     items_with_actual = [p for p in predictions if p["actual_qty"] > 0]
     if items_with_actual:
@@ -157,9 +165,11 @@ def run_backtest(
     matched = sum(1 for p in predictions if p["result_type"] == "matched")
     over = sum(1 for p in predictions if p["result_type"] == "over")
     under = sum(1 for p in predictions if p["result_type"] == "under")
-
     ml_count = sum(1 for p in predictions if p.get("model_type") in ("ml", "ensemble"))
     stat_count = sum(1 for p in predictions if p.get("model_type") == "statistical")
+
+    total_predicted = sum(p["predicted_qty"] for p in predictions)
+    total_actual = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
 
     predictions.sort(key=lambda x: (-x["error_abs"], -x["actual_qty"]))
 
@@ -174,7 +184,7 @@ def run_backtest(
             "avg_mape": round(avg_mape, 1),
             "total_predicted": total_predicted,
             "total_actual": total_actual,
-            "total_error": total_error,
+            "total_error": int(sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)),
             "item_count": len(predictions),
             "matched": matched,
             "over": over,
@@ -182,6 +192,7 @@ def run_backtest(
             "missed": len(missed_items),
             "ml_count": ml_count,
             "stat_count": stat_count,
+            **detailed_metrics,
         },
         "items": predictions,
         "missed_items": missed_items,

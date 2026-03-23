@@ -105,6 +105,14 @@ class PPValidationRequest(BaseModel):
     target_date: str
 
 
+class PPWalkForwardRequest(BaseModel):
+    supplier_name: str
+    test_start: str
+    test_end: str
+    train_min_days: int = Field(default=30, ge=7)
+    max_skus: int = Field(default=100, ge=10)
+
+
 class PPExceptionCreate(BaseModel):
     supplier_name: str
     target_type: str
