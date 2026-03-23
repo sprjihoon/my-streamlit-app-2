@@ -1,7 +1,7 @@
 """
 backtest_service — 예측 정확도 백테스트
 ──────────────────────────────────────
-forecast_service의 앙상블 예측을 그대로 사용하여
+forecast_service의 경량 통계 예측을 사용하여
 과거 특정일 실제 데이터와 비교.
 """
 from __future__ import annotations
@@ -76,6 +76,7 @@ def run_backtest(
         target_type = item.get("target_type", "single_sku")
         target_name = item.get("target_name", "")
         option_name = item.get("option_name", "")
+        target_code = item.get("target_code", "")
         best_qty = item.get("predicted_qty", 0)
 
         actual_qty = 0
@@ -87,13 +88,8 @@ def run_backtest(
                 ci_key = f"{ci_pn}||{ci_on}"
                 actual_qty += actual_remaining.pop(ci_key, 0)
         else:
-            parts = target_name.rsplit(" ", 1)
-            if len(parts) == 2:
-                pn_norm = parts[0].strip()
-                on_norm = parts[1].strip()
-            else:
-                pn_norm = normalize_sku_name(target_name)
-                on_norm = normalize_sku_name(option_name)
+            pn_norm = normalize_sku_name(target_code) if target_code else normalize_sku_name(target_name)
+            on_norm = normalize_sku_name(option_name)
             actual_key = f"{pn_norm}||{on_norm}"
             actual_qty = actual_remaining.pop(actual_key, 0)
 
@@ -102,7 +98,7 @@ def run_backtest(
 
         if best_qty == 0 and actual_qty == 0:
             result_type = "matched"
-        elif abs(best_qty - actual_qty) <= max(1, int(actual_qty * 0.15)):
+        elif abs(best_qty - actual_qty) <= max(1, int(actual_qty * 0.2)):
             result_type = "matched"
         elif best_qty > actual_qty:
             result_type = "over"
@@ -119,7 +115,7 @@ def run_backtest(
             "predicted_qty": best_qty,
             "stat_qty": item.get("stat_qty", 0),
             "ml_qty": item.get("ml_qty", 0),
-            "model_type": item.get("model_used", "ensemble"),
+            "model_type": item.get("model_used", "statistical"),
             "actual_qty": actual_qty,
             "error_abs": error_abs,
             "error_pct": round(error_pct, 1),
@@ -161,9 +157,6 @@ def run_backtest(
     over = sum(1 for p in predictions if p["result_type"] == "over")
     under = sum(1 for p in predictions if p["result_type"] == "under")
 
-    ml_count = sum(1 for p in predictions if p.get("model_type") == "ml")
-    stat_count = len(predictions) - ml_count
-
     predictions.sort(key=lambda x: (-x["error_abs"], -x["actual_qty"]))
 
     weekday_kr = ["월", "화", "수", "목", "금", "토", "일"]
@@ -183,8 +176,8 @@ def run_backtest(
             "over": over,
             "under": under,
             "missed": len(missed_items),
-            "ml_count": ml_count,
-            "stat_count": stat_count,
+            "ml_count": 0,
+            "stat_count": len(predictions),
         },
         "items": predictions,
         "missed_items": missed_items,

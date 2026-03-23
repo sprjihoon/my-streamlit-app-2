@@ -1,154 +1,98 @@
 """
-forecast_service — 다중 시그널 앙상블 예측
-──────────────────────────────────────────
-시그널 1: 최근 7일 일평균 (가장 최근 트렌드)
-시그널 2: 최근 14일 일평균
-시그널 3: 최근 30일 일평균
-시그널 4: 같은 요일 최근 8주 가중평균
-시그널 5: ML(GradientBoosting) 예측
+forecast_service — 경량 통계 예측
+─────────────────────────────────
+핵심 아이디어: "출하가 있는 날의 평균 수량" × "해당 요일 출하 확률"
 
-가중 앙상블로 최종 예측. 데이터가 많을수록 ML 비중 증가.
+시그널:
+  1. 최근 14일 중 출하일만의 평균 수량 (가중치 높음)
+  2. 최근 30일 중 출하일만의 평균 수량
+  3. 같은 요일 최근 8주 중 출하가 있었던 날의 평균 수량
+  4. 해당 요일에 출하가 발생할 확률 (최근 8주 기준)
+
+최종 예측 = 가중평균(시그널들) × 요일 출하 확률
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
-import math
+import statistics as _stats
 
 from prepacking.services.analysis import repeat_combination_service, repeat_sku_service, weekday_pattern_service
 from prepacking.services.prediction import confidence_service
-from prepacking.services.prediction import ml_forecast_service
 
 logger = logging.getLogger(__name__)
 
 
-def _ensemble_predict(
-    daily: dict[str, int],
-    target_date: str,
-    frequency: int,
-    weeks_back: int = 8,
-) -> dict:
-    """다중 시그널 앙상블 예측."""
-    td = dt.datetime.strptime(target_date[:10], "%Y-%m-%d").date()
-
-    avg_7 = _window_avg(daily, td, 7)
-    avg_14 = _window_avg(daily, td, 14)
-    avg_30 = _window_avg(daily, td, 30)
-
-    same_wd = _same_weekday_weighted(daily, td, weeks_back)
-
-    active_7 = _active_days(daily, td, 7)
-    active_30 = _active_days(daily, td, 30)
-
-    signals: list[tuple[float, float]] = []
-
-    if active_7 >= 1:
-        signals.append((avg_7, 3.0))
-    if active_30 >= 2:
-        signals.append((avg_14, 2.0))
-    if active_30 >= 3:
-        signals.append((avg_30, 1.5))
-    if same_wd > 0:
-        signals.append((same_wd, 2.5))
-
-    ml_result = ml_forecast_service.predict_ml(daily, target_date, frequency)
-    ml_qty = ml_result.get("predicted_qty", 0)
-    ml_type = ml_result.get("model_type", "statistical")
-    ml_accuracy = ml_result.get("train_accuracy", 0.0)
-    ml_samples = ml_result.get("train_samples", 0)
-    confidence_boost = ml_result.get("confidence_boost", 0.0)
-
-    if ml_type == "ml" and ml_qty > 0:
-        ml_weight = 2.0 + min(2.0, ml_accuracy * 3.0)
-        signals.append((float(ml_qty), ml_weight))
-
-    if not signals:
-        total_qty = sum(daily.values())
-        total_days = len([v for v in daily.values() if v > 0])
-        if total_days > 0:
-            fallback = total_qty / total_days
-            return {
-                "predicted_qty": max(1, int(round(fallback))),
-                "stat_qty": max(1, int(round(fallback))),
-                "ml_qty": ml_qty,
-                "ml_model_type": ml_type,
-                "ml_accuracy": ml_accuracy,
-                "ml_samples": ml_samples,
-                "confidence_boost": confidence_boost,
-                "avg_7": avg_7, "avg_14": avg_14, "avg_30": avg_30,
-                "avg_same_wd": same_wd,
-            }
-        return {
-            "predicted_qty": 0, "stat_qty": 0, "ml_qty": 0,
-            "ml_model_type": "none", "ml_accuracy": 0, "ml_samples": 0,
-            "confidence_boost": 0, "avg_7": 0, "avg_14": 0, "avg_30": 0,
-            "avg_same_wd": 0,
-        }
-
-    total_w = sum(w for _, w in signals)
-    ensemble = sum(v * w for v, w in signals) / total_w
-    stat_qty = max(0, int(round(ensemble)))
-
-    return {
-        "predicted_qty": stat_qty,
-        "stat_qty": stat_qty,
-        "ml_qty": ml_qty,
-        "ml_model_type": ml_type,
-        "ml_accuracy": ml_accuracy,
-        "ml_samples": ml_samples,
-        "confidence_boost": confidence_boost,
-        "avg_7": avg_7, "avg_14": avg_14, "avg_30": avg_30,
-        "avg_same_wd": same_wd,
-    }
-
-
-def _window_avg(daily: dict[str, int], td: dt.date, days: int) -> float:
-    total = 0
+def _active_avg(daily: dict[str, int], td: dt.date, days: int) -> tuple[float, int, int]:
+    """최근 N일 중 출하일만의 평균, 출하일수, 전체일수를 반환."""
+    vals = []
     for i in range(1, days + 1):
         d = td - dt.timedelta(days=i)
-        total += daily.get(d.isoformat(), 0)
-    return total / days
+        v = daily.get(d.isoformat(), 0)
+        if v > 0:
+            vals.append(float(v))
+    avg = sum(vals) / len(vals) if vals else 0.0
+    return avg, len(vals), days
 
 
-def _active_days(daily: dict[str, int], td: dt.date, days: int) -> int:
-    count = 0
-    for i in range(1, days + 1):
-        d = td - dt.timedelta(days=i)
-        if daily.get(d.isoformat(), 0) > 0:
-            count += 1
-    return count
-
-
-def _same_weekday_weighted(daily: dict[str, int], td: dt.date, weeks: int) -> float:
+def _same_weekday_stats(daily: dict[str, int], td: dt.date, weeks: int) -> tuple[float, float]:
+    """같은 요일 최근 N주: (출하가 있던 날의 평균 수량, 출하 확률)."""
     vals = []
     for w in range(1, weeks + 1):
         past_d = td - dt.timedelta(weeks=w)
-        vals.append(float(daily.get(past_d.isoformat(), 0)))
-    nonzero = [v for v in vals if v > 0]
-    if not nonzero:
-        return 0.0
-    n = len(vals)
-    weights = [float(i + 1) for i in range(n)]
-    num = sum(w * v for w, v in zip(weights, vals))
-    den = sum(weights)
-    return num / den if den else 0.0
+        vals.append(daily.get(past_d.isoformat(), 0))
+    nonzero = [float(v) for v in vals if v > 0]
+    avg = sum(nonzero) / len(nonzero) if nonzero else 0.0
+    prob = len(nonzero) / len(vals) if vals else 0.0
+    return avg, prob
 
 
-def _variability_coefficient(daily: dict[str, int], td: dt.date, days: int = 30) -> float:
-    import statistics
-    vals = []
-    for i in range(1, days + 1):
-        d = td - dt.timedelta(days=i)
-        vals.append(float(daily.get(d.isoformat(), 0)))
-    if len(vals) < 2:
-        return 0.0
-    m = statistics.mean(vals)
-    if m <= 1e-9:
-        return min(1.0, statistics.pstdev(vals))
-    return min(1.0, statistics.pstdev(vals) / m)
+def _predict_qty(daily: dict[str, int], td: dt.date, weeks_back: int = 8) -> dict:
+    """경량 통계 예측."""
+    avg_14, active_14, _ = _active_avg(daily, td, 14)
+    avg_30, active_30, _ = _active_avg(daily, td, 30)
+    avg_60, active_60, _ = _active_avg(daily, td, 60)
+    wd_avg, wd_prob = _same_weekday_stats(daily, td, weeks_back)
 
+    signals: list[tuple[float, float]] = []
 
-MAX_GPT_ITEMS = 10
+    if active_14 >= 1:
+        signals.append((avg_14, 4.0))
+    if active_30 >= 2:
+        signals.append((avg_30, 2.0))
+    if active_60 >= 3:
+        signals.append((avg_60, 1.0))
+    if wd_avg > 0:
+        signals.append((wd_avg, 3.0))
+
+    if not signals:
+        total_qty = sum(daily.values())
+        active_total = len([v for v in daily.values() if v > 0])
+        if active_total > 0:
+            raw = total_qty / active_total
+        else:
+            raw = 0.0
+        return {"raw_avg": raw, "wd_prob": 0.0, "predicted_qty": 0,
+                "avg_14": avg_14, "avg_30": avg_30, "avg_same_wd": wd_avg}
+
+    total_w = sum(w for _, w in signals)
+    raw_avg = sum(v * w for v, w in signals) / total_w
+
+    if wd_prob <= 0:
+        overall_active, _, total_days = _active_avg(daily, td, 60)
+        wd_prob = active_60 / 60.0 if active_60 > 0 else 0.0
+
+    predicted = raw_avg * max(wd_prob, 0.1)
+    predicted_qty = max(0, int(round(predicted)))
+
+    return {
+        "raw_avg": round(raw_avg, 2),
+        "wd_prob": round(wd_prob, 3),
+        "predicted_qty": predicted_qty,
+        "avg_14": avg_14,
+        "avg_30": avg_30,
+        "avg_same_wd": wd_avg,
+    }
 
 
 def predict_for_date(
@@ -184,19 +128,16 @@ def predict_for_date(
     for target_type, row in all_rows:
         daily = {k: int(v) for k, v in row["daily"].items()}
 
-        result = _ensemble_predict(daily, target_date, row["frequency"], weeks_back)
+        result = _predict_qty(daily, td, weeks_back)
 
-        var = _variability_coefficient(daily, td, 30)
         data_days = weekday_pattern_service.distinct_active_days(
             daily, target_date, lookback_days
         )
+        _, active_30, _ = _active_avg(daily, td, 30)
+        var = _variability_coeff(daily, td, 30)
         base_conf = confidence_service.calculate_confidence(
             row["frequency"], var, data_days
         )
-        final_conf = min(1.0, base_conf + result.get("confidence_boost", 0.0))
-
-        ml_type = result.get("ml_model_type", "statistical")
-        model_label = "ml" if ml_type == "ml" else "ensemble"
 
         entry = {
             "target_type": target_type,
@@ -208,18 +149,18 @@ def predict_for_date(
             "combination_key": row.get("combination_key", ""),
             "items": row.get("items", []),
             "predicted_qty": result["predicted_qty"],
-            "stat_qty": result["stat_qty"],
-            "ml_qty": result.get("ml_qty", 0),
-            "ml_model_type": ml_type,
-            "ml_accuracy": round(result.get("ml_accuracy", 0), 3),
-            "ml_samples": result.get("ml_samples", 0),
-            "confidence_score": round(final_conf, 3),
-            "recent_7d_avg": round(result.get("avg_7", 0), 1),
+            "stat_qty": result["predicted_qty"],
+            "ml_qty": 0,
+            "ml_model_type": "statistical",
+            "ml_accuracy": 0,
+            "ml_samples": 0,
+            "confidence_score": round(base_conf, 3),
+            "recent_7d_avg": round(result.get("avg_14", 0), 1),
             "recent_30d_avg": round(result.get("avg_30", 0), 1),
             "recent_same_weekday_avg": round(result.get("avg_same_wd", 0), 1),
             "weekday_basis": wb,
             "frequency": row["frequency"],
-            "model_used": model_label,
+            "model_used": "statistical",
             "gpt_reason": "",
             "gpt_confidence": "",
         }
@@ -227,3 +168,18 @@ def predict_for_date(
         out.append(entry)
 
     return out
+
+
+def _variability_coeff(daily: dict[str, int], td: dt.date, days: int = 30) -> float:
+    vals = []
+    for i in range(1, days + 1):
+        d = td - dt.timedelta(days=i)
+        v = daily.get(d.isoformat(), 0)
+        if v > 0:
+            vals.append(float(v))
+    if len(vals) < 2:
+        return 0.0
+    m = _stats.mean(vals)
+    if m <= 1e-9:
+        return 1.0
+    return min(1.0, _stats.pstdev(vals) / m)
