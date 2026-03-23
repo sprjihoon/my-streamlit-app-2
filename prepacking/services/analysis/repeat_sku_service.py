@@ -84,7 +84,7 @@ def analyze_repeat_skus(
 def load_repeat_sku_daily_totals(
     supplier_name: str, target_date: str, lookback_days: int
 ) -> list[dict]:
-    """forecast_service에서 호출: SKU별 일별 출하 합계를 반환."""
+    """forecast_service에서 호출: SKU별 일별 출하 합계 + 바코드를 반환."""
     d_end = _parse_date(target_date)
     if not d_end:
         return []
@@ -92,7 +92,7 @@ def load_repeat_sku_daily_totals(
     with get_pp_connection() as con:
         cur = con.execute(
             """
-            SELECT shipping_date, product_name, option_name, qty
+            SELECT shipping_date, product_name, option_name, qty, sku_code, barcode
             FROM pp_shipping_stats
             WHERE TRIM(supplier_name) = TRIM(?)
               AND shipping_date IS NOT NULL AND shipping_date != ''
@@ -105,7 +105,12 @@ def load_repeat_sku_daily_totals(
 
     agg: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
     freq: dict[tuple[str, str], set] = defaultdict(set)
-    for shipping_date, product_name, option_name, qty in raw_rows:
+    sku_code_map: dict[tuple[str, str], str] = {}
+    barcode_map: dict[tuple[str, str], str] = {}
+    for row in raw_rows:
+        shipping_date, product_name, option_name, qty = row[0], row[1], row[2], row[3]
+        sku_code = safe_str(row[4]) if len(row) > 4 else ""
+        barcode = safe_str(row[5]) if len(row) > 5 else ""
         pn = normalize_sku_name(product_name)
         on = normalize_sku_name(option_name)
         key = (pn, on)
@@ -114,6 +119,10 @@ def load_repeat_sku_daily_totals(
         agg[key][ds] += q
         if ds:
             freq[key].add(ds)
+        if sku_code and key not in sku_code_map:
+            sku_code_map[key] = sku_code
+        if barcode and key not in barcode_map:
+            barcode_map[key] = barcode
 
     out: list[dict] = []
     for (pn, on), daily in agg.items():
@@ -121,6 +130,9 @@ def load_repeat_sku_daily_totals(
         out.append({
             "target_name": display,
             "target_code": pn,
+            "sku_code": sku_code_map.get((pn, on), ""),
+            "barcode": barcode_map.get((pn, on), ""),
+            "option_name": on,
             "daily": dict(daily),
             "frequency": len(freq[(pn, on)]),
         })

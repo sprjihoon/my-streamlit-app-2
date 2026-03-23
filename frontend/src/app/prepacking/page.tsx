@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
 // API helper
@@ -935,12 +935,23 @@ function AnalysisTab({ supplierName, showToast }: { supplierName: string; showTo
 // ===========================================================================
 // TAB: 작업지시
 // ===========================================================================
+interface SkuDetail {
+  sku_code: string;
+  barcode: string;
+  product_name: string;
+  option_name: string;
+  qty: number;
+}
+
 interface WorkOrderItem {
   supplier_name: string;
   target_type: string;
   target_name: string;
   target_code: string;
+  sku_code: string;
+  barcode: string;
   combination_key: string;
+  items: SkuDetail[];
   predicted_qty: number;
   confidence_score: number;
   recent_7d_avg: number;
@@ -1077,46 +1088,83 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                       <th style={thStyle}>유형</th>
                       {!supplierName && <th style={thStyle}>공급처</th>}
                       <th style={thStyle}>상품/조합명</th>
+                      <th style={thStyle}>바코드</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>구성 SKU</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>예측 수량</th>
                       <th style={{ ...thStyle, textAlign: 'center' }}>신뢰도</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>7일 평균</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>같은 요일 평균</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>출현 일수</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((item, i) => (
-                      <tr key={`${item.target_code}-${item.supplier_name}-${i}`} style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                        <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }}>{i + 1}</td>
-                        <td style={tdStyle}>
-                          <span style={{
-                            padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
-                            background: item.target_type === 'combination' ? '#ede9fe' : '#fef3c7',
-                            color: item.target_type === 'combination' ? '#7c3aed' : '#92400e',
-                          }}>
-                            {item.target_type === 'combination' ? '조합' : 'SKU'}
-                          </span>
-                        </td>
-                        {!supplierName && <td style={{ ...tdStyle, fontSize: 12, color: '#6b7280' }}>{item.supplier_name}</td>}
-                        <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.target_name}>
-                          {item.target_name}
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#2563eb' }}>
-                          {item.predicted_qty.toLocaleString()}
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>
-                          <span style={{
-                            display: 'inline-block', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700,
-                            color: '#fff', background: confColor(item.confidence_score),
-                          }}>
-                            {(item.confidence_score * 100).toFixed(0)}%
-                          </span>
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.recent_7d_avg.toFixed(1)}</td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.recent_same_weekday_avg.toFixed(1)}</td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.frequency}일</td>
-                      </tr>
-                    ))}
+                    {filtered.map((item, i) => {
+                      const isCombo = item.target_type === 'combination';
+                      const skuItems = item.items || [];
+                      return (
+                        <React.Fragment key={`${item.target_code}-${item.supplier_name}-${i}`}>
+                          {/* Main row */}
+                          <tr style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb', borderTop: '1px solid #e5e7eb' }}>
+                            <td style={{ ...tdStyle, color: '#9ca3af', fontSize: 12 }} rowSpan={isCombo && skuItems.length > 0 ? skuItems.length + 1 : 1}>
+                              {i + 1}
+                            </td>
+                            <td style={tdStyle}>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
+                                background: isCombo ? '#ede9fe' : '#fef3c7',
+                                color: isCombo ? '#7c3aed' : '#92400e',
+                              }}>
+                                {isCombo ? '조합' : 'SKU'}
+                              </span>
+                            </td>
+                            {!supplierName && <td style={{ ...tdStyle, fontSize: 12, color: '#6b7280' }}>{item.supplier_name}</td>}
+                            <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 320 }}>
+                              {isCombo
+                                ? <span style={{ color: '#7c3aed' }}>📦 {skuItems.length}종 조합</span>
+                                : <span title={item.target_name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.target_name}</span>
+                              }
+                            </td>
+                            <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12, color: '#374151' }}>
+                              {isCombo ? '-' : (item.barcode || item.sku_code || '-')}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center', fontSize: 13 }}>
+                              {isCombo ? `${skuItems.length}종` : '1종'}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#2563eb' }}>
+                              {item.predicted_qty.toLocaleString()}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              <span style={{
+                                display: 'inline-block', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700,
+                                color: '#fff', background: confColor(item.confidence_score),
+                              }}>
+                                {(item.confidence_score * 100).toFixed(0)}%
+                              </span>
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.frequency}일</td>
+                          </tr>
+                          {/* Sub-rows for combination SKU details */}
+                          {isCombo && skuItems.map((sku, si) => (
+                            <tr key={`${item.target_code}-sku-${si}`} style={{ background: i % 2 === 0 ? '#f0f4ff' : '#eef2ff' }}>
+                              <td style={{ ...tdStyle, paddingLeft: 24, fontSize: 12, color: '#6b7280' }}>
+                                └
+                              </td>
+                              {!supplierName && <td style={tdStyle} />}
+                              <td style={{ ...tdStyle, fontSize: 12, color: '#374151' }} title={`${sku.product_name} ${sku.option_name}`.trim()}>
+                                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>
+                                  {sku.product_name}{sku.option_name ? ` / ${sku.option_name}` : ''}
+                                </span>
+                              </td>
+                              <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12, color: '#374151' }}>
+                                {sku.barcode || sku.sku_code || '-'}
+                              </td>
+                              <td style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: '#6b7280' }}>
+                                x{sku.qty}
+                              </td>
+                              <td colSpan={3} style={tdStyle} />
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -153,7 +153,7 @@ def analyze_repeat_combinations(
 def load_repeat_combo_daily_totals(
     supplier_name: str, target_date: str, lookback_days: int
 ) -> list[dict]:
-    """forecast_service에서 호출: 조합별 일별 출하 합계를 반환."""
+    """forecast_service에서 호출: 조합별 일별 출하 합계 + 구성 SKU 상세를 반환."""
     d_end = _parse_date(target_date)
     if not d_end:
         return []
@@ -162,7 +162,7 @@ def load_repeat_combo_daily_totals(
         cur = con.execute(
             """
             SELECT shipping_date, combo_no, invoice_no, order_no,
-                   product_name, option_name, sku_code, qty, inner_qty
+                   product_name, option_name, sku_code, qty, inner_qty, barcode
             FROM pp_shipping_stats
             WHERE TRIM(supplier_name) = TRIM(?)
               AND shipping_date IS NOT NULL AND shipping_date != ''
@@ -185,18 +185,36 @@ def load_repeat_combo_daily_totals(
     combo_daily: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     combo_dates: dict[str, set] = defaultdict(set)
     combo_name_map: dict[str, str] = {}
+    combo_items_map: dict[str, list[dict]] = {}
     for (sd_key, _bucket), lines in groups.items():
         sku_keys = set()
-        for _sd, _c, _i, _o, pn, on, sku, _q, iq in lines:
+        for row in lines:
+            _sd, _c, _i, _o, pn, on, sku, _q, iq = row[:9]
             sku_keys.add((safe_str(sku), normalize_sku_name(pn), normalize_sku_name(on)))
         multi_sku = len(sku_keys) >= 2
         inner_hit = any(max(1, safe_int(x[8], 1)) >= 2 for x in lines)
         if not (multi_sku or inner_hit):
             continue
         qty_by_name: dict[str, int] = defaultdict(int)
-        for _sd, _c, _i, _o, pn, on, sku, q, _iq in lines:
+        merged: dict[tuple[str, str, str], dict] = {}
+        for row in lines:
+            pn, on, sku, q, iq = row[4], row[5], row[6], row[7], row[8]
+            barcode = safe_str(row[9]) if len(row) > 9 else ""
             nm = _sku_line_name(sku, pn, on)
-            qty_by_name[nm] += max(1, safe_int(q, 1))
+            qv = max(1, safe_int(q, 1))
+            qty_by_name[nm] += qv
+            ik = (safe_str(sku), normalize_sku_name(pn), normalize_sku_name(on))
+            if ik not in merged:
+                merged[ik] = {
+                    "sku_code": safe_str(sku),
+                    "barcode": barcode,
+                    "product_name": ik[1],
+                    "option_name": ik[2],
+                    "qty": 0,
+                }
+            merged[ik]["qty"] += qv
+            if barcode and not merged[ik]["barcode"]:
+                merged[ik]["barcode"] = barcode
         items_for_key = [{"name": k, "qty": v} for k, v in sorted(qty_by_name.items())]
         ckey = make_combination_key(items_for_key)
         combo_daily[ckey][sd_key] += 1
@@ -204,6 +222,8 @@ def load_repeat_combo_daily_totals(
             combo_dates[ckey].add(sd_key)
         if ckey not in combo_name_map:
             combo_name_map[ckey] = ckey
+        if ckey not in combo_items_map:
+            combo_items_map[ckey] = list(merged.values())
 
     out: list[dict] = []
     for ckey, daily in combo_daily.items():
@@ -212,5 +232,6 @@ def load_repeat_combo_daily_totals(
             "combination_key": ckey,
             "daily": dict(daily),
             "frequency": len(combo_dates[ckey]),
+            "items": combo_items_map.get(ckey, []),
         })
     return out
