@@ -182,3 +182,72 @@ def analyze_weekday_patterns(
             "avg_orders_by_weekday": avg_orders_by_weekday,
         },
     }
+
+
+def weekday_basis_for(target_date: str) -> int:
+    """target_date의 요일 번호(0=Mon ~ 6=Sun)를 반환."""
+    d = _parse_date(target_date)
+    if d is None:
+        return dt.date.today().weekday()
+    return d.weekday()
+
+
+def bucket_weekly_totals(
+    daily: dict[str, int], target_date: str, weeks_back: int
+) -> list[float]:
+    """일별 데이터를 target_date 기준 같은 요일 주간 합계 리스트로 변환."""
+    d_end = _parse_date(target_date)
+    if d_end is None:
+        return []
+    weeks_back = max(1, weeks_back)
+    result: list[float] = []
+    for w in range(weeks_back, 0, -1):
+        d = d_end - dt.timedelta(weeks=w)
+        result.append(float(daily.get(d.isoformat(), 0)))
+    return result
+
+
+def distinct_active_days(
+    daily: dict[str, int], target_date: str, lookback_days: int
+) -> int:
+    """lookback_days 기간 내 출하가 있었던 일수."""
+    d_end = _parse_date(target_date)
+    if d_end is None:
+        return 0
+    d_start = d_end - dt.timedelta(days=max(1, lookback_days))
+    count = 0
+    for ds, qty in daily.items():
+        d = _parse_date(ds)
+        if d and d_start <= d < d_end and qty > 0:
+            count += 1
+    return count
+
+
+def window_average_daily(
+    daily: dict[str, int], target_date: str, days: int
+) -> float:
+    """최근 N일 일평균 출하량."""
+    d_end = _parse_date(target_date)
+    if d_end is None:
+        return 0.0
+    days = max(1, days)
+    total = 0
+    for i in range(1, days + 1):
+        d = d_end - dt.timedelta(days=i)
+        total += daily.get(d.isoformat(), 0)
+    return total / days
+
+
+def recent_same_weekday_average(
+    daily: dict[str, int], target_date: str, weeks: int = 8
+) -> float:
+    """최근 N주간 같은 요일의 평균 출하량."""
+    d_end = _parse_date(target_date)
+    if d_end is None:
+        return 0.0
+    weeks = max(1, weeks)
+    vals: list[int] = []
+    for w in range(1, weeks + 1):
+        d = d_end - dt.timedelta(weeks=w)
+        vals.append(daily.get(d.isoformat(), 0))
+    return sum(vals) / len(vals) if vals else 0.0

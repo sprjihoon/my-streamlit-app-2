@@ -4,8 +4,9 @@ import datetime as dt
 import sqlite3
 
 from prepacking.common.date_helper import now_kst
-from prepacking.common.enums import PackStatus
+from prepacking.common.enums import LocationAction, PackStatus
 from prepacking.database import ensure_pp_tables, get_pp_connection
+from prepacking.services.location.location_history_service import record_history
 
 
 def create_stock(
@@ -87,6 +88,13 @@ def use_stock(stock_id: int, use_qty: int) -> dict:
             (new_cur, new_avail, status, stock_id),
         )
         con.commit()
+    if take > 0:
+        loc = s.get("location_code") or ""
+        record_history(
+            stock_id, LocationAction.USE.value,
+            from_loc=loc, to_loc="", qty=take,
+            action_by="system", reason="stock_use",
+        )
     return get_stock_by_id(stock_id) or {}
 
 

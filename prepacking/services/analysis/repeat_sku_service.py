@@ -79,3 +79,49 @@ def analyze_repeat_skus(
         )
     out.sort(key=lambda x: x["total_count"], reverse=True)
     return out
+
+
+def load_repeat_sku_daily_totals(
+    supplier_name: str, target_date: str, lookback_days: int
+) -> list[dict]:
+    """forecast_service에서 호출: SKU별 일별 출하 합계를 반환."""
+    d_end = _parse_date(target_date)
+    if not d_end:
+        return []
+    d_start = d_end - dt.timedelta(days=max(1, lookback_days))
+    with get_pp_connection() as con:
+        cur = con.execute(
+            """
+            SELECT shipping_date, product_name, option_name, qty
+            FROM pp_shipping_stats
+            WHERE TRIM(supplier_name) = TRIM(?)
+              AND shipping_date IS NOT NULL AND shipping_date != ''
+              AND date(shipping_date) >= date(?)
+              AND date(shipping_date) < date(?)
+            """,
+            (supplier_name.strip(), d_start.isoformat(), d_end.isoformat()),
+        )
+        raw_rows = cur.fetchall()
+
+    agg: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    freq: dict[tuple[str, str], set] = defaultdict(set)
+    for shipping_date, product_name, option_name, qty in raw_rows:
+        pn = normalize_sku_name(product_name)
+        on = normalize_sku_name(option_name)
+        key = (pn, on)
+        ds = (shipping_date or "")[:10]
+        q = max(1, safe_int(qty, 1))
+        agg[key][ds] += q
+        if ds:
+            freq[key].add(ds)
+
+    out: list[dict] = []
+    for (pn, on), daily in agg.items():
+        display = f"{pn} {on}".strip() or pn or on
+        out.append({
+            "target_name": display,
+            "target_code": pn,
+            "daily": dict(daily),
+            "frequency": len(freq[(pn, on)]),
+        })
+    return out
