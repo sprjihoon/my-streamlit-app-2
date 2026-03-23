@@ -359,10 +359,10 @@ def _adaptive_predict(
             blended = val_7 * rw + median_active * (1 - rw)
             predicted = max(1, int(round(blended)))
             method = f"vol(7d={val_7:.0f},medA={median_active:.0f})"
-        elif ship_prob >= 0.67 and median_active > 0:
-            # 매우 자주 출하되는 SKU만 중앙값 폴백
-            predicted = max(1, int(round(median_active * 0.5)))
-            method = f"vol_fb(medA={median_active:.0f}*0.5,p={ship_prob:.0%})"
+        elif ship_prob >= 0.50 and median_active > 0:
+            # 자주 출하되는 SKU는 중앙값 폴백
+            predicted = max(1, int(round(median_active * 0.7)))
+            method = f"vol_fb(medA={median_active:.0f}*0.7,p={ship_prob:.0%})"
         else:
             predicted = 0
             method = f"vol_zero(7d=0,p={ship_prob:.0%})"
