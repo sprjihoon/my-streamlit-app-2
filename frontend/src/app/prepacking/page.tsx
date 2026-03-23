@@ -1172,7 +1172,14 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                             {!supplierName && <td style={{ ...tdStyle, fontSize: 12, color: '#6b7280' }}>{item.supplier_name}</td>}
                             <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 320 }}>
                               {isCombo
-                                ? <span style={{ color: '#7c3aed' }}>📦 {skuItems.length}종 조합</span>
+                                ? (
+                                  <div>
+                                    <span style={{ color: '#7c3aed' }}>📦 {skuItems.length}종 조합</span>
+                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                                      {skuItems.map(s => `${s.product_name?.slice(0, 12)}(x${s.qty})`).join(' + ')}
+                                    </div>
+                                  </div>
+                                )
                                 : <span title={item.target_name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.target_name}</span>
                               }
                             </td>
@@ -1216,26 +1223,37 @@ function RecommendTab({ supplierName, showToast }: { supplierName: string; showT
                             </td>
                             <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13 }}>{item.frequency}일</td>
                           </tr>
-                          {isCombo && skuItems.map((sku, si) => (
-                            <tr key={`${item.target_code}-sku-${si}`} style={{ background: i % 2 === 0 ? '#f0f4ff' : '#eef2ff' }}>
-                              <td style={{ ...tdStyle, paddingLeft: 24, fontSize: 12, color: '#6b7280' }}>
-                                └
-                              </td>
-                              {!supplierName && <td style={tdStyle} />}
-                              <td style={{ ...tdStyle, fontSize: 12, color: '#374151' }} title={`${sku.product_name} ${sku.option_name}`.trim()}>
-                                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>
-                                  {sku.product_name}{sku.option_name ? ` / ${sku.option_name}` : ''}
-                                </span>
-                              </td>
-                              <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12, color: '#374151' }}>
-                                {sku.barcode || sku.sku_code || '-'}
-                              </td>
-                              <td style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: '#6b7280' }}>
-                                x{sku.qty}
-                              </td>
-                              <td colSpan={4} style={tdStyle} />
-                            </tr>
-                          ))}
+                          {isCombo && skuItems.map((sku, si) => {
+                            const needQty = (sku.qty || 1) * item.predicted_qty;
+                            return (
+                              <tr key={`${item.target_code}-sku-${si}`} style={{ background: i % 2 === 0 ? '#f0f4ff' : '#eef2ff' }}>
+                                <td style={{ ...tdStyle, paddingLeft: 24, fontSize: 12, color: '#6b7280' }}>
+                                  └
+                                </td>
+                                {!supplierName && <td style={tdStyle} />}
+                                <td style={{ ...tdStyle, fontSize: 12, color: '#374151' }} title={`${sku.product_name} ${sku.option_name}`.trim()}>
+                                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>
+                                    {sku.product_name}{sku.option_name ? ` / ${sku.option_name}` : ''}
+                                  </span>
+                                </td>
+                                <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12, color: '#374151' }}>
+                                  {sku.barcode || sku.sku_code || '-'}
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: '#6b7280' }}>
+                                  x{sku.qty}
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                                  <span style={{ fontWeight: 700, fontSize: 14, color: '#059669' }}>
+                                    {needQty.toLocaleString()}개
+                                  </span>
+                                  <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 4 }}>
+                                    ({sku.qty}x{item.predicted_qty})
+                                  </span>
+                                </td>
+                                <td colSpan={3} style={tdStyle} />
+                              </tr>
+                            );
+                          })}
                         </React.Fragment>
                       );
                     })}
