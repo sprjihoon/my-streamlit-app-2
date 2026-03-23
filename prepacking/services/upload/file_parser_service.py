@@ -207,6 +207,16 @@ def _read_frame(file_path: str) -> pd.DataFrame:
     suf = path.suffix.lower()
     if suf in (".xlsx", ".xlsm"):
         return pd.read_excel(path, engine="openpyxl")
+    if suf == ".xls":
+        try:
+            return pd.read_excel(path, engine="xlrd")
+        except Exception:
+            pass
+        try:
+            return pd.read_html(path)[0]
+        except Exception:
+            pass
+        return pd.read_excel(path)
     if suf == ".csv":
         for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
             try:

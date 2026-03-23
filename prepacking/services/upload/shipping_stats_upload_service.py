@@ -146,7 +146,9 @@ def _process_upload_background(
         logger.info("Upload %d completed: %d inserted, %d skipped out of %d total",
                      upload_id, inserted_count, skipped, total_count)
 
-    except Exception:
+    except Exception as exc:
+        import traceback
+        err_detail = f"{type(exc).__name__}: {exc}"
         logger.exception("Background upload processing failed for upload_id=%d", upload_id)
         try:
             with get_pp_connection() as con:
@@ -157,7 +159,7 @@ def _process_upload_background(
                         error_message = ?
                     WHERE upload_id = ?
                     """,
-                    ("파일 처리 중 오류가 발생했습니다.", upload_id),
+                    (err_detail[:500], upload_id),
                 )
                 con.commit()
         except Exception:
