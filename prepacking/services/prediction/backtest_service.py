@@ -177,35 +177,42 @@ def run_backtest(
     y_pred = np.array(all_predicted, dtype=float)
     detailed_metrics = compute_all_metrics(y_true, y_pred) if len(y_true) > 0 else {}
 
-    # 총합 기준 정확도 — 작업지시서에서 가장 의미 있는 지표
-    total_predicted_all = sum(p["predicted_qty"] for p in predictions)
-    total_actual_all = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
-    if total_actual_all > 0:
-        total_error_rate = abs(total_predicted_all - total_actual_all) / total_actual_all * 100
-        accuracy = max(0.0, 100.0 - total_error_rate)
-    else:
-        accuracy = 0.0
-
-    # WAPE (개별 SKU 오차 합계 / 실제 합계)
-    total_abs_error = sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)
-    wape_pct = (total_abs_error / total_actual_all * 100) if total_actual_all > 0 else 0.0
-
-    # 참고용 MAPE (캡 적용)
-    items_with_actual = [p for p in predictions if p["actual_qty"] > 0]
-    if items_with_actual:
-        mape_values = [min(p["error_pct"], 200.0) for p in items_with_actual]
-        avg_mape = sum(mape_values) / len(mape_values)
-    else:
-        avg_mape = 0.0
-
-    matched = sum(1 for p in predictions if p["result_type"] == "matched")
-    over = sum(1 for p in predictions if p["result_type"] == "over")
-    under = sum(1 for p in predictions if p["result_type"] == "under")
-    ml_count = sum(1 for p in predictions if p.get("model_type") in ("ml", "ensemble"))
-    stat_count = sum(1 for p in predictions if p.get("model_type") == "statistical")
+    # ═══ 3단계 정확도 체계 ═══
 
     total_predicted = sum(p["predicted_qty"] for p in predictions)
     total_actual = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
+    total_abs_error = sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)
+
+    # 1) 총합 정확도 — 전체 물량 오차율
+    if total_actual > 0:
+        volume_error = abs(total_predicted - total_actual) / total_actual * 100
+        acc_volume = max(0.0, 100.0 - volume_error)
+    else:
+        acc_volume = 0.0
+
+    # 2) SKU 매칭률 — 개별 SKU를 얼마나 정확히 맞췄나
+    matched = sum(1 for p in predictions if p["result_type"] == "matched")
+    over = sum(1 for p in predictions if p["result_type"] == "over")
+    under = sum(1 for p in predictions if p["result_type"] == "under")
+    total_items = len(predictions) + len(missed_items)
+    acc_sku_match = (matched / total_items * 100) if total_items > 0 else 0.0
+
+    # 3) WAPE — 개별 수량 오차 합계 / 실제 합계
+    wape_pct = (total_abs_error / total_actual * 100) if total_actual > 0 else 0.0
+    acc_wape = max(0.0, 100.0 - wape_pct)
+
+    # 종합 정확도 = 총합 40% + SKU매칭 40% + WAPE 20%
+    accuracy = acc_volume * 0.4 + acc_sku_match * 0.4 + acc_wape * 0.2
+
+    # 참고용 MAPE
+    items_with_actual = [p for p in predictions if p["actual_qty"] > 0]
+    avg_mape = 0.0
+    if items_with_actual:
+        mape_values = [min(p["error_pct"], 200.0) for p in items_with_actual]
+        avg_mape = sum(mape_values) / len(mape_values)
+
+    ml_count = sum(1 for p in predictions if p.get("model_type") not in ("statistical", None, ""))
+    stat_count = sum(1 for p in predictions if p.get("model_type") in ("statistical", "stat_override", "stat_only"))
 
     predictions.sort(key=lambda x: (-x["error_abs"], -x["actual_qty"]))
 
@@ -220,10 +227,13 @@ def run_backtest(
         "supplier_name": supplier_name,
         "summary": {
             "accuracy": round(accuracy, 1),
+            "acc_volume": round(acc_volume, 1),
+            "acc_sku_match": round(acc_sku_match, 1),
+            "acc_wape": round(acc_wape, 1),
             "avg_mape": round(avg_mape, 1),
             "total_predicted": total_predicted,
             "total_actual": total_actual,
-            "total_error": int(sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)),
+            "total_error": int(total_abs_error),
             "item_count": len(predictions),
             "matched": matched,
             "over": over,

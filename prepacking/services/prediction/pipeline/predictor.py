@@ -272,6 +272,32 @@ def predict_for_date(
         scale_max=profile.trend_scale_max,
     )
 
+    # === ML 예측 (통계 예측 먼저 수집 후 ML과 앙상블) ===
+    stat_predictions: dict[str, int] = {}
+    for target_type, row in all_rows:
+        if target_type == "combination":
+            sk = f"combo||{row.get('combination_key', '')}"
+        else:
+            pn = normalize_sku_name(row.get("target_code", ""))
+            on = normalize_sku_name(row.get("option_name", ""))
+            sk = f"{pn}||{on}"
+        series = sku_series_map.get(sk)
+        if series is None or series.empty:
+            continue
+        sq, _, _ = _adaptive_predict(series, td_ts, profile)
+        if sq > 0 and trend_scale != 1.0:
+            sq = max(1, int(round(sq * trend_scale)))
+        stat_predictions[sk] = sq
+
+    ml_results: dict[str, dict] = {}
+    try:
+        from prepacking.services.prediction.pipeline.ml_predictor import build_ml_predictions
+        if len(sku_series_map) >= 10:
+            ml_results = build_ml_predictions(sku_series_map, td_ts, stat_predictions)
+            logger.info("ML predictions generated for %d SKUs", len(ml_results))
+    except Exception as exc:
+        logger.warning("ML prediction failed, using stat only: %s", exc)
+
     out: list[dict] = []
 
     for target_type, row in all_rows:
@@ -294,6 +320,16 @@ def predict_for_date(
         if predicted_qty > 0 and trend_scale != 1.0:
             predicted_qty = max(1, int(round(predicted_qty * trend_scale)))
             method_detail += f",scale={trend_scale:.2f}"
+
+        # ML 앙상블 적용
+        ml_info = ml_results.get(series_key, {})
+        ml_qty = 0
+        ml_model_type = "statistical"
+        if ml_info:
+            predicted_qty = ml_info["final_qty"]
+            ml_qty = ml_info["ml_qty"]
+            ml_model_type = ml_info["model_used"]
+            method_detail = f"{ml_model_type}(stat={ml_info['stat_qty']},ml={ml_qty},p={ml_info['ml_ship_prob']:.0%})"
 
         daily_dict = {k: int(v) for k, v in row.get("daily", {}).items()}
         data_days = weekday_pattern_service.distinct_active_days(
@@ -329,9 +365,9 @@ def predict_for_date(
             "combination_key": row.get("combination_key", ""),
             "items": row.get("items", []),
             "predicted_qty": predicted_qty,
-            "stat_qty": predicted_qty,
-            "ml_qty": 0,
-            "ml_model_type": "statistical",
+            "stat_qty": stat_predictions.get(series_key, 0),
+            "ml_qty": ml_qty,
+            "ml_model_type": ml_model_type,
             "ml_accuracy": 0,
             "ml_samples": 0,
             "confidence_score": round(base_conf, 3),
@@ -340,12 +376,20 @@ def predict_for_date(
             "recent_same_weekday_avg": round(wd_avg, 1),
             "weekday_basis": wb,
             "frequency": row.get("frequency", 0),
-            "model_used": "statistical",
+            "model_used": ml_model_type,
             "ship_probability": round(ship_prob, 3),
             "gpt_reason": f"[{profile.supplier_type}] {method_detail}",
             "gpt_confidence": "",
         }
         out.append(entry)
+
+    # LLM 이상치 검증 (use_gpt=True일 때만)
+    if use_gpt and out:
+        try:
+            from prepacking.services.prediction.pipeline.llm_reviewer import review_predictions
+            out = review_predictions(out, supplier_name, target_date)
+        except Exception as exc:
+            logger.warning("LLM review skipped: %s", exc)
 
     # 캘리브레이션에서 재활용할 수 있도록 컨텍스트 캐시
     _last_context.clear()
