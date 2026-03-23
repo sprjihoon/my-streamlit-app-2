@@ -78,7 +78,14 @@ def calibrate_from_backtest(
     if best_params is None:
         return None
 
-    # DB에 저장 (기존 결과와 블렌딩)
+    # 정확도가 60% 미만이면 저장하지 않음 (노이즈 방지)
+    if best_accuracy < 60.0:
+        logger.info(
+            "Skipping calibration for %s on %s: best_acc=%.1f%% < 60%%",
+            supplier_name, target_date, best_accuracy,
+        )
+        return {"accuracy": round(best_accuracy, 1), "skipped": True, **best_params}
+
     _update_params_in_db(supplier_name, target_date, best_params, best_accuracy, sku_series_map, td_ts)
 
     logger.info(
@@ -201,6 +208,15 @@ def _update_params_in_db(
 
     if existing and existing.get("calibration_accuracy", 0) > 0:
         old_acc = existing["calibration_accuracy"]
+
+        # 새 결과가 기존보다 20% 이상 나쁘면 저장하지 않음
+        if new_accuracy < old_acc - 20:
+            logger.info(
+                "Skipping update for %s: new_acc=%.1f%% < old_acc=%.1f%% - 20",
+                supplier_name, new_accuracy, old_acc,
+            )
+            return
+
         old_weight = 0.6
         new_weight = 0.4
 
