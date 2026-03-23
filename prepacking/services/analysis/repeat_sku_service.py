@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from collections import defaultdict
 
-from prepacking.common.utils import normalize_sku_name, safe_int
+from prepacking.common.utils import normalize_sku_name, safe_int, safe_str
 from prepacking.database import get_pp_connection
 
 
