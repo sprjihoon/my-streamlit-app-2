@@ -153,14 +153,19 @@ def run_backtest(
     y_pred = np.array(all_predicted, dtype=float)
     detailed_metrics = compute_all_metrics(y_true, y_pred) if len(y_true) > 0 else {}
 
+    # WAPE 기반 정확도 (총합 기준 — 소량 SKU 오차율 폭발 방지)
+    total_abs_error = sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)
+    total_actual_sum = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
+    wape_pct = (total_abs_error / total_actual_sum * 100) if total_actual_sum > 0 else 0.0
+    accuracy = max(0.0, 100.0 - wape_pct)
+
+    # 참고용 MAPE (표시만)
     items_with_actual = [p for p in predictions if p["actual_qty"] > 0]
     if items_with_actual:
-        mape_values = [p["error_pct"] for p in items_with_actual]
+        mape_values = [min(p["error_pct"], 200.0) for p in items_with_actual]
         avg_mape = sum(mape_values) / len(mape_values)
-        accuracy = max(0.0, 100.0 - avg_mape)
     else:
         avg_mape = 0.0
-        accuracy = 0.0
 
     matched = sum(1 for p in predictions if p["result_type"] == "matched")
     over = sum(1 for p in predictions if p["result_type"] == "over")
