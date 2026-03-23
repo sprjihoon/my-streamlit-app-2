@@ -1,20 +1,22 @@
 """
-predictor — SeasonalNaive 기반 예측기
-──────────────────────────────────────
-핵심: 7일 전 같은 요일 값을 그대로 예측.
-7일 전에 출하 0이면 → 0, 20이면 → 20.
+predictor — 업체 적응형 예측기
+═══════════════════════════════
+업체 특성(SKU 수, 평균 수량, 변동성, 출하 빈도)을 자동 분석하여
+파라미터를 동적으로 결정한다.
 
-이것이 가장 정확한 baseline이며, ML이 이를 이기기 전까지는
-이 방식을 사용한다.
+업체 유형:
+  A) 소품종 대량 (화장품 등) — SKU 적고 개당 수량 큼, 안정적
+  B) 다품종 소량 (의류 등) — SKU 많고 개당 수량 작음, 변동 큼
+  C) 중간형 — 그 사이
 
-보조 로직:
-- 7일 전 데이터가 없으면 14일 전, 21일 전 순서로 폴백
-- 최근 4주 같은 요일 중앙값으로 이상치 보정
+각 유형에 맞는 출하확률 threshold, 블렌딩 비율, 트렌드 스케일 범위를
+자동으로 결정한다.
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -22,6 +24,140 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+# ──────────────────────────────────────────────
+# 업체 프로파일 — 자동 분석 결과
+# ──────────────────────────────────────────────
+@dataclass
+class SupplierProfile:
+    total_skus: int
+    avg_qty_per_active_day: float
+    avg_ship_prob: float       # 전체 SKU의 평균 출하 확률
+    volatility: float          # 전체 변동계수 (CV)
+    supplier_type: str         # "stable_few", "volatile_many", "mixed"
+
+    # 적응형 파라미터
+    prob_threshold: float      # 출하확률 이 미만이면 0 예측
+    blend_recent_weight: float # 7일전 값 가중치 (나머지는 중앙값)
+    trend_scale_min: float
+    trend_scale_max: float
+    min_data_days: int         # 최소 데이터 일수
+
+
+def _analyze_supplier(
+    sku_series_map: dict[str, pd.Series],
+    td: pd.Timestamp,
+    weeks_back: int = 6,
+) -> SupplierProfile:
+    """업체 데이터를 분석하여 프로파일을 생성한다."""
+    if not sku_series_map:
+        return _default_profile()
+
+    total_skus = len(sku_series_map)
+    cutoff = td - pd.Timedelta(days=1)
+
+    ship_probs: list[float] = []
+    avg_qtys: list[float] = []
+    cvs: list[float] = []
+
+    for series in sku_series_map.values():
+        past = series[series.index <= cutoff]
+        if past.empty:
+            continue
+
+        # 같은 요일 출하 확률
+        wd_vals = []
+        for w in range(1, weeks_back + 1):
+            d = td - pd.Timedelta(weeks=w)
+            if d in past.index:
+                wd_vals.append(float(past[d]))
+            elif d >= past.index.min():
+                wd_vals.append(0.0)
+
+        if wd_vals:
+            sp = len([v for v in wd_vals if v > 0]) / len(wd_vals)
+            ship_probs.append(sp)
+
+        # 활성일 평균 수량
+        active = past[past > 0]
+        if len(active) > 0:
+            avg_qtys.append(float(active.mean()))
+            if len(active) >= 2 and active.mean() > 0:
+                cvs.append(float(active.std() / active.mean()))
+
+    avg_ship_prob = float(np.mean(ship_probs)) if ship_probs else 0.0
+    avg_qty = float(np.mean(avg_qtys)) if avg_qtys else 0.0
+    avg_cv = float(np.mean(cvs)) if cvs else 1.0
+
+    # 업체 유형 결정
+    if total_skus <= 50 and avg_qty >= 10 and avg_cv < 0.8:
+        stype = "stable_few"
+    elif total_skus >= 150 or (avg_qty < 5 and avg_cv > 0.6):
+        stype = "volatile_many"
+    else:
+        stype = "mixed"
+
+    # 유형별 파라미터 결정
+    if stype == "stable_few":
+        # 소품종 대량: 활성값 중심, 트렌드 적극 반영
+        return SupplierProfile(
+            total_skus=total_skus,
+            avg_qty_per_active_day=avg_qty,
+            avg_ship_prob=avg_ship_prob,
+            volatility=avg_cv,
+            supplier_type=stype,
+            prob_threshold=0.20,
+            blend_recent_weight=0.5,
+            trend_scale_min=0.6,
+            trend_scale_max=1.4,
+            min_data_days=7,
+        )
+    elif stype == "volatile_many":
+        # 다품종 소량: 보수적, 중앙값 중심, 트렌드 약하게
+        return SupplierProfile(
+            total_skus=total_skus,
+            avg_qty_per_active_day=avg_qty,
+            volatility=avg_cv,
+            avg_ship_prob=avg_ship_prob,
+            supplier_type=stype,
+            prob_threshold=0.40,
+            blend_recent_weight=0.3,
+            trend_scale_min=0.8,
+            trend_scale_max=1.2,
+            min_data_days=14,
+        )
+    else:
+        return SupplierProfile(
+            total_skus=total_skus,
+            avg_qty_per_active_day=avg_qty,
+            avg_ship_prob=avg_ship_prob,
+            volatility=avg_cv,
+            supplier_type=stype,
+            prob_threshold=0.30,
+            blend_recent_weight=0.4,
+            trend_scale_min=0.7,
+            trend_scale_max=1.3,
+            min_data_days=14,
+        )
+
+
+def _default_profile() -> SupplierProfile:
+    return SupplierProfile(
+        total_skus=0,
+        avg_qty_per_active_day=0,
+        avg_ship_prob=0,
+        volatility=1.0,
+        supplier_type="mixed",
+        prob_threshold=0.30,
+        blend_recent_weight=0.4,
+        trend_scale_min=0.7,
+        trend_scale_max=1.3,
+        min_data_days=14,
+    )
+
+
+# ──────────────────────────────────────────────
+# 메인 예측 함수
+# ──────────────────────────────────────────────
 def predict_for_date(
     supplier_name: str,
     target_date: str,
@@ -70,8 +206,23 @@ def predict_for_date(
         if s is not None:
             sku_series_map[f"combo||{ckey}"] = s
 
-    # 전체 공급처 수준 트렌드 스케일링 계산
-    trend_scale = _compute_supplier_trend_scale(sku_series_map, td_ts)
+    # 업체 프로파일 자동 분석
+    profile = _analyze_supplier(sku_series_map, td_ts)
+    logger.info(
+        "Supplier profile: %s — type=%s, skus=%d, avgQty=%.1f, cv=%.2f, "
+        "probTh=%.2f, blendW=%.2f, trendRange=[%.2f,%.2f]",
+        supplier_name, profile.supplier_type, profile.total_skus,
+        profile.avg_qty_per_active_day, profile.volatility,
+        profile.prob_threshold, profile.blend_recent_weight,
+        profile.trend_scale_min, profile.trend_scale_max,
+    )
+
+    # 트렌드 스케일링
+    trend_scale = _compute_supplier_trend_scale(
+        sku_series_map, td_ts,
+        scale_min=profile.trend_scale_min,
+        scale_max=profile.trend_scale_max,
+    )
 
     out: list[dict] = []
 
@@ -88,11 +239,10 @@ def predict_for_date(
         if series is None or series.empty:
             continue
 
-        predicted_qty, ship_prob, method_detail = _seasonal_naive_predict(
-            series, td_ts
+        predicted_qty, ship_prob, method_detail = _adaptive_predict(
+            series, td_ts, profile
         )
 
-        # 트렌드 스케일링 적용 (0이 아닌 예측에만)
         if predicted_qty > 0 and trend_scale != 1.0:
             predicted_qty = max(1, int(round(predicted_qty * trend_scale)))
             method_detail += f",scale={trend_scale:.2f}"
@@ -144,7 +294,7 @@ def predict_for_date(
             "frequency": row.get("frequency", 0),
             "model_used": "statistical",
             "ship_probability": round(ship_prob, 3),
-            "gpt_reason": method_detail,
+            "gpt_reason": f"[{profile.supplier_type}] {method_detail}",
             "gpt_confidence": "",
         }
         out.append(entry)
@@ -152,16 +302,89 @@ def predict_for_date(
     return out
 
 
+# ──────────────────────────────────────────────
+# 적응형 예측 함수
+# ──────────────────────────────────────────────
+def _adaptive_predict(
+    series: pd.Series,
+    td: pd.Timestamp,
+    profile: SupplierProfile,
+) -> tuple[int, float, str]:
+    """
+    업체 프로파일에 따라 파라미터가 달라지는 예측.
+
+    stable_few: 7일전 값 비중 높음, 확률 threshold 낮음 → 과소예측 방지
+    volatile_many: 중앙값 비중 높음, 확률 threshold 높음 → 과다예측 방지
+    """
+    cutoff = td - pd.Timedelta(days=1)
+    past = series[series.index <= cutoff]
+
+    if past.empty:
+        return 0, 0.0, "no_data"
+
+    data_span = (past.index.max() - past.index.min()).days
+    if data_span < profile.min_data_days:
+        return 0, 0.0, "insufficient_data"
+
+    # 같은 요일 최근 6주 데이터 수집 (0 포함)
+    wd_vals: list[float] = []
+    for w in range(1, 7):
+        d = td - pd.Timedelta(weeks=w)
+        if d in past.index:
+            wd_vals.append(float(past[d]))
+        elif d >= past.index.min():
+            wd_vals.append(0.0)
+
+    if not wd_vals:
+        return 0, 0.0, "no_weekday_data"
+
+    ship_count = len([v for v in wd_vals if v > 0])
+    ship_prob = ship_count / len(wd_vals)
+
+    if ship_prob < profile.prob_threshold:
+        return 0, ship_prob, f"low_prob({ship_prob:.0%}<{profile.prob_threshold:.0%})"
+
+    active_vals = [v for v in wd_vals if v > 0]
+    median_all = float(np.median(wd_vals))
+    median_active = float(np.median(active_vals)) if active_vals else 0.0
+
+    d_7 = td - pd.Timedelta(weeks=1)
+    val_7 = float(past[d_7]) if d_7 in past.index else 0.0
+
+    rw = profile.blend_recent_weight  # 7일전 가중치
+
+    if ship_prob >= 0.5:
+        # 자주 출하되는 SKU
+        if val_7 > 0:
+            blended = val_7 * rw + median_active * (1 - rw)
+        else:
+            blended = median_active * ship_prob
+        predicted = max(0, int(round(blended)))
+        method = f"freq(7d={val_7:.0f},medA={median_active:.0f},rw={rw:.1f})"
+    else:
+        # 비정기 SKU — 전체 중앙값 기반
+        if median_all > 0:
+            predicted = max(0, int(round(median_all)))
+            method = f"rare_med({median_all:.0f},p={ship_prob:.0%})"
+        elif val_7 > 0:
+            predicted = max(0, int(round(val_7 * ship_prob)))
+            method = f"rare_7d({val_7:.0f}*{ship_prob:.0%})"
+        else:
+            predicted = 0
+            method = "rare_zero"
+
+    return predicted, ship_prob, method
+
+
+# ──────────────────────────────────────────────
+# 유틸리티 함수들
+# ──────────────────────────────────────────────
 def _compute_supplier_trend_scale(
     sku_series_map: dict[str, pd.Series],
     td: pd.Timestamp,
+    scale_min: float = 0.7,
+    scale_max: float = 1.3,
 ) -> float:
-    """
-    전체 공급처 수준의 트렌드 스케일링 팩터 계산.
-
-    직전 7일 총합 vs 그 전 7일 총합 비율로 증가/감소 추세를 반영.
-    급격한 변동 방지를 위해 0.7~1.3 범위로 제한.
-    """
     if not sku_series_map:
         return 1.0
 
@@ -183,7 +406,7 @@ def _compute_supplier_trend_scale(
         return 1.0
 
     raw_scale = recent_total / prev_total
-    return max(0.7, min(1.3, raw_scale))
+    return max(scale_min, min(scale_max, raw_scale))
 
 
 def _daily_to_filled_series(
@@ -207,87 +430,6 @@ def _daily_to_filled_series(
             filled[d] = float(v)
 
     return filled
-
-
-def _seasonal_naive_predict(
-    series: pd.Series,
-    td: pd.Timestamp,
-) -> tuple[int, float, str]:
-    """
-    SeasonalNaive 예측 — 같은 요일 최근 4주 중앙값 기반.
-
-    중앙값을 사용하면:
-    - 이상치에 강건 (한 주만 비정상적으로 높아도 영향 적음)
-    - 0이 많으면 자연스럽게 0으로 수렴
-    - 변동성이 큰 SKU에서도 안정적
-
-    출하 확률이 25% 미만이면 0으로 예측.
-    """
-    cutoff = td - pd.Timedelta(days=1)
-    past = series[series.index <= cutoff]
-
-    if past.empty:
-        return 0, 0.0, "no_data"
-
-    # 최소 14일 데이터 필요
-    data_span = (past.index.max() - past.index.min()).days
-    if data_span < 14:
-        return 0, 0.0, "insufficient_data"
-
-    # 같은 요일 최근 6주 데이터 수집 (0 포함)
-    wd_vals: list[float] = []
-    for w in range(1, 7):
-        d = td - pd.Timedelta(weeks=w)
-        if d in past.index:
-            wd_vals.append(float(past[d]))
-        elif d >= past.index.min():
-            wd_vals.append(0.0)
-
-    if not wd_vals:
-        return 0, 0.0, "no_weekday_data"
-
-    # 출하 확률
-    ship_count = len([v for v in wd_vals if v > 0])
-    ship_prob = ship_count / len(wd_vals)
-
-    # 출하 확률이 낮으면 0 (2/6 미만 = 33%)
-    if ship_prob < 0.33:
-        return 0, ship_prob, f"low_prob({ship_prob:.0%})"
-
-    # 활성값만 추출
-    active_vals = [v for v in wd_vals if v > 0]
-
-    # 중앙값 (0 포함) — 과다예측 방지의 핵심
-    median_all = float(np.median(wd_vals))
-    # 활성값 중앙값 — 과소예측 방지
-    median_active = float(np.median(active_vals)) if active_vals else 0.0
-
-    # 최근 1주 값
-    d_7 = td - pd.Timedelta(weeks=1)
-    val_7 = float(past[d_7]) if d_7 in past.index else 0.0
-
-    # 예측 로직: 출하 확률에 따라 다른 전략
-    if ship_prob >= 0.5:
-        # 자주 출하되는 SKU: 활성값 중앙값 기반 (과소예측 방지)
-        if val_7 > 0:
-            blended = val_7 * 0.4 + median_active * 0.6
-        else:
-            blended = median_active * ship_prob
-        predicted = max(0, int(round(blended)))
-        method = f"freq(7d={val_7:.0f},medA={median_active:.0f},p={ship_prob:.0%})"
-    else:
-        # 가끔 출하되는 SKU: 전체 중앙값 기반 (과다예측 방지)
-        if median_all > 0:
-            predicted = max(0, int(round(median_all)))
-            method = f"rare_med({median_all:.0f},p={ship_prob:.0%})"
-        elif val_7 > 0:
-            predicted = max(0, int(round(val_7 * ship_prob)))
-            method = f"rare_7d({val_7:.0f}*{ship_prob:.0%})"
-        else:
-            predicted = 0
-            method = "rare_zero"
-
-    return predicted, ship_prob, method
 
 
 def _variability_coeff(series: pd.Series, td: pd.Timestamp, days: int = 30) -> float:
