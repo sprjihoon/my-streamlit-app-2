@@ -153,13 +153,20 @@ def run_backtest(
     y_pred = np.array(all_predicted, dtype=float)
     detailed_metrics = compute_all_metrics(y_true, y_pred) if len(y_true) > 0 else {}
 
-    # WAPE 기반 정확도 (총합 기준 — 소량 SKU 오차율 폭발 방지)
-    total_abs_error = sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)
-    total_actual_sum = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
-    wape_pct = (total_abs_error / total_actual_sum * 100) if total_actual_sum > 0 else 0.0
-    accuracy = max(0.0, 100.0 - wape_pct)
+    # 총합 기준 정확도 — 작업지시서에서 가장 의미 있는 지표
+    total_predicted_all = sum(p["predicted_qty"] for p in predictions)
+    total_actual_all = sum(p["actual_qty"] for p in predictions) + sum(m["actual_qty"] for m in missed_items)
+    if total_actual_all > 0:
+        total_error_rate = abs(total_predicted_all - total_actual_all) / total_actual_all * 100
+        accuracy = max(0.0, 100.0 - total_error_rate)
+    else:
+        accuracy = 0.0
 
-    # 참고용 MAPE (표시만)
+    # WAPE (개별 SKU 오차 합계 / 실제 합계)
+    total_abs_error = sum(p["error_abs"] for p in predictions) + sum(m["error_abs"] for m in missed_items)
+    wape_pct = (total_abs_error / total_actual_all * 100) if total_actual_all > 0 else 0.0
+
+    # 참고용 MAPE (캡 적용)
     items_with_actual = [p for p in predictions if p["actual_qty"] > 0]
     if items_with_actual:
         mape_values = [min(p["error_pct"], 200.0) for p in items_with_actual]
