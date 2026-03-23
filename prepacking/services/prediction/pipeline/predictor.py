@@ -203,31 +203,42 @@ def _seasonal_naive_predict(
     ship_count = len([v for v in wd_vals if v > 0])
     ship_prob = ship_count / len(wd_vals)
 
-    # 출하 확률이 너무 낮으면 0
-    if ship_prob < 0.25:
+    # 출하 확률이 매우 낮으면 0 (1/6 미만 = 16.7%)
+    if ship_prob < 0.16:
         return 0, ship_prob, f"low_prob({ship_prob:.0%})"
 
-    # 중앙값 (0 포함) — 핵심 예측값
-    median_val = float(np.median(wd_vals))
+    # 활성값만 추출
+    active_vals = [v for v in wd_vals if v > 0]
 
-    # 최근 1주 가중: 7일 전 값과 중앙값의 가중 평균
+    # 중앙값 (0 포함) — 과다예측 방지의 핵심
+    median_all = float(np.median(wd_vals))
+    # 활성값 중앙값 — 과소예측 방지
+    median_active = float(np.median(active_vals)) if active_vals else 0.0
+
+    # 최근 1주 값
     d_7 = td - pd.Timedelta(weeks=1)
     val_7 = float(past[d_7]) if d_7 in past.index else 0.0
 
-    if val_7 > 0 and median_val > 0:
-        # 7일 전 값 60% + 중앙값 40%
-        blended = val_7 * 0.6 + median_val * 0.4
+    # 예측 로직: 출하 확률에 따라 다른 전략
+    if ship_prob >= 0.5:
+        # 자주 출하되는 SKU: 활성값 중앙값 기반 (과소예측 방지)
+        if val_7 > 0:
+            blended = val_7 * 0.4 + median_active * 0.6
+        else:
+            blended = median_active * ship_prob
         predicted = max(0, int(round(blended)))
-        method = f"blend(7d={val_7:.0f},med={median_val:.0f})"
-    elif median_val > 0:
-        predicted = max(0, int(round(median_val)))
-        method = f"median({median_val:.0f},prob={ship_prob:.0%})"
-    elif val_7 > 0:
-        predicted = max(0, int(round(val_7 * ship_prob)))
-        method = f"7d_prob({val_7:.0f}*{ship_prob:.0%})"
+        method = f"freq(7d={val_7:.0f},medA={median_active:.0f},p={ship_prob:.0%})"
     else:
-        predicted = 0
-        method = "zero"
+        # 가끔 출하되는 SKU: 전체 중앙값 기반 (과다예측 방지)
+        if median_all > 0:
+            predicted = max(0, int(round(median_all)))
+            method = f"rare_med({median_all:.0f},p={ship_prob:.0%})"
+        elif val_7 > 0:
+            predicted = max(0, int(round(val_7 * ship_prob)))
+            method = f"rare_7d({val_7:.0f}*{ship_prob:.0%})"
+        else:
+            predicted = 0
+            method = "rare_zero"
 
     return predicted, ship_prob, method
 
