@@ -160,7 +160,7 @@ def _compute_supplier_trend_scale(
     전체 공급처 수준의 트렌드 스케일링 팩터 계산.
 
     직전 7일 총합 vs 그 전 7일 총합 비율로 증가/감소 추세를 반영.
-    급격한 변동 방지를 위해 0.6~1.5 범위로 제한.
+    급격한 변동 방지를 위해 0.7~1.3 범위로 제한.
     """
     if not sku_series_map:
         return 1.0
@@ -179,11 +179,11 @@ def _compute_supplier_trend_scale(
         recent_total += recent_window.sum()
         prev_total += prev_window.sum()
 
-    if prev_total < 10:
+    if prev_total < 30:
         return 1.0
 
     raw_scale = recent_total / prev_total
-    return max(0.6, min(1.5, raw_scale))
+    return max(0.7, min(1.3, raw_scale))
 
 
 def _daily_to_filled_series(
@@ -229,6 +229,11 @@ def _seasonal_naive_predict(
     if past.empty:
         return 0, 0.0, "no_data"
 
+    # 최소 14일 데이터 필요
+    data_span = (past.index.max() - past.index.min()).days
+    if data_span < 14:
+        return 0, 0.0, "insufficient_data"
+
     # 같은 요일 최근 6주 데이터 수집 (0 포함)
     wd_vals: list[float] = []
     for w in range(1, 7):
@@ -245,8 +250,8 @@ def _seasonal_naive_predict(
     ship_count = len([v for v in wd_vals if v > 0])
     ship_prob = ship_count / len(wd_vals)
 
-    # 출하 확률이 매우 낮으면 0 (1/6 미만 = 16.7%)
-    if ship_prob < 0.16:
+    # 출하 확률이 낮으면 0 (2/6 미만 = 33%)
+    if ship_prob < 0.33:
         return 0, ship_prob, f"low_prob({ship_prob:.0%})"
 
     # 활성값만 추출
