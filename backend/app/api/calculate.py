@@ -563,7 +563,7 @@ async def get_shipping_stats(req: ShippingStatsRequest) -> ShippingStatsResponse
 async def worklog_debug(vendor: str = "", date_from: str = "", date_to: str = ""):
     """작업일지 DB 상태 진단."""
     from logic.db import _resolve_db_path
-    info = {"db_path": str(_resolve_db_path())}
+    info = {"db_path": str(_resolve_db_path()), "code_version": "set-dedup-v2"}
 
     with get_connection() as con:
         tables = [r[0] for r in con.execute(
