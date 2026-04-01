@@ -383,56 +383,59 @@ def ingest(
             return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 유사한 컬럼 발견: {similar_cols}. 파일의 컬럼: {available_cols}"
         return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 파일의 컬럼: {available_cols}"
 
-    # 5) 행-중복 제거
+    # 5) 행-중복 제거 (set 기반 - merge 대신 안전한 방식 사용)
     key_cols = UNIQUE_KEY.get(table)
+    date_col = DATE_COL.get(table)
     if key_cols:
         try:
             with get_connection() as con:
+                col_sql = ", ".join(f"[{c}]" for c in key_cols)
                 existed = pd.read_sql(
-                    f"SELECT {','.join(key_cols)} FROM {table}", con
+                    f"SELECT {col_sql} FROM {table}", con
                 )
         except sqlite3.OperationalError:
             existed = pd.DataFrame(columns=key_cols)
 
-        # 날짜 컬럼 타입 맞추기 (datetime -> string으로 변환하여 비교)
-        date_col = DATE_COL.get(table)
-        if date_col and date_col in key_cols:
-            # 새 데이터의 날짜를 문자열로 변환
-            if date_col in df.columns and pd.api.types.is_datetime64_any_dtype(df[date_col]):
-                df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
-            # 기존 데이터의 날짜도 문자열로 통일
-            if date_col in existed.columns:
-                existed[date_col] = pd.to_datetime(existed[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
-
-        # key 컬럼을 모두 문자열로 통일하여 비교 (float '1100.0' vs int '1100' 불일치 방지)
-        df_key = df[key_cols].copy()
-        existed_key = existed[key_cols].copy()
-        for kc in key_cols:
-            if kc in df_key.columns:
-                # 숫자형은 정수 문자열로 통일 (1100.0 → '1100')
-                if pd.api.types.is_numeric_dtype(df_key[kc]):
-                    df_key[kc] = df_key[kc].apply(
-                        lambda x: str(int(x)) if pd.notna(x) else pd.NA
-                    )
+        def _to_key_str(row):
+            """행의 key 컬럼들을 정규화된 문자열로 변환."""
+            parts = []
+            for kc in key_cols:
+                v = row.get(kc, "")
+                if pd.isna(v) or v is None:
+                    parts.append("__NA__")
+                elif isinstance(v, float):
+                    parts.append(str(int(v)) if v == int(v) else str(v))
                 else:
-                    df_key[kc] = df_key[kc].astype(str).replace('nan', pd.NA)
-            if kc in existed_key.columns:
-                if pd.api.types.is_numeric_dtype(existed_key[kc]):
-                    existed_key[kc] = existed_key[kc].apply(
-                        lambda x: str(int(x)) if pd.notna(x) else pd.NA
-                    )
-                else:
-                    existed_key[kc] = existed_key[kc].astype(str).replace('nan', pd.NA)
+                    # 날짜 문자열 정규화 (YYYY-MM-DD HH:MM:SS → YYYY-MM-DD)
+                    s = str(v).strip()
+                    if len(s) > 10 and s[4] == '-' and s[7] == '-':
+                        s = s[:10]
+                    parts.append(s)
+            return "|".join(parts)
 
-        # 머지는 key 컬럼 기준으로 하되 원본 df 컬럼을 보존
-        df_key["__idx__"] = range(len(df_key))
-        merged = df_key.merge(existed_key, on=key_cols, how="left", indicator=True)
-        left_only_idx = merged.loc[merged["_merge"] == "left_only", "__idx__"].values
-        df = df.iloc[left_only_idx].reset_index(drop=True)
-        
-        # 다시 datetime으로 변환 (저장용)
+        # 새 데이터: datetime → 문자열 변환 후 key 생성
+        df_for_key = df.copy()
+        if date_col and date_col in df_for_key.columns:
+            if pd.api.types.is_datetime64_any_dtype(df_for_key[date_col]):
+                df_for_key[date_col] = df_for_key[date_col].dt.strftime('%Y-%m-%d')
+
+        new_keys = df_for_key[key_cols].apply(_to_key_str, axis=1)
+
+        # 기존 데이터 key 생성
+        if date_col and date_col in existed.columns:
+            existed[date_col] = pd.to_datetime(
+                existed[date_col], errors='coerce'
+            ).dt.strftime('%Y-%m-%d').fillna('')
+        existed_keys = set(existed[key_cols].apply(_to_key_str, axis=1))
+
+        # 중복 아닌 행만 유지 (원본 df 인덱스 사용)
+        mask = ~new_keys.isin(existed_keys)
+        df = df[mask].reset_index(drop=True)
+
+        # 날짜 다시 datetime으로 변환 (저장용)
         if date_col and date_col in df.columns:
-            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+            if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
     # 6-1) work_log: 출처='excel' 기본값 설정 + 날짜 YYYY-MM-DD 정규화 + 업체명 null 필터링
     if table == "work_log":
