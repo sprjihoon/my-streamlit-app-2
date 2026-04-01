@@ -246,47 +246,72 @@ def _read_excel_or_html(path: Path, **kwargs) -> pd.DataFrame:
         return _read_excel_with_best_sheet(path, **kwargs)
 
 
+def _count_meaningful_rows(df: pd.DataFrame) -> int:
+    """'no', 'Unnamed' 컬럼을 제외한 실제 데이터 행 수 반환."""
+    meaningful_cols = [
+        c for c in df.columns
+        if str(c).strip() != 'no' and not str(c).startswith('Unnamed')
+    ]
+    if not meaningful_cols:
+        meaningful_cols = list(df.columns)
+    return int(df[meaningful_cols].notna().any(axis=1).sum())
+
+
 def _read_excel_with_best_sheet(path: Path, **kwargs) -> pd.DataFrame:
     """
-    Excel 파일에서 데이터가 있는 최적의 시트를 자동으로 선택하여 읽습니다.
+    Excel 파일에서 실제 데이터가 가장 많은 시트를 선택하여 읽습니다.
     
-    여러 시트가 있는 경우:
-    1. 각 시트를 확인하여 데이터가 있는 시트 목록 생성
-    2. 가장 많은 행을 가진 시트 선택
+    시트 선택 기준: 의미있는 컬럼(no·Unnamed 제외)의 non-null 행 수
+    → 빈 템플릿 행(no열만 채워진)이 많은 시트가 잘못 선택되는 버그 방지
     """
     try:
         xl = pd.ExcelFile(path)
         sheet_names = xl.sheet_names
-        
+
         if len(sheet_names) == 1:
-            # 시트가 하나면 그냥 읽기
             return pd.read_excel(path, **kwargs)
-        
-        # 여러 시트가 있는 경우, 데이터가 있는 시트 찾기
+
         best_sheet = None
         best_row_count = 0
-        
+
         for sheet_name in sheet_names:
             try:
-                # 빠른 확인을 위해 처음 몇 행만 읽기
                 df_check = pd.read_excel(path, sheet_name=sheet_name, nrows=5)
                 if len(df_check.columns) > 0 and len(df_check) > 0:
-                    # 전체 행 수 확인
                     df_full = pd.read_excel(path, sheet_name=sheet_name, **kwargs)
-                    if len(df_full) > best_row_count:
-                        best_row_count = len(df_full)
+                    # 의미있는 데이터 행수 기준으로 최적 시트 선택
+                    meaningful_count = _count_meaningful_rows(df_full)
+                    if meaningful_count > best_row_count:
+                        best_row_count = meaningful_count
                         best_sheet = sheet_name
             except Exception:
                 continue
-        
+
         if best_sheet:
             return pd.read_excel(path, sheet_name=best_sheet, **kwargs)
-        
-        # 데이터가 있는 시트를 찾지 못한 경우 기본 시트 사용
+
         return pd.read_excel(path, **kwargs)
-        
+
     except Exception:
-        # ExcelFile 생성 실패 시 기본 방식으로 읽기
+        return pd.read_excel(path, **kwargs)
+
+
+def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
+    """모든 시트를 읽어 하나의 DataFrame으로 합칩니다 (work_log 연간 파일용)."""
+    try:
+        xl = pd.ExcelFile(path)
+        dfs = []
+        for sheet_name in xl.sheet_names:
+            try:
+                df_sheet = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
+                if _count_meaningful_rows(df_sheet) > 0:
+                    dfs.append(df_sheet)
+            except Exception:
+                continue
+        if dfs:
+            return pd.concat(dfs, ignore_index=True)
+        return pd.read_excel(path, **kwargs)
+    except Exception:
         return pd.read_excel(path, **kwargs)
 
 
@@ -345,8 +370,12 @@ def ingest(
     read_kwargs = {"dtype": {col: "string" for col in TRACK_COLS}}
 
     # HTML 형식 XLS 파일 감지 및 처리
+    # work_log: 연간 파일(월별 시트)이면 모든 시트를 합쳐서 읽기
     try:
-        df = _read_excel_or_html(path, **read_kwargs)
+        if table == "work_log":
+            df = _read_all_sheets_concat(path, **read_kwargs)
+        else:
+            df = _read_excel_or_html(path, **read_kwargs)
     except Exception as e:
         return False, f"⚠️ 파일 읽기 실패: {str(e)}"
     
@@ -525,23 +554,6 @@ def ingest(
                     raise
             else:
                 raise
-        # work_log: INSERT 후 SQL로 중복 제거 (날짜+업체명+분류+수량+단가 기준)
-        # bot 행은 절대 삭제하지 않고, excel 행 중 중복만 제거
-        if table == "work_log":
-            count_before_dedup = con.execute("SELECT COUNT(*) FROM work_log WHERE 출처='excel'").fetchone()[0]
-            con.execute("""
-                DELETE FROM work_log
-                WHERE 출처 = 'excel'
-                AND id NOT IN (
-                    SELECT MIN(id) FROM work_log
-                    GROUP BY [날짜], [업체명], [분류], [수량], [단가]
-                )
-            """)
-            count_after_dedup = con.execute("SELECT COUNT(*) FROM work_log WHERE 출처='excel'").fetchone()[0]
-            dedup_removed = count_before_dedup - count_after_dedup
-            saved_count = len(df) - dedup_removed
-            print(f"[work_log] 삽입 {len(df)}건, 중복제거 {dedup_removed}건, 최종저장 {saved_count}건")
-
         con.execute("""
           INSERT INTO uploads
             (filename, orig_name, table_name,
@@ -550,8 +562,6 @@ def ingest(
         """, (fname, orig_name or getattr(file, 'name', fname), table, d_min, d_max, file_hash))
         con.commit()
 
-    if table == "work_log":
-        return True, f"✅ {table} 테이블에 {saved_count}건 적재 완료 (중복 {dedup_removed}건 제거)"
     return True, f"✅ {table} 테이블에 {len(df)}건 적재 완료"
 
 
