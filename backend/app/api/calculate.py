@@ -555,3 +555,69 @@ async def get_shipping_stats(req: ShippingStatsRequest) -> ShippingStatsResponse
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ─────────────────────────────────────
+# 작업일지 진단 (디버깅용)
+# ─────────────────────────────────────
+@router.get("/worklog-debug")
+async def worklog_debug(vendor: str = "", date_from: str = "", date_to: str = ""):
+    """작업일지 DB 상태 진단."""
+    from logic.db import _resolve_db_path
+    info = {"db_path": str(_resolve_db_path())}
+
+    with get_connection() as con:
+        tables = [r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()]
+        info["has_work_log"] = "work_log" in tables
+
+        if "work_log" not in tables:
+            return info
+
+        cols = [c[1] for c in con.execute("PRAGMA table_info(work_log)")]
+        info["columns"] = cols
+        info["total_rows"] = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+
+        if "출처" in cols:
+            src = con.execute("SELECT [출처], COUNT(*) FROM work_log GROUP BY [출처]").fetchall()
+            info["source_dist"] = {str(r[0]): r[1] for r in src}
+
+        dates = con.execute("SELECT MIN([날짜]), MAX([날짜]) FROM work_log").fetchone()
+        info["date_range"] = {"min": dates[0], "max": dates[1]}
+
+        bad_dates = con.execute(
+            "SELECT COUNT(*) FROM work_log WHERE [날짜] NOT LIKE '____-__-__'"
+        ).fetchone()[0]
+        info["non_iso_dates"] = bad_dates
+
+        vendors_wl = con.execute(
+            "SELECT [업체명], COUNT(*) FROM work_log GROUP BY [업체명] ORDER BY COUNT(*) DESC LIMIT 30"
+        ).fetchall()
+        info["vendors_in_worklog"] = {r[0]: r[1] for r in vendors_wl}
+
+        if vendor:
+            info["query_vendor"] = vendor
+            cnt = con.execute("SELECT COUNT(*) FROM work_log WHERE [업체명]=?", (vendor,)).fetchone()[0]
+            info["vendor_match"] = cnt
+
+            if "aliases" in tables:
+                aliases = con.execute(
+                    "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('work_log','all')",
+                    (vendor,)
+                ).fetchall()
+                info["aliases"] = [r[0] for r in aliases]
+
+                all_names = [vendor] + [r[0] for r in aliases]
+                ph = ",".join("?" * len(all_names))
+                cnt2 = con.execute(f"SELECT COUNT(*) FROM work_log WHERE [업체명] IN ({ph})", all_names).fetchone()[0]
+                info["vendor_with_aliases_match"] = cnt2
+
+            if date_from and date_to and cnt > 0:
+                cnt3 = con.execute(
+                    "SELECT COUNT(*) FROM work_log WHERE [업체명]=? AND [날짜] >= ? AND [날짜] <= ?",
+                    (vendor, date_from, date_to)
+                ).fetchone()[0]
+                info["date_filtered"] = cnt3
+
+    return info
+
