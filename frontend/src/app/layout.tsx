@@ -30,6 +30,7 @@ const NAV_ITEMS = [
 const INVOICE_NAV_ITEMS = [
   { href: '/invoice', label: '📊 인보이스 계산' },
   { href: '/invoice-list', label: '📜 인보이스 목록' },
+  { href: '/invoice-analytics', label: '📈 청구금액 분석' },
 ];
 
 const ESTIMATE_NAV_ITEMS = [
