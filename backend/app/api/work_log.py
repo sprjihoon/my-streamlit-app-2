@@ -569,6 +569,43 @@ async def export_work_logs(
 
 
 # ─────────────────────────────────────
+# DB 정리 (관리자용)
+# ─────────────────────────────────────
+
+@router.delete("/cleanup-null")
+async def cleanup_null_worklog():
+    """업체명 또는 날짜가 없는 work_log 행 일괄 삭제."""
+    with get_connection() as con:
+        cols = [c[1] for c in con.execute("PRAGMA table_info(work_log)")]
+        if "업체명" not in cols or "날짜" not in cols:
+            raise HTTPException(status_code=400, detail="work_log 테이블 구조 오류")
+
+        before = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+        con.execute(
+            "DELETE FROM work_log WHERE [업체명] IS NULL OR TRIM([업체명]) = '' OR [날짜] IS NULL OR TRIM([날짜]) = ''"
+        )
+        con.commit()
+        after = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+
+    deleted = before - after
+    return {"deleted": deleted, "before": before, "after": after}
+
+
+@router.delete("/cleanup-uploads")
+async def cleanup_null_uploads():
+    """work_log 관련 업로드 기록 전체 삭제 (재업로드 허용용)."""
+    with get_connection() as con:
+        con.execute("CREATE TABLE IF NOT EXISTS uploads (filename TEXT)")
+        before = con.execute(
+            "SELECT COUNT(*) FROM uploads WHERE table_name='work_log'"
+        ).fetchone()[0]
+        con.execute("DELETE FROM uploads WHERE table_name='work_log'")
+        con.commit()
+
+    return {"deleted": before, "message": "work_log 업로드 기록 삭제 완료. 이제 같은 파일 재업로드 가능."}
+
+
+# ─────────────────────────────────────
 # /{log_id} 엔드포인트는 /export, /check-duplicate 보다 뒤에 위치해야 함
 # ─────────────────────────────────────
 
