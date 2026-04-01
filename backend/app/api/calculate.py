@@ -631,5 +631,18 @@ async def worklog_debug(vendor: str = "", date_from: str = "", date_to: str = ""
             ).fetchall()
             info["vendor_source_dist"] = {str(r[0]): r[1] for r in source_for_vendor}
 
+        # 최근 추가된 10행 (excel 출처)
+        recent = con.execute(
+            "SELECT id, [날짜], [업체명], [분류], [수량], [단가], [출처] "
+            "FROM work_log WHERE [출처]='excel' ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+        info["recent_excel_rows"] = [
+            {"id": r[0], "날짜": r[1], "업체명": r[2], "분류": r[3], "수량": r[4], "단가": r[5], "출처": r[6]}
+            for r in recent
+        ]
+
+        # 전체 컬럼 실제 이름 (repr 포함)
+        info["col_reprs"] = [repr(c[1]) for c in con.execute("PRAGMA table_info(work_log)")]
+
     return info
 
