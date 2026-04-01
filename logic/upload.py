@@ -404,24 +404,37 @@ def ingest(
             if date_col in existed.columns:
                 existed[date_col] = pd.to_datetime(existed[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
 
-        # key 컬럼의 dtype을 양쪽 모두 문자열로 통일 (float64 vs object 충돌 방지)
+        # key 컬럼을 모두 문자열로 통일하여 비교 (float '1100.0' vs int '1100' 불일치 방지)
+        df_key = df[key_cols].copy()
+        existed_key = existed[key_cols].copy()
         for kc in key_cols:
-            if kc in df.columns and kc in existed.columns:
-                if df[kc].dtype != existed[kc].dtype:
-                    df[kc] = df[kc].astype(str).replace('nan', pd.NA)
-                    existed[kc] = existed[kc].astype(str).replace('nan', pd.NA)
+            if kc in df_key.columns:
+                # 숫자형은 정수 문자열로 통일 (1100.0 → '1100')
+                if pd.api.types.is_numeric_dtype(df_key[kc]):
+                    df_key[kc] = df_key[kc].apply(
+                        lambda x: str(int(x)) if pd.notna(x) else pd.NA
+                    )
+                else:
+                    df_key[kc] = df_key[kc].astype(str).replace('nan', pd.NA)
+            if kc in existed_key.columns:
+                if pd.api.types.is_numeric_dtype(existed_key[kc]):
+                    existed_key[kc] = existed_key[kc].apply(
+                        lambda x: str(int(x)) if pd.notna(x) else pd.NA
+                    )
+                else:
+                    existed_key[kc] = existed_key[kc].astype(str).replace('nan', pd.NA)
 
-        df = (
-            df.merge(existed, on=key_cols, how="left", indicator=True)
-            .query("_merge == 'left_only'")
-            .drop(columns="_merge")
-        )
+        # 머지는 key 컬럼 기준으로 하되 원본 df 컬럼을 보존
+        df_key["__idx__"] = range(len(df_key))
+        merged = df_key.merge(existed_key, on=key_cols, how="left", indicator=True)
+        left_only_idx = merged.loc[merged["_merge"] == "left_only", "__idx__"].values
+        df = df.iloc[left_only_idx].reset_index(drop=True)
         
         # 다시 datetime으로 변환 (저장용)
         if date_col and date_col in df.columns:
             df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
-    # 6-1) work_log: 출처='excel' 기본값 설정 + 날짜 YYYY-MM-DD 정규화
+    # 6-1) work_log: 출처='excel' 기본값 설정 + 날짜 YYYY-MM-DD 정규화 + 업체명 null 필터링
     if table == "work_log":
         if "출처" not in df.columns:
             df["출처"] = "excel"
@@ -430,6 +443,14 @@ def ingest(
         date_col_wl = DATE_COL.get(table, "")
         if date_col_wl and date_col_wl in df.columns:
             df[date_col_wl] = _normalize_worklog_date_col(df[date_col_wl])
+        # 업체명 없는 행 제거 (인보이스 계산에 반영되지 않으므로)
+        if "업체명" in df.columns:
+            before = len(df)
+            df = df[df["업체명"].notna() & (df["업체명"].astype(str).str.strip() != "")]
+            df = df.reset_index(drop=True)
+            removed = before - len(df)
+            if removed > 0:
+                print(f"[work_log] 업체명 없는 행 {removed}건 제외")
 
     # 6) 날짜 범위 (이미 파싱된 날짜 컬럼 사용)
     date_col_name = DATE_COL.get(table, "")
