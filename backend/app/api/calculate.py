@@ -173,7 +173,41 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         
         # 9. 작업일지 (플래그/반품 요금 뒤에 추가)
         if req.include_worklog:
-            add_worklog_items(items, req.vendor, d_from, d_to, source=req.worklog_source)
+            items_before = len(items)
+            try:
+                add_worklog_items(items, req.vendor, d_from, d_to, source=req.worklog_source)
+                items_added = len(items) - items_before
+                if items_added == 0:
+                    # 디버깅: 왜 0건인지 확인
+                    with get_connection() as con:
+                        wl_total = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+                        wl_vendor = con.execute(
+                            "SELECT COUNT(*) FROM work_log WHERE [업체명]=?", (req.vendor,)
+                        ).fetchone()[0]
+                        wl_cols = [c[1] for c in con.execute("PRAGMA table_info(work_log)")]
+                        has_source = '출처' in wl_cols
+                        src_info = ""
+                        if has_source:
+                            src_rows = con.execute("SELECT [출처], COUNT(*) FROM work_log WHERE [업체명]=? GROUP BY [출처]", (req.vendor,)).fetchall()
+                            src_info = f", 출처분포={dict(src_rows)}"
+                        # aliases 확인
+                        alias_rows = con.execute(
+                            "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('work_log','all')",
+                            (req.vendor,)
+                        ).fetchall()
+                        alias_list = [r[0] for r in alias_rows]
+                        # work_log에서 해당 업체 날짜 범위
+                        date_range = con.execute(
+                            "SELECT MIN([날짜]), MAX([날짜]) FROM work_log WHERE [업체명]=?", (req.vendor,)
+                        ).fetchone()
+                        warnings.append(
+                            f"작업일지 0건 반영 - vendor='{req.vendor}', source='{req.worklog_source}', "
+                            f"work_log전체={wl_total}건, vendor매칭={wl_vendor}건, "
+                            f"aliases={alias_list}, 날짜범위={date_range}{src_info}, "
+                            f"요청기간={d_from}~{d_to}"
+                        )
+            except Exception as e:
+                warnings.append(f"작업일지 계산 오류: {str(e)}")
         
         # 10. 거래처별 보관료 (활성 상태인 항목은 매월 자동 청구)
         # 보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정)
