@@ -38,7 +38,7 @@ def add_inbound_inspection_fee(
     with get_connection() as con:
         # ① 공급처 별칭 가져오기
         alias_df = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'inbound_slip'",
+            "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('inbound_slip', 'all')",
             con, params=(vendor,)
         )
         name_list = [vendor] + alias_df["alias"].tolist()
@@ -47,7 +47,7 @@ def add_inbound_inspection_fee(
         df = pd.read_sql(
             f"""
             SELECT 작업일, 수량, 공급처 FROM inbound_slip
-            WHERE 공급처 IN ({','.join('?' * len(name_list))})
+            WHERE TRIM(공급처) IN ({','.join('?' * len(name_list))})
             """, con, params=name_list
         )
 
@@ -110,7 +110,7 @@ def calculate_inbound_inspection_fee(
     """
     with get_connection() as con:
         alias_df = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'inbound_slip'",
+            "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('inbound_slip', 'all')",
             con, params=(vendor,)
         )
         name_list = [vendor] + alias_df["alias"].tolist()
@@ -118,7 +118,7 @@ def calculate_inbound_inspection_fee(
         df = pd.read_sql(
             f"""
             SELECT 작업일, 수량, 공급처 FROM inbound_slip
-            WHERE 공급처 IN ({','.join('?' * len(name_list))})
+            WHERE TRIM(공급처) IN ({','.join('?' * len(name_list))})
             """, con, params=name_list
         )
 

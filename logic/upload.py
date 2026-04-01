@@ -92,6 +92,43 @@ def _parse_date_column(series: pd.Series, default_year: int = None) -> pd.Series
     return result
 from .clean import TRACK_COLS, normalize_tracking
 
+
+def _normalize_worklog_date_col(series: pd.Series) -> pd.Series:
+    """work_log 날짜를 YYYY-MM-DD 문자열로 정규화한다.
+    
+    '3월 4일', '2025년 3월 4일' 등 한국어 형식도 변환한다.
+    이미 datetime이면 strftime으로 변환한다.
+    """
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series.dt.strftime("%Y-%m-%d")
+
+    current_year = dt.datetime.now().year
+
+    def _convert(val):
+        if pd.isna(val) or val is None:
+            return None
+        s = str(val).strip()
+        if not s:
+            return None
+        if re.match(r'^\d{4}-\d{2}-\d{2}', s):
+            return s[:10]
+        m = re.match(r'(\d{2,4})년\s*(\d{1,2})월\s*(\d{1,2})일?', s)
+        if m:
+            y = int(m.group(1))
+            if y < 100:
+                y = 2000 + y
+            return f"{y:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        m = re.match(r'(\d{1,2})월\s*(\d{1,2})일?', s)
+        if m:
+            return f"{current_year:04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+        try:
+            ts = pd.to_datetime(s)
+            return ts.strftime("%Y-%m-%d")
+        except Exception:
+            return val
+
+    return series.apply(_convert)
+
 # 저장 폴더 - 환경변수 우선, 없으면 절대경로 사용
 def _get_upload_dir() -> Path:
     """업로드 디렉토리 경로 반환 (지연 초기화)"""
@@ -383,6 +420,16 @@ def ingest(
         # 다시 datetime으로 변환 (저장용)
         if date_col and date_col in df.columns:
             df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+
+    # 6-1) work_log: 출처='excel' 기본값 설정 + 날짜 YYYY-MM-DD 정규화
+    if table == "work_log":
+        if "출처" not in df.columns:
+            df["출처"] = "excel"
+        else:
+            df["출처"] = df["출처"].fillna("excel")
+        date_col_wl = DATE_COL.get(table, "")
+        if date_col_wl and date_col_wl in df.columns:
+            df[date_col_wl] = _normalize_worklog_date_col(df[date_col_wl])
 
     # 6) 날짜 범위 (이미 파싱된 날짜 컬럼 사용)
     date_col_name = DATE_COL.get(table, "")

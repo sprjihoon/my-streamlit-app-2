@@ -94,20 +94,21 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
     
     try:
         # 1. 기본 출고비
-        df_items = pd.DataFrame(columns=["항목", "수량", "단가", "금액"])
-        try:
-            df_items = add_basic_shipping(df_items, req.vendor, d_from, d_to)
-            for _, row in df_items.iterrows():
-                if row["수량"] > 0:
-                    items.append({
-                        "항목": row["항목"],
-                        "수량": row["수량"],
-                        "단가": row["단가"],
-                        "금액": row["금액"],
-                        "비고": ""
-                    })
-        except Exception as e:
-            warnings.append(f"기본 출고비 계산 오류: {str(e)}")
+        if req.include_basic_shipping:
+            df_items = pd.DataFrame(columns=["항목", "수량", "단가", "금액"])
+            try:
+                df_items = add_basic_shipping(df_items, req.vendor, d_from, d_to)
+                for _, row in df_items.iterrows():
+                    if row["수량"] > 0:
+                        items.append({
+                            "항목": row["항목"],
+                            "수량": row["수량"],
+                            "단가": row["단가"],
+                            "금액": row["금액"],
+                            "비고": ""
+                        })
+            except Exception as e:
+                warnings.append(f"기본 출고비 계산 오류: {str(e)}")
         
         # 2. 택배요금 (구간별) - 반드시 먼저 계산해야 zone_counts 확보
         zone_counts: Dict[str, int] = {}
@@ -149,7 +150,9 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
         
         # 5. 박스/봉투 (택배요금 다음에 바로 추가)
         if zone_counts:
-            add_box_fee_by_zone(items, req.vendor, zone_counts)
+            box_warnings = add_box_fee_by_zone(items, req.vendor, zone_counts)
+            if box_warnings:
+                warnings.extend(box_warnings)
         
         # 6. 플래그 기반 요금 (바코드, 완충작업 등)
         add_barcode_fee(items, req.vendor)

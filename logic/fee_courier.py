@@ -73,11 +73,11 @@ def calculate_courier_fee_by_zone(
         else:
             rate_type = "표준"
 
-        # ② 별칭 목록 불러오기 (file_type = 'kpost_in')
+        # ② 별칭 목록 불러오기
         try:
             if "aliases" in tables:
                 alias_df = pd.read_sql(
-                    "SELECT alias FROM aliases WHERE vendor = ? AND file_type = 'kpost_in'",
+                    "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('kpost_in', 'all')",
                     con, params=(vendor,)
                 )
             else:

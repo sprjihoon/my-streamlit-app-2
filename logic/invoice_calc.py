@@ -31,6 +31,17 @@ WL_COL_MEMO = "비고1"
 # ───────────────────────────────────────────────
 # kpost_ret 레코드 수 카운트 공통 함수
 # ───────────────────────────────────────────────
+def _normalize_rate_type(raw: str) -> str:
+    """rate_type 값을 shipping_zone 요금제 이름으로 정규화한다."""
+    val = (raw or "").strip()
+    up = val.upper()
+    if up in ("", "STD", "STANDARD") or val in ("기본", "표준"):
+        return "표준"
+    elif up == "A":
+        return "A"
+    return "표준"
+
+
 def _count_kpost_ret(con, names: List[str], d_from: str, d_to: str) -> int:
     """
     kpost_ret 테이블에서 지정된 '수취인명' 목록과 기간 조건에
@@ -43,7 +54,7 @@ def _count_kpost_ret(con, names: List[str], d_from: str, d_to: str) -> int:
     sql = f"""
         SELECT COUNT(*) AS c
         FROM kpost_ret
-        WHERE 수취인명 IN ({placeholders})
+        WHERE TRIM(수취인명) IN ({placeholders})
           AND DATE(배달일자) BETWEEN DATE(?) AND DATE(?)
     """
     (cnt,) = con.execute(sql, (*names, d_from, d_to)).fetchone()
@@ -104,7 +115,7 @@ def add_basic_shipping(
                 break
 
         alias = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor=? AND file_type='shipping_stats'",
+            "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('shipping_stats','all')",
             con, params=(vendor,)
         )
         
@@ -341,7 +352,7 @@ def add_return_pickup_fee(
     """반품 회수비 추가."""
     with get_connection() as con:
         alias = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor=? AND file_type='kpost_ret'",
+            "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('kpost_ret','all')",
             con, params=(vendor,)
         )
         names = [vendor] + alias["alias"].tolist()
@@ -372,19 +383,20 @@ def add_return_courier_fee(
         d_to: 종료일
     """
     with get_connection() as con:
-        rate = con.execute(
+        raw_rate = con.execute(
             "SELECT COALESCE(rate_type,'STD') FROM vendors WHERE vendor=?",
             (vendor,)
         ).fetchone()[0]
+        rate = _normalize_rate_type(raw_rate)
         alias = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor=? AND file_type='kpost_ret'",
+            "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('kpost_ret','all')",
             con, params=(vendor,)
         )
         names = [vendor] + alias["alias"].tolist()
         df = pd.read_sql(
             f"SELECT 우편물부피 FROM kpost_ret "
-            f"WHERE 수취인명 IN ({','.join('?' * len(names))}) "
-            "AND 배달일자 BETWEEN ? AND ?",
+            f"WHERE TRIM(수취인명) IN ({','.join('?' * len(names))}) "
+            "AND DATE(배달일자) BETWEEN DATE(?) AND DATE(?)",
             con, params=(*names, d_from, d_to)
         )
         if df.empty:
@@ -423,7 +435,7 @@ def add_video_ret_fee(
         ).fetchone()[0] != "YES":
             return
         alias = pd.read_sql(
-            "SELECT alias FROM aliases WHERE vendor=? AND file_type='kpost_ret'",
+            "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('kpost_ret','all')",
             con, params=(vendor,)
         )
         names = [vendor] + alias["alias"].tolist()
@@ -445,7 +457,7 @@ def add_box_fee_by_zone(
     item_list: List[dict],
     vendor: str,
     zone_counts: Dict[str, int]
-) -> None:
+) -> List[str]:
     """
     박스/봉투 자동 매칭.
 
@@ -463,6 +475,9 @@ def add_box_fee_by_zone(
 
     ★ 기본:
     • 각 구간에 맞는 박스
+
+    Returns:
+        매칭 실패한 구간에 대한 경고 메시지 리스트
     """
     # 1) 공급처 플래그
     with get_connection() as con:
@@ -535,11 +550,13 @@ def add_box_fee_by_zone(
         return df_b.iloc[0] if not df_b.empty else None
 
     # 4) 항목 추가
+    missing_sizes: List[str] = []
     for size, qty in zone_counts.items():
         if qty == 0:
             continue
         rec = pick(size, use_mailer)
         if rec is None:
+            missing_sizes.append(f"구간 '{size}' ({qty}건): material_rates에 매칭되는 포장재 없음")
             continue
         item_list.append({
             "항목": rec["항목"],
@@ -548,10 +565,67 @@ def add_box_fee_by_zone(
             "금액": int(float(qty)) * int(float(rec["단가"])),
         })
 
+    warnings_out = []
+    if missing_sizes:
+        warnings_out.append(f"박스/봉투 매칭 실패: {'; '.join(missing_sizes)}")
+    return warnings_out
+
 
 # ─────────────────────────────────────────────
 # 8. 작업일지 → 인보이스 항목
 # ─────────────────────────────────────────────
+import re as _re
+
+
+def _ensure_worklog_source_column(con) -> None:
+    """출처 컬럼이 없으면 추가한다."""
+    existing = [c[1] for c in con.execute("PRAGMA table_info(work_log);")]
+    for col, ctype in [("출처", "TEXT"), ("작성자", "TEXT"),
+                       ("저장시간", "TIMESTAMP"), ("works_user_id", "TEXT")]:
+        if col not in existing:
+            try:
+                con.execute(f"ALTER TABLE work_log ADD COLUMN [{col}] {ctype};")
+            except Exception:
+                pass
+    con.commit()
+
+
+def _normalize_worklog_dates(series: pd.Series) -> pd.Series:
+    """한국어 날짜('3월 4일') 또는 YYYY-MM-DD를 YYYY-MM-DD 문자열로 변환."""
+    import datetime as _dt
+
+    current_year = _dt.datetime.now().year
+
+    def _convert(val):
+        if pd.isna(val) or val is None:
+            return None
+        s = str(val).strip()
+        if not s:
+            return None
+        # 이미 YYYY-MM-DD 형식이면 그대로
+        if _re.match(r'^\d{4}-\d{2}-\d{2}', s):
+            return s[:10]
+        # "2025년 3월 4일" or "25년 3월 4일"
+        m = _re.match(r'(\d{2,4})년\s*(\d{1,2})월\s*(\d{1,2})일?', s)
+        if m:
+            y = int(m.group(1))
+            if y < 100:
+                y = 2000 + y
+            return f"{y:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        # "3월 4일" (연도 없음 → 올해)
+        m = _re.match(r'(\d{1,2})월\s*(\d{1,2})일?', s)
+        if m:
+            return f"{current_year:04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+        # pd.to_datetime fallback
+        try:
+            ts = pd.to_datetime(s)
+            return ts.strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    return series.apply(_convert)
+
+
 def add_worklog_items(
     item_list: List[dict],
     vendor: str,
@@ -570,9 +644,11 @@ def add_worklog_items(
         source: 데이터 소스 필터
             - "all": 전체 (기본값)
             - "bot": 봇으로 입력된 작업일지만 (출처='bot')
-            - "upload": 엑셀 업로드된 작업일지만 (출처가 NULL 또는 빈값)
+            - "upload": 엑셀 업로드된 작업일지만 (출처가 NULL/빈값 또는 'excel'/'manual')
     """
     with get_connection() as con:
+        _ensure_worklog_source_column(con)
+
         # work_log 전용 별칭 가져오기
         alias_df = pd.read_sql(
             "SELECT alias FROM aliases "
@@ -587,20 +663,26 @@ def add_worklog_items(
         # 소스 필터 조건 추가
         source_condition = ""
         if source == "bot":
-            source_condition = "AND 출처 = 'bot'"
+            source_condition = "AND [출처] = 'bot'"
         elif source == "upload":
-            source_condition = "AND (출처 IS NULL OR 출처 = '' OR 출처 != 'bot')"
-        # source == "all"이면 조건 없음
-        
+            source_condition = "AND ([출처] IS NULL OR [출처] = '' OR [출처] NOT IN ('bot'))"
+
         df = pd.read_sql(
-            f"""SELECT {WL_COL_DATE}, {WL_COL_CAT}, {WL_COL_UNIT},
-                       {WL_COL_QTY},  {WL_COL_AMT}, {WL_COL_MEMO}
+            f"""SELECT [{WL_COL_DATE}], [{WL_COL_CAT}], [{WL_COL_UNIT}],
+                       [{WL_COL_QTY}],  [{WL_COL_AMT}], [{WL_COL_MEMO}]
                 FROM work_log
-                WHERE {WL_COL_VEN} IN ({placeholders})
-                  AND {WL_COL_DATE} BETWEEN ? AND ?
+                WHERE [{WL_COL_VEN}] IN ({placeholders})
                   {source_condition}""",
-            con, params=(*names, d_from, d_to)
+            con, params=(*names,)
         )
+
+    if df.empty:
+        return
+
+    # 날짜 필터: 한국어 형식('3월 4일') 및 YYYY-MM-DD 모두 지원
+    df[WL_COL_DATE] = _normalize_worklog_dates(df[WL_COL_DATE])
+    df = df.dropna(subset=[WL_COL_DATE])
+    df = df[(df[WL_COL_DATE] >= d_from) & (df[WL_COL_DATE] <= d_to)]
 
     if df.empty:
         return
