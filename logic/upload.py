@@ -383,10 +383,12 @@ def ingest(
             return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 유사한 컬럼 발견: {similar_cols}. 파일의 컬럼: {available_cols}"
         return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 파일의 컬럼: {available_cols}"
 
-    # 5) 행-중복 제거 (set 기반 - merge 대신 안전한 방식 사용)
+    # 5) 행-중복 제거
+    # work_log: pandas 비교 불안정 → 전체 삽입 후 SQL dedup 방식 사용 (8단계에서 처리)
+    # 그 외 테이블: set 기반 pandas dedup
     key_cols = UNIQUE_KEY.get(table)
     date_col = DATE_COL.get(table)
-    if key_cols:
+    if key_cols and table != "work_log":
         try:
             with get_connection() as con:
                 col_sql = ", ".join(f"[{c}]" for c in key_cols)
@@ -397,7 +399,6 @@ def ingest(
             existed = pd.DataFrame(columns=key_cols)
 
         def _to_key_str(row):
-            """행의 key 컬럼들을 정규화된 문자열로 변환."""
             parts = []
             for kc in key_cols:
                 v = row.get(kc, "")
@@ -406,14 +407,12 @@ def ingest(
                 elif isinstance(v, float):
                     parts.append(str(int(v)) if v == int(v) else str(v))
                 else:
-                    # 날짜 문자열 정규화 (YYYY-MM-DD HH:MM:SS → YYYY-MM-DD)
                     s = str(v).strip()
                     if len(s) > 10 and s[4] == '-' and s[7] == '-':
                         s = s[:10]
                     parts.append(s)
             return "|".join(parts)
 
-        # 새 데이터: datetime → 문자열 변환 후 key 생성
         df_for_key = df.copy()
         if date_col and date_col in df_for_key.columns:
             if pd.api.types.is_datetime64_any_dtype(df_for_key[date_col]):
@@ -421,18 +420,15 @@ def ingest(
 
         new_keys = df_for_key[key_cols].apply(_to_key_str, axis=1)
 
-        # 기존 데이터 key 생성
         if date_col and date_col in existed.columns:
             existed[date_col] = pd.to_datetime(
                 existed[date_col], errors='coerce'
             ).dt.strftime('%Y-%m-%d').fillna('')
         existed_keys = set(existed[key_cols].apply(_to_key_str, axis=1))
 
-        # 중복 아닌 행만 유지 (원본 df 인덱스 사용)
         mask = ~new_keys.isin(existed_keys)
         df = df[mask].reset_index(drop=True)
 
-        # 날짜 다시 datetime으로 변환 (저장용)
         if date_col and date_col in df.columns:
             if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
                 df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
@@ -529,6 +525,23 @@ def ingest(
                     raise
             else:
                 raise
+        # work_log: INSERT 후 SQL로 중복 제거 (날짜+업체명+분류+수량+단가 기준)
+        # bot 행은 절대 삭제하지 않고, excel 행 중 중복만 제거
+        if table == "work_log":
+            count_before_dedup = con.execute("SELECT COUNT(*) FROM work_log WHERE 출처='excel'").fetchone()[0]
+            con.execute("""
+                DELETE FROM work_log
+                WHERE 출처 = 'excel'
+                AND id NOT IN (
+                    SELECT MIN(id) FROM work_log
+                    GROUP BY [날짜], [업체명], [분류], [수량], [단가]
+                )
+            """)
+            count_after_dedup = con.execute("SELECT COUNT(*) FROM work_log WHERE 출처='excel'").fetchone()[0]
+            dedup_removed = count_before_dedup - count_after_dedup
+            saved_count = len(df) - dedup_removed
+            print(f"[work_log] 삽입 {len(df)}건, 중복제거 {dedup_removed}건, 최종저장 {saved_count}건")
+
         con.execute("""
           INSERT INTO uploads
             (filename, orig_name, table_name,
@@ -537,6 +550,8 @@ def ingest(
         """, (fname, orig_name or getattr(file, 'name', fname), table, d_min, d_max, file_hash))
         con.commit()
 
+    if table == "work_log":
+        return True, f"✅ {table} 테이블에 {saved_count}건 적재 완료 (중복 {dedup_removed}건 제거)"
     return True, f"✅ {table} 테이블에 {len(df)}건 적재 완료"
 
 
