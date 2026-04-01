@@ -619,5 +619,17 @@ async def worklog_debug(vendor: str = "", date_from: str = "", date_to: str = ""
                 ).fetchone()[0]
                 info["date_filtered"] = cnt3
 
+            sample_dates = con.execute(
+                "SELECT DISTINCT [날짜] FROM work_log WHERE [업체명]=? ORDER BY [날짜] LIMIT 20",
+                (vendor,)
+            ).fetchall()
+            info["sample_dates"] = [r[0] for r in sample_dates]
+
+            source_for_vendor = con.execute(
+                "SELECT [출처], COUNT(*) FROM work_log WHERE [업체명]=? GROUP BY [출처]",
+                (vendor,)
+            ).fetchall()
+            info["vendor_source_dist"] = {str(r[0]): r[1] for r in source_for_vendor}
+
     return info
 
