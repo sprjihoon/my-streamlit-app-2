@@ -304,9 +304,8 @@ def ingest(
     # 3) 저장 + DataFrame
     path, fname = _save_file_to_disk(file, orig_name)
 
-    read_kwargs = {}
-    if table == "kpost_in":
-        read_kwargs["dtype"] = {col: "string" for col in TRACK_COLS}
+    # 송장/등기번호 컬럼을 문자열로 읽기 (모든 테이블 공통)
+    read_kwargs = {"dtype": {col: "string" for col in TRACK_COLS}}
 
     # HTML 형식 XLS 파일 감지 및 처리
     try:
@@ -323,11 +322,10 @@ def ingest(
         .str.strip()  # 다시 양쪽 공백 제거
     )
 
-    # 송장번호 정규화
-    if table == "kpost_in":
-        for col in TRACK_COLS:
-            if col in df.columns:
-                df[col] = normalize_tracking(df[col])
+    # 송장번호 정규화 (해당 컬럼이 있는 모든 테이블에 적용)
+    for col in TRACK_COLS:
+        if col in df.columns:
+            df[col] = normalize_tracking(df[col])
 
     # 4) 날짜 컬럼 파싱 (모든 테이블에 적용)
     date_col = DATE_COL.get(table)
@@ -368,6 +366,13 @@ def ingest(
             # 기존 데이터의 날짜도 문자열로 통일
             if date_col in existed.columns:
                 existed[date_col] = pd.to_datetime(existed[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+
+        # key 컬럼의 dtype을 양쪽 모두 문자열로 통일 (float64 vs object 충돌 방지)
+        for kc in key_cols:
+            if kc in df.columns and kc in existed.columns:
+                if df[kc].dtype != existed[kc].dtype:
+                    df[kc] = df[kc].astype(str).replace('nan', pd.NA)
+                    existed[kc] = existed[kc].astype(str).replace('nan', pd.NA)
 
         df = (
             df.merge(existed, on=key_cols, how="left", indicator=True)
