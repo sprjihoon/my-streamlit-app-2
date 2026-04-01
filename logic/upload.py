@@ -558,7 +558,7 @@ def ingest(
           INSERT INTO uploads
             (filename, orig_name, table_name,
              date_min, date_max, file_hash, uploaded_at)
-          VALUES (?,?,?,?,?,?,datetime('now'))
+          VALUES (?,?,?,?,?,?,datetime('now', '+9 hours'))
         """, (fname, orig_name or getattr(file, 'name', fname), table, d_min, d_max, file_hash))
         con.commit()
 
