@@ -163,7 +163,7 @@ TIME_TABLES = {"shipping_stats", "inbound_slip"}
 UNIQUE_KEY: dict[str, list[str] | None] = {
     "shipping_stats": ["송장번호", "배송일"],
     "inbound_slip": ["상품코드", "작업일", "수량"],
-    "work_log": ["날짜", "업체명", "분류", "수량", "단가"],  # 단가 추가!
+    "work_log": ["no", "날짜"],  # no+날짜 조합: no는 월마다 리셋되므로 날짜(YYYY-MM-DD)와 조합하면 유니크
     "kpost_in": ["등기번호"],
     "kpost_ret": ["등기번호", "배달일자"],
 }
@@ -297,7 +297,11 @@ def _read_excel_with_best_sheet(path: Path, **kwargs) -> pd.DataFrame:
 
 
 def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
-    """모든 시트를 읽어 하나의 DataFrame으로 합칩니다 (work_log 연간 파일용)."""
+    """모든 시트를 읽어 하나의 DataFrame으로 합칩니다 (work_log 연간 파일용).
+    
+    합산 시트나 중복 시트가 포함된 경우를 대비해 concat 후
+    no+날짜 기준으로 시트간 중복 행을 제거합니다.
+    """
     try:
         xl = pd.ExcelFile(path)
         dfs = []
@@ -309,7 +313,15 @@ def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
             except Exception:
                 continue
         if dfs:
-            return pd.concat(dfs, ignore_index=True)
+            df_concat = pd.concat(dfs, ignore_index=True)
+            # no + 날짜 컬럼이 모두 있으면 시트간 중복 제거
+            if "no" in df_concat.columns and "날짜" in df_concat.columns:
+                before = len(df_concat)
+                df_concat = df_concat.drop_duplicates(subset=["no", "날짜"], keep="first")
+                removed = before - len(df_concat)
+                if removed > 0:
+                    print(f"[work_log] 시트간 중복 {removed}건 제거")
+            return df_concat.reset_index(drop=True)
         return pd.read_excel(path, **kwargs)
     except Exception:
         return pd.read_excel(path, **kwargs)
@@ -412,12 +424,16 @@ def ingest(
             return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 유사한 컬럼 발견: {similar_cols}. 파일의 컬럼: {available_cols}"
         return False, f"⚠️ 필수 컬럼 '{date_col}'이(가) 없습니다. 파일의 컬럼: {available_cols}"
 
-    # 5) 행-중복 제거
-    # work_log: pandas 비교 불안정 → 전체 삽입 후 SQL dedup 방식 사용 (8단계에서 처리)
-    # 그 외 테이블: set 기반 pandas dedup
+    # 5) 행-중복 제거 (set 기반 pandas dedup)
+    # work_log: no+날짜 조합으로 중복 제거. no 컬럼이 없는 구형 파일은 건너뜀.
     key_cols = UNIQUE_KEY.get(table)
     date_col = DATE_COL.get(table)
-    if key_cols and table != "work_log":
+
+    # work_log이고 no 컬럼이 없는 구형 파일 → dedup 불가, 건너뜀
+    if table == "work_log" and "no" not in df.columns:
+        key_cols = None
+
+    if key_cols:
         try:
             with get_connection() as con:
                 col_sql = ", ".join(f"[{c}]" for c in key_cols)

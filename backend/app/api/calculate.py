@@ -646,3 +646,122 @@ async def worklog_debug(vendor: str = "", date_from: str = "", date_to: str = ""
 
     return info
 
+
+# ─────────────────────────────────────
+# 작업일지 DB 중복 정리 (관리자 전용)
+# ─────────────────────────────────────
+@router.post("/worklog-dedup")
+async def worklog_dedup(token: Optional[str] = None):
+    """
+    work_log 테이블에서 no+날짜 기준 중복 행을 제거합니다 (관리자 전용).
+    
+    no 컬럼이 없는 구형 데이터는 건드리지 않습니다.
+    삭제 전 미리보기(dry_run=true)는 GET /worklog-dedup-preview 를 사용하세요.
+    """
+    is_admin, nickname = check_admin(token)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+    with get_connection() as con:
+        # no 컬럼 존재 확인
+        cols = [c[1] for c in con.execute("PRAGMA table_info(work_log)")]
+        if "no" not in cols:
+            return {
+                "success": False,
+                "message": "work_log 테이블에 'no' 컬럼이 없습니다. no 컬럼이 포함된 파일을 먼저 업로드해 주세요.",
+                "deleted": 0,
+            }
+
+        total_before = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+
+        # no+날짜 조합이 중복인 행 중 rowid가 가장 작은 것만 남기고 나머지 삭제
+        # no가 NULL인 행(no 컬럼 없이 올린 구형 데이터)은 건드리지 않음
+        con.execute("""
+            DELETE FROM work_log
+            WHERE [no] IS NOT NULL
+              AND rowid NOT IN (
+                  SELECT MIN(rowid)
+                  FROM work_log
+                  WHERE [no] IS NOT NULL
+                  GROUP BY [no], [날짜]
+              )
+        """)
+        con.commit()
+
+        total_after = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+        deleted = total_before - total_after
+
+    add_log(
+        action_type="작업일지 중복 정리",
+        target_type="work_log",
+        target_id=None,
+        target_name="work_log",
+        user_nickname=nickname,
+        details=f"삭제 전: {total_before}건, 삭제 후: {total_after}건, 제거된 중복: {deleted}건"
+    )
+
+    return {
+        "success": True,
+        "message": f"중복 행 {deleted}건을 삭제했습니다. ({total_before}건 → {total_after}건)",
+        "before": total_before,
+        "after": total_after,
+        "deleted": deleted,
+    }
+
+
+@router.get("/worklog-dedup-preview")
+async def worklog_dedup_preview(token: Optional[str] = None):
+    """
+    work_log 테이블에서 no+날짜 기준 중복 행 현황을 미리 확인합니다 (삭제 없음).
+    """
+    is_admin, nickname = check_admin(token)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+    with get_connection() as con:
+        cols = [c[1] for c in con.execute("PRAGMA table_info(work_log)")]
+        if "no" not in cols:
+            return {
+                "has_no_column": False,
+                "message": "'no' 컬럼이 없습니다. no 컬럼이 포함된 파일을 먼저 업로드해 주세요.",
+                "duplicate_count": 0,
+                "samples": [],
+            }
+
+        total = con.execute("SELECT COUNT(*) FROM work_log WHERE [no] IS NOT NULL").fetchone()[0]
+
+        # 중복 그룹 수 및 중복 행 수
+        dup_rows = con.execute("""
+            SELECT COUNT(*) FROM work_log
+            WHERE [no] IS NOT NULL
+              AND rowid NOT IN (
+                  SELECT MIN(rowid)
+                  FROM work_log
+                  WHERE [no] IS NOT NULL
+                  GROUP BY [no], [날짜]
+              )
+        """).fetchone()[0]
+
+        # 중복 샘플 (상위 10개 그룹)
+        samples = con.execute("""
+            SELECT [no], [날짜], [업체명], COUNT(*) as cnt
+            FROM work_log
+            WHERE [no] IS NOT NULL
+            GROUP BY [no], [날짜]
+            HAVING COUNT(*) > 1
+            ORDER BY cnt DESC
+            LIMIT 10
+        """).fetchall()
+
+    return {
+        "has_no_column": True,
+        "total_rows_with_no": total,
+        "duplicate_rows_to_delete": dup_rows,
+        "duplicate_groups": len(samples),
+        "samples": [
+            {"no": r[0], "날짜": r[1], "업체명": r[2], "중복수": r[3]}
+            for r in samples
+        ],
+        "message": f"중복 행 {dup_rows}건이 발견되었습니다. POST /worklog-dedup 으로 삭제하세요." if dup_rows > 0 else "중복 행이 없습니다.",
+    }
+
