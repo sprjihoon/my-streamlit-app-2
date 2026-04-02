@@ -650,6 +650,12 @@ async def worklog_debug(vendor: str = "", date_from: str = "", date_to: str = ""
 # ─────────────────────────────────────
 # 작업일지 DB 중복 정리 (관리자 전용)
 # ─────────────────────────────────────
+@router.get("/worklog-dedup-run")
+async def worklog_dedup_run(token: Optional[str] = None):
+    """브라우저 주소창에서 직접 호출 가능한 GET 버전 중복 정리."""
+    return await worklog_dedup(token=token)
+
+
 @router.post("/worklog-dedup")
 async def worklog_dedup(token: Optional[str] = None):
     """
