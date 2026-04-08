@@ -22,6 +22,7 @@ from backend.app.api.naver_works_webhook import router as naver_works_router
 from backend.app.api.work_log import router as work_log_router
 from backend.app.api.estimate_analytics import router as estimate_analytics_router
 from backend.app.api.invoice_analytics import router as invoice_analytics_router
+from backend.app.api.wp_analytics import router as wp_analytics_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -61,6 +62,7 @@ app.include_router(work_log_router)
 app.include_router(estimate_router)
 app.include_router(estimate_analytics_router)
 app.include_router(invoice_analytics_router)
+app.include_router(wp_analytics_router)
 
 
 # 루트 엔드포인트

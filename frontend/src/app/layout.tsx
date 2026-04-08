@@ -39,6 +39,10 @@ const ESTIMATE_NAV_ITEMS = [
   { href: '/estimate-analytics', label: '📊 견적서 분석' },
 ];
 
+const MARKETING_NAV_ITEMS = [
+  { href: '/wp-analytics', label: '🌐 사이트 방문 분석' },
+];
+
 const ADMIN_NAV_ITEMS = [
   { href: '/storage', label: '📦 보관료 관리' },
   { href: '/vendor-charges', label: '💰 추가비용 관리' },
@@ -342,6 +346,18 @@ export default function RootLayout({
                 </Link>
               ))}
               
+              {/* 마케팅 그룹 */}
+              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>마케팅</div>
+              {MARKETING_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={pathname === item.href ? 'active' : ''}
+                >
+                  {item.label}
+                </Link>
+              ))}
+
               {/* 관리자 전용 메뉴 */}
               {user?.is_admin && (
                 <>
