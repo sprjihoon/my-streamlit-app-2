@@ -15,6 +15,9 @@ interface Stats {
     touch_device_count: number;
     mobile_count: number;
     mobile_rate: number;
+    avg_duration_seconds: number;
+    max_duration_seconds: number;
+    tracked_visit_count: number;
   };
   os_stats: { os: string; count: number }[];
   browser_stats: { browser: string; count: number }[];
@@ -52,6 +55,7 @@ interface VisitorLog {
   utm_source: string | null;
   utm_medium: string | null;
   utm_campaign: string | null;
+  duration_seconds: number;
 }
 
 interface CalculateLog {
@@ -70,7 +74,35 @@ function fmt(n: number) {
   return n.toLocaleString('ko-KR');
 }
 
+function fmtDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '-';
+  if (seconds < 60) return `${seconds}초`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return s > 0 ? `${m}분 ${s}초` : `${m}분`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 ? `${h}시간 ${rm}분` : `${h}시간`;
+}
+
 const BRAND_LABEL: Record<string, string> = { fashion: '패션', beauty: '뷰티', etc: '기타' };
+
+type Preset = '오늘' | '어제' | '7일' | '15일' | '30일' | '전체' | '직접입력';
+const PRESETS: Preset[] = ['오늘', '어제', '7일', '15일', '30일', '전체', '직접입력'];
+
+function calcPreset(p: Preset): { from: string; to: string } {
+  const d = new Date();
+  const iso = (x: Date) => x.toISOString().split('T')[0];
+  const ago = (n: number) => { const t = new Date(d); t.setDate(d.getDate() - n); return t; };
+  switch (p) {
+    case '오늘':  return { from: iso(d), to: iso(d) };
+    case '어제':  return { from: iso(ago(1)), to: iso(ago(1)) };
+    case '7일':   return { from: iso(ago(6)), to: iso(d) };
+    case '15일':  return { from: iso(ago(14)), to: iso(d) };
+    case '30일':  return { from: iso(ago(29)), to: iso(d) };
+    default:      return { from: '', to: '' };
+  }
+}
 
 export default function EstimateAnalyticsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -78,8 +110,18 @@ export default function EstimateAnalyticsPage() {
   const [calculations, setCalculations] = useState<CalculateLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'visitors' | 'calculations'>('overview');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [preset, setPreset] = useState<Preset>('30일');
+  const [dateFrom, setDateFrom] = useState(calcPreset('30일').from);
+  const [dateTo, setDateTo] = useState(calcPreset('30일').to);
+
+  function applyPreset(p: Preset) {
+    setPreset(p);
+    if (p !== '직접입력') {
+      const { from, to } = calcPreset(p);
+      setDateFrom(from);
+      setDateTo(to);
+    }
+  }
   const [visitorPage, setVisitorPage] = useState(1);
   const [visitorTotal, setVisitorTotal] = useState(0);
   const [calcPage, setCalcPage] = useState(1);
@@ -159,6 +201,14 @@ export default function EstimateAnalyticsPage() {
     fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', transition: 'all .15s',
   };
 
+  const presetBtn = (active: boolean): React.CSSProperties => ({
+    padding: '0.35rem 0.75rem', border: '1px solid',
+    borderColor: active ? '#3b82f6' : '#e5e7eb',
+    borderRadius: 6, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+    background: active ? '#eff6ff' : '#fff',
+    color: active ? '#3b82f6' : '#6b7280',
+  });
+
   const cardStyle: React.CSSProperties = {
     background: '#fff',
     borderRadius: 12,
@@ -194,22 +244,32 @@ export default function EstimateAnalyticsPage() {
 
       {/* 필터 바 */}
       <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end',
         background: '#fff', padding: '1rem', borderRadius: 12,
         boxShadow: '0 1px 3px rgba(0,0,0,.08)', marginBottom: '1rem',
       }}>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>시작일</label>
-          <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        {/* 날짜 프리셋 */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {PRESETS.map(p => (
+            <button key={p} style={presetBtn(preset === p)} onClick={() => applyPreset(p)}>{p}</button>
+          ))}
         </div>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>종료일</label>
-          <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-        </div>
-        {(dateFrom || dateTo) && (
-          <button onClick={() => { setDateFrom(''); setDateTo(''); }} style={{ ...btnStyle, background: '#e5e7eb', color: '#374151' }}>
-            초기화
-          </button>
+        {/* 직접입력 시 날짜 인풋 표시 */}
+        {preset === '직접입력' && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>시작일</label>
+              <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>종료일</label>
+              <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </div>
+          </div>
+        )}
+        {(dateFrom || dateTo) && preset !== '전체' && (
+          <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#6b7280' }}>
+            📅 {dateFrom || '전체'} ~ {dateTo || '전체'}
+          </div>
         )}
       </div>
 
@@ -255,6 +315,11 @@ export default function EstimateAnalyticsPage() {
                   <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>모바일 접속</div>
                   <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ec4899' }}>{fmt(stats.summary.mobile_count)}</div>
                   <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>{stats.summary.mobile_rate}%</div>
+                </div>
+                <div style={statCardStyle}>
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>평균 체류시간</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#06b6d4' }}>{fmtDuration(stats.summary.avg_duration_seconds)}</div>
+                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>최대 {fmtDuration(stats.summary.max_duration_seconds)}</div>
                 </div>
               </div>
 
@@ -483,6 +548,7 @@ export default function EstimateAnalyticsPage() {
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>브라우저</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>디바이스</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>모바일</th>
+                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>체류시간</th>
                       <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>유입경로</th>
                     </tr>
                   </thead>
@@ -542,6 +608,18 @@ export default function EstimateAnalyticsPage() {
                             }}>터치</span>
                           ) : (
                             <span style={{ color: '#9ca3af' }}>-</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.6rem', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          {v.duration_seconds > 0 ? (
+                            <span style={{
+                              display: 'inline-block', padding: '2px 8px', borderRadius: 10,
+                              fontSize: '0.75rem', fontWeight: 600,
+                              background: v.duration_seconds >= 180 ? '#dcfce7' : v.duration_seconds >= 60 ? '#dbeafe' : '#f3f4f6',
+                              color: v.duration_seconds >= 180 ? '#166534' : v.duration_seconds >= 60 ? '#1d4ed8' : '#6b7280',
+                            }}>{fmtDuration(v.duration_seconds)}</span>
+                          ) : (
+                            <span style={{ color: '#d1d5db', fontSize: '0.8rem' }}>-</span>
                           )}
                         </td>
                         <td style={{ padding: '0.6rem' }} title={v.utm_campaign ? `캠페인: ${v.utm_campaign}` : v.referrer || ''}>
