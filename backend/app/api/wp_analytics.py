@@ -16,6 +16,27 @@ router = APIRouter(prefix="/wp-analytics", tags=["wp-analytics"])
 WP_DOMAIN = "spring3pl.co.kr"
 
 
+def _ensure_columns(con):
+    """estimate_visitor_logs에 필요한 컬럼이 없으면 추가"""
+    for col, definition in [
+        ("duration_seconds", "INTEGER DEFAULT 0"),
+        ("is_touch_device", "INTEGER"),
+        ("is_mobile", "INTEGER"),
+        ("inner_width", "INTEGER"),
+        ("inner_height", "INTEGER"),
+        ("utm_source", "TEXT"),
+        ("utm_medium", "TEXT"),
+        ("utm_campaign", "TEXT"),
+        ("utm_content", "TEXT"),
+        ("utm_term", "TEXT"),
+    ]:
+        try:
+            con.execute(f"ALTER TABLE estimate_visitor_logs ADD COLUMN {col} {definition}")
+            con.commit()
+        except Exception:
+            pass
+
+
 def _build_where(date_from: Optional[str], date_to: Optional[str]) -> tuple:
     """WordPress 도메인 + 날짜 필터 WHERE절과 params 반환"""
     where = f"page_url LIKE '%{WP_DOMAIN}%'"
@@ -98,6 +119,7 @@ async def get_wp_stats(
     """WordPress 전체 방문 통계 (요약 + 각종 분류)"""
     try:
         with get_connection() as con:
+            _ensure_columns(con)
             where, params = _build_where(date_from, date_to)
 
             total_visits = con.execute(
@@ -310,6 +332,7 @@ async def get_page_flow(
     """
     try:
         with get_connection() as con:
+            _ensure_columns(con)
             where, params = _build_where(date_from, date_to)
 
             # ── 세션별 페이지 수 / 첫페이지 / 마지막페이지 ────────────
@@ -480,6 +503,7 @@ async def get_ip_sessions(
     """
     try:
         with get_connection() as con:
+            _ensure_columns(con)
             where, params = _build_where(date_from, date_to)
 
             total = con.execute(
@@ -569,6 +593,7 @@ async def list_wp_visitors(
     """WordPress 방문자 로그 목록 (페이지네이션)"""
     try:
         with get_connection() as con:
+            _ensure_columns(con)
             where, params = _build_where(date_from, date_to)
 
             total = con.execute(

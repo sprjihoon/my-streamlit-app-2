@@ -49,6 +49,12 @@ class CalculateLogRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+class HeartbeatRequest(BaseModel):
+    """체류시간 하트비트 요청"""
+    session_id: str
+    duration_seconds: int
+
+
 def _ensure_tables(con):
     """로그 테이블 생성"""
     con.execute("""
@@ -118,6 +124,10 @@ def _ensure_tables(con):
         pass
     try:
         con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN utm_term TEXT")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN duration_seconds INTEGER DEFAULT 0")
     except Exception:
         pass
     con.execute("""
@@ -330,6 +340,48 @@ async def log_calculate(body: CalculateLogRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/heartbeat")
+async def log_heartbeat(request: Request):
+    """
+    체류시간 업데이트.
+    sendBeacon(text/plain) 또는 fetch(application/json) 모두 처리.
+    """
+    try:
+        import json as _json
+        raw = await request.body()
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            return {"success": False, "reason": "invalid body"}
+
+        session_id = data.get("session_id", "")
+        duration_seconds = int(data.get("duration_seconds", 0))
+
+        if not session_id:
+            return {"success": False, "reason": "missing session_id"}
+
+        ip_address = _get_client_ip(request)
+        with get_connection() as con:
+            _ensure_tables(con)
+            con.execute(
+                """
+                UPDATE estimate_visitor_logs
+                SET duration_seconds = ?
+                WHERE session_id = ? AND ip_address = ?
+                  AND id = (
+                    SELECT id FROM estimate_visitor_logs
+                    WHERE session_id = ? AND ip_address = ?
+                    ORDER BY id DESC LIMIT 1
+                  )
+                """,
+                (duration_seconds, session_id, ip_address, session_id, ip_address),
+            )
+            con.commit()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats")
 async def get_stats(
     date_from: Optional[str] = Query(None, description="시작일 YYYY-MM-DD"),
@@ -523,6 +575,19 @@ async def get_stats(
                 params_visit
             ).fetchone()
             
+            # 평균 체류시간 (duration_seconds > 0인 방문만)
+            dwell_stats = con.execute(
+                f"""
+                SELECT 
+                    AVG(duration_seconds) as avg_duration,
+                    MAX(duration_seconds) as max_duration,
+                    COUNT(CASE WHEN duration_seconds > 0 THEN 1 END) as tracked_count
+                FROM estimate_visitor_logs 
+                WHERE {where_visit} AND duration_seconds > 0
+                """,
+                params_visit
+            ).fetchone()
+            
             # 지역별 통계
             location_stats = con.execute(
                 f"""
@@ -551,6 +616,9 @@ async def get_stats(
                     "touch_device_count": touch_stats[0] if touch_stats else 0,
                     "mobile_count": touch_stats[1] if touch_stats else 0,
                     "mobile_rate": round((touch_stats[1] or 0) / touch_stats[2] * 100, 1) if touch_stats and touch_stats[2] > 0 else 0,
+                    "avg_duration_seconds": int(dwell_stats[0]) if dwell_stats and dwell_stats[0] else 0,
+                    "max_duration_seconds": int(dwell_stats[1]) if dwell_stats and dwell_stats[1] else 0,
+                    "tracked_visit_count": dwell_stats[2] if dwell_stats else 0,
                 },
                 "os_stats": [{"os": r[0], "count": r[1]} for r in os_stats],
                 "browser_stats": [{"browser": r[0], "count": r[1]} for r in browser_stats],
@@ -613,7 +681,7 @@ async def list_visitors(
                        os, browser, device_type, screen_width, screen_height,
                        language, timezone, session_id, created_at,
                        is_touch_device, is_mobile, inner_width, inner_height,
-                       utm_source, utm_medium, utm_campaign
+                       utm_source, utm_medium, utm_campaign, duration_seconds
                 FROM estimate_visitor_logs 
                 WHERE {where}
                 ORDER BY id DESC LIMIT ? OFFSET ?
@@ -646,6 +714,7 @@ async def list_visitors(
                     "utm_source": r[20],
                     "utm_medium": r[21],
                     "utm_campaign": r[22],
+                    "duration_seconds": r[23] or 0,
                 }
                 for r in rows
             ]
