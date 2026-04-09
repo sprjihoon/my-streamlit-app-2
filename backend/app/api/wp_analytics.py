@@ -8,13 +8,39 @@ page_url 기준으로 WordPress 페이지만 추출.
 
 from typing import List, Any, Optional
 from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 
 from logic.db import get_connection
 
 router = APIRouter(prefix="/wp-analytics", tags=["wp-analytics"])
 
 WP_DOMAIN = "spring3pl.co.kr"
-EXCLUDED_IPS = ["211.195.12.98"]
+
+
+def _ensure_excluded_ips_table(con):
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_excluded_ips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ip_address TEXT UNIQUE NOT NULL,
+            memo TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # 기존 하드코딩 IP 마이그레이션 (최초 1회)
+    try:
+        con.execute(
+            "INSERT OR IGNORE INTO analytics_excluded_ips (ip_address, memo) VALUES (?, ?)",
+            ("211.195.12.98", "관리자 IP"),
+        )
+    except Exception:
+        pass
+    con.commit()
+
+
+def _get_excluded_ips(con) -> List[str]:
+    _ensure_excluded_ips_table(con)
+    rows = con.execute("SELECT ip_address FROM analytics_excluded_ips").fetchall()
+    return [r[0] for r in rows]
 
 
 def _ensure_columns(con):
@@ -41,11 +67,16 @@ def _ensure_columns(con):
             pass
 
 
-def _build_where(date_from: Optional[str], date_to: Optional[str]) -> tuple:
+def _build_where(date_from: Optional[str], date_to: Optional[str], excluded_ips: Optional[List[str]] = None) -> tuple:
     """WordPress 도메인 + 날짜 필터 WHERE절과 params 반환 (한국시간 KST = UTC+9 기준)"""
-    placeholders = ",".join("?" * len(EXCLUDED_IPS))
-    where = f"page_url LIKE '%{WP_DOMAIN}%' AND ip_address NOT IN ({placeholders})"
-    params: List[Any] = list(EXCLUDED_IPS)
+    ips = excluded_ips or []
+    if ips:
+        placeholders = ",".join("?" * len(ips))
+        where = f"page_url LIKE '%{WP_DOMAIN}%' AND ip_address NOT IN ({placeholders})"
+        params: List[Any] = list(ips)
+    else:
+        where = f"page_url LIKE '%{WP_DOMAIN}%'"
+        params = []
     if date_from:
         where += " AND date(created_at, '+9 hours') >= ?"
         params.append(date_from)
@@ -125,7 +156,8 @@ async def get_wp_stats(
     try:
         with get_connection() as con:
             _ensure_columns(con)
-            where, params = _build_where(date_from, date_to)
+            excluded = _get_excluded_ips(con)
+            where, params = _build_where(date_from, date_to, excluded)
 
             total_visits = con.execute(
                 f"SELECT COUNT(*) FROM estimate_visitor_logs WHERE {where}", params
@@ -399,7 +431,8 @@ async def get_page_flow(
     try:
         with get_connection() as con:
             _ensure_columns(con)
-            where, params = _build_where(date_from, date_to)
+            excluded = _get_excluded_ips(con)
+            where, params = _build_where(date_from, date_to, excluded)
 
             # ── 세션별 페이지 수 / 첫페이지 / 마지막페이지 ────────────
             session_data = con.execute(
@@ -570,7 +603,8 @@ async def get_ip_sessions(
     try:
         with get_connection() as con:
             _ensure_columns(con)
-            where, params = _build_where(date_from, date_to)
+            excluded = _get_excluded_ips(con)
+            where, params = _build_where(date_from, date_to, excluded)
 
             total = con.execute(
                 f"SELECT COUNT(DISTINCT ip_address) FROM estimate_visitor_logs WHERE {where}", params
@@ -669,7 +703,8 @@ async def list_wp_visitors(
     try:
         with get_connection() as con:
             _ensure_columns(con)
-            where, params = _build_where(date_from, date_to)
+            excluded = _get_excluded_ips(con)
+            where, params = _build_where(date_from, date_to, excluded)
 
             total = con.execute(
                 f"SELECT COUNT(*) FROM estimate_visitor_logs WHERE {where}", params
@@ -715,5 +750,55 @@ async def list_wp_visitors(
             ]
 
             return {"items": items, "total": total, "page": page, "page_size": page_size}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 제외 IP 관리 ──────────────────────────────────────────────────────────
+
+class ExcludedIpRequest(BaseModel):
+    ip_address: str
+    memo: Optional[str] = None
+
+
+@router.get("/excluded-ips")
+async def list_excluded_ips():
+    """제외 IP 목록 조회"""
+    try:
+        with get_connection() as con:
+            _ensure_excluded_ips_table(con)
+            rows = con.execute(
+                "SELECT id, ip_address, memo, created_at FROM analytics_excluded_ips ORDER BY id"
+            ).fetchall()
+            return [{"id": r[0], "ip_address": r[1], "memo": r[2], "created_at": str(r[3])} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/excluded-ips")
+async def add_excluded_ip(body: ExcludedIpRequest):
+    """제외 IP 추가"""
+    try:
+        with get_connection() as con:
+            _ensure_excluded_ips_table(con)
+            con.execute(
+                "INSERT OR IGNORE INTO analytics_excluded_ips (ip_address, memo) VALUES (?, ?)",
+                (body.ip_address.strip(), body.memo),
+            )
+            con.commit()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/excluded-ips/{ip_id}")
+async def delete_excluded_ip(ip_id: int):
+    """제외 IP 삭제"""
+    try:
+        with get_connection() as con:
+            _ensure_excluded_ips_table(con)
+            con.execute("DELETE FROM analytics_excluded_ips WHERE id = ?", (ip_id,))
+            con.commit()
+        return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

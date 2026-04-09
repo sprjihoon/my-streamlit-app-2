@@ -12,10 +12,9 @@ import json
 import httpx
 
 from logic.db import get_connection
+from backend.app.api.wp_analytics import _ensure_excluded_ips_table, _get_excluded_ips
 
 router = APIRouter(prefix="/estimate-analytics", tags=["estimate-analytics"])
-
-EXCLUDED_IPS = ["211.195.12.98"]
 
 
 class VisitorLogRequest(BaseModel):
@@ -496,13 +495,21 @@ async def get_stats(
     try:
         with get_connection() as con:
             _ensure_tables(con)
-            
+            _ensure_excluded_ips_table(con)
+            _excluded = _get_excluded_ips(con)
+
             # 날짜 필터
-            _ip_placeholders = ",".join("?" * len(EXCLUDED_IPS))
-            where_visit = f"ip_address NOT IN ({_ip_placeholders})"
-            where_calc = f"ip_address NOT IN ({_ip_placeholders})"
-            params_visit: List[Any] = list(EXCLUDED_IPS)
-            params_calc: List[Any] = list(EXCLUDED_IPS)
+            if _excluded:
+                _ip_placeholders = ",".join("?" * len(_excluded))
+                where_visit = f"ip_address NOT IN ({_ip_placeholders})"
+                where_calc = f"ip_address NOT IN ({_ip_placeholders})"
+                params_visit: List[Any] = list(_excluded)
+                params_calc: List[Any] = list(_excluded)
+            else:
+                where_visit = "1=1"
+                where_calc = "1=1"
+                params_visit = []
+                params_calc = []
 
             if date_from:
                 where_visit += " AND date(created_at) >= ?"
@@ -759,10 +766,16 @@ async def list_visitors(
     try:
         with get_connection() as con:
             _ensure_tables(con)
+            _ensure_excluded_ips_table(con)
+            _excluded = _get_excluded_ips(con)
 
-            _ip_ph = ",".join("?" * len(EXCLUDED_IPS))
-            where = f"ip_address NOT IN ({_ip_ph})"
-            params: List[Any] = list(EXCLUDED_IPS)
+            if _excluded:
+                _ip_ph = ",".join("?" * len(_excluded))
+                where = f"ip_address NOT IN ({_ip_ph})"
+                params: List[Any] = list(_excluded)
+            else:
+                where = "1=1"
+                params = []
 
             if date_from:
                 where += " AND date(created_at) >= ?"
@@ -846,10 +859,16 @@ async def list_calculations(
     try:
         with get_connection() as con:
             _ensure_tables(con)
+            _ensure_excluded_ips_table(con)
+            _excluded = _get_excluded_ips(con)
 
-            _ip_ph = ",".join("?" * len(EXCLUDED_IPS))
-            where = f"ip_address NOT IN ({_ip_ph})"
-            params: List[Any] = list(EXCLUDED_IPS)
+            if _excluded:
+                _ip_ph = ",".join("?" * len(_excluded))
+                where = f"ip_address NOT IN ({_ip_ph})"
+                params: List[Any] = list(_excluded)
+            else:
+                where = "1=1"
+                params = []
 
             if date_from:
                 where += " AND date(created_at) >= ?"

@@ -197,6 +197,11 @@ export default function WpAnalyticsPage() {
   const [visitorSort, setVisitorSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'desc' });
   const [sessionSort, setSessionSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'desc' });
 
+  const [excludedIps, setExcludedIps] = useState<{ id: number; ip_address: string; memo: string }[]>([]);
+  const [ipInput, setIpInput] = useState('');
+  const [memoInput, setMemoInput] = useState('');
+  const [ipPanelOpen, setIpPanelOpen] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [flowLoading, setFlowLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -214,6 +219,30 @@ export default function WpAnalyticsPage() {
       const { from, to } = calcPreset(p);
       setDateFrom(from); setDateTo(to);
     }
+  }
+
+  const loadExcludedIps = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/wp-analytics/excluded-ips`);
+      if (res.ok) setExcludedIps(await res.json());
+    } catch (e) { console.error(e); }
+  }, []);
+
+  async function addExcludedIp() {
+    const ip = ipInput.trim();
+    if (!ip) return;
+    await fetch(`${API_BASE}/wp-analytics/excluded-ips`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip_address: ip, memo: memoInput.trim() || null }),
+    });
+    setIpInput(''); setMemoInput('');
+    await loadExcludedIps();
+  }
+
+  async function deleteExcludedIp(id: number) {
+    await fetch(`${API_BASE}/wp-analytics/excluded-ips/${id}`, { method: 'DELETE' });
+    await loadExcludedIps();
   }
 
   const loadStats = useCallback(async () => {
@@ -262,6 +291,7 @@ export default function WpAnalyticsPage() {
     } catch (e) { console.error(e); }
   }, [dateFrom, dateTo, visitorPage]);
 
+  useEffect(() => { loadExcludedIps(); }, [loadExcludedIps]);
   useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { if (activeTab === 'flow') loadFlow(); }, [activeTab, loadFlow]);
   useEffect(() => { if (activeTab === 'sessions') loadSessions(); }, [activeTab, loadSessions]);
@@ -392,6 +422,66 @@ export default function WpAnalyticsPage() {
         {(dateFrom || dateTo) && preset !== '전체' && (
           <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#6b7280' }}>
             📅 {dateFrom || '전체'} ~ {dateTo || '전체'}
+          </div>
+        )}
+      </div>
+
+      {/* ── 관리자 IP 필터 패널 ── */}
+      <div style={{ ...card, marginBottom: '1rem', border: '1px solid #e5e7eb' }}>
+        <button
+          onClick={() => setIpPanelOpen(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0, width: '100%', textAlign: 'left' }}
+        >
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#374151' }}>🚫 분석 제외 IP 관리</span>
+          <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 4 }}>({excludedIps.length}개)</span>
+          <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: '#9ca3af' }}>{ipPanelOpen ? '▲ 접기' : '▼ 펼치기'}</span>
+        </button>
+
+        {ipPanelOpen && (
+          <div style={{ marginTop: '0.9rem' }}>
+            {/* 현재 목록 */}
+            {excludedIps.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: '0.9rem' }}>
+                {excludedIps.map(item => (
+                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', borderRadius: 8, padding: '0.45rem 0.75rem' }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#374151', fontWeight: 600 }}>{item.ip_address}</span>
+                    {item.memo && <span style={{ fontSize: '0.73rem', color: '#9ca3af' }}>{item.memo}</span>}
+                    <button
+                      onClick={() => deleteExcludedIp(item.id)}
+                      style={{ marginLeft: 'auto', background: '#fee2e2', color: '#b91c1c', border: 'none', borderRadius: 6, padding: '2px 10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+                    >삭제</button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: '0 0 0.9rem' }}>등록된 제외 IP 없음</p>
+            )}
+
+            {/* 추가 입력 */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', marginBottom: 2 }}>IP 주소</label>
+                <input
+                  type="text" placeholder="예) 123.456.78.90"
+                  value={ipInput} onChange={e => setIpInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addExcludedIp()}
+                  style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', outline: 'none', width: 180 }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', marginBottom: 2 }}>메모 (선택)</label>
+                <input
+                  type="text" placeholder="예) 관리자 IP"
+                  value={memoInput} onChange={e => setMemoInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addExcludedIp()}
+                  style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', outline: 'none', width: 140 }}
+                />
+              </div>
+              <button
+                onClick={addExcludedIp}
+                style={{ padding: '0.4rem 0.9rem', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
+              >+ 추가</button>
+            </div>
           </div>
         )}
       </div>
