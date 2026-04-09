@@ -446,7 +446,7 @@ export default function WpAnalyticsPage() {
                   {stats.repeat_stats && (
                     <div style={card}>
                       <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.4rem' }}>🔄 반복유입 분석</h3>
-                      <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>같은 IP가 기간 내 여러 번 방문한 패턴</p>
+                      <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>같은 IP가 <strong>다른 날</strong> 재방문한 패턴 (같은 날 멀티탭·페이지이동은 제외)</p>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.8rem' }}>
                         <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '0.7rem', textAlign: 'center' }}>
@@ -468,7 +468,7 @@ export default function WpAnalyticsPage() {
                       <div style={{ background: '#eff6ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
                         <div style={{ fontSize: '0.68rem', color: '#3b82f6', fontWeight: 700 }}>방문자 평균 세션 수</div>
                         <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1d4ed8' }}>{stats.repeat_stats.avg_sessions.toFixed(1)}회</div>
-                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>1회 초과 = 재방문</div>
+                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>방문 일수 기준</div>
                       </div>
 
                       {/* 재방문율 바 */}
@@ -857,11 +857,8 @@ export default function WpAnalyticsPage() {
                           {s.is_repeat ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                               <span style={{ background: '#fef08a', color: '#854d0e', padding: '2px 7px', borderRadius: 8, fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                🔄 {s.sessions}회 재방문
+                                🔄 {s.visit_days}일 재방문
                               </span>
-                              {s.visit_days > 1 && (
-                                <span style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{s.visit_days}일에 걸쳐</span>
-                              )}
                             </div>
                           ) : (
                             <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>신규</span>

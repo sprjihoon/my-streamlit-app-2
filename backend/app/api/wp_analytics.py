@@ -271,16 +271,18 @@ async def get_wp_stats(
                 """, params,
             ).fetchone()
 
-            # 반복 유입 분석 (같은 IP가 기간 내 여러 세션)
+            # 반복 유입 분석 (같은 IP가 다른 날짜에 방문 = 진짜 재방문)
+            # session_id 기준은 멀티탭/페이지이동으로 오집계되므로 날짜 기준 사용
             repeat_stats = con.execute(
                 f"""
                 SELECT
                     COUNT(DISTINCT ip_address) as total_ips,
-                    SUM(CASE WHEN session_cnt > 1 THEN 1 ELSE 0 END) as repeat_ips,
-                    SUM(CASE WHEN session_cnt = 1 THEN 1 ELSE 0 END) as once_ips,
-                    AVG(session_cnt) as avg_sessions
+                    SUM(CASE WHEN day_cnt > 1 THEN 1 ELSE 0 END) as repeat_ips,
+                    SUM(CASE WHEN day_cnt = 1 THEN 1 ELSE 0 END) as once_ips,
+                    AVG(day_cnt) as avg_sessions
                 FROM (
-                    SELECT ip_address, COUNT(DISTINCT session_id) as session_cnt
+                    SELECT ip_address,
+                           COUNT(DISTINCT date(created_at, '+9 hours')) as day_cnt
                     FROM estimate_visitor_logs WHERE {where}
                     GROUP BY ip_address
                 )
@@ -643,7 +645,7 @@ async def get_ip_sessions(
                     "has_10s": bool(r[18]),
                     "has_30s": bool(r[19]),
                     "visit_days": int(r[20] or 1),
-                    "is_repeat": int(r[5] or 0) > 1,
+                    "is_repeat": int(r[20] or 1) > 1,  # 다른 날짜에 방문한 경우만 재방문
                 })
 
             return {"items": items, "total": total, "page": page, "page_size": page_size}
