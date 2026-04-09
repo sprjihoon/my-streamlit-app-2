@@ -91,18 +91,21 @@ function shortenUrl(url: string): string {
   } catch { return url.slice(0, 40); }
 }
 
-// 날짜 프리셋
+// 날짜 프리셋 (한국시간 KST = UTC+9 기준)
 type Preset = '오늘' | '어제' | '7일' | '15일' | '30일' | '전체' | '직접입력';
+function toKstDateStr(date: Date): string {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
+}
 function calcPreset(p: Preset): { from: string; to: string } {
-  const d = new Date();
-  const iso = (x: Date) => x.toISOString().split('T')[0];
-  const ago = (n: number) => { const t = new Date(d); t.setDate(d.getDate() - n); return t; };
+  const now = new Date();
+  const ago = (n: number) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000);
   switch (p) {
-    case '오늘':    return { from: iso(d), to: iso(d) };
-    case '어제':    return { from: iso(ago(1)), to: iso(ago(1)) };
-    case '7일':     return { from: iso(ago(6)), to: iso(d) };
-    case '15일':    return { from: iso(ago(14)), to: iso(d) };
-    case '30일':    return { from: iso(ago(29)), to: iso(d) };
+    case '오늘':    return { from: toKstDateStr(now), to: toKstDateStr(now) };
+    case '어제':    return { from: toKstDateStr(ago(1)), to: toKstDateStr(ago(1)) };
+    case '7일':     return { from: toKstDateStr(ago(6)), to: toKstDateStr(now) };
+    case '15일':    return { from: toKstDateStr(ago(14)), to: toKstDateStr(now) };
+    case '30일':    return { from: toKstDateStr(ago(29)), to: toKstDateStr(now) };
     default:        return { from: '', to: '' };
   }
 }
