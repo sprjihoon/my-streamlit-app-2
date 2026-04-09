@@ -15,6 +15,8 @@ from logic.db import get_connection
 
 router = APIRouter(prefix="/estimate-analytics", tags=["estimate-analytics"])
 
+EXCLUDED_IPS = ["211.195.12.98"]
+
 
 class VisitorLogRequest(BaseModel):
     """방문자 로그 요청"""
@@ -496,11 +498,12 @@ async def get_stats(
             _ensure_tables(con)
             
             # 날짜 필터
-            where_visit = "1=1"
-            where_calc = "1=1"
-            params_visit: List[Any] = []
-            params_calc: List[Any] = []
-            
+            _ip_placeholders = ",".join("?" * len(EXCLUDED_IPS))
+            where_visit = f"ip_address NOT IN ({_ip_placeholders})"
+            where_calc = f"ip_address NOT IN ({_ip_placeholders})"
+            params_visit: List[Any] = list(EXCLUDED_IPS)
+            params_calc: List[Any] = list(EXCLUDED_IPS)
+
             if date_from:
                 where_visit += " AND date(created_at) >= ?"
                 where_calc += " AND date(created_at) >= ?"
@@ -756,10 +759,11 @@ async def list_visitors(
     try:
         with get_connection() as con:
             _ensure_tables(con)
-            
-            where = "1=1"
-            params: List[Any] = []
-            
+
+            _ip_ph = ",".join("?" * len(EXCLUDED_IPS))
+            where = f"ip_address NOT IN ({_ip_ph})"
+            params: List[Any] = list(EXCLUDED_IPS)
+
             if date_from:
                 where += " AND date(created_at) >= ?"
                 params.append(date_from)
@@ -842,10 +846,11 @@ async def list_calculations(
     try:
         with get_connection() as con:
             _ensure_tables(con)
-            
-            where = "1=1"
-            params: List[Any] = []
-            
+
+            _ip_ph = ",".join("?" * len(EXCLUDED_IPS))
+            where = f"ip_address NOT IN ({_ip_ph})"
+            params: List[Any] = list(EXCLUDED_IPS)
+
             if date_from:
                 where += " AND date(created_at) >= ?"
                 params.append(date_from)

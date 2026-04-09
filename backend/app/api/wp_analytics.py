@@ -14,6 +14,7 @@ from logic.db import get_connection
 router = APIRouter(prefix="/wp-analytics", tags=["wp-analytics"])
 
 WP_DOMAIN = "spring3pl.co.kr"
+EXCLUDED_IPS = ["211.195.12.98"]
 
 
 def _ensure_columns(con):
@@ -42,8 +43,9 @@ def _ensure_columns(con):
 
 def _build_where(date_from: Optional[str], date_to: Optional[str]) -> tuple:
     """WordPress 도메인 + 날짜 필터 WHERE절과 params 반환 (한국시간 KST = UTC+9 기준)"""
-    where = f"page_url LIKE '%{WP_DOMAIN}%'"
-    params: List[Any] = []
+    placeholders = ",".join("?" * len(EXCLUDED_IPS))
+    where = f"page_url LIKE '%{WP_DOMAIN}%' AND ip_address NOT IN ({placeholders})"
+    params: List[Any] = list(EXCLUDED_IPS)
     if date_from:
         where += " AND date(created_at, '+9 hours') >= ?"
         params.append(date_from)

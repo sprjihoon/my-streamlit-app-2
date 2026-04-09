@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loading } from '@/components/Loading';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -194,6 +194,8 @@ export default function WpAnalyticsPage() {
   const [visitors, setVisitors] = useState<VisitorLog[]>([]);
   const [visitorTotal, setVisitorTotal] = useState(0);
   const [visitorPage, setVisitorPage] = useState(1);
+  const [visitorSort, setVisitorSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'desc' });
+  const [sessionSort, setSessionSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'desc' });
 
   const [loading, setLoading] = useState(true);
   const [flowLoading, setFlowLoading] = useState(false);
@@ -264,6 +266,66 @@ export default function WpAnalyticsPage() {
   useEffect(() => { if (activeTab === 'flow') loadFlow(); }, [activeTab, loadFlow]);
   useEffect(() => { if (activeTab === 'sessions') loadSessions(); }, [activeTab, loadSessions]);
   useEffect(() => { if (activeTab === 'visitors') loadVisitors(); }, [activeTab, loadVisitors]);
+
+  // ── 방문 로그 정렬 ──
+  const sortedVisitors = useMemo(() => {
+    if (!visitorSort.key) return visitors;
+    const key = visitorSort.key;
+    return [...visitors].sort((a, b) => {
+      let av: string | number;
+      let bv: string | number;
+      if (key === 'location') {
+        av = (a as VisitorLog).city || (a as VisitorLog).region || (a as VisitorLog).country || '';
+        bv = (b as VisitorLog).city || (b as VisitorLog).region || (b as VisitorLog).country || '';
+      } else {
+        av = (a as unknown as Record<string, unknown>)[key] as string | number ?? '';
+        bv = (b as unknown as Record<string, unknown>)[key] as string | number ?? '';
+      }
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return visitorSort.dir === 'asc' ? av - bv : bv - av;
+      }
+      const cmp = String(av).localeCompare(String(bv), 'ko');
+      return visitorSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [visitors, visitorSort]);
+
+  function toggleVisitorSort(key: string) {
+    setVisitorSort(prev =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' }
+    );
+  }
+
+  // ── 방문자별(세션) 정렬 ──
+  const sortedSessions = useMemo(() => {
+    if (!sessionSort.key) return sessions;
+    const key = sessionSort.key;
+    return [...sessions].sort((a, b) => {
+      let av: string | number;
+      let bv: string | number;
+      if (key === 'location') {
+        av = (a as IpSession).city || (a as IpSession).region || (a as IpSession).country || '';
+        bv = (b as IpSession).city || (b as IpSession).region || (b as IpSession).country || '';
+      } else {
+        av = (a as unknown as Record<string, unknown>)[key] as string | number ?? '';
+        bv = (b as unknown as Record<string, unknown>)[key] as string | number ?? '';
+      }
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sessionSort.dir === 'asc' ? av - bv : bv - av;
+      }
+      const cmp = String(av).localeCompare(String(bv), 'ko');
+      return sessionSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [sessions, sessionSort]);
+
+  function toggleSessionSort(key: string) {
+    setSessionSort(prev =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' }
+    );
+  }
 
   // ── 스타일 ──
   const card: React.CSSProperties = { background: '#fff', borderRadius: 12, padding: '1.1rem', boxShadow: '0 1px 4px rgba(0,0,0,.07)' };
@@ -834,13 +896,39 @@ export default function WpAnalyticsPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {['IP', '위치', '유입경로', '재방문', '세션', '페이지뷰', '체류', '스크롤', '기기', '첫방문', '마지막방문'].map(h => (
-                        <th key={h} style={th}>{h}</th>
-                      ))}
+                      {([
+                        ['IP', 'ip_address'],
+                        ['위치', 'location'],
+                        ['유입경로', 'source'],
+                        ['재방문', 'is_repeat'],
+                        ['세션', 'sessions'],
+                        ['페이지뷰', 'page_views'],
+                        ['체류', 'max_duration'],
+                        ['스크롤', 'max_scroll_depth'],
+                        ['기기', 'device_type'],
+                        ['첫방문', 'first_visit'],
+                        ['마지막방문', 'last_visit'],
+                      ] as [string, string][]).map(([label, key]) => {
+                        const isActive = sessionSort.key === key;
+                        return (
+                          <th
+                            key={key}
+                            style={{ ...th, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                            onClick={() => toggleSessionSort(key)}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              {label}
+                              <span style={{ fontSize: '0.65rem', color: isActive ? '#6366f1' : '#cbd5e1' }}>
+                                {isActive ? (sessionSort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
-                    {sessions.map((s, i) => (
+                    {sortedSessions.map((s, i) => (
                       <tr key={i} style={{ background: s.is_repeat ? '#fefce8' : undefined }}>
                         <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.75rem' }}>
                           {s.ip_address}
@@ -937,13 +1025,38 @@ export default function WpAnalyticsPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {['일시', 'IP', '위치', '페이지', 'OS', '브라우저', '디바이스', '체류시간', '스크롤', '유입경로'].map(h => (
-                        <th key={h} style={th}>{h}</th>
-                      ))}
+                      {([
+                        ['일시', 'created_at'],
+                        ['IP', 'ip_address'],
+                        ['위치', 'location'],
+                        ['페이지', 'page_url'],
+                        ['OS', 'os'],
+                        ['브라우저', 'browser'],
+                        ['디바이스', 'device_type'],
+                        ['체류시간', 'duration_seconds'],
+                        ['스크롤', 'scroll_depth'],
+                        ['유입경로', 'source'],
+                      ] as [string, string][]).map(([label, key]) => {
+                        const isActive = visitorSort.key === key;
+                        return (
+                          <th
+                            key={key}
+                            style={{ ...th, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                            onClick={() => toggleVisitorSort(key)}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              {label}
+                              <span style={{ fontSize: '0.65rem', color: isActive ? '#6366f1' : '#cbd5e1' }}>
+                                {isActive ? (visitorSort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
-                    {visitors.map(v => (
+                    {sortedVisitors.map(v => (
                       <tr key={v.id}>
                         <td style={{ ...td, whiteSpace: 'nowrap', color: '#6b7280', fontSize: '0.75rem' }}>{v.created_at}</td>
                         <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.75rem' }}>{v.ip_address}</td>
