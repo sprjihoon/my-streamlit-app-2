@@ -196,6 +196,7 @@ export default function WpAnalyticsPage() {
   const [visitorPage, setVisitorPage] = useState(1);
   const [visitorSort, setVisitorSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'desc' });
   const [sessionSort, setSessionSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'desc' });
+  const [pageSort, setPageSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: 'count', dir: 'desc' });
 
   const [excludedIps, setExcludedIps] = useState<{ id: number; ip_address: string; memo: string }[]>([]);
   const [ipInput, setIpInput] = useState('');
@@ -354,6 +355,30 @@ export default function WpAnalyticsPage() {
       prev.key === key
         ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
         : { key, dir: 'asc' }
+    );
+  }
+
+  // ── 페이지별 정렬 ──
+  const sortedPageStats = useMemo(() => {
+    if (!stats?.page_stats) return [];
+    const key = pageSort.key;
+    if (!key) return stats.page_stats;
+    return [...stats.page_stats].sort((a, b) => {
+      const av = (a as unknown as Record<string, unknown>)[key] as string | number ?? '';
+      const bv = (b as unknown as Record<string, unknown>)[key] as string | number ?? '';
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return pageSort.dir === 'asc' ? av - bv : bv - av;
+      }
+      const cmp = String(av).localeCompare(String(bv), 'ko');
+      return pageSort.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [stats?.page_stats, pageSort]);
+
+  function togglePageSort(key: string) {
+    setPageSort(prev =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'desc' }
     );
   }
 
@@ -935,16 +960,39 @@ export default function WpAnalyticsPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {['#', '페이지', '방문수', '고유 방문자', '평균 체류', '비율'].map((h, i) => (
-                        <th key={i} style={{ ...th, textAlign: i >= 2 ? 'right' : 'left' }}>{h}</th>
-                      ))}
+                      <th style={th}>#</th>
+                      {([
+                        ['페이지', 'page_url'],
+                        ['방문수', 'count'],
+                        ['고유 방문자', 'unique_count'],
+                        ['평균 체류', 'avg_duration'],
+                        ['비율', 'count'],
+                      ] as [string, string][]).map(([label, key], i) => {
+                        const isActive = pageSort.key === key && !(label === '비율' && pageSort.key === 'count' && i !== 1);
+                        const sortKey = label === '비율' ? '_pct' : key;
+                        const active = pageSort.key === sortKey;
+                        return (
+                          <th
+                            key={label}
+                            style={{ ...th, textAlign: i >= 1 ? 'right' : 'left', cursor: 'pointer', userSelect: 'none' }}
+                            onClick={() => togglePageSort(sortKey)}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              {label}
+                              <span style={{ fontSize: '0.65rem', color: active ? '#6366f1' : '#cbd5e1' }}>
+                                {active ? (pageSort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.page_stats.map((p, i) => {
+                    {sortedPageStats.map((p, i) => {
                       const pct = Math.round((p.count / totalVisits) * 100);
                       return (
-                        <tr key={i}>
+                        <tr key={p.page_url}>
                           <td style={{ ...td, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</td>
                           <td style={td}>
                             <div style={{ fontWeight: 600, color: '#374151', fontSize: '0.83rem' }}>{shortenUrl(p.page_url)}</div>
