@@ -24,6 +24,19 @@ interface DailyStat { date: string; count: number }
 interface UtmStat { source: string; medium: string; campaign: string; count: number }
 interface DwellDist { [k: string]: number }
 
+interface Engagement {
+  milestone_10s_count: number; milestone_30s_count: number;
+  milestone_10s_rate: number; milestone_30s_rate: number;
+  avg_scroll_depth: number;
+  scroll_50_count: number; scroll_75_count: number;
+  scroll_50_rate: number; scroll_75_rate: number;
+  duration_1_9: number; duration_10_29: number;
+  duration_30plus: number; duration_zero: number;
+}
+interface RepeatStats {
+  total_ips: number; repeat_ips: number; once_ips: number; avg_sessions: number;
+}
+
 interface Stats {
   summary: Summary;
   page_stats: PageStat[];
@@ -37,6 +50,8 @@ interface Stats {
   daily_visits: DailyStat[];
   utm_stats: UtmStat[];
   dwell_distribution: DwellDist;
+  engagement: Engagement;
+  repeat_stats: RepeatStats;
 }
 
 interface FlowSummary { total_sessions: number; bounce_sessions: number; bounce_rate: number }
@@ -61,6 +76,8 @@ interface IpSession {
   os: string; browser: string; device_type: string; is_mobile: boolean;
   source: string; utm_campaign: string;
   pages_visited: string[];
+  max_scroll_depth: number; has_10s: boolean; has_30s: boolean;
+  visit_days: number; is_repeat: boolean;
 }
 
 interface VisitorLog {
@@ -68,6 +85,7 @@ interface VisitorLog {
   page_url: string; referrer: string; os: string; browser: string; device_type: string;
   is_mobile: boolean | null; utm_source: string | null; utm_campaign: string | null;
   duration_seconds: number; created_at: string; source: string;
+  scroll_depth: number; milestone_10s: boolean; milestone_30s: boolean;
 }
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────
@@ -357,6 +375,126 @@ export default function WpAnalyticsPage() {
                   <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#f59e0b' }}>{stats.page_stats.length}</div>
                 </div>
               </div>
+
+              {/* 인게이지먼트 + 반복유입 카드 */}
+              {stats.engagement && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                  {/* 인게이지먼트 지표 */}
+                  <div style={card}>
+                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>📊 방문 깊이 분석</h3>
+                    <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>한 페이지만 보고 나간 방문자도 "얼마나 관심이 있었는지"를 측정합니다</p>
+
+                    {/* 체류시간 구간 */}
+                    <div style={{ marginBottom: '0.8rem' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6b7280', marginBottom: 6 }}>⏱ 체류시간 분포</div>
+                      {[
+                        { label: '즉시 이탈 (미측정)', val: stats.engagement.duration_zero, color: '#e5e7eb', textColor: '#9ca3af' },
+                        { label: '1~9초 (훑어봄)', val: stats.engagement.duration_1_9, color: '#fca5a5', textColor: '#b91c1c' },
+                        { label: '10~29초 (관심)', val: stats.engagement.duration_10_29, color: '#fdba74', textColor: '#92400e' },
+                        { label: '30초+ (진지한 관심)', val: stats.engagement.duration_30plus, color: '#6ee7b7', textColor: '#065f46' },
+                      ].map((item, i) => {
+                        const pct = stats.summary.total_visits > 0 ? Math.round(item.val / stats.summary.total_visits * 100) : 0;
+                        return (
+                          <div key={i} style={{ marginBottom: 6 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, fontSize: '0.75rem' }}>
+                              <span style={{ color: '#374151' }}>{item.label}</span>
+                              <span style={{ fontWeight: 700, color: item.textColor }}>{fmt(item.val)}명 ({pct}%)</span>
+                            </div>
+                            <div style={{ height: 5, background: '#f1f5f9', borderRadius: 3 }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: item.color, borderRadius: 3 }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 마일스톤 */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: '0.8rem' }}>
+                      <div style={{ flex: 1, background: '#eff6ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 700 }}>10초 이상 체류</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1d4ed8' }}>{stats.engagement.milestone_10s_rate}%</div>
+                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.milestone_10s_count)}명</div>
+                      </div>
+                      <div style={{ flex: 1, background: '#f0fdf4', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#16a34a', fontWeight: 700 }}>30초 이상 체류</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#15803d' }}>{stats.engagement.milestone_30s_rate}%</div>
+                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.milestone_30s_count)}명</div>
+                      </div>
+                    </div>
+
+                    {/* 스크롤 깊이 */}
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6b7280', marginBottom: 6 }}>📜 스크롤 깊이</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ flex: 1, background: '#faf5ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 700 }}>평균 스크롤</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6d28d9' }}>{stats.engagement.avg_scroll_depth}%</div>
+                      </div>
+                      <div style={{ flex: 1, background: '#faf5ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 700 }}>50% 이상 스크롤</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6d28d9' }}>{stats.engagement.scroll_50_rate}%</div>
+                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.scroll_50_count)}명</div>
+                      </div>
+                      <div style={{ flex: 1, background: '#faf5ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 700 }}>75% 이상 스크롤</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6d28d9' }}>{stats.engagement.scroll_75_rate}%</div>
+                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.scroll_75_count)}명</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 반복유입 분석 */}
+                  {stats.repeat_stats && (
+                    <div style={card}>
+                      <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.4rem' }}>🔄 반복유입 분석</h3>
+                      <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>같은 IP가 기간 내 여러 번 방문한 패턴</p>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.8rem' }}>
+                        <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '0.7rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: '#16a34a', fontWeight: 700 }}>재방문자</div>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#15803d' }}>{fmt(stats.repeat_stats.repeat_ips)}</div>
+                          <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>
+                            {stats.repeat_stats.total_ips > 0 ? Math.round(stats.repeat_stats.repeat_ips / stats.repeat_stats.total_ips * 100) : 0}%
+                          </div>
+                        </div>
+                        <div style={{ background: '#f8fafc', borderRadius: 8, padding: '0.7rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '0.68rem', color: '#6b7280', fontWeight: 700 }}>신규방문자</div>
+                          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{fmt(stats.repeat_stats.once_ips)}</div>
+                          <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>
+                            {stats.repeat_stats.total_ips > 0 ? Math.round(stats.repeat_stats.once_ips / stats.repeat_stats.total_ips * 100) : 0}%
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#eff6ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.68rem', color: '#3b82f6', fontWeight: 700 }}>방문자 평균 세션 수</div>
+                        <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1d4ed8' }}>{stats.repeat_stats.avg_sessions.toFixed(1)}회</div>
+                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>1회 초과 = 재방문</div>
+                      </div>
+
+                      {/* 재방문율 바 */}
+                      <div style={{ marginTop: '0.8rem' }}>
+                        {[
+                          { label: '신규 (1회 방문)', count: stats.repeat_stats.once_ips, color: '#e5e7eb' },
+                          { label: '재방문 (2회+)', count: stats.repeat_stats.repeat_ips, color: '#6366f1' },
+                        ].map((item, i) => {
+                          const pct = stats.repeat_stats.total_ips > 0 ? Math.round(item.count / stats.repeat_stats.total_ips * 100) : 0;
+                          return (
+                            <div key={i} style={{ marginBottom: 6 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 2 }}>
+                                <span style={{ color: '#374151' }}>{item.label}</span>
+                                <span style={{ fontWeight: 700, color: '#6b7280' }}>{pct}%</span>
+                              </div>
+                              <div style={{ height: 6, background: '#f1f5f9', borderRadius: 3 }}>
+                                <div style={{ height: '100%', width: `${pct}%`, background: item.color, borderRadius: 3 }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
 
@@ -696,15 +834,17 @@ export default function WpAnalyticsPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {['IP', '위치', '유입경로', '세션', '페이지뷰', '체류시간', '기기', '첫 방문', '마지막 방문', '방문 페이지'].map(h => (
+                      {['IP', '위치', '유입경로', '재방문', '세션', '페이지뷰', '체류', '스크롤', '기기', '첫방문', '마지막방문'].map(h => (
                         <th key={h} style={th}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {sessions.map((s, i) => (
-                      <tr key={i}>
-                        <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.78rem' }}>{s.ip_address}</td>
+                      <tr key={i} style={{ background: s.is_repeat ? '#fefce8' : undefined }}>
+                        <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                          {s.ip_address}
+                        </td>
                         <td style={{ ...td, fontSize: '0.78rem' }}>
                           {s.city || s.region || s.country ? (
                             <span title={[s.country, s.region, s.city].filter(Boolean).join(', ')}>
@@ -713,16 +853,49 @@ export default function WpAnalyticsPage() {
                           ) : <span style={{ color: '#d1d5db' }}>-</span>}
                         </td>
                         <td style={td}><SourceBadge source={s.source} /></td>
+                        <td style={{ ...td, textAlign: 'center' }}>
+                          {s.is_repeat ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                              <span style={{ background: '#fef08a', color: '#854d0e', padding: '2px 7px', borderRadius: 8, fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                🔄 {s.sessions}회 재방문
+                              </span>
+                              {s.visit_days > 1 && (
+                                <span style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{s.visit_days}일에 걸쳐</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>신규</span>
+                          )}
+                        </td>
                         <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#6366f1' }}>{s.sessions}</td>
                         <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{s.page_views}</td>
                         <td style={td}>
                           {s.max_duration > 0 ? (
-                            <span style={{
-                              padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
-                              background: s.max_duration >= 180 ? '#dcfce7' : s.max_duration >= 60 ? '#dbeafe' : '#f3f4f6',
-                              color: s.max_duration >= 180 ? '#166534' : s.max_duration >= 60 ? '#1d4ed8' : '#6b7280',
-                            }}>{fmtDuration(s.max_duration)}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{
+                                padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
+                                background: s.max_duration >= 180 ? '#dcfce7' : s.max_duration >= 60 ? '#dbeafe' : '#f3f4f6',
+                                color: s.max_duration >= 180 ? '#166534' : s.max_duration >= 60 ? '#1d4ed8' : '#6b7280',
+                              }}>{fmtDuration(s.max_duration)}</span>
+                              <div style={{ display: 'flex', gap: 2 }}>
+                                {s.has_10s && <span style={{ fontSize: '0.6rem', background: '#dbeafe', color: '#1d4ed8', padding: '1px 4px', borderRadius: 4 }}>10초✓</span>}
+                                {s.has_30s && <span style={{ fontSize: '0.6rem', background: '#dcfce7', color: '#166534', padding: '1px 4px', borderRadius: 4 }}>30초✓</span>}
+                              </div>
+                            </div>
                           ) : <span style={{ color: '#d1d5db' }}>-</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center' }}>
+                          {s.max_scroll_depth > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                              <span style={{
+                                fontSize: '0.75rem', fontWeight: 700,
+                                color: s.max_scroll_depth >= 75 ? '#6d28d9' : s.max_scroll_depth >= 50 ? '#7c3aed' : '#a78bfa',
+                              }}>{s.max_scroll_depth}%</span>
+                              <div style={{ width: 30, height: 4, background: '#f1f5f9', borderRadius: 2 }}>
+                                <div style={{ height: '100%', width: `${s.max_scroll_depth}%`, background: '#8b5cf6', borderRadius: 2 }} />
+                              </div>
+                            </div>
+                          ) : <span style={{ color: '#d1d5db', fontSize: '0.72rem' }}>-</span>}
                         </td>
                         <td style={td}>
                           {s.is_mobile ? (
@@ -733,19 +906,10 @@ export default function WpAnalyticsPage() {
                         </td>
                         <td style={{ ...td, fontSize: '0.75rem', color: '#9ca3af', whiteSpace: 'nowrap' }}>{s.first_visit.slice(0, 10)}</td>
                         <td style={{ ...td, fontSize: '0.75rem', color: '#9ca3af', whiteSpace: 'nowrap' }}>{s.last_visit.slice(0, 10)}</td>
-                        <td style={{ ...td, maxWidth: 200 }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            {s.pages_visited.map((url, j) => (
-                              <span key={j} style={{ fontSize: '0.7rem', color: '#374151', background: '#f1f5f9', padding: '1px 5px', borderRadius: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 180 }} title={url}>
-                                {shortenUrl(url)}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
                       </tr>
                     ))}
                     {sessions.length === 0 && (
-                      <tr><td colSpan={10} style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</td></tr>
+                      <tr><td colSpan={11} style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -773,7 +937,7 @@ export default function WpAnalyticsPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {['일시', 'IP', '위치', '페이지', 'OS', '브라우저', '디바이스', '체류시간', '유입경로'].map(h => (
+                      {['일시', 'IP', '위치', '페이지', 'OS', '브라우저', '디바이스', '체류시간', '스크롤', '유입경로'].map(h => (
                         <th key={h} style={th}>{h}</th>
                       ))}
                     </tr>
@@ -798,12 +962,26 @@ export default function WpAnalyticsPage() {
                         </td>
                         <td style={td}>
                           {v.duration_seconds > 0 ? (
-                            <span style={{
-                              padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
-                              background: v.duration_seconds >= 180 ? '#dcfce7' : v.duration_seconds >= 60 ? '#dbeafe' : '#f3f4f6',
-                              color: v.duration_seconds >= 180 ? '#166534' : v.duration_seconds >= 60 ? '#1d4ed8' : '#6b7280',
-                            }}>{fmtDuration(v.duration_seconds)}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{
+                                padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
+                                background: v.duration_seconds >= 180 ? '#dcfce7' : v.duration_seconds >= 60 ? '#dbeafe' : '#f3f4f6',
+                                color: v.duration_seconds >= 180 ? '#166534' : v.duration_seconds >= 60 ? '#1d4ed8' : '#6b7280',
+                              }}>{fmtDuration(v.duration_seconds)}</span>
+                              <div style={{ display: 'flex', gap: 2 }}>
+                                {v.milestone_10s && <span style={{ fontSize: '0.58rem', background: '#dbeafe', color: '#1d4ed8', padding: '1px 3px', borderRadius: 3 }}>10s✓</span>}
+                                {v.milestone_30s && <span style={{ fontSize: '0.58rem', background: '#dcfce7', color: '#166534', padding: '1px 3px', borderRadius: 3 }}>30s✓</span>}
+                              </div>
+                            </div>
                           ) : <span style={{ color: '#d1d5db' }}>-</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center' }}>
+                          {v.scroll_depth > 0 ? (
+                            <span style={{
+                              fontSize: '0.75rem', fontWeight: 700,
+                              color: v.scroll_depth >= 75 ? '#6d28d9' : v.scroll_depth >= 50 ? '#7c3aed' : '#a78bfa',
+                            }}>{v.scroll_depth}%</span>
+                          ) : <span style={{ color: '#d1d5db', fontSize: '0.72rem' }}>-</span>}
                         </td>
                         <td style={td}>
                           <SourceBadge source={v.source} />
@@ -812,7 +990,7 @@ export default function WpAnalyticsPage() {
                       </tr>
                     ))}
                     {visitors.length === 0 && (
-                      <tr><td colSpan={9} style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</td></tr>
+                      <tr><td colSpan={10} style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</td></tr>
                     )}
                   </tbody>
                 </table>

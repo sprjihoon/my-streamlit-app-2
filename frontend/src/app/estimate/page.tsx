@@ -59,20 +59,62 @@ export default function EstimatePage() {
   
   const visitLoggedRef = useRef(false);
 
-  // 페이지 접속 시 방문 로그 전송
+  const pageEnteredAtRef = useRef<number>(Date.now());
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scrollDepthRef = useRef<number>(0);
+  const milestone10sRef = useRef<boolean>(false);
+  const milestone30sRef = useRef<boolean>(false);
+
+  const sendHeartbeat = (sessionId: string) => {
+    const elapsed = Math.floor((Date.now() - pageEnteredAtRef.current) / 1000);
+    if (elapsed <= 0) return;
+    try {
+      navigator.sendBeacon(
+        `${API_BASE}/estimate-analytics/heartbeat`,
+        JSON.stringify({ session_id: sessionId, duration_seconds: elapsed }),
+      );
+    } catch {
+      fetch(`${API_BASE}/estimate-analytics/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, duration_seconds: elapsed }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+  };
+
+  const sendEngagement = (sessionId: string) => {
+    const payload = JSON.stringify({
+      session_id: sessionId,
+      scroll_depth: scrollDepthRef.current,
+      milestone_10s: milestone10sRef.current,
+      milestone_30s: milestone30sRef.current,
+    });
+    try {
+      navigator.sendBeacon(`${API_BASE}/estimate-analytics/engagement`, payload);
+    } catch {
+      fetch(`${API_BASE}/estimate-analytics/engagement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  };
+
+  // 페이지 접속 시 방문 로그 전송 + 체류시간 + 인게이지먼트 추적
   useEffect(() => {
     if (visitLoggedRef.current) return;
     visitLoggedRef.current = true;
+    pageEnteredAtRef.current = Date.now();
     
     const sessionId = getOrCreateSessionId();
     
     const logVisit = async () => {
       try {
-        // 터치 지원 여부로 모바일 판별
         const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         const isMobile = isTouchDevice && window.innerWidth < 768;
         
-        // UTM 파라미터 추출
         const urlParams = new URLSearchParams(window.location.search);
         const utmSource = urlParams.get('utm_source') || null;
         const utmMedium = urlParams.get('utm_medium') || null;
@@ -111,6 +153,46 @@ export default function EstimatePage() {
     };
     
     logVisit();
+
+    // 스크롤 깊이 추적
+    const onScroll = () => {
+      const el = document.documentElement;
+      const scrolled = el.scrollTop + el.clientHeight;
+      const total = el.scrollHeight;
+      if (total <= 0) return;
+      const depth = Math.round((scrolled / total) * 100);
+      if (depth > scrollDepthRef.current) scrollDepthRef.current = Math.min(depth, 100);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+
+    // 10초 / 30초 마일스톤 타이머
+    const timer10 = setTimeout(() => { milestone10sRef.current = true; }, 10000);
+    const timer30 = setTimeout(() => { milestone30sRef.current = true; }, 30000);
+
+    heartbeatRef.current = setInterval(() => sendHeartbeat(sessionId), 30000);
+
+    const handleLeave = () => {
+      sendHeartbeat(sessionId);
+      sendEngagement(sessionId);
+    };
+    window.addEventListener('beforeunload', handleLeave);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        sendHeartbeat(sessionId);
+        sendEngagement(sessionId);
+      }
+    });
+
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      clearTimeout(timer10);
+      clearTimeout(timer30);
+      window.removeEventListener('beforeunload', handleLeave);
+      window.removeEventListener('scroll', onScroll);
+      sendHeartbeat(sessionId);
+      sendEngagement(sessionId);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [loading, setLoading] = useState(false);

@@ -130,6 +130,18 @@ def _ensure_tables(con):
         con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN duration_seconds INTEGER DEFAULT 0")
     except Exception:
         pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN scroll_depth INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN milestone_10s INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        con.execute("ALTER TABLE estimate_visitor_logs ADD COLUMN milestone_30s INTEGER DEFAULT 0")
+    except Exception:
+        pass
     con.execute("""
         CREATE TABLE IF NOT EXISTS estimate_calculate_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -375,6 +387,56 @@ async def log_heartbeat(request: Request):
                   )
                 """,
                 (duration_seconds, session_id, ip_address, session_id, ip_address),
+            )
+            con.commit()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/engagement")
+async def log_engagement(request: Request):
+    """
+    스크롤 깊이 및 인게이지먼트 마일스톤 업데이트.
+    - scroll_depth: 최대 스크롤 도달 비율 (0~100)
+    - milestone_10s: 10초 체류 달성 여부
+    - milestone_30s: 30초 체류 달성 여부
+    sendBeacon(text/plain) 또는 fetch(application/json) 모두 처리.
+    """
+    try:
+        import json as _json
+        raw = await request.body()
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            return {"success": False, "reason": "invalid body"}
+
+        session_id = data.get("session_id", "")
+        scroll_depth = int(data.get("scroll_depth", 0))
+        milestone_10s = 1 if data.get("milestone_10s") else 0
+        milestone_30s = 1 if data.get("milestone_30s") else 0
+
+        if not session_id:
+            return {"success": False, "reason": "missing session_id"}
+
+        ip_address = _get_client_ip(request)
+        with get_connection() as con:
+            _ensure_tables(con)
+            con.execute(
+                """
+                UPDATE estimate_visitor_logs
+                SET scroll_depth = MAX(COALESCE(scroll_depth, 0), ?),
+                    milestone_10s = MAX(COALESCE(milestone_10s, 0), ?),
+                    milestone_30s = MAX(COALESCE(milestone_30s, 0), ?)
+                WHERE session_id = ? AND ip_address = ?
+                  AND id = (
+                    SELECT id FROM estimate_visitor_logs
+                    WHERE session_id = ? AND ip_address = ?
+                    ORDER BY id DESC LIMIT 1
+                  )
+                """,
+                (scroll_depth, milestone_10s, milestone_30s,
+                 session_id, ip_address, session_id, ip_address),
             )
             con.commit()
         return {"success": True}

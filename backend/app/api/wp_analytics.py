@@ -29,6 +29,9 @@ def _ensure_columns(con):
         ("utm_campaign", "TEXT"),
         ("utm_content", "TEXT"),
         ("utm_term", "TEXT"),
+        ("scroll_depth", "INTEGER DEFAULT 0"),
+        ("milestone_10s", "INTEGER DEFAULT 0"),
+        ("milestone_30s", "INTEGER DEFAULT 0"),
     ]:
         try:
             con.execute(f"ALTER TABLE estimate_visitor_logs ADD COLUMN {col} {definition}")
@@ -250,6 +253,40 @@ async def get_wp_stats(
                 """, params,
             ).fetchall()
 
+            # 인게이지먼트 마일스톤 / 스크롤
+            engagement = con.execute(
+                f"""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN milestone_10s = 1 THEN 1 ELSE 0 END) as m10,
+                    SUM(CASE WHEN milestone_30s = 1 THEN 1 ELSE 0 END) as m30,
+                    AVG(CASE WHEN scroll_depth > 0 THEN scroll_depth END) as avg_scroll,
+                    SUM(CASE WHEN scroll_depth >= 50 THEN 1 ELSE 0 END) as scroll_50,
+                    SUM(CASE WHEN scroll_depth >= 75 THEN 1 ELSE 0 END) as scroll_75,
+                    SUM(CASE WHEN duration_seconds BETWEEN 1 AND 9 THEN 1 ELSE 0 END) as d_1_9,
+                    SUM(CASE WHEN duration_seconds BETWEEN 10 AND 29 THEN 1 ELSE 0 END) as d_10_29,
+                    SUM(CASE WHEN duration_seconds >= 30 THEN 1 ELSE 0 END) as d_30plus,
+                    SUM(CASE WHEN duration_seconds = 0 OR duration_seconds IS NULL THEN 1 ELSE 0 END) as d_zero
+                FROM estimate_visitor_logs WHERE {where}
+                """, params,
+            ).fetchone()
+
+            # 반복 유입 분석 (같은 IP가 기간 내 여러 세션)
+            repeat_stats = con.execute(
+                f"""
+                SELECT
+                    COUNT(DISTINCT ip_address) as total_ips,
+                    SUM(CASE WHEN session_cnt > 1 THEN 1 ELSE 0 END) as repeat_ips,
+                    SUM(CASE WHEN session_cnt = 1 THEN 1 ELSE 0 END) as once_ips,
+                    AVG(session_cnt) as avg_sessions
+                FROM (
+                    SELECT ip_address, COUNT(DISTINCT session_id) as session_cnt
+                    FROM estimate_visitor_logs WHERE {where}
+                    GROUP BY ip_address
+                )
+                """, params,
+            ).fetchone()
+
             # UTM 캠페인
             utm_stats = con.execute(
                 f"""
@@ -276,6 +313,7 @@ async def get_wp_stats(
                 """, params,
             ).fetchone()
 
+            eng_total = int(engagement[0] or 1) if engagement else 1
             return {
                 "summary": {
                     "total_visits": total_visits,
@@ -286,6 +324,27 @@ async def get_wp_stats(
                     "avg_duration_seconds": int(dwell[0]) if dwell and dwell[0] else 0,
                     "max_duration_seconds": int(dwell[1]) if dwell and dwell[1] else 0,
                     "tracked_visit_count": int(dwell[2]) if dwell and dwell[2] else 0,
+                },
+                "engagement": {
+                    "milestone_10s_count": int(engagement[1] or 0) if engagement else 0,
+                    "milestone_30s_count": int(engagement[2] or 0) if engagement else 0,
+                    "milestone_10s_rate": round((engagement[1] or 0) / eng_total * 100, 1),
+                    "milestone_30s_rate": round((engagement[2] or 0) / eng_total * 100, 1),
+                    "avg_scroll_depth": round(engagement[3] or 0, 1) if engagement else 0,
+                    "scroll_50_count": int(engagement[4] or 0) if engagement else 0,
+                    "scroll_75_count": int(engagement[5] or 0) if engagement else 0,
+                    "scroll_50_rate": round((engagement[4] or 0) / eng_total * 100, 1),
+                    "scroll_75_rate": round((engagement[5] or 0) / eng_total * 100, 1),
+                    "duration_1_9": int(engagement[6] or 0) if engagement else 0,
+                    "duration_10_29": int(engagement[7] or 0) if engagement else 0,
+                    "duration_30plus": int(engagement[8] or 0) if engagement else 0,
+                    "duration_zero": int(engagement[9] or 0) if engagement else 0,
+                },
+                "repeat_stats": {
+                    "total_ips": int(repeat_stats[0] or 0) if repeat_stats else 0,
+                    "repeat_ips": int(repeat_stats[1] or 0) if repeat_stats else 0,
+                    "once_ips": int(repeat_stats[2] or 0) if repeat_stats else 0,
+                    "avg_sessions": round(float(repeat_stats[3] or 1), 2) if repeat_stats else 1.0,
                 },
                 "page_stats": [
                     {"page_url": r[0], "count": r[1], "unique_count": r[2], "avg_duration": int(r[3]) if r[3] else 0}
@@ -528,7 +587,11 @@ async def get_ip_sessions(
                     GROUP_CONCAT(DISTINCT utm_source) as utm_sources,
                     GROUP_CONCAT(DISTINCT utm_campaign) as utm_campaigns,
                     GROUP_CONCAT(DISTINCT referrer) as referrers,
-                    GROUP_CONCAT(DISTINCT language) as languages
+                    GROUP_CONCAT(DISTINCT language) as languages,
+                    MAX(COALESCE(scroll_depth, 0)) as max_scroll_depth,
+                    MAX(COALESCE(milestone_10s, 0)) as has_10s,
+                    MAX(COALESCE(milestone_30s, 0)) as has_30s,
+                    COUNT(DISTINCT date(created_at, '+9 hours')) as visit_days
                 FROM estimate_visitor_logs
                 WHERE {where}
                 GROUP BY ip_address
@@ -576,6 +639,11 @@ async def get_ip_sessions(
                     "source": source,
                     "utm_campaign": (r[14] or "").split(",")[0],
                     "pages_visited": [p[0] for p in pages_visited],
+                    "max_scroll_depth": int(r[17] or 0),
+                    "has_10s": bool(r[18]),
+                    "has_30s": bool(r[19]),
+                    "visit_days": int(r[20] or 1),
+                    "is_repeat": int(r[5] or 0) > 1,
                 })
 
             return {"items": items, "total": total, "page": page, "page_size": page_size}
@@ -607,7 +675,8 @@ async def list_wp_visitors(
                        os, browser, device_type, screen_width, screen_height,
                        language, timezone, session_id, created_at,
                        is_touch_device, is_mobile, inner_width, inner_height,
-                       utm_source, utm_medium, utm_campaign, duration_seconds
+                       utm_source, utm_medium, utm_campaign, duration_seconds,
+                       COALESCE(scroll_depth, 0), COALESCE(milestone_10s, 0), COALESCE(milestone_30s, 0)
                 FROM estimate_visitor_logs
                 WHERE {where}
                 ORDER BY id DESC LIMIT ? OFFSET ?
@@ -631,6 +700,9 @@ async def list_wp_visitors(
                     "utm_source": r[20], "utm_medium": r[21], "utm_campaign": r[22],
                     "duration_seconds": r[23] or 0,
                     "source": _classify_source(r[20], r[21], r[6]),
+                    "scroll_depth": int(r[24] or 0),
+                    "milestone_10s": bool(r[25]),
+                    "milestone_30s": bool(r[26]),
                 }
                 for r in rows
             ]
