@@ -239,16 +239,39 @@ def _get_client_ip(request: Request) -> str:
 async def _get_ip_location(ip_address: str) -> Dict[str, str]:
     """
     IP 주소로 위치 정보 조회.
-    1순위: ip-api.com (city/region/country, 무료 45회/분)
-    2순위 폴백: IPInfo Lite (country만, 무제한) - 429/401/타임아웃 시 자동 전환
+    1순위: ip2location.io (city/region/country, 무료 30,000회/월) - 정확도 높음
+    2순위 폴백: ip-api.com (city/region/country, 무료 45회/분) - 한도 초과 시 자동 전환
     """
     result = {"country": "", "region": "", "city": ""}
 
     if not ip_address or ip_address in ("unknown", "127.0.0.1", "localhost", "::1"):
         return result
 
+    from backend.app.config import settings
+
     async with httpx.AsyncClient(timeout=3.0) as client:
-        # ── 1순위: ip-api.com ────────────────────────────────
+        # ── 1순위: ip2location.io ────────────────────────────
+        try:
+            key = settings.IP2LOCATION_KEY
+            if key:
+                resp = await client.get(
+                    "https://api.ip2location.io/",
+                    params={"key": key, "ip": ip_address, "format": "json"},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    city = data.get("city_name", "")
+                    region = data.get("region_name", "")
+                    country = data.get("country_name", "")
+                    if country and country != "-":
+                        result["country"] = country
+                        result["region"] = "" if region == "-" else region
+                        result["city"] = "" if city == "-" else city
+                        return result
+        except Exception:
+            pass
+
+        # ── 2순위 폴백: ip-api.com ───────────────────────────
         try:
             resp = await client.get(f"http://ip-api.com/json/{ip_address}?lang=ko")
             if resp.status_code == 200:
@@ -257,23 +280,6 @@ async def _get_ip_location(ip_address: str) -> Dict[str, str]:
                     result["country"] = data.get("country", "")
                     result["region"] = data.get("regionName", "")
                     result["city"] = data.get("city", "")
-                    return result
-        except Exception:
-            pass
-
-        # ── 2순위 폴백: IPInfo Lite (country만, 무제한) ──────
-        try:
-            from backend.app.config import settings
-            token = settings.IPINFO_TOKEN
-            if token:
-                resp = await client.get(
-                    f"https://api.ipinfo.io/lite/{ip_address}",
-                    params={"token": token},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    result["country"] = data.get("country_name") or data.get("국가", "")
-                    # Lite는 city/region 미제공 → 빈 문자열 유지
         except Exception:
             pass
 
