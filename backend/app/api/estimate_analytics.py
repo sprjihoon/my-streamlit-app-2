@@ -330,7 +330,7 @@ async def log_visit(body: VisitorLogRequest, request: Request):
                     ua_info["os"], ua_info["browser"], device_type,
                     body.screen_width, body.screen_height, body.language,
                     body.timezone, body.platform, body.vendor,
-                    body.session_id, 
+                    body.session_id,
                     1 if body.is_touch_device else 0,
                     1 if body.is_mobile else 0,
                     body.inner_width, body.inner_height,
@@ -339,8 +339,18 @@ async def log_visit(body: VisitorLogRequest, request: Request):
                     kst_now,
                 ),
             )
+            # 같은 IP의 기존 행들도 최신 지역 정보로 일괄 업데이트
+            if country:
+                con.execute(
+                    """
+                    UPDATE estimate_visitor_logs
+                    SET country = ?, region = ?, city = ?
+                    WHERE ip_address = ?
+                    """,
+                    (country, region, city, ip_address),
+                )
             con.commit()
-        
+
         return {"success": True, "ip": ip_address, "is_mobile": body.is_mobile, "is_touch": body.is_touch_device}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
