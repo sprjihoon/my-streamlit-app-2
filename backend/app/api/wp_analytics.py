@@ -68,7 +68,8 @@ def _ensure_columns(con):
 
 
 def _build_where(date_from: Optional[str], date_to: Optional[str], excluded_ips: Optional[List[str]] = None) -> tuple:
-    """WordPress 도메인 + 날짜 필터 WHERE절과 params 반환 (한국시간 KST = UTC+9 기준)"""
+    """WordPress 도메인 + 날짜 필터 WHERE절과 params 반환
+    created_at은 이미 KST로 저장되므로 별도 오프셋 불필요."""
     ips = excluded_ips or []
     if ips:
         placeholders = ",".join("?" * len(ips))
@@ -78,10 +79,10 @@ def _build_where(date_from: Optional[str], date_to: Optional[str], excluded_ips:
         where = f"page_url LIKE '%{WP_DOMAIN}%'"
         params = []
     if date_from:
-        where += " AND date(created_at, '+9 hours') >= ?"
+        where += " AND date(created_at) >= ?"
         params.append(date_from)
     if date_to:
-        where += " AND date(created_at, '+9 hours') <= ?"
+        where += " AND date(created_at) <= ?"
         params.append(date_to)
     return where, params
 
@@ -242,7 +243,7 @@ async def get_wp_stats(
             # 시간대 / 요일 (한국시간 KST = UTC+9 기준)
             hourly_stats = con.execute(
                 f"""
-                SELECT strftime('%H', created_at, '+9 hours') as h, COUNT(*)
+                SELECT strftime('%H', created_at) as h, COUNT(*)
                 FROM estimate_visitor_logs WHERE {where}
                 GROUP BY h ORDER BY h
                 """, params,
@@ -251,11 +252,11 @@ async def get_wp_stats(
             weekday_stats = con.execute(
                 f"""
                 SELECT
-                    CASE strftime('%w', created_at, '+9 hours')
+                    CASE strftime('%w', created_at)
                         WHEN '0' THEN '일' WHEN '1' THEN '월' WHEN '2' THEN '화'
                         WHEN '3' THEN '수' WHEN '4' THEN '목' WHEN '5' THEN '금'
                         WHEN '6' THEN '토' END as wd,
-                    strftime('%w', created_at, '+9 hours') as wn,
+                    strftime('%w', created_at) as wn,
                     COUNT(*)
                 FROM estimate_visitor_logs WHERE {where}
                 GROUP BY wn ORDER BY wn
@@ -278,10 +279,10 @@ async def get_wp_stats(
                 """, params,
             ).fetchall()
 
-            # 일별 추이 (한국시간 KST = UTC+9 기준)
+            # 일별 추이
             daily_visits = con.execute(
                 f"""
-                SELECT date(created_at, '+9 hours') as d, COUNT(*)
+                SELECT date(created_at) as d, COUNT(*)
                 FROM estimate_visitor_logs WHERE {where}
                 GROUP BY d ORDER BY d DESC LIMIT 30
                 """, params,
@@ -514,8 +515,8 @@ async def get_page_flow(
                 WHERE a.page_url LIKE '%{WP_DOMAIN}%'
                   AND b.page_url LIKE '%{WP_DOMAIN}%'
                   AND a.session_id IS NOT NULL AND a.session_id != ''
-                  {'AND date(a.created_at, \'+9 hours\') >= ?' if date_from else ''}
-                  {'AND date(a.created_at, \'+9 hours\') <= ?' if date_to else ''}
+                  {'AND date(a.created_at) >= ?' if date_from else ''}
+                  {'AND date(a.created_at) <= ?' if date_to else ''}
                 GROUP BY from_page, to_page
                 ORDER BY cnt DESC LIMIT 20
                 """,
@@ -632,7 +633,7 @@ async def get_ip_sessions(
                     MAX(COALESCE(scroll_depth, 0)) as max_scroll_depth,
                     MAX(COALESCE(milestone_10s, 0)) as has_10s,
                     MAX(COALESCE(milestone_30s, 0)) as has_30s,
-                    COUNT(DISTINCT date(created_at, '+9 hours')) as visit_days
+                    COUNT(DISTINCT date(created_at)) as visit_days
                 FROM estimate_visitor_logs
                 WHERE {where}
                 GROUP BY ip_address
