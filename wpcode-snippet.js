@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var API_BASE = 'https://YOUR_API_URL';  // ← 실제 API 주소로 변경
+  var API_BASE = 'https://my-streamlit-app-2-production.up.railway.app';
 
   // ── 세션 ID 생성/유지 ──────────────────────────────────
   function getOrCreateSessionId() {
