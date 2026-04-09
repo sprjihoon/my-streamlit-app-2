@@ -168,6 +168,25 @@ UNIQUE_KEY: dict[str, list[str] | None] = {
     "kpost_ret": ["등기번호", "배달일자"],
 }
 
+# 우체국 데이터 허용 컬럼 (화이트리스트)
+# 계산에 필요한 컬럼만 DB에 저장 — 이름·주소·전화번호 등 개인정보는 자동 제외
+KPOST_ALLOWED_COLS: dict[str, set[str]] = {
+    "kpost_in": {
+        "발송인명",    # 거래처 필터링 키 (업체명)
+        "접수일자",    # 날짜 필터
+        "우편물부피",  # 사이즈 구간 계산
+        "등기번호",    # 중복 제거 키
+        "도서행",      # 도서산간 여부
+    },
+    "kpost_ret": {
+        "수취인명",    # 거래처 필터링 키 (업체명)
+        "배달일자",    # 날짜 필터
+        "우편물부피",  # 사이즈 구간 계산
+        "등기번호",    # 중복 제거 키
+        "수량",        # 건수 집계
+    },
+}
+
 
 # ───────────── 헬퍼 ──────────────────────────────────────
 def _md5(file: BinaryIO) -> str:
@@ -265,32 +284,32 @@ def _read_excel_with_best_sheet(path: Path, **kwargs) -> pd.DataFrame:
     → 빈 템플릿 행(no열만 채워진)이 많은 시트가 잘못 선택되는 버그 방지
     """
     try:
-        xl = pd.ExcelFile(path)
-        sheet_names = xl.sheet_names
+        with pd.ExcelFile(path) as xl:
+            sheet_names = xl.sheet_names
 
-        if len(sheet_names) == 1:
-            return pd.read_excel(path, **kwargs)
+            if len(sheet_names) == 1:
+                return pd.read_excel(xl, **kwargs)
 
-        best_sheet = None
-        best_row_count = 0
+            best_sheet = None
+            best_row_count = 0
 
-        for sheet_name in sheet_names:
-            try:
-                df_check = pd.read_excel(path, sheet_name=sheet_name, nrows=5)
-                if len(df_check.columns) > 0 and len(df_check) > 0:
-                    df_full = pd.read_excel(path, sheet_name=sheet_name, **kwargs)
-                    # 의미있는 데이터 행수 기준으로 최적 시트 선택
-                    meaningful_count = _count_meaningful_rows(df_full)
-                    if meaningful_count > best_row_count:
-                        best_row_count = meaningful_count
-                        best_sheet = sheet_name
-            except Exception:
-                continue
+            for sheet_name in sheet_names:
+                try:
+                    df_check = pd.read_excel(xl, sheet_name=sheet_name, nrows=5)
+                    if len(df_check.columns) > 0 and len(df_check) > 0:
+                        df_full = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
+                        # 의미있는 데이터 행수 기준으로 최적 시트 선택
+                        meaningful_count = _count_meaningful_rows(df_full)
+                        if meaningful_count > best_row_count:
+                            best_row_count = meaningful_count
+                            best_sheet = sheet_name
+                except Exception:
+                    continue
 
-        if best_sheet:
-            return pd.read_excel(path, sheet_name=best_sheet, **kwargs)
+            if best_sheet:
+                return pd.read_excel(xl, sheet_name=best_sheet, **kwargs)
 
-        return pd.read_excel(path, **kwargs)
+            return pd.read_excel(xl, **kwargs)
 
     except Exception:
         return pd.read_excel(path, **kwargs)
@@ -303,26 +322,26 @@ def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
     no+날짜 기준으로 시트간 중복 행을 제거합니다.
     """
     try:
-        xl = pd.ExcelFile(path)
-        dfs = []
-        for sheet_name in xl.sheet_names:
-            try:
-                df_sheet = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
-                if _count_meaningful_rows(df_sheet) > 0:
-                    dfs.append(df_sheet)
-            except Exception:
-                continue
-        if dfs:
-            df_concat = pd.concat(dfs, ignore_index=True)
-            # no + 날짜 컬럼이 모두 있으면 시트간 중복 제거
-            if "no" in df_concat.columns and "날짜" in df_concat.columns:
-                before = len(df_concat)
-                df_concat = df_concat.drop_duplicates(subset=["no", "날짜"], keep="first")
-                removed = before - len(df_concat)
-                if removed > 0:
-                    print(f"[work_log] 시트간 중복 {removed}건 제거")
-            return df_concat.reset_index(drop=True)
-        return pd.read_excel(path, **kwargs)
+        with pd.ExcelFile(path) as xl:
+            dfs = []
+            for sheet_name in xl.sheet_names:
+                try:
+                    df_sheet = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
+                    if _count_meaningful_rows(df_sheet) > 0:
+                        dfs.append(df_sheet)
+                except Exception:
+                    continue
+            if dfs:
+                df_concat = pd.concat(dfs, ignore_index=True)
+                # no + 날짜 컬럼이 모두 있으면 시트간 중복 제거
+                if "no" in df_concat.columns and "날짜" in df_concat.columns:
+                    before = len(df_concat)
+                    df_concat = df_concat.drop_duplicates(subset=["no", "날짜"], keep="first")
+                    removed = before - len(df_concat)
+                    if removed > 0:
+                        print(f"[work_log] 시트간 중복 {removed}건 제거")
+                return df_concat.reset_index(drop=True)
+            return pd.read_excel(xl, **kwargs)
     except Exception:
         return pd.read_excel(path, **kwargs)
 
@@ -375,7 +394,7 @@ def ingest(
         ).fetchone():
             return False, "⚠️ 이미 동일한 파일을 업로드했습니다."
 
-    # 3) 저장 + DataFrame
+    # 3) 임시 저장 → DataFrame 읽기 → 원본 파일 즉시 삭제
     path, fname = _save_file_to_disk(file, orig_name)
 
     # 송장/등기번호 컬럼을 문자열로 읽기 (모든 테이블 공통)
@@ -390,6 +409,9 @@ def ingest(
             df = _read_excel_or_html(path, **read_kwargs)
     except Exception as e:
         return False, f"⚠️ 파일 읽기 실패: {str(e)}"
+    finally:
+        # 성공/실패 여부에 관계없이 원본 파일 즉시 삭제 (개인정보 보호)
+        path.unlink(missing_ok=True)
     
     # 컬럼명 정리 (공백 제거, 줄바꿈 제거, 특수 공백 문자 제거)
     df.columns = (
@@ -404,6 +426,12 @@ def ingest(
     for col in TRACK_COLS:
         if col in df.columns:
             df[col] = normalize_tracking(df[col])
+
+    # 3-1) 개인정보 보호: kpost_in / kpost_ret 화이트리스트 필터링
+    # 계산에 필요한 컬럼만 유지하고, 이름·주소·전화번호 등은 DB에 저장하지 않음
+    if table in KPOST_ALLOWED_COLS:
+        allowed = KPOST_ALLOWED_COLS[table]
+        df = df[[c for c in df.columns if c in allowed]]
 
     # 4) 날짜 컬럼 파싱 (모든 테이블에 적용)
     date_col = DATE_COL.get(table)
