@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     NAVER_WORKS_PRIVATE_KEY_PATH: str = "private_key.key"
     
     # ─────────────────────────────────────
+    # IPInfo Lite API 설정 (IP 지역 조회 폴백)
+    # ─────────────────────────────────────
+    IPINFO_TOKEN: str = ""
+
+    # ─────────────────────────────────────
     # OpenAI API 설정
     # ─────────────────────────────────────
     OPENAI_API_KEY: str = ""
