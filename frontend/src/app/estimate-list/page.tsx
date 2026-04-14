@@ -75,6 +75,30 @@ export default function EstimateListPage() {
   ]);
   const [createLoading, setCreateLoading] = useState(false);
 
+  // 자동 계산 섹션
+  const [showAutoCalc, setShowAutoCalc] = useState(true);
+  const [autoCalcLoading, setAutoCalcLoading] = useState(false);
+  const [createMonthlyOutbound, setCreateMonthlyOutbound] = useState(1000);
+  const [createReturnPct, setCreateReturnPct] = useState(0);
+  const [createInboundQty, setCreateInboundQty] = useState(0);
+  const [createCombinedPct, setCreateCombinedPct] = useState(0);
+  const [createCombinedAvgQty, setCreateCombinedAvgQty] = useState(0);
+  const [createStoragePlt, setCreateStoragePlt] = useState(0);
+  const [createSkuCount, setCreateSkuCount] = useState(0);
+  const [createZoneRatios, setCreateZoneRatios] = useState<Record<string, number>>({ 극소: 70, 소: 20, 중: 7, 대: 3 });
+  const [createPpBagProvider, setCreatePpBagProvider] = useState<'brand' | 'ours'>('brand');
+  const [createMailerProvider, setCreateMailerProvider] = useState<'brand' | 'ours'>('brand');
+  const [createCourierBoxProvider, setCreateCourierBoxProvider] = useState<'brand' | 'ours'>('brand');
+  const [createNeedQualityWork, setCreateNeedQualityWork] = useState(false);
+  const [createNeedTexWork, setCreateNeedTexWork] = useState(false);
+  const [createNeedBarcodeAttach, setCreateNeedBarcodeAttach] = useState(false);
+  const [createNeedVoidWork, setCreateNeedVoidWork] = useState(false);
+  const [createNeedVideoOut, setCreateNeedVideoOut] = useState(false);
+  const [createNeedVideoRet, setCreateNeedVideoRet] = useState(false);
+  const [createNeedStickerAttach, setCreateNeedStickerAttach] = useState(false);
+  const [createNeedLeafletInsert, setCreateNeedLeafletInsert] = useState(false);
+  const [createNeedB2bDocument, setCreateNeedB2bDocument] = useState(false);
+
   useEffect(() => {
     loadEstimates();
   }, [page, pageSize]);
@@ -183,7 +207,114 @@ export default function EstimateListPage() {
     setCreateEmail('');
     setCreateBrandType('fashion');
     setCreateItems([{ 항목: '', 수량: 1, 단가: 0, 금액: 0, 비고: '' }]);
+    setShowAutoCalc(true);
+    setCreateMonthlyOutbound(1000);
+    setCreateReturnPct(0);
+    setCreateInboundQty(0);
+    setCreateCombinedPct(0);
+    setCreateCombinedAvgQty(0);
+    setCreateStoragePlt(0);
+    setCreateSkuCount(0);
+    setCreateZoneRatios({ 극소: 70, 소: 20, 중: 7, 대: 3 });
+    setCreatePpBagProvider('brand');
+    setCreateMailerProvider('brand');
+    setCreateCourierBoxProvider('brand');
+    setCreateNeedQualityWork(false);
+    setCreateNeedTexWork(false);
+    setCreateNeedBarcodeAttach(false);
+    setCreateNeedVoidWork(false);
+    setCreateNeedVideoOut(false);
+    setCreateNeedVideoRet(false);
+    setCreateNeedStickerAttach(false);
+    setCreateNeedLeafletInsert(false);
+    setCreateNeedB2bDocument(false);
     setIsCreating(true);
+  }
+
+  function handleZoneRatioChange(changedLabel: string, newValue: number) {
+    setCreateZoneRatios(prev => {
+      const clamped = Math.max(0, Math.min(100, Math.ceil(newValue)));
+      const updated = { ...prev, [changedLabel]: clamped };
+      const otherLabels = ['극소', '소', '중', '대'].filter(l => l !== changedLabel);
+      const otherSum = otherLabels.reduce((s, l) => s + (updated[l] || 0), 0);
+      const targetOtherSum = 100 - clamped;
+      const diff = targetOtherSum - otherSum;
+      if (diff === 0) return updated;
+      const sorted = [...otherLabels].sort((a, b) => (updated[b] || 0) - (updated[a] || 0));
+      let remaining = Math.abs(diff);
+      for (const label of sorted) {
+        if (remaining <= 0) break;
+        const cur = updated[label] || 0;
+        if (diff < 0) {
+          const d = Math.min(cur, remaining);
+          updated[label] = cur - d;
+          remaining -= d;
+        } else {
+          const a = Math.min(100 - cur, remaining);
+          updated[label] = cur + a;
+          remaining -= a;
+        }
+      }
+      return updated;
+    });
+  }
+
+  function zoneRatiosToDecimal() {
+    const sum = Object.values(createZoneRatios).reduce((a, b) => a + (Number(b) || 0), 0);
+    if (sum <= 0) return { 극소: 1 };
+    const out: Record<string, number> = {};
+    ['극소', '소', '중', '대'].forEach(label => {
+      out[label] = (Number(createZoneRatios[label]) || 0) / sum;
+    });
+    return out;
+  }
+
+  async function handleAutoCalculate() {
+    setAutoCalcLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/estimate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: createCompanyName,
+          contact: createContact,
+          email: createEmail,
+          monthly_outbound: createMonthlyOutbound,
+          rate_type: '표준',
+          zone_ratios: zoneRatiosToDecimal(),
+          return_percentage: createReturnPct,
+          inbound_qty: createInboundQty,
+          combined_percentage: createCombinedPct,
+          combined_avg_qty: createCombinedAvgQty || undefined,
+          brand_type: createBrandType,
+          need_quality_work: createBrandType === 'fashion' ? createNeedQualityWork : false,
+          pp_bag_provider: createPpBagProvider,
+          mailer_provider: createMailerProvider,
+          courier_box_provider: createCourierBoxProvider,
+          need_tex_work: createNeedTexWork,
+          need_barcode_attach: createNeedBarcodeAttach,
+          need_void_work: createNeedVoidWork,
+          need_video_out: createNeedVideoOut,
+          need_video_ret: createNeedVideoRet,
+          need_sticker_attach: createNeedStickerAttach,
+          need_leaflet_insert: createNeedLeafletInsert,
+          need_b2b_document: createNeedB2bDocument,
+          storage_plt: createStoragePlt || undefined,
+          sku_count: createSkuCount || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error('자동 계산 실패');
+      const data = await res.json();
+      if (data.items && data.items.length > 0) {
+        setCreateItems(data.items.map((it: EstimateItem) => ({ ...it })));
+        setShowAutoCalc(false);
+        setSuccess('항목이 자동으로 채워졌습니다. 필요 시 수정 후 저장하세요.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '자동 계산 실패');
+    } finally {
+      setAutoCalcLoading(false);
+    }
   }
 
   function closeCreateModal() {
@@ -607,6 +738,169 @@ export default function EstimateListPage() {
                     </select>
                   </div>
                 </div>
+              </div>
+
+              {/* 자동 계산 섹션 */}
+              <div style={{ marginBottom: '1.25rem', border: '1px solid #bfdbfe', borderRadius: 12, overflow: 'hidden' }}>
+                <button
+                  onClick={() => setShowAutoCalc(v => !v)}
+                  style={{
+                    width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '0.75rem 1rem', background: '#eff6ff', border: 'none', cursor: 'pointer',
+                    fontSize: '0.875rem', fontWeight: 700, color: '#1d4ed8',
+                  }}
+                >
+                  <span>자동 계산으로 항목 채우기</span>
+                  <span style={{ fontSize: '0.8rem', fontWeight: 400, color: '#3b82f6' }}>
+                    {showAutoCalc ? '▲ 접기' : '▼ 펼치기'}
+                  </span>
+                </button>
+                {showAutoCalc && (
+                  <div style={{ padding: '1rem', background: '#f8faff' }}>
+                    {/* 기본 수치 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.65rem', marginBottom: '0.75rem' }}>
+                      {[
+                        { label: '월 출고건수', value: createMonthlyOutbound, set: (v: number) => setCreateMonthlyOutbound(v) },
+                        { label: '반품 비율 (%)', value: createReturnPct, set: (v: number) => setCreateReturnPct(Math.min(100, v)) },
+                        { label: '입고수량', value: createInboundQty, set: (v: number) => setCreateInboundQty(v) },
+                        { label: '합포장 비율 (%)', value: createCombinedPct, set: (v: number) => setCreateCombinedPct(Math.min(100, v)) },
+                        { label: '합포장 평균 수량', value: createCombinedAvgQty, set: (v: number) => setCreateCombinedAvgQty(v) },
+                        { label: '보관량 (PLT)', value: createStoragePlt, set: (v: number) => setCreateStoragePlt(v) },
+                        { label: 'SKU 수', value: createSkuCount, set: (v: number) => setCreateSkuCount(v) },
+                      ].map(({ label, value, set }) => (
+                        <div key={label}>
+                          <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#6b7280', marginBottom: 3 }}>{label}</label>
+                          <input
+                            type="number" min={0} step={1}
+                            value={value || ''}
+                            onChange={(e) => set(Math.ceil(Number(e.target.value)) || 0)}
+                            style={{ ...smallInputStyle, width: '100%' }}
+                            placeholder="0"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 구간별 비율 */}
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>
+                        택배 구간별 비율
+                        <span style={{
+                          marginLeft: 8, fontSize: '0.7rem', fontWeight: 400,
+                          color: Object.values(createZoneRatios).reduce((a, b) => a + b, 0) === 100 ? '#10b981' : '#ef4444',
+                        }}>
+                          합계 {Object.values(createZoneRatios).reduce((a, b) => a + b, 0)}%
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {['극소', '소', '중', '대'].map((label) => (
+                          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 500, minWidth: 28, color: '#374151' }}>{label}</span>
+                            <input
+                              type="range" min={0} max={100} step={1}
+                              value={createZoneRatios[label] || 0}
+                              onChange={(e) => handleZoneRatioChange(label, Number(e.target.value))}
+                              style={{ flex: 1, height: 5, cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: '0.78rem', fontWeight: 600, minWidth: 36, textAlign: 'right', color: '#1d4ed8' }}>
+                              {createZoneRatios[label] || 0}%
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 포장재 제공 방식 */}
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>포장재 제공 방식</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {createBrandType === 'fashion' && (
+                          <>
+                            <div>
+                              <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: 3 }}>PP 봉투</div>
+                              <select
+                                value={createPpBagProvider}
+                                onChange={(e) => setCreatePpBagProvider(e.target.value as 'brand' | 'ours')}
+                                style={{ ...smallInputStyle, minWidth: 130 }}
+                              >
+                                <option value="brand">브랜드 제공</option>
+                                <option value="ours">풀필먼트 공용</option>
+                              </select>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: 3 }}>택배 봉투</div>
+                              <select
+                                value={createMailerProvider}
+                                onChange={(e) => setCreateMailerProvider(e.target.value as 'brand' | 'ours')}
+                                style={{ ...smallInputStyle, minWidth: 130 }}
+                              >
+                                <option value="brand">브랜드 제공</option>
+                                <option value="ours">풀필먼트 공용</option>
+                              </select>
+                            </div>
+                          </>
+                        )}
+                        <div>
+                          <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: 3 }}>택배박스</div>
+                          <select
+                            value={createCourierBoxProvider}
+                            onChange={(e) => setCreateCourierBoxProvider(e.target.value as 'brand' | 'ours')}
+                            style={{ ...smallInputStyle, minWidth: 130 }}
+                          >
+                            <option value="brand">브랜드 제공</option>
+                            <option value="ours">풀필먼트 공용</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 부가 작업 */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>부가 작업</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {([
+                          ...(createBrandType === 'fashion' ? [{ label: '양품화', value: createNeedQualityWork, set: setCreateNeedQualityWork }] : []),
+                          { label: '텍작업', value: createNeedTexWork, set: setCreateNeedTexWork },
+                          { label: '바코드 부착', value: createNeedBarcodeAttach, set: setCreateNeedBarcodeAttach },
+                          { label: '완충작업', value: createNeedVoidWork, set: setCreateNeedVoidWork },
+                          { label: '출고영상촬영', value: createNeedVideoOut, set: setCreateNeedVideoOut },
+                          { label: '반품영상촬영', value: createNeedVideoRet, set: setCreateNeedVideoRet },
+                          { label: '스티커 부착', value: createNeedStickerAttach, set: setCreateNeedStickerAttach },
+                          { label: '리플릿 동봉', value: createNeedLeafletInsert, set: setCreateNeedLeafletInsert },
+                          { label: 'B2B동봉서류', value: createNeedB2bDocument, set: setCreateNeedB2bDocument },
+                        ] as Array<{ label: string; value: boolean; set: (v: boolean) => void }>).map(({ label, value, set }) => (
+                          <label
+                            key={label}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '4px 10px', borderRadius: 16, cursor: 'pointer', fontSize: '0.78rem',
+                              border: `1px solid ${value ? '#3b82f6' : '#d1d5db'}`,
+                              background: value ? '#dbeafe' : '#fff',
+                              color: value ? '#1d4ed8' : '#6b7280',
+                              fontWeight: value ? 600 : 400, transition: 'all .12s',
+                            }}
+                          >
+                            <input type="checkbox" checked={value} onChange={(e) => set(e.target.checked)} style={{ display: 'none' }} />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleAutoCalculate}
+                      disabled={autoCalcLoading}
+                      style={{
+                        width: '100%', padding: '0.6rem', border: 'none', borderRadius: 8,
+                        background: autoCalcLoading ? '#93c5fd' : '#3b82f6', color: '#fff',
+                        fontSize: '0.875rem', fontWeight: 700,
+                        cursor: autoCalcLoading ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {autoCalcLoading ? '계산 중...' : '자동으로 항목 계산하기'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* 견적 항목 */}
