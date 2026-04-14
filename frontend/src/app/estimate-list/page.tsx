@@ -64,6 +64,17 @@ export default function EstimateListPage() {
   // PDF 다운로드 로딩
   const [pdfLoading, setPdfLoading] = useState(false);
 
+  // 새 견적서 생성 모달
+  const [isCreating, setIsCreating] = useState(false);
+  const [createCompanyName, setCreateCompanyName] = useState('');
+  const [createContact, setCreateContact] = useState('');
+  const [createEmail, setCreateEmail] = useState('');
+  const [createBrandType, setCreateBrandType] = useState('fashion');
+  const [createItems, setCreateItems] = useState<EstimateItem[]>([
+    { 항목: '', 수량: 1, 단가: 0, 금액: 0, 비고: '' },
+  ]);
+  const [createLoading, setCreateLoading] = useState(false);
+
   useEffect(() => {
     loadEstimates();
   }, [page, pageSize]);
@@ -166,6 +177,82 @@ export default function EstimateListPage() {
     return editItems.reduce((sum, item) => sum + (item.금액 || 0), 0);
   }
 
+  function openCreateModal() {
+    setCreateCompanyName('');
+    setCreateContact('');
+    setCreateEmail('');
+    setCreateBrandType('fashion');
+    setCreateItems([{ 항목: '', 수량: 1, 단가: 0, 금액: 0, 비고: '' }]);
+    setIsCreating(true);
+  }
+
+  function closeCreateModal() {
+    setIsCreating(false);
+  }
+
+  function updateCreateItem(index: number, field: keyof EstimateItem, value: string | number) {
+    setCreateItems(prev => {
+      const newItems = [...prev];
+      if (field === '항목' || field === '비고') {
+        newItems[index] = { ...newItems[index], [field]: value as string };
+      } else {
+        const numValue = typeof value === 'string' ? parseInt(value) || 0 : value;
+        newItems[index] = { ...newItems[index], [field]: numValue };
+        if (field === '수량' || field === '단가') {
+          newItems[index].금액 = newItems[index].수량 * newItems[index].단가;
+        }
+      }
+      return newItems;
+    });
+  }
+
+  function addCreateItem() {
+    setCreateItems(prev => [...prev, { 항목: '', 수량: 1, 단가: 0, 금액: 0, 비고: '' }]);
+  }
+
+  function removeCreateItem(index: number) {
+    setCreateItems(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function getCreateTotalAmount() {
+    return createItems.reduce((sum, item) => sum + (item.금액 || 0), 0);
+  }
+
+  async function handleCreateSave() {
+    if (!createCompanyName.trim()) {
+      setError('업체명을 입력해주세요.');
+      return;
+    }
+    if (createItems.length === 0 || createItems.every(it => !it.항목.trim())) {
+      setError('최소 1개 이상의 견적 항목을 입력해주세요.');
+      return;
+    }
+    setCreateLoading(true);
+    try {
+      const totalAmount = getCreateTotalAmount();
+      const res = await fetch(`${API_BASE}/estimate/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: createCompanyName,
+          contact: createContact,
+          email: createEmail,
+          brand_type: createBrandType,
+          items: createItems.filter(it => it.항목.trim()),
+          total_amount: totalAmount,
+        }),
+      });
+      if (!res.ok) throw new Error('견적서 저장 실패');
+      setSuccess('견적서가 생성되었습니다.');
+      closeCreateModal();
+      loadEstimates();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '견적서 저장 실패');
+    } finally {
+      setCreateLoading(false);
+    }
+  }
+
   async function handleSaveEdit() {
     if (!detail) return;
     try {
@@ -256,9 +343,22 @@ export default function EstimateListPage() {
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '1rem' }}>
-      <h1 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', color: '#1f2937' }}>
-        견적서 목록
-      </h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h1 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1f2937', margin: 0 }}>
+          견적서 목록
+        </h1>
+        <button
+          onClick={openCreateModal}
+          style={{
+            padding: '0.55rem 1.2rem', border: 'none', borderRadius: 8,
+            background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff',
+            fontSize: '0.875rem', fontWeight: 700, cursor: 'pointer',
+            boxShadow: '0 2px 6px rgba(16,185,129,.35)',
+          }}
+        >
+          + 새 견적서 만들기
+        </button>
+      </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
@@ -417,6 +517,229 @@ export default function EstimateListPage() {
                 }}
               >
                 다음
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 새 견적서 생성 모달 */}
+      {isCreating && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, maxWidth: 820, width: '100%', maxHeight: '92vh',
+            overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 20px 50px rgba(0,0,0,.25)',
+          }}>
+            {/* 헤더 */}
+            <div style={{
+              padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+            }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
+                새 견적서 만들기
+              </h2>
+              <button
+                onClick={closeCreateModal}
+                style={{
+                  background: 'rgba(255,255,255,.2)', border: 'none', borderRadius: 8,
+                  padding: '6px 12px', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                닫기
+              </button>
+            </div>
+
+            {/* 본문 */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem' }}>
+              {/* 기본 정보 */}
+              <div style={{ background: '#f0fdf4', borderRadius: 12, padding: '1rem', marginBottom: '1.25rem', border: '1px solid #bbf7d0' }}>
+                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#065f46', marginBottom: '0.75rem', margin: '0 0 0.75rem' }}>
+                  기본 정보
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>
+                      업체명 <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={createCompanyName}
+                      onChange={(e) => setCreateCompanyName(e.target.value)}
+                      placeholder="업체명 입력"
+                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>연락처</label>
+                    <input
+                      type="text"
+                      value={createContact}
+                      onChange={(e) => setCreateContact(e.target.value)}
+                      placeholder="010-0000-0000"
+                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>이메일</label>
+                    <input
+                      type="email"
+                      value={createEmail}
+                      onChange={(e) => setCreateEmail(e.target.value)}
+                      placeholder="example@email.com"
+                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>브랜드 유형</label>
+                    <select
+                      value={createBrandType}
+                      onChange={(e) => setCreateBrandType(e.target.value)}
+                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', appearance: 'auto' as const }}
+                    >
+                      <option value="fashion">패션</option>
+                      <option value="beauty">뷰티</option>
+                      <option value="etc">기타</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* 견적 항목 */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', margin: 0 }}>
+                    견적 항목
+                  </h3>
+                  <button
+                    onClick={addCreateItem}
+                    style={{
+                      padding: '4px 12px', fontSize: '0.75rem', fontWeight: 600,
+                      background: '#10b981', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
+                    }}
+                  >
+                    + 항목 추가
+                  </button>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9' }}>
+                        <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 140 }}>항목명</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 80 }}>수량</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>단가 (₩)</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 110 }}>금액</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>비고</th>
+                        <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #e2e8f0', width: 50 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {createItems.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '0.4rem' }}>
+                            <input
+                              type="text"
+                              value={item.항목}
+                              onChange={(e) => updateCreateItem(idx, '항목', e.target.value)}
+                              style={{ ...smallInputStyle, width: '100%' }}
+                              placeholder="예: 출고비"
+                            />
+                          </td>
+                          <td style={{ padding: '0.4rem' }}>
+                            <input
+                              type="number"
+                              value={item.수량}
+                              onChange={(e) => updateCreateItem(idx, '수량', e.target.value)}
+                              style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                              min={0}
+                            />
+                          </td>
+                          <td style={{ padding: '0.4rem' }}>
+                            <input
+                              type="number"
+                              value={item.단가}
+                              onChange={(e) => updateCreateItem(idx, '단가', e.target.value)}
+                              style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                              min={0}
+                            />
+                          </td>
+                          <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 600, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
+                            ₩{fmt(item.금액)}
+                          </td>
+                          <td style={{ padding: '0.4rem' }}>
+                            <input
+                              type="text"
+                              value={item.비고 || ''}
+                              onChange={(e) => updateCreateItem(idx, '비고', e.target.value)}
+                              style={{ ...smallInputStyle, width: '100%' }}
+                              placeholder="비고"
+                            />
+                          </td>
+                          <td style={{ padding: '0.4rem', textAlign: 'center' }}>
+                            <button
+                              onClick={() => removeCreateItem(idx)}
+                              disabled={createItems.length === 1}
+                              style={{
+                                padding: '2px 8px', fontSize: '0.7rem', fontWeight: 600,
+                                background: createItems.length === 1 ? '#f3f4f6' : '#fee2e2',
+                                color: createItems.length === 1 ? '#d1d5db' : '#dc2626',
+                                border: 'none', borderRadius: 4,
+                                cursor: createItems.length === 1 ? 'default' : 'pointer',
+                              }}
+                            >
+                              삭제
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background: '#f8fafc' }}>
+                        <td colSpan={3} style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 700, fontSize: '0.85rem' }}>
+                          합계
+                        </td>
+                        <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#1d4ed8', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
+                          ₩{fmt(getCreateTotalAmount())}
+                        </td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* 푸터 버튼 */}
+            <div style={{
+              padding: '1rem 1.25rem', borderTop: '1px solid #e2e8f0',
+              display: 'flex', gap: 8, justifyContent: 'flex-end',
+            }}>
+              <button
+                onClick={closeCreateModal}
+                disabled={createLoading}
+                style={{
+                  padding: '0.65rem 1.5rem', border: '1px solid #d1d5db', borderRadius: 8,
+                  background: '#fff', color: '#374151', fontSize: '0.9rem', fontWeight: 600,
+                  cursor: createLoading ? 'not-allowed' : 'pointer', opacity: createLoading ? 0.6 : 1,
+                }}
+              >
+                취소
+              </button>
+              <button
+                onClick={handleCreateSave}
+                disabled={createLoading}
+                style={{
+                  padding: '0.65rem 1.5rem', border: 'none', borderRadius: 8,
+                  background: createLoading ? '#9ca3af' : '#10b981', color: '#fff',
+                  fontSize: '0.9rem', fontWeight: 700,
+                  cursor: createLoading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {createLoading ? '저장 중...' : '견적서 저장'}
               </button>
             </div>
           </div>
