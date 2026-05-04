@@ -148,13 +148,35 @@ def calculate_courier_fee_by_zone(
             df_post[col] = normalize_tracking(df_post[col])
 
         # 부피 숫자 추출 로직 보강
-        df_post["부피"] = (
-            df_post["부피"].astype(str)
-            .str.replace(r"[^0-9.]", "", regex=True)
-            .str.extract(r"(\d+(?:\.\d+)?)")[0]
-            .astype(float, errors="ignore")
-        )
+        try:
+            df_post["부피"] = pd.to_numeric(df_post["부피"], errors="coerce")
+        except Exception:
+            df_post["부피"] = (
+                df_post["부피"].astype(str)
+                .str.replace(r"[^0-9.]", "", regex=True)
+                .str.extract(r"(\d+(?:\.\d+)?)")[0]
+                .pipe(pd.to_numeric, errors="coerce")
+            )
         df_post["부피"] = df_post["부피"].fillna(0).round(0).astype(int)
+
+        # ── 부피 전부 0인 경우: 규격 텍스트 컬럼 fallback ────────────────
+        # 우체국 kpost_in 데이터에 우편물부피가 없고 규격(텍스트) 컬럼만 있는 경우 처리
+        if df_post["부피"].eq(0).all() and "규격" in df_post.columns:
+            # 규격 텍스트 → 대표 cm 값 매핑 (구간 중간값 사용)
+            ZONE_TEXT_TO_CM = {
+                "극소": 25, "소": 60, "중": 85, "대": 110,
+                "특대": 130, "특특대": 150,
+                # 영문/약자 대비
+                "xs": 25, "s": 60, "m": 85, "l": 110, "xl": 130, "xxl": 150,
+            }
+            def _text_to_cm(val):
+                if pd.isna(val):
+                    return 0
+                key = str(val).strip().lower()
+                return ZONE_TEXT_TO_CM.get(key, 0)
+            df_post["부피"] = df_post["규격"].apply(_text_to_cm)
+            if DEBUG_MODE:
+                print(f"⚠️ 우편물부피 전부 0 → 규격 텍스트 컬럼으로 대체: {df_post['부피'].value_counts().to_dict()}")
 
         # 중복 제거 (두 컬럼 모두 같을 때만)
         before = len(df_post)

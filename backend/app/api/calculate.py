@@ -528,6 +528,101 @@ async def debug_kpost_doseo(vendor: str, d_from: str, d_to: str):
         return {"error": str(e)}
 
 
+@router.get("/debug/kpost-volume")
+async def debug_kpost_volume(vendor: str, d_from: str, d_to: str):
+    """
+    kpost_in 우편물부피 실제 데이터 진단 (디버그용)
+    
+    택배요금이 전부 극소로 분류될 때, 이 엔드포인트로 실제 저장된 부피값을 확인하세요.
+    """
+    try:
+        with get_connection() as con:
+            tables = [row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            if "kpost_in" not in tables:
+                return {"error": "kpost_in 테이블이 없습니다."}
+
+            cols = [c[1] for c in con.execute("PRAGMA table_info(kpost_in)").fetchall()]
+            
+            # 별칭 포함 name_list
+            name_list = [vendor]
+            if "aliases" in tables:
+                alias_df = pd.read_sql(
+                    "SELECT alias FROM aliases WHERE vendor = ? AND file_type IN ('kpost_in', 'all')",
+                    con, params=(vendor,)
+                )
+                name_list.extend(alias_df["alias"].astype(str).str.strip().tolist())
+            
+            placeholders = ",".join("?" * len(name_list))
+
+            result = {
+                "kpost_in_columns": cols,
+                "has_우편물부피": "우편물부피" in cols,
+                "has_부피": "부피" in cols,
+                "vendor": vendor,
+                "name_list": name_list,
+                "d_from": d_from,
+                "d_to": d_to,
+            }
+
+            # 전체 기간 부피 분포
+            for vol_col in ["우편물부피", "부피"]:
+                if vol_col in cols:
+                    dist = con.execute(
+                        f"""SELECT [{vol_col}], COUNT(*) as cnt 
+                            FROM kpost_in 
+                            WHERE TRIM(발송인명) IN ({placeholders})
+                              AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
+                            GROUP BY [{vol_col}]
+                            ORDER BY cnt DESC 
+                            LIMIT 20""",
+                        (*name_list, d_from, d_to)
+                    ).fetchall()
+                    result[f"{vol_col}_분포"] = [{"값": r[0], "건수": r[1]} for r in dist]
+                    
+                    # 0이거나 NULL인 건수
+                    null_cnt = con.execute(
+                        f"""SELECT COUNT(*) FROM kpost_in 
+                            WHERE TRIM(발송인명) IN ({placeholders})
+                              AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
+                              AND (CAST([{vol_col}] AS INTEGER) = 0 OR [{vol_col}] IS NULL)""",
+                        (*name_list, d_from, d_to)
+                    ).fetchone()[0]
+                    total_period = con.execute(
+                        f"""SELECT COUNT(*) FROM kpost_in 
+                            WHERE TRIM(발송인명) IN ({placeholders})
+                              AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)""",
+                        (*name_list, d_from, d_to)
+                    ).fetchone()[0]
+                    result[f"{vol_col}_null_or_zero"] = null_cnt
+                    result[f"{vol_col}_total"] = total_period
+                    result[f"{vol_col}_null_비율"] = f"{null_cnt}/{total_period} ({round(null_cnt/total_period*100) if total_period else 0}%)"
+
+            # 샘플 5행 (전체 컬럼)
+            sample_rows = con.execute(
+                f"""SELECT * FROM kpost_in 
+                    WHERE TRIM(발송인명) IN ({placeholders})
+                      AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?)
+                    LIMIT 5""",
+                (*name_list, d_from, d_to)
+            ).fetchall()
+            col_names = [desc[0] for desc in con.execute(
+                f"SELECT * FROM kpost_in WHERE TRIM(발송인명) IN ({placeholders}) AND DATE(접수일자) BETWEEN DATE(?) AND DATE(?) LIMIT 1",
+                (*name_list, d_from, d_to)
+            ).description or []]
+            result["sample_rows"] = [dict(zip(col_names, row)) for row in sample_rows]
+
+            # shipping_zone 확인
+            if "shipping_zone" in tables:
+                zone_dist = pd.read_sql("SELECT * FROM shipping_zone ORDER BY 요금제, len_min_cm", con)
+                result["shipping_zone"] = zone_dist.to_dict(orient="records")
+
+            return result
+
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 # ─────────────────────────────────────
 # 배송통계 조회
 # ─────────────────────────────────────

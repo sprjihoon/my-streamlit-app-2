@@ -129,18 +129,22 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str, items_list: Lis
         for col in track_cols:
             df_post[col] = normalize_tracking(df_post[col])
 
-        # ── 부피 숫자 추출 로직 보강 ─────────────────────────────
-        #   ① 숫자·소수점 이외 문자 제거 → "80cm" → "80"
-        #   ② 첫 번째 정수/소수 패턴 추출 → r"(\d+(?:\.\d+)?)"
-        #   ③ float → round → int
-        df_post["부피"] = (
-            df_post["부피"].astype(str)
-            .str.replace(r"[^0-9.]", "", regex=True)           # 숫자·. 만 남김
-            .str.extract(r"(\d+(?:\.\d+)?)")[0]
-            .astype(float, errors="ignore")
-        )
-
+        # ── 부피 숫자 추출 ──────────────────────────────────────
+        df_post["부피"] = pd.to_numeric(df_post["부피"], errors="coerce")
         df_post["부피"] = df_post["부피"].fillna(0).round(0).astype(int)
+
+        # 부피 전부 0이고 규격 텍스트 컬럼이 있으면 fallback
+        if df_post["부피"].eq(0).all() and "규격" in df_post.columns:
+            ZONE_TEXT_TO_CM = {
+                "극소": 25, "소": 60, "중": 85, "대": 110,
+                "특대": 130, "특특대": 150,
+                "xs": 25, "s": 60, "m": 85, "l": 110, "xl": 130, "xxl": 150,
+            }
+            def _text_to_cm(val):
+                if pd.isna(val):
+                    return 0
+                return ZONE_TEXT_TO_CM.get(str(val).strip().lower(), 0)
+            df_post["부피"] = df_post["규격"].apply(_text_to_cm)
 
         # ── 3️⃣  두 컬럼 조합으로 중복 제거 + 4️⃣ 로그 출력 ────────────────
         # 3️⃣  중복 제거 (두 컬럼 모두 같을 때만)
