@@ -356,32 +356,74 @@ export default function InvoiceListPage() {
     }
   }
 
+  // 공통 파일 다운로드 헬퍼
+  async function downloadFile(url: string, defaultFilename: string) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        let detail = `다운로드 실패 (HTTP ${res.status})`;
+        try {
+          const errData = await res.json();
+          detail = errData.detail || detail;
+        } catch {}
+        setError(detail);
+        return;
+      }
+      const contentDisposition = res.headers.get('Content-Disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      const filename = filenameMatch ? filenameMatch[1].replace(/['"]/g, '') : defaultFilename;
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '다운로드 중 오류 발생');
+    }
+  }
+
   // 엑셀 다운로드 - 전체
-  function handleExportAll() {
+  async function handleExportAll() {
     const params = new URLSearchParams();
     if (selectedPeriod) params.append('period', selectedPeriod);
     if (selectedVendor) params.append('vendor', selectedVendor);
-    window.open(`${API_URL}/invoices/export/xlsx?${params.toString()}`, '_blank');
+    await downloadFile(
+      `${API_URL}/invoices/export/xlsx?${params.toString()}`,
+      `invoices_${selectedPeriod || 'all'}.xlsx`
+    );
   }
 
   // 엑셀 다운로드 - 선택
-  function handleExportSelected() {
+  async function handleExportSelected() {
     if (selectedIds.length === 0) {
       alert('선택된 인보이스가 없습니다.');
       return;
     }
     const idsStr = selectedIds.join(',');
-    window.open(`${API_URL}/invoices/export/xlsx?invoice_ids=${idsStr}`, '_blank');
+    await downloadFile(
+      `${API_URL}/invoices/export/xlsx?invoice_ids=${idsStr}`,
+      `invoices_selected_${selectedIds.length}건.xlsx`
+    );
   }
 
   // 엑셀 다운로드 - 단일
-  function handleExportSingle(invoiceId: number) {
-    window.open(`${API_URL}/invoices/${invoiceId}/export/xlsx`, '_blank');
+  async function handleExportSingle(invoiceId: number) {
+    await downloadFile(
+      `${API_URL}/invoices/${invoiceId}/export/xlsx`,
+      `invoice_${invoiceId}.xlsx`
+    );
   }
 
   // PDF 다운로드 - 단일
-  function handleExportPdf(invoiceId: number) {
-    window.open(`${API_URL}/invoices/${invoiceId}/export/pdf`, '_blank');
+  async function handleExportPdf(invoiceId: number) {
+    await downloadFile(
+      `${API_URL}/invoices/${invoiceId}/export/pdf`,
+      `invoice_${invoiceId}.pdf`
+    );
   }
 
   // 편집 항목 합계 계산

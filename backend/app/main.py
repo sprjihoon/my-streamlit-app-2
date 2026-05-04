@@ -41,6 +41,7 @@ app.add_middleware(
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=settings.cors_methods_list,
     allow_headers=settings.CORS_ALLOW_HEADERS.split(",") if settings.CORS_ALLOW_HEADERS != "*" else ["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 

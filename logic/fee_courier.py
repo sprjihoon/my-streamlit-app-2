@@ -120,21 +120,27 @@ def calculate_courier_fee_by_zone(
                 발송인_counts = df_post["발송인명"].value_counts()
                 print(f"발송인명별 건수: {발송인_counts.head(10).to_dict()}")
 
-        # 필수 컬럼/행 체크 - 부피 컬럼명 확인 (부피 또는 우편물부피)
-        volume_col = None
-        for col_name in ["부피", "우편물부피"]:
-            if col_name in df_post.columns:
-                volume_col = col_name
-                break
-        
-        if df_post.empty or volume_col is None:
+        # 필수 컬럼/행 체크 - 부피 컬럼명 확인
+        # 우편물부피(신버전) → 부피(구버전) 순서로 우선순위 적용
+        if df_post.empty:
             if DEBUG_MODE:
-                print(f"❌ {vendor}: 데이터 없음 또는 부피 컬럼 없음 (사용 가능한 컬럼: {list(df_post.columns)})")
+                print(f"❌ {vendor}: 데이터 없음 (사용 가능한 컬럼: {list(df_post.columns)})")
             return {}
 
-        # 부피 컬럼명 통일 (부피로 변경)
-        if volume_col != "부피":
-            df_post["부피"] = df_post[volume_col]
+        has_upv = "우편물부피" in df_post.columns
+        has_bpi = "부피" in df_post.columns
+
+        if not has_upv and not has_bpi:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: 부피 컬럼 없음 (사용 가능한 컬럼: {list(df_post.columns)})")
+            return {}
+
+        if has_upv and has_bpi:
+            # 두 컬럼 모두 있으면 우편물부피 우선, NaN은 부피로 보완 (COALESCE)
+            df_post["부피"] = df_post["우편물부피"].combine_first(df_post["부피"])
+        elif has_upv:
+            df_post["부피"] = df_post["우편물부피"]
+        # has_bpi만 있는 경우: df_post["부피"]를 그대로 사용
 
         # 송장/등기 번호 컬럼 → 문자열 & 정규화
         track_cols = [c for c in TRACK_COLS if c in df_post.columns]

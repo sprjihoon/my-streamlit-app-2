@@ -104,10 +104,24 @@ def add_courier_fee_by_zone(vendor: str, d_from: str, d_to: str, items_list: Lis
                 print(f"발송인명별 건수: {발송인_counts.head(10).to_dict()}")
 
         # ── 필수 컬럼/행 체크 ──
-        if df_post.empty or "부피" not in df_post.columns:
+        # 우편물부피(신버전) → 부피(구버전) 순서로 우선순위 적용
+        if df_post.empty:
             if DEBUG_MODE:
-                print(f"❌ {vendor}: 데이터 없음 또는 부피 컬럼 없음")
+                print(f"❌ {vendor}: 데이터 없음")
             return {}
+
+        has_upv = "우편물부피" in df_post.columns
+        has_bpi = "부피" in df_post.columns
+
+        if not has_upv and not has_bpi:
+            if DEBUG_MODE:
+                print(f"❌ {vendor}: 부피 컬럼 없음")
+            return {}
+
+        if has_upv and has_bpi:
+            df_post["부피"] = df_post["우편물부피"].combine_first(df_post["부피"])
+        elif has_upv:
+            df_post["부피"] = df_post["우편물부피"]
 
         # ── 1️⃣·2️⃣  송장/등기 번호 컬럼 → 문자열 & 정규화 ─────────────────
         # 1️⃣·2️⃣  ─────────────────────────────────────────────
