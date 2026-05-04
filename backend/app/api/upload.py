@@ -5,7 +5,7 @@ logic/ 모듈의 업로드 함수를 호출하는 얇은 API 레이어.
 """
 
 from typing import Literal, Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 import io
 
 # logic 모듈에서 업로드 함수 import
@@ -222,5 +222,96 @@ async def reset_table_data(table_name: str, token: Optional[str] = None) -> Uplo
             message=message
         )
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 테이블별 날짜 컬럼 매핑
+TABLE_DATE_COL = {
+    "inbound_slip": "작업일",
+    "shipping_stats": "배송일",
+    "kpost_in": "접수일자",
+    "kpost_ret": "배달일자",
+    "work_log": "날짜",
+}
+
+
+@router.delete("/table/{table_name}/period")
+async def reset_table_data_by_period(
+    table_name: str,
+    date_from: str = Query(..., description="삭제 시작일 (YYYY-MM-DD)"),
+    date_to: str = Query(..., description="삭제 종료일 (YYYY-MM-DD)"),
+    token: Optional[str] = None,
+) -> UploadResponse:
+    """
+    특정 테이블의 지정 기간 데이터만 삭제 (관리자만).
+
+    - date_from ~ date_to 범위의 데이터만 삭제합니다.
+    - work_log의 경우 봇(출처='bot') 데이터는 기간 내에 있어도 보존됩니다.
+    - 해당 기간에 완전히 속하는 업로드 기록도 함께 삭제됩니다.
+    """
+    is_admin, nickname = check_admin(token)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+    allowed_tables = ["inbound_slip", "shipping_stats", "kpost_in", "kpost_ret", "work_log"]
+    if table_name not in allowed_tables:
+        raise HTTPException(status_code=400, detail=f"허용되지 않은 테이블입니다: {table_name}")
+
+    date_col = TABLE_DATE_COL[table_name]
+
+    try:
+        with get_connection() as con:
+            if table_name == "work_log":
+                count_before = con.execute(
+                    f"SELECT COUNT(*) FROM {table_name} "
+                    f"WHERE [{date_col}] >= ? AND [{date_col}] <= ? "
+                    f"AND (출처 IS NULL OR 출처 = '' OR 출처 != 'bot')",
+                    (date_from, date_to),
+                ).fetchone()[0]
+                con.execute(
+                    f"DELETE FROM {table_name} "
+                    f"WHERE [{date_col}] >= ? AND [{date_col}] <= ? "
+                    f"AND (출처 IS NULL OR 출처 = '' OR 출처 != 'bot')",
+                    (date_from, date_to),
+                )
+                message = (
+                    f"✅ {table_name} {date_from} ~ {date_to} 구간 데이터 삭제 완료 "
+                    f"({count_before}건 삭제, 봇 작업일지 보존)"
+                )
+            else:
+                count_before = con.execute(
+                    f"SELECT COUNT(*) FROM {table_name} "
+                    f"WHERE [{date_col}] >= ? AND [{date_col}] <= ?",
+                    (date_from, date_to),
+                ).fetchone()[0]
+                con.execute(
+                    f"DELETE FROM {table_name} "
+                    f"WHERE [{date_col}] >= ? AND [{date_col}] <= ?",
+                    (date_from, date_to),
+                )
+                message = (
+                    f"✅ {table_name} {date_from} ~ {date_to} 구간 데이터 삭제 완료 "
+                    f"({count_before}건 삭제)"
+                )
+
+            # 해당 기간에 완전히 속하는 업로드 기록 삭제
+            con.execute(
+                "DELETE FROM uploads WHERE table_name = ? AND date_min >= ? AND date_max <= ?",
+                (table_name, date_from, date_to),
+            )
+            con.commit()
+
+        add_log(
+            action_type="기간별 데이터 삭제",
+            target_type="table",
+            target_id=table_name,
+            target_name=table_name,
+            user_nickname=nickname,
+            details=f"{message} (기간: {date_from} ~ {date_to})",
+        )
+
+        return UploadResponse(success=True, message=message)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

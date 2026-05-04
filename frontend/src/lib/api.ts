@@ -304,6 +304,26 @@ export async function resetTableData(tableName: string) {
   });
 }
 
+/**
+ * 특정 기간 데이터만 삭제
+ */
+export async function resetTableDataByPeriod(
+  tableName: string,
+  dateFrom: string,
+  dateTo: string,
+) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+  if (token) params.set('token', token);
+
+  return fetchApi<{
+    success: boolean;
+    message: string;
+  }>(`/upload/table/${tableName}/period?${params.toString()}`, {
+    method: 'DELETE',
+  });
+}
+
 // ─────────────────────────────────────
 // Vendors API
 // ─────────────────────────────────────
