@@ -258,6 +258,9 @@ async def reset_table_data_by_period(
     if table_name not in allowed_tables:
         raise HTTPException(status_code=400, detail=f"허용되지 않은 테이블입니다: {table_name}")
 
+    if date_from > date_to:
+        raise HTTPException(status_code=400, detail="시작일이 종료일보다 늦을 수 없습니다.")
+
     date_col = TABLE_DATE_COL[table_name]
 
     try:
