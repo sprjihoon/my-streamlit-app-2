@@ -442,7 +442,14 @@ def ingest(
     if date_col and date_col in df.columns:
         # 한국어 날짜 형식 지원 ("1월 2일", "2025년 1월 2일" 등)
         df[date_col] = _parse_date_column(df[date_col])
-        
+
+        # 날짜 없는 행 제거 (다른 시트의 메모·목록 행 등이 혼입되는 것 방지)
+        before = len(df)
+        df = df[df[date_col].notna()].reset_index(drop=True)
+        removed = before - len(df)
+        if removed > 0:
+            print(f"[{table}] 날짜 없는 행 {removed}건 제외")
+
         # 시간 포함 테이블은 별도의 날짜 전용 컬럼 추가
         if table in TIME_TABLES:
             df[f"{date_col}_날짜"] = df[date_col].dt.date
