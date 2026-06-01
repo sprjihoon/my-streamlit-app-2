@@ -7,6 +7,8 @@ logic/ 모듈의 업로드 함수를 호출하는 얇은 API 레이어.
 from typing import Literal, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 import io
+import asyncio
+from functools import partial
 
 # logic 모듈에서 업로드 함수 import
 from logic import ingest, list_uploads, delete_upload
@@ -70,7 +72,11 @@ async def upload_file(
         file_like = io.BytesIO(contents)
         file_like.name = file.filename or "upload.xlsx"
         
-        success, message = ingest(file_like, table, file.filename or "")
+        # ingest는 동기 함수이므로 스레드풀에서 실행 (이벤트루프 블로킹 방지)
+        loop = asyncio.get_event_loop()
+        success, message = await loop.run_in_executor(
+            None, partial(ingest, file_like, table, file.filename or "")
+        )
         
         if success:
             # 로그 기록
