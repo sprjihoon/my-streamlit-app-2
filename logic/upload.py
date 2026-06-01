@@ -317,24 +317,74 @@ def _read_excel_with_best_sheet(path: Path, **kwargs) -> pd.DataFrame:
         return pd.read_excel(path, **kwargs)
 
 
+def _patch_openpyxl_filters():
+    """openpyxl CustomFilter.val 세터의 ValueError를 무시하도록 패치.
+    
+    일부 Excel 파일의 자동 필터 조건 값이
+    'Value must be either numerical or a string containing a wildcard' 오류를
+    발생시키는 버그(openpyxl filters.py)를 우회합니다.
+    """
+    try:
+        from openpyxl.worksheet import filters as _filters
+        if getattr(_filters, "_patched_safe", False):
+            return
+
+        # CustomFilter.__init__ 을 감싸서 val 설정 시 ValueError 무시
+        _orig_cf_init = _filters.CustomFilter.__init__
+
+        def _safe_cf_init(self, *args, **kwargs):
+            try:
+                _orig_cf_init(self, *args, **kwargs)
+            except (ValueError, TypeError):
+                # val 설정 실패 시 빈 문자열로 대체
+                if not hasattr(self, "val"):
+                    try:
+                        object.__setattr__(self, "val", "")
+                    except Exception:
+                        pass
+
+        _filters.CustomFilter.__init__ = _safe_cf_init
+
+        # 혹시 from_tree 경로도 막기: Serialisable.from_tree 래핑
+        from openpyxl.descriptors.serialisable import Serialisable
+        _orig_from_tree = Serialisable.from_tree.__func__ if hasattr(Serialisable.from_tree, '__func__') else None
+        if _orig_from_tree is None:
+            _orig_from_tree = Serialisable.from_tree
+
+        @classmethod  # type: ignore[misc]
+        def _safe_from_tree(cls, el):
+            try:
+                return _orig_from_tree(cls, el)
+            except (ValueError, TypeError):
+                return cls.__new__(cls)
+
+        # CustomFilter 에만 적용
+        _filters.CustomFilter.from_tree = _safe_from_tree
+
+        _filters._patched_safe = True
+    except Exception:
+        pass
+
+
 def _read_excel_readonly_fallback(path: Path, **kwargs) -> pd.DataFrame:
     """openpyxl read_only 모드로 Excel 읽기.
     
-    데이터 유효성 검사 규칙 파싱 오류
-    ('Value must be either numerical or a string containing a wildcard')를
-    우회하기 위해 read_only=True로 열어 파싱 단계를 건너뜁니다.
+    데이터 유효성 검사 규칙 파싱 오류를 우회하기 위해
+    read_only=True로 열어 파싱 단계를 건너뜁니다.
     """
     import openpyxl
     dtype = kwargs.get("dtype", {})
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     dfs = []
     for ws in wb.worksheets:
-        rows = list(ws.values)
+        try:
+            rows = list(ws.values)
+        except Exception:
+            continue
         if not rows:
             continue
         headers = [str(c) if c is not None else f"Unnamed:{i}" for i, c in enumerate(rows[0])]
         df_sheet = pd.DataFrame(rows[1:], columns=headers)
-        # dtype 적용
         for col, dt in dtype.items():
             if col in df_sheet.columns:
                 try:
@@ -354,12 +404,14 @@ def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
     
     합산 시트나 중복 시트가 포함된 경우를 대비해 concat 후
     no+날짜+업체명 기준으로 시트간 중복 행을 제거합니다.
-    openpyxl 데이터 유효성 오류 발생 시 read_only 모드로 자동 재시도합니다.
+    openpyxl 데이터 유효성 오류 발생 시 패치 후 재시도, 그래도 실패하면
+    read_only 모드로 자동 재시도합니다.
     """
     def _do_concat(xl) -> pd.DataFrame:
         dfs = []
         for sheet_name in xl.sheet_names:
             try:
+
                 df_sheet = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
                 if _count_meaningful_rows(df_sheet) > 0:
                     dfs.append(df_sheet)
@@ -380,12 +432,21 @@ def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
     try:
         with pd.ExcelFile(path) as xl:
             return _do_concat(xl)
-    except ValueError:
-        # openpyxl 데이터 유효성 규칙 파싱 오류 → read_only 모드로 우회
-        print("[work_log] openpyxl 데이터 유효성 오류 감지, read_only 모드로 재시도")
-        return _read_excel_readonly_fallback(path, **kwargs)
+    except (ValueError, TypeError):
+        # openpyxl 데이터 유효성 규칙 파싱 오류 → 패치 후 재시도, 그래도 실패하면 read_only
+        print("[work_log] openpyxl 데이터 유효성 오류 감지, 패치 후 재시도")
+        _patch_openpyxl_filters()
+        try:
+            with pd.ExcelFile(path) as xl:
+                return _do_concat(xl)
+        except Exception:
+            print("[work_log] 패치 후에도 실패, read_only 모드로 재시도")
+            return _read_excel_readonly_fallback(path, **kwargs)
     except Exception:
-        return pd.read_excel(path, **kwargs)
+        try:
+            return _read_excel_readonly_fallback(path, **kwargs)
+        except Exception:
+            return pd.read_excel(path, **kwargs)
 
 
 # ───────────── 인제스트 ─────────────────────────────────
@@ -450,7 +511,15 @@ def ingest(
         else:
             df = _read_excel_or_html(path, **read_kwargs)
     except Exception as e:
-        return False, f"⚠️ 파일 읽기 실패: {str(e)}"
+        # 마지막 수단: openpyxl 패치 후 read_only fallback 직접 시도
+        if table == "work_log":
+            try:
+                _patch_openpyxl_filters()
+                df = _read_excel_readonly_fallback(path, **read_kwargs)
+            except Exception:
+                return False, f"⚠️ 파일 읽기 실패: {str(e)}"
+        else:
+            return False, f"⚠️ 파일 읽기 실패: {str(e)}"
     finally:
         # 성공/실패 여부에 관계없이 원본 파일 즉시 삭제 (개인정보 보호)
         path.unlink(missing_ok=True)
