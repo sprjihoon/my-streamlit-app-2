@@ -317,35 +317,73 @@ def _read_excel_with_best_sheet(path: Path, **kwargs) -> pd.DataFrame:
         return pd.read_excel(path, **kwargs)
 
 
+def _read_excel_readonly_fallback(path: Path, **kwargs) -> pd.DataFrame:
+    """openpyxl read_only 모드로 Excel 읽기.
+    
+    데이터 유효성 검사 규칙 파싱 오류
+    ('Value must be either numerical or a string containing a wildcard')를
+    우회하기 위해 read_only=True로 열어 파싱 단계를 건너뜁니다.
+    """
+    import openpyxl
+    dtype = kwargs.get("dtype", {})
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    dfs = []
+    for ws in wb.worksheets:
+        rows = list(ws.values)
+        if not rows:
+            continue
+        headers = [str(c) if c is not None else f"Unnamed:{i}" for i, c in enumerate(rows[0])]
+        df_sheet = pd.DataFrame(rows[1:], columns=headers)
+        # dtype 적용
+        for col, dt in dtype.items():
+            if col in df_sheet.columns:
+                try:
+                    df_sheet[col] = df_sheet[col].astype(dt)
+                except Exception:
+                    pass
+        if _count_meaningful_rows(df_sheet) > 0:
+            dfs.append(df_sheet)
+    wb.close()
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+    return pd.DataFrame()
+
+
 def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
     """모든 시트를 읽어 하나의 DataFrame으로 합칩니다 (work_log 연간 파일용).
     
     합산 시트나 중복 시트가 포함된 경우를 대비해 concat 후
-    no+날짜 기준으로 시트간 중복 행을 제거합니다.
+    no+날짜+업체명 기준으로 시트간 중복 행을 제거합니다.
+    openpyxl 데이터 유효성 오류 발생 시 read_only 모드로 자동 재시도합니다.
     """
+    def _do_concat(xl) -> pd.DataFrame:
+        dfs = []
+        for sheet_name in xl.sheet_names:
+            try:
+                df_sheet = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
+                if _count_meaningful_rows(df_sheet) > 0:
+                    dfs.append(df_sheet)
+            except Exception:
+                continue
+        if dfs:
+            df_concat = pd.concat(dfs, ignore_index=True)
+            dedup_cols = [c for c in ["no", "날짜", "업체명"] if c in df_concat.columns]
+            if len(dedup_cols) >= 2:
+                before = len(df_concat)
+                df_concat = df_concat.drop_duplicates(subset=dedup_cols, keep="first")
+                removed = before - len(df_concat)
+                if removed > 0:
+                    print(f"[work_log] 시트간 중복 {removed}건 제거")
+            return df_concat.reset_index(drop=True)
+        return pd.read_excel(xl, **kwargs)
+
     try:
         with pd.ExcelFile(path) as xl:
-            dfs = []
-            for sheet_name in xl.sheet_names:
-                try:
-                    df_sheet = pd.read_excel(xl, sheet_name=sheet_name, **kwargs)
-                    if _count_meaningful_rows(df_sheet) > 0:
-                        dfs.append(df_sheet)
-                except Exception:
-                    continue
-            if dfs:
-                df_concat = pd.concat(dfs, ignore_index=True)
-                # no + 날짜 + 업체명 컬럼이 모두 있으면 시트간 중복 제거
-                # (no는 월마다·파일마다 리셋되므로 업체명까지 포함해야 진짜 중복 구분 가능)
-                dedup_cols = [c for c in ["no", "날짜", "업체명"] if c in df_concat.columns]
-                if len(dedup_cols) >= 2:
-                    before = len(df_concat)
-                    df_concat = df_concat.drop_duplicates(subset=dedup_cols, keep="first")
-                    removed = before - len(df_concat)
-                    if removed > 0:
-                        print(f"[work_log] 시트간 중복 {removed}건 제거")
-                return df_concat.reset_index(drop=True)
-            return pd.read_excel(xl, **kwargs)
+            return _do_concat(xl)
+    except ValueError:
+        # openpyxl 데이터 유효성 규칙 파싱 오류 → read_only 모드로 우회
+        print("[work_log] openpyxl 데이터 유효성 오류 감지, read_only 모드로 재시도")
+        return _read_excel_readonly_fallback(path, **kwargs)
     except Exception:
         return pd.read_excel(path, **kwargs)
 
