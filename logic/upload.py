@@ -163,7 +163,7 @@ TIME_TABLES = {"shipping_stats", "inbound_slip"}
 UNIQUE_KEY: dict[str, list[str] | None] = {
     "shipping_stats": ["송장번호", "배송일"],
     "inbound_slip": ["상품코드", "작업일", "수량"],
-    "work_log": ["no", "날짜"],  # no+날짜 조합: no는 월마다 리셋되므로 날짜(YYYY-MM-DD)와 조합하면 유니크
+    "work_log": ["no", "날짜", "업체명"],  # no+날짜+업체명: no는 월마다·파일마다 리셋되므로 업체명 포함해야 유니크
     "kpost_in": ["등기번호"],
     "kpost_ret": ["등기번호", "배달일자"],
 }
@@ -335,10 +335,12 @@ def _read_all_sheets_concat(path: Path, **kwargs) -> pd.DataFrame:
                     continue
             if dfs:
                 df_concat = pd.concat(dfs, ignore_index=True)
-                # no + 날짜 컬럼이 모두 있으면 시트간 중복 제거
-                if "no" in df_concat.columns and "날짜" in df_concat.columns:
+                # no + 날짜 + 업체명 컬럼이 모두 있으면 시트간 중복 제거
+                # (no는 월마다·파일마다 리셋되므로 업체명까지 포함해야 진짜 중복 구분 가능)
+                dedup_cols = [c for c in ["no", "날짜", "업체명"] if c in df_concat.columns]
+                if len(dedup_cols) >= 2:
                     before = len(df_concat)
-                    df_concat = df_concat.drop_duplicates(subset=["no", "날짜"], keep="first")
+                    df_concat = df_concat.drop_duplicates(subset=dedup_cols, keep="first")
                     removed = before - len(df_concat)
                     if removed > 0:
                         print(f"[work_log] 시트간 중복 {removed}건 제거")
