@@ -230,11 +230,20 @@ export async function uploadFile(file: File, table: string, token?: string) {
     formData.append('token', token);
   }
 
-  const response = await fetch(`${API_BASE}/upload`, {
-    method: 'POST',
-    body: formData,
-    // FormData를 사용할 때는 Content-Type을 설정하지 않아야 브라우저가 자동으로 boundary를 추가합니다
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      body: formData,
+      // FormData를 사용할 때는 Content-Type을 설정하지 않아야 브라우저가 자동으로 boundary를 추가합니다
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
+      throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    throw e;
+  }
 
   if (!response.ok) {
     let errorMessage = `Upload Error: ${response.status}`;
