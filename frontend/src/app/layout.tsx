@@ -205,6 +205,7 @@ const NAV_GROUPS = [
     icon: '🗓️',
     items: [
       { href: '/leave', label: '🗓️ 연월차 관리' },
+      { href: '/leave/calendar', label: '📅 연차 달력' },
     ],
   },
   {
