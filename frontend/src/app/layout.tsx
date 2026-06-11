@@ -10,7 +10,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 // ─────────────────────────────────────
 // 아코디언 네비게이션 그룹 컴포넌트
 // ─────────────────────────────────────
-interface NavItem { href: string; label: string; }
+interface NavItem { href: string; label: string; adminOnly?: boolean; }
 
 function NavGroup({
   label,
@@ -164,18 +164,20 @@ function MustChangePasswordModal({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+// adminOnly: true → 관리자(is_admin)만 표시
+// adminOnly 없음 → 모든 로그인 사용자 표시
 const NAV_GROUPS = [
   {
     key: 'home',
     label: '기본',
     icon: '🏠',
     items: [
-      { href: '/', label: '🏠 대시보드' },
-      { href: '/work-log', label: '📋 작업일지' },
-      { href: '/upload', label: '📤 데이터 업로드' },
-      { href: '/mapping', label: '🔗 업체 매핑 관리' },
-      { href: '/vendors', label: '📋 매핑 리스트' },
-      { href: '/rates', label: '💰 요금표 관리' },
+      { href: '/', label: '🏠 대시보드', adminOnly: true },
+      { href: '/work-log', label: '📋 작업일지', adminOnly: true },
+      { href: '/upload', label: '📤 데이터 업로드', adminOnly: true },
+      { href: '/mapping', label: '🔗 업체 매핑 관리', adminOnly: true },
+      { href: '/vendors', label: '📋 매핑 리스트', adminOnly: true },
+      { href: '/rates', label: '💰 요금표 관리', adminOnly: true },
       { href: '/insights', label: '📈 데이터 인사이트' },
     ],
   },
@@ -184,8 +186,8 @@ const NAV_GROUPS = [
     label: '인보이스',
     icon: '📊',
     items: [
-      { href: '/invoice', label: '📊 인보이스 계산' },
-      { href: '/invoice-list', label: '📜 인보이스 목록' },
+      { href: '/invoice', label: '📊 인보이스 계산', adminOnly: true },
+      { href: '/invoice-list', label: '📜 인보이스 목록', adminOnly: true },
       { href: '/invoice-analytics', label: '📈 청구금액 분석' },
     ],
   },
@@ -492,26 +494,22 @@ export default function RootLayout({
             )}
             
             <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {/* 일반 그룹 (아코디언) */}
-              {NAV_GROUPS.map(group => (
-                <NavGroup
-                  key={group.key}
-                  label={group.label}
-                  icon={group.icon}
-                  items={group.items}
-                  pathname={pathname}
-                />
-              ))}
-
-              {/* 팀장/인사과장 - 팀 관리 */}
-              {!user?.is_admin && user?.position && ['팀장', '인사과장'].includes(user.position) && (
-                <NavGroup
-                  label="팀 관리"
-                  icon="👥"
-                  items={[{ href: '/users', label: '👥 사용자 관리' }]}
-                  pathname={pathname}
-                />
-              )}
+              {/* 일반 그룹 (아코디언) — adminOnly 항목은 관리자만 표시 */}
+              {NAV_GROUPS.map(group => {
+                const visibleItems = group.items.filter(
+                  item => user?.is_admin || !item.adminOnly
+                );
+                if (visibleItems.length === 0) return null;
+                return (
+                  <NavGroup
+                    key={group.key}
+                    label={group.label}
+                    icon={group.icon}
+                    items={visibleItems}
+                    pathname={pathname}
+                  />
+                );
+              })}
 
               {/* 관리자 전용 */}
               {user?.is_admin && (
