@@ -251,7 +251,7 @@ export default function LeavePage() {
     fetchMyRequests();
     fetchPendingApprovals();
     if (isAdmin) fetchAdminData();
-  }, [token, year, month, fetchMySummary, fetchMyRequests, fetchPendingApprovals, fetchAdminData]);
+  }, [token, year, fetchMySummary, fetchMyRequests, fetchPendingApprovals, fetchAdminData]);
 
   function showMsg(msg: string, isError = false) {
     if (isError) { setError(msg); setSuccess(null); }
