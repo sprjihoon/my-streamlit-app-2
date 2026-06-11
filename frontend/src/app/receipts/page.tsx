@@ -35,7 +35,15 @@ interface Receipt {
   needs_review: boolean;
   warnings: string[];
   created_at: string;
+  processor_name: string | null;
   items?: ReceiptItem[];
+}
+
+function fmtDatetime(dt: string) {
+  if (!dt) return '-';
+  const d = new Date(dt);
+  if (isNaN(d.getTime())) return dt;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
 function fmt(n: number | null | undefined) {
@@ -236,8 +244,12 @@ function ReceiptDetail({
               </span>
             </h3>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
-              {detail.order_date || '-'} {detail.phone ? `· ${detail.phone}` : ''}
-            </p>
+            {detail.order_date || '-'} {detail.phone ? `· ${detail.phone}` : ''}
+          </p>
+          <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: '#adb5bd' }}>
+            처리자: <strong style={{ color: '#495057' }}>{detail.processor_name || '-'}</strong>
+            &nbsp;·&nbsp;처리시간: <strong style={{ color: '#495057' }}>{fmtDatetime(detail.created_at)}</strong>
+          </p>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
             <a
@@ -472,9 +484,9 @@ export default function ReceiptsPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
               <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
-                {['거래처', '종류', '거래일', '금액', '수기', '상태', ''].map(h => (
-                  <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
-                ))}
+            {['거래처', '종류', '거래일', '금액', '처리자', '처리시간', '수기', '상태', ''].map(h => (
+                    <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
               </tr>
             </thead>
             <tbody>
@@ -486,6 +498,12 @@ export default function ReceiptsPage() {
                   <td style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontSize: '0.82rem' }}>{r.receipt_type}</td>
                   <td style={{ padding: '0.6rem 0.75rem', color: '#6c757d' }}>{r.order_date || '-'}</td>
                   <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>{fmt(r.total_amount)}</td>
+                  <td style={{ padding: '0.6rem 0.75rem', color: '#495057', fontSize: '0.85rem' }}>
+                    {r.processor_name || '-'}
+                  </td>
+                  <td style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                    {fmtDatetime(r.created_at)}
+                  </td>
                   <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
                     {r.is_handwritten ? '✍️' : ''}
                   </td>

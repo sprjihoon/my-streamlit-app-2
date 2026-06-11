@@ -373,27 +373,38 @@ async def upload_and_analyze(
 
 @router.get("/list")
 def list_receipts(token: str, year: Optional[int] = None, month: Optional[int] = None):
-    """영수증 목록 조회"""
+    """영수증 목록 조회 (관리자=전체, 일반=본인)"""
     ensure_receipt_tables()
     user = get_user_from_token(token)
 
     with get_connection() as con:
-        query = "SELECT * FROM receipts WHERE user_id = ?"
-        params: list = [user["user_id"]]
+        # 처리자 닉네임 포함 JOIN
+        base = """
+            SELECT r.*, u.nickname AS processor_name
+            FROM receipts r
+            LEFT JOIN users u ON r.user_id = u.user_id
+        """
+        params: list = []
+        if user["is_admin"]:
+            query = base + " WHERE 1=1"
+        else:
+            query = base + " WHERE r.user_id = ?"
+            params.append(user["user_id"])
+
         if year:
-            query += " AND strftime('%Y', created_at) = ?"
+            query += " AND strftime('%Y', r.created_at) = ?"
             params.append(str(year))
         if month:
-            query += " AND strftime('%m', created_at) = ?"
+            query += " AND strftime('%m', r.created_at) = ?"
             params.append(f"{month:02d}")
-        query += " ORDER BY created_at DESC"
+        query += " ORDER BY r.created_at DESC"
 
         rows = con.execute(query, params).fetchall()
-        cols = [d[0] for d in con.execute(query, params).description] if False else [
+        cols = [
             "id", "user_id", "image_filename", "store_name", "receipt_type", "receipt_no",
             "order_date", "phone", "total_amount", "paid_amount", "balance_amount",
             "bank_info", "memo", "raw_text", "image_quality", "is_handwritten",
-            "confidence", "needs_review", "warnings", "created_at"
+            "confidence", "needs_review", "warnings", "created_at", "processor_name"
         ]
 
     result = []
@@ -411,15 +422,26 @@ def list_receipts(token: str, year: Optional[int] = None, month: Optional[int] =
 
 @router.get("/{receipt_id}")
 def get_receipt(receipt_id: str, token: str):
-    """영수증 단건 + 품목 조회"""
+    """영수증 단건 + 품목 조회 (처리자 정보 포함)"""
     ensure_receipt_tables()
     user = get_user_from_token(token)
 
     with get_connection() as con:
-        row = con.execute(
-            "SELECT * FROM receipts WHERE id = ? AND user_id = ?",
-            (receipt_id, user["user_id"])
-        ).fetchone()
+        # 관리자는 타인 영수증도 조회 가능
+        if user["is_admin"]:
+            row = con.execute(
+                """SELECT r.*, u.nickname AS processor_name
+                   FROM receipts r LEFT JOIN users u ON r.user_id = u.user_id
+                   WHERE r.id = ?""",
+                (receipt_id,)
+            ).fetchone()
+        else:
+            row = con.execute(
+                """SELECT r.*, u.nickname AS processor_name
+                   FROM receipts r LEFT JOIN users u ON r.user_id = u.user_id
+                   WHERE r.id = ? AND r.user_id = ?""",
+                (receipt_id, user["user_id"])
+            ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="영수증을 찾을 수 없습니다.")
 
@@ -427,7 +449,7 @@ def get_receipt(receipt_id: str, token: str):
             "id", "user_id", "image_filename", "store_name", "receipt_type", "receipt_no",
             "order_date", "phone", "total_amount", "paid_amount", "balance_amount",
             "bank_info", "memo", "raw_text", "image_quality", "is_handwritten",
-            "confidence", "needs_review", "warnings", "created_at"
+            "confidence", "needs_review", "warnings", "created_at", "processor_name"
         ]
         receipt = dict(zip(cols, row))
         receipt["is_handwritten"] = bool(receipt["is_handwritten"])
