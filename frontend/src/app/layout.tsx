@@ -7,6 +7,83 @@ import { useEffect, useState } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// ─────────────────────────────────────
+// 아코디언 네비게이션 그룹 컴포넌트
+// ─────────────────────────────────────
+interface NavItem { href: string; label: string; }
+
+function NavGroup({
+  label,
+  icon,
+  items,
+  pathname,
+  defaultOpen,
+}: {
+  label: string;
+  icon: string;
+  items: NavItem[];
+  pathname: string;
+  defaultOpen?: boolean;
+}) {
+  const hasActive = items.some(i => i.href === pathname);
+  const [open, setOpen] = useState(defaultOpen || hasActive);
+
+  // 경로 바뀌면 active 그룹 자동 열기
+  useEffect(() => {
+    if (hasActive) setOpen(true);
+  }, [hasActive]);
+
+  return (
+    <div style={{ marginBottom: '2px' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0.5rem 0.75rem',
+          background: hasActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
+          border: 'none',
+          borderRadius: '6px',
+          color: 'rgba(255,255,255,0.9)',
+          cursor: 'pointer',
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+          transition: 'background 0.15s',
+        }}
+      >
+        <span>{icon} {label}</span>
+        <span style={{
+          fontSize: '0.65rem',
+          transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.2s',
+          opacity: 0.7,
+        }}>▼</span>
+      </button>
+
+      <div style={{
+        overflow: 'hidden',
+        maxHeight: open ? `${items.length * 44}px` : '0px',
+        transition: 'max-height 0.25s ease',
+      }}>
+        {items.map(item => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={pathname === item.href ? 'active' : ''}
+            style={{ paddingLeft: '1.5rem', fontSize: '0.85rem' }}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface User {
   user_id: number;
   username: string;
@@ -87,37 +164,57 @@ function MustChangePasswordModal({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-/**
- * 네비게이션 링크
- */
-const NAV_ITEMS = [
-  { href: '/', label: '🏠 대시보드' },
-  { href: '/work-log', label: '📋 작업일지' },
-  { href: '/upload', label: '📤 데이터 업로드' },
-  { href: '/mapping', label: '🔗 업체 매핑 관리' },
-  { href: '/vendors', label: '📋 매핑 리스트' },
-  { href: '/rates', label: '💰 요금표 관리' },
-  { href: '/insights', label: '📈 데이터 인사이트' },
-];
-
-const INVOICE_NAV_ITEMS = [
-  { href: '/invoice', label: '📊 인보이스 계산' },
-  { href: '/invoice-list', label: '📜 인보이스 목록' },
-  { href: '/invoice-analytics', label: '📈 청구금액 분석' },
-];
-
-const ESTIMATE_NAV_ITEMS = [
-  { href: '/estimate', label: '📄 견적서 만들기' },
-  { href: '/estimate-list', label: '📑 견적서 목록' },
-  { href: '/estimate-analytics', label: '📊 견적서 분석' },
-];
-
-const MARKETING_NAV_ITEMS = [
-  { href: '/wp-analytics', label: '🌐 사이트 방문 분석' },
-];
-
-const HR_NAV_ITEMS = [
-  { href: '/leave', label: '🗓️ 연월차 관리' },
+const NAV_GROUPS = [
+  {
+    key: 'home',
+    label: '기본',
+    icon: '🏠',
+    items: [
+      { href: '/', label: '🏠 대시보드' },
+      { href: '/work-log', label: '📋 작업일지' },
+      { href: '/upload', label: '📤 데이터 업로드' },
+      { href: '/mapping', label: '🔗 업체 매핑 관리' },
+      { href: '/vendors', label: '📋 매핑 리스트' },
+      { href: '/rates', label: '💰 요금표 관리' },
+      { href: '/insights', label: '📈 데이터 인사이트' },
+    ],
+  },
+  {
+    key: 'invoice',
+    label: '인보이스',
+    icon: '📊',
+    items: [
+      { href: '/invoice', label: '📊 인보이스 계산' },
+      { href: '/invoice-list', label: '📜 인보이스 목록' },
+      { href: '/invoice-analytics', label: '📈 청구금액 분석' },
+    ],
+  },
+  {
+    key: 'estimate',
+    label: '견적서',
+    icon: '📄',
+    items: [
+      { href: '/estimate', label: '📄 견적서 만들기' },
+      { href: '/estimate-list', label: '📑 견적서 목록' },
+      { href: '/estimate-analytics', label: '📊 견적서 분석' },
+    ],
+  },
+  {
+    key: 'groupware',
+    label: '그룹웨어',
+    icon: '🗓️',
+    items: [
+      { href: '/leave', label: '🗓️ 연월차 관리' },
+    ],
+  },
+  {
+    key: 'marketing',
+    label: '마케팅',
+    icon: '🌐',
+    items: [
+      { href: '/wp-analytics', label: '🌐 사이트 방문 분석' },
+    ],
+  },
 ];
 
 const ADMIN_NAV_ITEMS = [
@@ -392,89 +489,37 @@ export default function RootLayout({
               </div>
             )}
             
-            <nav>
-              {NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={pathname === item.href ? 'active' : ''}
-                >
-                  {item.label}
-                </Link>
-              ))}
-              
-              {/* 인보이스 그룹 */}
-              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>인보이스</div>
-              {INVOICE_NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={pathname === item.href ? 'active' : ''}
-                >
-                  {item.label}
-                </Link>
-              ))}
-              
-              {/* 견적서 그룹 */}
-              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>견적서</div>
-              {ESTIMATE_NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={pathname === item.href ? 'active' : ''}
-                >
-                  {item.label}
-                </Link>
-              ))}
-              
-              {/* 그룹웨어 */}
-              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>그룹웨어</div>
-              {HR_NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={pathname === item.href ? 'active' : ''}
-                >
-                  {item.label}
-                </Link>
+            <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              {/* 일반 그룹 (아코디언) */}
+              {NAV_GROUPS.map(group => (
+                <NavGroup
+                  key={group.key}
+                  label={group.label}
+                  icon={group.icon}
+                  items={group.items}
+                  pathname={pathname}
+                />
               ))}
 
-              {/* 마케팅 그룹 */}
-              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>마케팅</div>
-              {MARKETING_NAV_ITEMS.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={pathname === item.href ? 'active' : ''}
-                >
-                  {item.label}
-                </Link>
-              ))}
-
-              {/* 팀장/인사과장도 사용자 관리 접근 가능 */}
+              {/* 팀장/인사과장 - 팀 관리 */}
               {!user?.is_admin && user?.position && ['팀장', '인사과장'].includes(user.position) && (
-                <>
-                  <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>팀 관리</div>
-                  <Link href="/users" className={pathname === '/users' ? 'active' : ''}>👥 사용자 관리</Link>
-                </>
+                <NavGroup
+                  label="팀 관리"
+                  icon="👥"
+                  items={[{ href: '/users', label: '👥 사용자 관리' }]}
+                  pathname={pathname}
+                />
               )}
 
-              {/* 관리자 전용 메뉴 */}
+              {/* 관리자 전용 */}
               {user?.is_admin && (
-                <>
-                  <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>관리자</div>
-                  {ADMIN_NAV_ITEMS.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={pathname === item.href ? 'active' : ''}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </>
+                <NavGroup
+                  label="관리자"
+                  icon="⚙️"
+                  items={ADMIN_NAV_ITEMS}
+                  pathname={pathname}
+                />
               )}
-
             </nav>
           </aside>
 
