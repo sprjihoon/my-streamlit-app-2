@@ -269,9 +269,8 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.25rem' }}>
                       <span style={{
                         fontSize: '0.8rem', fontWeight: isToday ? 700 : 400,
-                        color: col === 0 ? '#dc3545' : col === 6 ? '#0d6efd' : '#212529',
-                        backgroundColor: isToday ? '#0d6efd' : 'transparent',
                         color: isToday ? 'white' : col === 0 ? '#dc3545' : col === 6 ? '#0d6efd' : '#212529',
+                        backgroundColor: isToday ? '#0d6efd' : 'transparent',
                         borderRadius: isToday ? '50%' : 0,
                         width: isToday ? '22px' : 'auto',
                         height: isToday ? '22px' : 'auto',
