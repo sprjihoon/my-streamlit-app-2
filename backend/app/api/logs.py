@@ -158,40 +158,125 @@ async def get_log_stats(token: str):
     """로그 통계 (관리자만)"""
     ensure_logs_table()
     
-    # 관리자 권한 확인
     with get_connection() as con:
         session = con.execute(
             "SELECT u.is_admin FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
             (token,)
         ).fetchone()
-        
         if not session or not session[0]:
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
-        # 전체 로그 수
         total = con.execute("SELECT COUNT(*) FROM activity_logs").fetchone()[0]
-        
-        # 오늘 로그 수
         today = con.execute(
             "SELECT COUNT(*) FROM activity_logs WHERE date(created_at) = date('now')"
         ).fetchone()[0]
-        
-        # 액션별 통계
         by_action = pd.read_sql(
             "SELECT action_type, COUNT(*) as count FROM activity_logs GROUP BY action_type ORDER BY count DESC",
             con
         ).to_dict(orient='records')
-        
-        # 사용자별 통계
         by_user = pd.read_sql(
             "SELECT user_nickname, COUNT(*) as count FROM activity_logs WHERE user_nickname IS NOT NULL GROUP BY user_nickname ORDER BY count DESC LIMIT 10",
             con
         ).to_dict(orient='records')
     
+    return {"total": total, "today": today, "by_action": by_action, "by_user": by_user}
+
+
+@router.get("/analytics")
+async def get_log_analytics(token: str, days: int = 30):
+    """로그 분석 (관리자만) — 일별 추이, 기능별, 시간대별, 사용자별"""
+    ensure_logs_table()
+
+    with get_connection() as con:
+        session = con.execute(
+            "SELECT u.is_admin FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,)
+        ).fetchone()
+        if not session or not session[0]:
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+        # ── 일별 추이 (최근 N일)
+        daily = pd.read_sql(f"""
+            SELECT date(created_at) as date, COUNT(*) as count
+            FROM activity_logs
+            WHERE created_at >= date('now', '-{days} days')
+            GROUP BY date(created_at)
+            ORDER BY date
+        """, con).to_dict(orient='records')
+
+        # ── 기능 카테고리별 집계
+        feature_map = {
+            'receipt': '영수증',
+            'leave': '연월차',
+            'invoice': '인보이스',
+            'estimate': '견적서',
+            'vendor': '업체',
+            'user': '사용자',
+            'upload': '업로드',
+            'work_log': '작업일지',
+        }
+        by_feature_raw = pd.read_sql(
+            "SELECT target_type, COUNT(*) as count FROM activity_logs WHERE target_type IS NOT NULL GROUP BY target_type ORDER BY count DESC",
+            con
+        ).to_dict(orient='records')
+        by_feature = [
+            {"feature": feature_map.get(r["target_type"], r["target_type"]), "target_type": r["target_type"], "count": r["count"]}
+            for r in by_feature_raw
+        ]
+
+        # ── 시간대별 분포 (0~23시)
+        hourly = pd.read_sql(
+            "SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour, COUNT(*) as count FROM activity_logs GROUP BY hour ORDER BY hour",
+            con
+        ).to_dict(orient='records')
+        # 0~23 전체 채우기
+        hourly_full = {r["hour"]: r["count"] for r in hourly}
+        hourly_list = [{"hour": h, "count": hourly_full.get(h, 0)} for h in range(24)]
+
+        # ── 사용자별 액션 breakdown
+        user_breakdown = pd.read_sql("""
+            SELECT user_nickname, action_type, COUNT(*) as count
+            FROM activity_logs
+            WHERE user_nickname IS NOT NULL
+            GROUP BY user_nickname, action_type
+            ORDER BY user_nickname, count DESC
+        """, con).to_dict(orient='records')
+
+        # ── 최근 이상 활동 (단일 사용자가 1시간 내 20회 이상)
+        unusual = pd.read_sql("""
+            SELECT user_nickname,
+                   strftime('%Y-%m-%d %H:00', created_at) as hour_bucket,
+                   COUNT(*) as count
+            FROM activity_logs
+            WHERE user_nickname IS NOT NULL
+            GROUP BY user_nickname, hour_bucket
+            HAVING count >= 10
+            ORDER BY count DESC
+            LIMIT 20
+        """, con).to_dict(orient='records')
+
+        # ── 요약 지표
+        this_week = con.execute(
+            "SELECT COUNT(*) FROM activity_logs WHERE created_at >= date('now', '-7 days')"
+        ).fetchone()[0]
+        last_week = con.execute(
+            "SELECT COUNT(*) FROM activity_logs WHERE created_at >= date('now', '-14 days') AND created_at < date('now', '-7 days')"
+        ).fetchone()[0]
+        active_users = con.execute(
+            "SELECT COUNT(DISTINCT user_nickname) FROM activity_logs WHERE created_at >= date('now', '-7 days')"
+        ).fetchone()[0]
+
     return {
-        "total": total,
-        "today": today,
-        "by_action": by_action,
-        "by_user": by_user,
+        "summary": {
+            "this_week": this_week,
+            "last_week": last_week,
+            "week_change_pct": round((this_week - last_week) / max(last_week, 1) * 100, 1),
+            "active_users_7d": active_users,
+        },
+        "daily": daily,
+        "by_feature": by_feature,
+        "hourly": hourly_list,
+        "user_breakdown": user_breakdown,
+        "unusual_activity": unusual,
     }
 

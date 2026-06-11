@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from logic.db import get_connection
+from backend.app.api.logs import add_log
 from backend.app.config import settings
 
 router = APIRouter(prefix="/receipt", tags=["receipt"])
@@ -368,6 +369,17 @@ async def upload_and_analyze(
 
         con.commit()
 
+    store = receipt_data.get("storeName") or "미추출"
+    item_count = len(items_data)
+    add_log(
+        action_type="영수증 업로드",
+        target_type="receipt",
+        target_id=receipt_id,
+        target_name=store,
+        user_nickname=user["nickname"],
+        details=f"거래처:{store} / 품목 {item_count}개 / AI분석{'(확인필요)' if receipt_data.get('needsReview') else '완료'}",
+    )
+
     return {"receipt_id": receipt_id, "needs_review": bool(receipt_data.get("needsReview"))}
 
 
@@ -494,11 +506,21 @@ def update_receipt(receipt_id: str, token: str, data: ReceiptUpdate):
 
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     with get_connection() as con:
+        row = con.execute("SELECT store_name FROM receipts WHERE id = ?", (receipt_id,)).fetchone()
+        store = row[0] if row else receipt_id
         con.execute(
             f"UPDATE receipts SET {set_clause} WHERE id = ? AND user_id = ?",
             list(fields.values()) + [receipt_id, user["user_id"]]
         )
         con.commit()
+    add_log(
+        action_type="영수증 수정",
+        target_type="receipt",
+        target_id=receipt_id,
+        target_name=store,
+        user_nickname=user["nickname"],
+        details=f"수정 항목: {', '.join(fields.keys())}",
+    )
     return {"success": True}
 
 
@@ -506,7 +528,7 @@ def update_receipt(receipt_id: str, token: str, data: ReceiptUpdate):
 def update_receipt_item(item_id: str, token: str, data: ReceiptItemUpdate):
     """품목 수정"""
     ensure_receipt_tables()
-    get_user_from_token(token)
+    user = get_user_from_token(token)
 
     fields = {k: v for k, v in data.dict().items() if v is not None}
     if not fields:
@@ -537,11 +559,25 @@ def update_receipt_item(item_id: str, token: str, data: ReceiptItemUpdate):
 
     set_clause = ", ".join(f"{k} = ?" for k in db_fields)
     with get_connection() as con:
+        # 품목 소속 영수증 조회 (로그용)
+        r_row = con.execute(
+            "SELECT r.store_name FROM receipt_items ri JOIN receipts r ON ri.receipt_id = r.id WHERE ri.id = ?",
+            (item_id,)
+        ).fetchone()
+        store = r_row[0] if r_row else item_id
         con.execute(
             f"UPDATE receipt_items SET {set_clause} WHERE id = ?",
             list(db_fields.values()) + [item_id]
         )
         con.commit()
+    add_log(
+        action_type="영수증 품목 수정",
+        target_type="receipt",
+        target_id=item_id,
+        target_name=store,
+        user_nickname=user["nickname"],
+        details=f"수정 항목: {', '.join(fields.keys())}",
+    )
     return {"success": True}
 
 
@@ -553,13 +589,12 @@ def delete_receipt(receipt_id: str, token: str):
 
     with get_connection() as con:
         row = con.execute(
-            "SELECT image_filename FROM receipts WHERE id = ? AND user_id = ?",
+            "SELECT image_filename, store_name FROM receipts WHERE id = ? AND user_id = ?",
             (receipt_id, user["user_id"])
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="영수증을 찾을 수 없습니다.")
 
-        # 이미지 파일 삭제
         if row[0]:
             img_path = UPLOAD_DIR / row[0]
             if img_path.exists():
@@ -568,6 +603,15 @@ def delete_receipt(receipt_id: str, token: str):
         con.execute("DELETE FROM receipt_items WHERE receipt_id = ?", (receipt_id,))
         con.execute("DELETE FROM receipts WHERE id = ?", (receipt_id,))
         con.commit()
+
+    add_log(
+        action_type="영수증 삭제",
+        target_type="receipt",
+        target_id=receipt_id,
+        target_name=row[1] or receipt_id,
+        user_nickname=user["nickname"],
+        details="영수증 및 품목 전체 삭제",
+    )
     return {"success": True}
 
 
