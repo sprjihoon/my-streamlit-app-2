@@ -373,7 +373,7 @@ export default function UsersPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f8f9fa' }}>
-                  {['성함', '아이디', '직급', '입사일', '네이버웍스ID', '연차제외', '권한', '작업'].map(h => (
+                  {['성함', '아이디', '직급', '입사일', '결재자', '연차제외', '권한', '작업'].map(h => (
                     <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', borderBottom: '2px solid #e0e0e0', fontWeight: 600, color: '#555', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -387,7 +387,20 @@ export default function UsersPage() {
                       <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.78rem', backgroundColor: `${color}20`, color }}>{user.position || '-'}</span>
                     </td>
                     <td style={{ padding: '0.6rem 0.75rem', color: '#666' }}>{user.join_date || '-'}</td>
-                    <td style={{ padding: '0.6rem 0.75rem', color: '#666', fontSize: '0.85rem' }}>{user.naver_works_id || '-'}</td>
+                    <td style={{ padding: '0.6rem 0.75rem', color: '#555', fontSize: '0.85rem' }}>
+                      {user.approver_id
+                        ? (() => {
+                            const approver = users.find(u => u.user_id === user.approver_id);
+                            return approver
+                              ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                                  <span style={{ color: '#198754', fontWeight: 600 }}>{approver.nickname}</span>
+                                  <span style={{ color: '#aaa', fontSize: '0.75rem' }}>({approver.position || '-'})</span>
+                                </span>
+                              : <span style={{ color: '#dc3545' }}>ID:{user.approver_id}</span>;
+                          })()
+                        : <span style={{ color: '#ccc' }}>-</span>
+                      }
+                    </td>
                     <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
                       {user.leave_exempt ? <span style={{ color: '#888', fontSize: '0.8rem' }}>제외</span> : <span style={{ color: '#4CAF50', fontSize: '0.8rem' }}>관리</span>}
                     </td>
@@ -452,6 +465,45 @@ export default function UsersPage() {
               <div>
                 <label style={labelStyle}>네이버웍스 ID</label>
                 <input style={inputStyle} type="text" value={editForm.naver_works_id} onChange={e => setEditForm(f => ({ ...f, naver_works_id: e.target.value }))} />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={labelStyle}>결재자 <span style={{ color: '#aaa', fontWeight: 400 }}>(연차 신청 시 1차 결재자)</span></label>
+                <select style={inputStyle} value={editForm.approver_id} onChange={e => setEditForm(f => ({ ...f, approver_id: e.target.value }))}>
+                  <option value="">없음 (결재라인 없음)</option>
+                  {users
+                    .filter(u => u.user_id !== editUser?.user_id)
+                    .map(u => (
+                      <option key={u.user_id} value={String(u.user_id)}>
+                        {u.nickname} ({u.position || '직급없음'}{u.department ? ` / ${u.department}` : ''})
+                      </option>
+                    ))}
+                </select>
+                {/* 결재라인 미리보기 */}
+                {editForm.approver_id && (() => {
+                  const chain: User[] = [];
+                  let cur = parseInt(editForm.approver_id);
+                  const visited = new Set<number>();
+                  while (cur && !visited.has(cur)) {
+                    const u = users.find(x => x.user_id === cur);
+                    if (!u) break;
+                    chain.push(u);
+                    visited.add(cur);
+                    cur = u.approver_id ?? 0;
+                  }
+                  return (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem', fontSize: '0.82rem', color: '#555' }}>
+                      <span style={{ color: '#888' }}>결재라인:</span>
+                      <span style={{ fontWeight: 600, color: '#1a56db' }}>{editUser?.nickname}</span>
+                      {chain.map((u, i) => (
+                        <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <span style={{ color: '#aaa' }}>→</span>
+                          <span style={{ fontWeight: 600, color: '#198754' }}>{u.nickname}</span>
+                          <span style={{ color: '#999' }}>({u.position || '-'})</span>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
