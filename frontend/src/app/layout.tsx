@@ -12,6 +12,79 @@ interface User {
   username: string;
   nickname: string;
   is_admin: boolean;
+  position?: string;
+  department?: string;
+}
+
+// 최초 로그인 비밀번호 변경 강제 모달
+function MustChangePasswordModal({ onSuccess }: { onSuccess: () => void }) {
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newPw || newPw.length < 4) return setError('비밀번호는 4자 이상이어야 합니다.');
+    if (newPw !== confirmPw) return setError('비밀번호가 일치하지 않습니다.');
+    if (newPw === '123456') return setError('초기 비밀번호와 다른 비밀번호를 사용하세요.');
+    setLoading(true);
+    setError('');
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/auth/change-password?token=${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: '123456', new_password: newPw }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '변경 실패');
+      localStorage.removeItem('must_change_password');
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '변경 실패');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '2rem', width: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔐</div>
+          <h3 style={{ margin: 0, marginBottom: '0.5rem' }}>비밀번호 변경 필요</h3>
+          <p style={{ margin: 0, fontSize: '0.875rem', color: '#6c757d' }}>
+            초기 비밀번호(123456)를 변경해야 합니다.<br />
+            새 비밀번호를 설정해주세요.
+          </p>
+        </div>
+        {error && (
+          <div style={{ padding: '0.5rem', marginBottom: '1rem', backgroundColor: '#f8d7da', color: '#842029', borderRadius: '4px', fontSize: '0.875rem' }}>
+            {error}
+          </div>
+        )}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.875rem' }}>새 비밀번호</label>
+            <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
+              placeholder="새 비밀번호 (4자 이상)"
+              style={{ width: '100%', padding: '0.6rem', border: '1px solid #dee2e6', borderRadius: '4px' }} />
+          </div>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.875rem' }}>새 비밀번호 확인</label>
+            <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
+              placeholder="비밀번호 재입력"
+              style={{ width: '100%', padding: '0.6rem', border: '1px solid #dee2e6', borderRadius: '4px' }} />
+          </div>
+          <button type="submit" disabled={loading}
+            style={{ width: '100%', padding: '0.75rem', backgroundColor: loading ? '#ccc' : '#0d6efd', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}>
+            {loading ? '변경 중...' : '비밀번호 변경'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -43,6 +116,10 @@ const MARKETING_NAV_ITEMS = [
   { href: '/wp-analytics', label: '🌐 사이트 방문 분석' },
 ];
 
+const HR_NAV_ITEMS = [
+  { href: '/leave', label: '🗓️ 연월차 관리' },
+];
+
 const ADMIN_NAV_ITEMS = [
   { href: '/storage', label: '📦 보관료 관리' },
   { href: '/vendor-charges', label: '💰 추가비용 관리' },
@@ -60,7 +137,8 @@ export default function RootLayout({
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  
+  const [mustChangePw, setMustChangePw] = useState(false);
+
   // 비밀번호 변경 모달
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -103,6 +181,9 @@ export default function RootLayout({
 
       const userData = await res.json();
       setUser(userData);
+      // must_change_password 체크
+      const mcp = localStorage.getItem('must_change_password');
+      if (mcp === 'true') setMustChangePw(true);
     } catch {
       // API 연결 실패 시 저장된 사용자 정보 사용
       try {
@@ -346,6 +427,18 @@ export default function RootLayout({
                 </Link>
               ))}
               
+              {/* 그룹웨어 */}
+              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>그룹웨어</div>
+              {HR_NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={pathname === item.href ? 'active' : ''}
+                >
+                  {item.label}
+                </Link>
+              ))}
+
               {/* 마케팅 그룹 */}
               <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>마케팅</div>
               {MARKETING_NAV_ITEMS.map((item) => (
@@ -357,6 +450,14 @@ export default function RootLayout({
                   {item.label}
                 </Link>
               ))}
+
+              {/* 팀장/인사과장도 사용자 관리 접근 가능 */}
+              {!user?.is_admin && user?.position && ['팀장', '인사과장'].includes(user.position) && (
+                <>
+                  <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', padding: '0.5rem 0.75rem 0.25rem', marginTop: '0.5rem' }}>팀 관리</div>
+                  <Link href="/users" className={pathname === '/users' ? 'active' : ''}>👥 사용자 관리</Link>
+                </>
+              )}
 
               {/* 관리자 전용 메뉴 */}
               {user?.is_admin && (
@@ -380,6 +481,11 @@ export default function RootLayout({
           {/* 메인 콘텐츠 */}
           <main className="main-content">{children}</main>
         </div>
+
+        {/* 최초 로그인 비밀번호 강제 변경 모달 */}
+        {mustChangePw && (
+          <MustChangePasswordModal onSuccess={() => setMustChangePw(false)} />
+        )}
 
         {/* 비밀번호 변경 모달 */}
         {showPasswordModal && (

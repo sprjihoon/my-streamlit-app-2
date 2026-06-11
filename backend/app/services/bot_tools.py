@@ -506,7 +506,126 @@ TOOLS = [
                 "required": ["vendor", "work_type"]
             }
         }
-    }
+    },
+    # ── 연차 관련 도구 ──────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "check_leave",
+            "description": "연차 현황을 조회합니다. '연차 몇일 남았어?', '내 연차 알려줘', '휴가 현황' 등의 요청에 사용합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "year": {
+                        "type": "integer",
+                        "description": "조회 연도 (기본값: 올해)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_leave",
+            "description": "연차를 신청합니다. '연차 신청해줘', '7/1~7/3 연차', '다음주 반차' 등의 요청에 사용합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "leave_type": {
+                        "type": "string",
+                        "description": "휴가 종류: '연차', '반차(오전)', '반차(오후)' 중 하나",
+                        "enum": ["연차", "반차(오전)", "반차(오후)"]
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "시작일 (YYYY-MM-DD)"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "종료일 (YYYY-MM-DD). 반차는 start_date와 동일하게."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "신청 사유 (선택)"
+                    }
+                },
+                "required": ["leave_type", "start_date", "end_date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_leave",
+            "description": "연차 신청을 취소합니다. '연차 취소해줘', '#5 취소' 등의 요청에 사용합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "integer",
+                        "description": "취소할 연차 신청 ID (#번호)"
+                    }
+                },
+                "required": ["request_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approve_leave",
+            "description": "연차 신청을 승인합니다. 결재자가 '승인 #5', '연차 승인해줘' 등의 요청을 할 때 사용합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "integer",
+                        "description": "승인할 연차 신청 ID (#번호)"
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "승인 코멘트 (선택)"
+                    }
+                },
+                "required": ["request_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_leave",
+            "description": "연차 신청을 반려합니다. 결재자가 '반려 #5 사유', '연차 반려' 등의 요청을 할 때 사용합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "integer",
+                        "description": "반려할 연차 신청 ID (#번호)"
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "반려 사유"
+                    }
+                },
+                "required": ["request_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pending_approvals",
+            "description": "내가 결재해야 할 연차 목록을 조회합니다. '결재 대기', '승인 대기 연차', '결재할 거 있어?' 등의 요청에 사용합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
 ]
 
 
@@ -550,6 +669,13 @@ def execute_tool(
         "web_search": _web_search,
         "get_help": _get_help,
         "lookup_price_from_history": _lookup_price_from_history,
+        # 연차 관련 도구
+        "check_leave": _check_leave,
+        "apply_leave": _apply_leave,
+        "cancel_leave": _cancel_leave,
+        "approve_leave": _approve_leave,
+        "reject_leave": _reject_leave,
+        "get_pending_approvals": _get_pending_approvals,
     }
     
     if tool_name not in tool_functions:
@@ -1844,6 +1970,119 @@ def _log_work_history(
             con.commit()
     except Exception as e:
         print(f"Warning: Could not log work history: {e}")
+
+
+# ─────────────────────────────────────
+# 연차 관련 도구 실행 함수
+# ─────────────────────────────────────
+
+def _check_leave(args: Dict, user_id: str, user_name: str) -> Dict:
+    """연차 현황 조회"""
+    try:
+        from backend.app.api.leave import bot_get_leave_summary
+        year = args.get("year")
+        result = bot_get_leave_summary(user_id)
+        if "error" in result:
+            return result
+        if result.get("exempt"):
+            return {"success": True, "message": f"{result['nickname']}님은 연차 관리 대상이 아닙니다."}
+
+        summary = result
+        lines = [
+            f"📊 {summary['nickname']}님 연차 현황 ({summary['year']}년)",
+            f"━━━━━━━━━━━━━━━━",
+            f"📋 총 부여: {summary['total_hours']}시간 ({summary['total_days']}일)",
+            f"✅ 사용:    {summary['used_hours']}시간 ({summary['used_days']}일)",
+        ]
+        if summary['pending_hours'] > 0:
+            lines.append(f"⏳ 결재중:  {summary['pending_hours']}시간 ({summary['pending_days']}일)")
+        color = "🔴" if summary['remaining_days'] < 0 else ("🟡" if summary['remaining_days'] < 3 else "🟢")
+        lines.append(f"{color} 잔여:    {summary['remaining_hours']}시간 ({summary['remaining_days']}일)")
+        lines.append(f"(입사일: {summary['join_date']})")
+        return {"success": True, "message": "\n".join(lines)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _apply_leave(args: Dict, user_id: str, user_name: str) -> Dict:
+    """연차 신청"""
+    try:
+        from backend.app.api.leave import bot_apply_leave
+        leave_type = args.get("leave_type", "연차")
+        start_date = args.get("start_date", "")
+        end_date = args.get("end_date", start_date)
+        reason = args.get("reason")
+
+        if not start_date:
+            return {"success": False, "error": "시작일을 알려주세요. (예: 7월 1일)"}
+
+        result = bot_apply_leave(user_id, leave_type, start_date, end_date, reason)
+        return result
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _cancel_leave(args: Dict, user_id: str, user_name: str) -> Dict:
+    """연차 취소"""
+    try:
+        from backend.app.api.leave import bot_cancel_leave
+        request_id = args.get("request_id")
+        if not request_id:
+            return {"success": False, "error": "취소할 신청 번호(#ID)를 알려주세요."}
+        return bot_cancel_leave(user_id, request_id)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _approve_leave(args: Dict, user_id: str, user_name: str) -> Dict:
+    """연차 승인"""
+    try:
+        from backend.app.api.leave import bot_approve_leave
+        request_id = args.get("request_id")
+        if not request_id:
+            return {"success": False, "error": "승인할 신청 번호(#ID)를 알려주세요."}
+        comment = args.get("comment")
+        return bot_approve_leave(user_id, request_id, comment)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _reject_leave(args: Dict, user_id: str, user_name: str) -> Dict:
+    """연차 반려"""
+    try:
+        from backend.app.api.leave import bot_reject_leave
+        request_id = args.get("request_id")
+        if not request_id:
+            return {"success": False, "error": "반려할 신청 번호(#ID)를 알려주세요."}
+        comment = args.get("comment")
+        return bot_reject_leave(user_id, request_id, comment)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _get_pending_approvals(args: Dict, user_id: str, user_name: str) -> Dict:
+    """결재 대기 목록"""
+    try:
+        from backend.app.api.leave import bot_get_pending_approvals
+        result = bot_get_pending_approvals(user_id)
+        if "error" in result:
+            return result
+
+        if result["count"] == 0:
+            return {"success": True, "message": "✅ 결재 대기 중인 연차가 없습니다."}
+
+        lines = [f"📋 결재 대기 {result['count']}건", "━━━━━━━━━━━━━━━━"]
+        for item in result["items"]:
+            lines.append(
+                f"#{item['request_id']} {item['requester']}({item['department']}) "
+                f"{item['start_date']}~{item['end_date']} {item['leave_type']} {item['days']}일\n"
+                f"   사유: {item['reason']}"
+            )
+        lines.append("━━━━━━━━━━━━━━━━")
+        lines.append("승인: '승인 #번호' | 반려: '반려 #번호 사유'")
+        return {"success": True, "message": "\n".join(lines)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def get_db_context_for_ai() -> str:

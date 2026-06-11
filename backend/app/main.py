@@ -23,6 +23,7 @@ from backend.app.api.work_log import router as work_log_router
 from backend.app.api.estimate_analytics import router as estimate_analytics_router
 from backend.app.api.invoice_analytics import router as invoice_analytics_router
 from backend.app.api.wp_analytics import router as wp_analytics_router
+from backend.app.api.leave import router as leave_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -64,6 +65,7 @@ app.include_router(estimate_router)
 app.include_router(estimate_analytics_router)
 app.include_router(invoice_analytics_router)
 app.include_router(wp_analytics_router)
+app.include_router(leave_router)
 
 
 # 루트 엔드포인트
@@ -84,6 +86,9 @@ async def startup_event():
     """앱 시작 시 DB 테이블 확인 및 스케줄러 시작."""
     from logic import ensure_tables
     ensure_tables()
+    # 연차 테이블 초기화
+    from backend.app.api.leave import ensure_leave_tables
+    ensure_leave_tables()
     # 스케줄러 시작 (평일 오전 10시 인사)
     from backend.app.services.scheduler import start_scheduler
     start_scheduler()

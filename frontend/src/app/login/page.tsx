@@ -1,21 +1,39 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const SAVED_ID_KEY = 'saved_username';
 
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 페이지 로드 시 저장된 아이디 불러오기
+  useEffect(() => {
+    const saved = localStorage.getItem(SAVED_ID_KEY);
+    if (saved) {
+      setUsername(saved);
+      setRememberMe(true);
+    }
+  }, []);
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+
+    // 아이디 저장 처리
+    if (rememberMe) {
+      localStorage.setItem(SAVED_ID_KEY, username);
+    } else {
+      localStorage.removeItem(SAVED_ID_KEY);
+    }
     
     if (!username.trim() || !password.trim()) {
       setError('아이디와 비밀번호를 입력하세요.');
@@ -42,6 +60,13 @@ export default function LoginPage() {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       localStorage.setItem('isAdmin', data.user.is_admin ? 'true' : 'false');
+      
+      // 최초 로그인 비밀번호 변경 필요 여부 저장
+      if (data.must_change_password) {
+        localStorage.setItem('must_change_password', 'true');
+      } else {
+        localStorage.removeItem('must_change_password');
+      }
 
       // 메인 페이지로 이동
       router.push('/');
@@ -92,7 +117,7 @@ export default function LoginPage() {
             />
           </div>
 
-          <div style={{ marginBottom: '1.5rem' }}>
+          <div style={{ marginBottom: '1rem' }}>
             <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
               비밀번호
             </label>
@@ -110,6 +135,19 @@ export default function LoginPage() {
                 fontSize: '1rem',
               }}
             />
+          </div>
+
+          {/* 아이디 저장 */}
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#4CAF50' }}
+              />
+              <span style={{ fontSize: '0.875rem', color: '#555' }}>아이디 저장</span>
+            </label>
           </div>
 
           <button
