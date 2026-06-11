@@ -42,25 +42,25 @@ function NavGroup({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0.5rem 0.75rem',
-          background: hasActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
+          padding: '0.4rem 0.75rem',
+          background: hasActive ? '#e8f0fe' : 'transparent',
           border: 'none',
           borderRadius: '6px',
-          color: 'rgba(255,255,255,0.9)',
+          color: hasActive ? '#1a56db' : '#6c757d',
           cursor: 'pointer',
-          fontSize: '0.75rem',
-          fontWeight: 600,
-          letterSpacing: '0.05em',
+          fontSize: '0.7rem',
+          fontWeight: 700,
+          letterSpacing: '0.06em',
           textTransform: 'uppercase',
           transition: 'background 0.15s',
+          marginTop: '0.25rem',
         }}
       >
         <span>{icon} {label}</span>
         <span style={{
-          fontSize: '0.65rem',
+          fontSize: '0.6rem',
           transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
           transition: 'transform 0.2s',
-          opacity: 0.7,
         }}>▼</span>
       </button>
 
@@ -74,7 +74,7 @@ function NavGroup({
             key={item.href}
             href={item.href}
             className={pathname === item.href ? 'active' : ''}
-            style={{ paddingLeft: '1.5rem', fontSize: '0.85rem' }}
+            style={{ paddingLeft: '1.25rem', fontSize: '0.85rem' }}
           >
             {item.label}
           </Link>
