@@ -14,6 +14,8 @@ interface LeaveSummary {
   nickname: string;
   year: number;
   join_date: string;
+  work_year_start?: string;
+  work_year_end?: string;
   total_hours: number;
   total_days: number;
   used_hours: number;
@@ -165,11 +167,16 @@ function LeaveDonut({ summary }: { summary: LeaveSummary }) {
           { color: '#e9ecef', label: '총 부여', value: `${total}일 (${summary.total_hours}h)`, border: '1px solid #dee2e6' },
         ].map(item => (
           <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <div style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: item.color, border: item.border, flexShrink: 0 }} />
+            <div style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: item.color, border: (item as {border?: string}).border, flexShrink: 0 }} />
             <span style={{ fontSize: '0.875rem', color: '#495057', minWidth: 40 }}>{item.label}</span>
             <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>{item.value}</span>
           </div>
         ))}
+        {summary.work_year_start && summary.work_year_end && (
+          <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: '#f8f9fa', borderRadius: 6, fontSize: '0.78rem', color: '#6c757d' }}>
+            📅 연차 기간: {summary.work_year_start} ~ {summary.work_year_end}
+          </div>
+        )}
       </div>
     </div>
   );

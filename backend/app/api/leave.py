@@ -132,9 +132,54 @@ def ensure_leave_tables():
 # 연차 계산 유틸리티
 # ─────────────────────────────────────
 
+def _months_between(join: date, ref: date) -> int:
+    """두 날짜 사이 완성된 월수"""
+    months = (ref.year - join.year) * 12 + (ref.month - join.month)
+    if ref.day < join.day:
+        months -= 1
+    return max(0, months)
+
+
+def _anniversary(join: date, years: int) -> date:
+    """입사일 기준 n번째 기념일"""
+    try:
+        return join.replace(year=join.year + years)
+    except ValueError:
+        # 2월 29일 → 2월 28일
+        return date(join.year + years, join.month, 28)
+
+
+def get_work_year_range(join_date_str: str, ref_date_str: str = None):
+    """
+    현재 연차 연도의 시작일/종료일 반환
+    - 1년 미만: (입사일, 첫 기념일 전날)
+    - 1년 이상: (마지막 기념일, 다음 기념일 전날)
+    """
+    join = date.fromisoformat(join_date_str)
+    ref = date.fromisoformat(ref_date_str) if ref_date_str else date.today()
+
+    months = _months_between(join, ref)
+    years = months // 12
+
+    if years == 0:
+        start = join
+        end = _anniversary(join, 1) - timedelta(days=1)
+    else:
+        start = _anniversary(join, years)
+        end = _anniversary(join, years + 1) - timedelta(days=1)
+
+    return start, end
+
+
 def calculate_entitlement_hours(join_date_str: str, ref_date_str: str = None) -> float:
     """
-    입사일 기준 현재까지 발생한 연차 시간 (근로기준법 제60조)
+    현재 연차 연도의 부여 시간 (근로기준법 제60조)
+
+    - 1년 미만: 완성된 월 × 1일 (최대 11일) — 매월 개근 확인 후 부여 원칙이나
+      실무상 월 단위 발생으로 계산
+    - 1년 이상: 입사기념일에 일괄 부여
+        · 1년차 기념일: 15일
+        · 3년차 기념일부터 2년마다 1일 추가, 최대 25일
     """
     join = date.fromisoformat(join_date_str)
     ref = date.fromisoformat(ref_date_str) if ref_date_str else date.today()
@@ -142,20 +187,17 @@ def calculate_entitlement_hours(join_date_str: str, ref_date_str: str = None) ->
     if ref < join:
         return 0.0
 
-    months = (ref.year - join.year) * 12 + (ref.month - join.month)
-    if ref.day < join.day:
-        months -= 1
-    months = max(0, months)
-
+    months = _months_between(join, ref)
     years = months // 12
 
-    if months < 12:
-        # 1년 미만: 매월 1일 (최대 11일)
+    if years == 0:
+        # 1년 미만: 완성된 월 수 (입사 당월 제외, 최대 11일)
         days = min(months, 11)
     else:
-        # 1년 이상: 15일 기본, 3년차부터 2년마다 1일 추가, 최대 25일
+        # 1년 이상: 기념일 기준 해당 연도 부여일수
+        # years=1 → 15일, years=2 → 15일, years=3 → 16일, years=4 → 16일 ...
         base = 15
-        extra = (years - 1) // 2
+        extra = (years - 1) // 2  # 1년차: 0, 3년차: 1, 5년차: 2 ...
         days = min(base + extra, 25)
 
     return round(days * HOURS_PER_DAY, 1)
@@ -213,12 +255,22 @@ def get_approval_chain(user_id: int, con) -> list:
     return chain
 
 
-def get_used_hours(user_id: int, con, year: int = None) -> float:
-    """승인된 연차 사용 시간 합계"""
-    if year is None:
-        year = date.today().year
-    year_start = f"{year}-01-01"
-    year_end = f"{year}-12-31"
+def get_used_hours(user_id: int, con, year: int = None, join_date_str: str = None) -> float:
+    """
+    승인된 연차 사용 시간 합계.
+    join_date_str 이 주어지면 현재 연차 연도(입사기념일 기준)의 사용량을,
+    없으면 달력 연도(year) 기준으로 반환.
+    """
+    if join_date_str:
+        start, end = get_work_year_range(join_date_str)
+        year_start = start.isoformat()
+        year_end = end.isoformat()
+    else:
+        if year is None:
+            year = date.today().year
+        year_start = f"{year}-01-01"
+        year_end = f"{year}-12-31"
+
     row = con.execute(
         """SELECT COALESCE(SUM(hours_requested), 0) FROM leave_requests
            WHERE user_id = ? AND status = 'approved'
@@ -229,7 +281,11 @@ def get_used_hours(user_id: int, con, year: int = None) -> float:
 
 
 def get_leave_summary_data(user_id: int, year: int = None):
-    """연차 현황 데이터 반환 (봇·웹 공용)"""
+    """
+    연차 현황 데이터 반환 (봇·웹 공용)
+    - 부여량·사용량 모두 입사기념일 기준 연도로 계산
+    - year 파라미터는 수동 조정 조회용으로만 사용 (하위 호환)
+    """
     ensure_leave_tables()
     if year is None:
         year = date.today().year
@@ -250,26 +306,29 @@ def get_leave_summary_data(user_id: int, year: int = None):
         if not join_date:
             return {"no_join_date": True, "nickname": nickname}
 
-        # 연차 부여 시간
+        # 현재 연차 연도 범위 (입사기념일 기준)
+        wy_start, wy_end = get_work_year_range(join_date)
+
+        # 연차 부여 시간 (현재 연차 연도의 부여량)
         total_hours = calculate_entitlement_hours(join_date)
 
-        # 수동 조정
+        # 수동 조정 (달력 연도 기준 유지)
         allow_row = con.execute(
             "SELECT manual_adjustment FROM leave_allowances WHERE user_id = ? AND year = ?",
             (user_id, year)
         ).fetchone()
         adjustment = float(allow_row[0]) if allow_row else 0.0
 
-        # 사용 시간
-        used_hours = get_used_hours(user_id, con, year)
+        # 사용 시간 (입사기념일 기준 연도)
+        used_hours = get_used_hours(user_id, con, join_date_str=join_date)
 
-        # 결재 중인 시간
+        # 결재 중인 시간 (입사기념일 기준 연도)
         pending_row = con.execute(
             """SELECT COALESCE(SUM(r.hours_requested), 0)
                FROM leave_requests r
                WHERE r.user_id = ? AND r.status = 'pending'
-               AND strftime('%Y', r.start_date) = ?""",
-            (user_id, str(year))
+               AND r.start_date >= ? AND r.start_date <= ?""",
+            (user_id, wy_start.isoformat(), wy_end.isoformat())
         ).fetchone()
         pending_hours = round(float(pending_row[0]) if pending_row else 0.0, 1)
 
@@ -281,6 +340,8 @@ def get_leave_summary_data(user_id: int, year: int = None):
             "nickname": nickname,
             "year": year,
             "join_date": join_date,
+            "work_year_start": wy_start.isoformat(),
+            "work_year_end": wy_end.isoformat(),
             "total_hours": total_with_adj,
             "total_days": round(total_with_adj / HOURS_PER_DAY, 1),
             "used_hours": used_hours,
