@@ -70,7 +70,7 @@ def hash_password(password: str) -> str:
 
 
 def ensure_users_table():
-    """users 테이블 생성"""
+    """users 테이블 생성 및 컬럼 마이그레이션"""
     with get_connection() as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -82,7 +82,26 @@ def ensure_users_table():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
+        # 신규 컬럼 마이그레이션 (없으면 추가)
+        new_cols = [
+            ("department",           "TEXT"),
+            ("position",             "TEXT"),
+            ("position_order",       "INTEGER DEFAULT 1"),
+            ("naver_works_id",       "TEXT"),
+            ("approver_id",          "INTEGER"),
+            ("join_date",            "TEXT"),
+            ("must_change_password", "INTEGER DEFAULT 0"),
+            ("leave_exempt",         "INTEGER DEFAULT 0"),
+        ]
+        existing_cols = [row[1] for row in con.execute("PRAGMA table_info(users)")]
+        for col_name, col_def in new_cols:
+            if col_name not in existing_cols:
+                try:
+                    con.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                except Exception:
+                    pass
+
         # 기본 관리자 계정 생성 (없으면)
         existing = con.execute("SELECT 1 FROM users WHERE username = 'admin'").fetchone()
         if not existing:
@@ -90,7 +109,7 @@ def ensure_users_table():
                 "INSERT INTO users (username, password_hash, nickname, is_admin) VALUES (?, ?, ?, ?)",
                 ('admin', hash_password('admin123'), '관리자', 1)
             )
-        
+
         con.commit()
 
 
