@@ -222,9 +222,12 @@ const NAV_GROUPS = [
   },
 ];
 
-const ADMIN_NAV_ITEMS = [
+const BILLING_INVOICE_NAV_ITEMS = [
   { href: '/billing-invoice', label: '📑 실 인보이스 관리' },
   { href: '/billing-invoice/analytics', label: '📊 청구금액 분석' },
+];
+
+const ADMIN_NAV_ITEMS = [
   { href: '/storage', label: '📦 보관료 관리' },
   { href: '/vendor-charges', label: '💰 추가비용 관리' },
   { href: '/users', label: '👥 사용자 관리' },
@@ -513,6 +516,16 @@ export default function RootLayout({
                   />
                 );
               })}
+
+              {/* 실 인보이스 (관리자 전용) */}
+              {user?.is_admin && (
+                <NavGroup
+                  label="실 청구서"
+                  icon="📑"
+                  items={BILLING_INVOICE_NAV_ITEMS}
+                  pathname={pathname}
+                />
+              )}
 
               {/* 관리자 전용 */}
               {user?.is_admin && (
