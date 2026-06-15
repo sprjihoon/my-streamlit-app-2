@@ -223,6 +223,8 @@ const NAV_GROUPS = [
 ];
 
 const ADMIN_NAV_ITEMS = [
+  { href: '/billing-invoice', label: '📑 실 인보이스 관리' },
+  { href: '/billing-invoice/analytics', label: '📊 청구금액 분석' },
   { href: '/storage', label: '📦 보관료 관리' },
   { href: '/vendor-charges', label: '💰 추가비용 관리' },
   { href: '/users', label: '👥 사용자 관리' },
