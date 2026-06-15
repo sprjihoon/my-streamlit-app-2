@@ -456,8 +456,8 @@ export default function ReceiptsPage() {
         ))}
       </div>
 
-      {/* 필터 */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', alignItems: 'center' }}>
+      {/* 필터 + 엑셀 다운로드 */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
           style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }}>
           {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
@@ -470,6 +470,19 @@ export default function ReceiptsPage() {
           ))}
         </select>
         <span style={{ fontSize: '0.85rem', color: '#6c757d' }}>{receipts.length}건</span>
+        <div style={{ marginLeft: 'auto' }}>
+          <a
+            href={`${API_URL}/receipt/bulk-excel?token=${token}&year=${filterYear}${filterMonth ? `&month=${filterMonth}` : ''}`}
+            download
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+              padding: '0.4rem 1rem', backgroundColor: '#1a7f4b', color: 'white',
+              textDecoration: 'none', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 600,
+            }}
+          >
+            📥 엑셀 다운로드 ({receipts.length}건)
+          </a>
+        </div>
       </div>
 
       {/* 목록 */}

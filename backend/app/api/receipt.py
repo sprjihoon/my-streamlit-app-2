@@ -615,6 +615,164 @@ def delete_receipt(receipt_id: str, token: str):
     return {"success": True}
 
 
+@router.get("/bulk-excel")
+def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[int] = None):
+    """필터 조건에 맞는 영수증 전체를 엑셀로 다운로드"""
+    ensure_receipt_tables()
+    user = get_user_from_token(token)
+
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        import io
+
+        # 영수증 목록 조회 (기존 list 로직 재활용)
+        with get_connection() as con:
+            base = """
+                SELECT r.id, r.store_name, r.receipt_type, r.receipt_no,
+                       r.order_date, r.phone, r.total_amount, r.bank_info,
+                       r.is_handwritten, r.needs_review, r.created_at,
+                       u.nickname AS processor_name
+                FROM receipts r
+                LEFT JOIN users u ON r.user_id = u.user_id
+            """
+            params: list = []
+            if user["is_admin"]:
+                query = base + " WHERE 1=1"
+            else:
+                query = base + " WHERE r.user_id = ?"
+                params.append(user["user_id"])
+            if year:
+                query += " AND strftime('%Y', r.created_at) = ?"
+                params.append(str(year))
+            if month:
+                query += " AND strftime('%m', r.created_at) = ?"
+                params.append(str(month).zfill(2))
+            query += " ORDER BY r.created_at DESC"
+
+            receipts_rows = con.execute(query, params).fetchall()
+            receipt_ids = [r[0] for r in receipts_rows]
+            receipt_map = {r[0]: r for r in receipts_rows}
+
+            # 품목 한 번에 조회
+            if receipt_ids:
+                placeholders = ",".join("?" * len(receipt_ids))
+                items_rows = con.execute(
+                    f"""SELECT receipt_id, item_name, color, size, option_text,
+                               unit_price, quantity, amount, needs_review, warnings
+                        FROM receipt_items WHERE receipt_id IN ({placeholders})
+                        ORDER BY receipt_id, line_no""",
+                    receipt_ids
+                ).fetchall()
+            else:
+                items_rows = []
+
+        # 품목을 receipt_id 별로 그룹화
+        from collections import defaultdict
+        import json as _json
+        items_by_receipt: dict = defaultdict(list)
+        for it in items_rows:
+            items_by_receipt[it[0]].append(it)
+
+        # 엑셀 작성
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "영수증목록"
+
+        headers = ["처리일시", "처리자", "거래일", "거래처명", "영수증번호", "종류",
+                   "품명", "색상", "사이즈", "옵션", "단가", "수량", "금액",
+                   "합계", "연락처", "계좌정보", "수기여부", "확인필요"]
+        header_fill = PatternFill("solid", fgColor="1F4E79")
+        header_font = Font(color="FFFFFF", bold=True, size=10)
+        for ci, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=ci, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+
+        review_fill = PatternFill("solid", fgColor="FFF2CC")
+        alt_fill = PatternFill("solid", fgColor="EBF3FB")
+
+        row_idx = 2
+        for rid in receipt_ids:
+            r = receipt_map[rid]
+            (r_id, store, r_type, r_no, order_date, phone,
+             total_amount, bank_info, is_hw, needs_review,
+             created_at, processor) = r
+
+            items = items_by_receipt.get(rid, [])
+            if not items:
+                # 품목 없는 영수증도 한 줄 출력
+                row_data = [
+                    created_at, processor or "", order_date or "",
+                    store or "", r_no or "", r_type,
+                    "", "", "", "", None, None, None,
+                    total_amount, phone or "", bank_info or "",
+                    "O" if is_hw else "", "O" if needs_review else "",
+                ]
+                ws.append(row_data)
+                if needs_review:
+                    for ci in range(1, len(headers) + 1):
+                        ws.cell(row=row_idx, column=ci).fill = review_fill
+                elif row_idx % 2 == 0:
+                    for ci in range(1, len(headers) + 1):
+                        ws.cell(row=row_idx, column=ci).fill = alt_fill
+                row_idx += 1
+            else:
+                for it in items:
+                    (_, item_name, color, size, option_text,
+                     unit_price, quantity, amount, it_review, warnings_json) = it
+                    try:
+                        warnings = _json.loads(warnings_json) if warnings_json else []
+                    except Exception:
+                        warnings = []
+                    row_data = [
+                        created_at, processor or "", order_date or "",
+                        store or "", r_no or "", r_type,
+                        item_name or "", color or "", size or "", option_text or "",
+                        unit_price, quantity, amount,
+                        total_amount, phone or "", bank_info or "",
+                        "O" if is_hw else "",
+                        "O" if it_review else ("△" if warnings else ""),
+                    ]
+                    ws.append(row_data)
+                    if it_review:
+                        for ci in range(1, len(headers) + 1):
+                            ws.cell(row=row_idx, column=ci).fill = review_fill
+                    elif row_idx % 2 == 0:
+                        for ci in range(1, len(headers) + 1):
+                            ws.cell(row=row_idx, column=ci).fill = alt_fill
+                    row_idx += 1
+
+        # 컬럼 너비 설정
+        col_widths = [18, 10, 12, 20, 14, 10, 28, 10, 8, 18, 10, 8, 12, 12, 15, 30, 8, 8]
+        for ci, w in enumerate(col_widths, 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+
+        # 금액 컬럼 숫자 서식
+        for col in [11, 12, 13, 14]:
+            for row in ws.iter_rows(min_row=2, min_col=col, max_col=col):
+                for cell in row:
+                    if cell.value is not None:
+                        cell.number_format = '#,##0'
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        year_str = str(year) if year else "전체"
+        month_str = f"{month}월" if month else "전체"
+        filename = f"영수증_{year_str}_{month_str}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+        )
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl이 설치되지 않았습니다.")
+
+
 @router.get("/{receipt_id}/excel")
 def download_excel(receipt_id: str, token: str):
     """영수증 엑셀 다운로드"""
