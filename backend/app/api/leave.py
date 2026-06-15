@@ -588,18 +588,24 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
 # API: 신청 취소
 # ─────────────────────────────────────
 
+class CancelLeaveBody(BaseModel):
+    reason: str = ""
+
+
 @router.put("/requests/{request_id}/cancel")
-async def cancel_leave_request(request_id: int, token: str):
-    """연차 신청 취소 (pending 상태만)"""
+async def cancel_leave_request(request_id: int, token: str, body: CancelLeaveBody = None):
+    """연차 신청 취소 (pending/approved 모두 가능, 모든 기록 보존)"""
     ensure_leave_tables()
+    if body is None:
+        body = CancelLeaveBody()
 
     with get_connection() as con:
         session = con.execute(
-            "SELECT user_id FROM sessions WHERE token = ?", (token,)
+            "SELECT user_id, is_admin FROM sessions s JOIN users u USING(user_id) WHERE s.token = ?", (token,)
         ).fetchone()
         if not session:
             raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-        user_id = session[0]
+        user_id, is_admin = session[0], bool(session[1])
 
         req = con.execute(
             "SELECT user_id, status, leave_type, start_date, end_date, hours_requested FROM leave_requests WHERE id = ?",
@@ -607,30 +613,62 @@ async def cancel_leave_request(request_id: int, token: str):
         ).fetchone()
         if not req:
             raise HTTPException(status_code=404, detail="신청을 찾을 수 없습니다.")
-        if req[0] != user_id:
-            raise HTTPException(status_code=403, detail="본인 신청만 취소할 수 있습니다.")
-        if req[1] != "pending":
-            raise HTTPException(status_code=400, detail=f"'{req[1]}' 상태는 취소할 수 없습니다.")
+
+        owner_id, current_status, leave_type, start_date, end_date, hours = req
+
+        # 본인 또는 관리자만 취소 가능
+        if owner_id != user_id and not is_admin:
+            raise HTTPException(status_code=403, detail="본인 또는 관리자만 취소할 수 있습니다.")
+
+        # 이미 취소/반려된 건은 불가
+        if current_status in ("cancelled", "rejected"):
+            raise HTTPException(status_code=400, detail=f"이미 '{current_status}' 상태인 신청은 취소할 수 없습니다.")
+
+        actor = con.execute("SELECT nickname FROM users WHERE user_id=?", (user_id,)).fetchone()
+        actor_name = actor[0] if actor else str(user_id)
+        owner = con.execute("SELECT nickname FROM users WHERE user_id=?", (owner_id,)).fetchone()
+        owner_name = owner[0] if owner else str(owner_id)
+
+        now = datetime.now().isoformat()
+
+        # 상태를 cancelled로, 취소 사유·취소자·취소시각 기록
+        # cancel_reason 컬럼이 없으면 마이그레이션
+        cols = [c[1] for c in con.execute("PRAGMA table_info(leave_requests)").fetchall()]
+        if "cancel_reason" not in cols:
+            con.execute("ALTER TABLE leave_requests ADD COLUMN cancel_reason TEXT")
+        if "cancelled_by" not in cols:
+            con.execute("ALTER TABLE leave_requests ADD COLUMN cancelled_by TEXT")
+        if "cancelled_at" not in cols:
+            con.execute("ALTER TABLE leave_requests ADD COLUMN cancelled_at TEXT")
 
         con.execute(
-            "UPDATE leave_requests SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (request_id,)
+            """UPDATE leave_requests
+               SET status='cancelled', updated_at=?, cancel_reason=?, cancelled_by=?, cancelled_at=?
+               WHERE id=?""",
+            (now, body.reason or None, actor_name, now, request_id)
+        )
+
+        # 대기 중인 결재 항목도 'cancelled' 처리 (이력 보존)
+        con.execute(
+            "UPDATE leave_approvals SET status='cancelled', acted_at=? WHERE request_id=? AND status='waiting'",
+            (now, request_id)
         )
         con.commit()
 
-        user = con.execute("SELECT nickname FROM users WHERE user_id=?", (user_id,)).fetchone()
-        nickname = user[0] if user else str(user_id)
-
+    action = "연차 취소(관리자)" if (is_admin and owner_id != user_id) else "연차 취소"
+    detail = f"#{request_id} {leave_type} {start_date}~{end_date} / 이전상태:{current_status}"
+    if body.reason:
+        detail += f" / 사유:{body.reason}"
     add_log(
-        action_type="연차 취소",
+        action_type=action,
         target_type="leave",
         target_id=str(request_id),
-        target_name=nickname,
-        user_nickname=nickname,
-        details=f"#{request_id} {req[2]} {req[3]}~{req[4]}"
+        target_name=owner_name,
+        user_nickname=actor_name,
+        details=detail,
     )
 
-    return {"success": True, "message": "연차 신청이 취소되었습니다."}
+    return {"success": True, "message": "연차가 취소되었습니다. 기록은 이력에 보존됩니다."}
 
 
 # ─────────────────────────────────────
@@ -677,6 +715,60 @@ async def get_pending_approvals(token: str):
             "requester_nickname": r[9],
             "requester_department": r[10],
             "requester_position": r[11],
+        }
+        for r in rows
+    ]
+
+
+# ─────────────────────────────────────
+# API: 결재 처리 이력 (내가 처리한 것)
+# ─────────────────────────────────────
+
+@router.get("/approval-history")
+async def get_approval_history(token: str, limit: int = 100):
+    """내가 처리한 결재 이력 (승인/반려/취소 모두)"""
+    ensure_leave_tables()
+
+    with get_connection() as con:
+        session = con.execute(
+            "SELECT user_id FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if not session:
+            raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+        user_id = session[0]
+
+        rows = con.execute(
+            """SELECT a.id, a.request_id, a.step, a.status, a.comment, a.acted_at,
+                      r.leave_type, r.start_date, r.end_date, r.hours_requested,
+                      r.status AS req_status, r.cancel_reason,
+                      u.nickname, u.department, u.position
+               FROM leave_approvals a
+               JOIN leave_requests r ON a.request_id = r.id
+               JOIN users u ON r.user_id = u.user_id
+               WHERE a.approver_id = ? AND a.status != 'waiting'
+               ORDER BY COALESCE(a.acted_at, r.created_at) DESC
+               LIMIT ?""",
+            (user_id, limit)
+        ).fetchall()
+
+    return [
+        {
+            "approval_id": r[0],
+            "request_id": r[1],
+            "step": r[2],
+            "status": r[3],           # approved / rejected / cancelled
+            "comment": r[4],
+            "acted_at": r[5],
+            "leave_type": r[6],
+            "start_date": r[7],
+            "end_date": r[8],
+            "hours_requested": r[9],
+            "days_requested": round(r[9] / HOURS_PER_DAY, 1),
+            "req_status": r[10],
+            "cancel_reason": r[11],
+            "requester_nickname": r[12],
+            "requester_department": r[13],
+            "requester_position": r[14],
         }
         for r in rows
     ]
