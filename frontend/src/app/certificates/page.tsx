@@ -88,9 +88,10 @@ function EmploymentCert({ info, purpose }: { info: CertInfo; purpose: string }) 
         <div style={companyName}>{company.company_name}</div>
         {company.address && <div style={companyDetail}>{company.address}</div>}
         {company.business_number && <div style={companyDetail}>사업자등록번호: {company.business_number}</div>}
-        <div style={{ ...companyDetail, marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '2rem' }}>
+        <div style={{ ...companyDetail, marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2rem' }}>
           <span>대표이사: {company.representative || '—'}</span>
-          <span style={sealBox}>직인</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/seal.png" alt="직인" style={sealImg} />
         </div>
       </div>
     </div>
@@ -158,9 +159,10 @@ function CareerCert({ info, purpose }: { info: CertInfo; purpose: string }) {
         <div style={companyName}>{company.company_name}</div>
         {company.address && <div style={companyDetail}>{company.address}</div>}
         {company.business_number && <div style={companyDetail}>사업자등록번호: {company.business_number}</div>}
-        <div style={{ ...companyDetail, marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '2rem' }}>
+        <div style={{ ...companyDetail, marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2rem' }}>
           <span>대표이사: {company.representative || '—'}</span>
-          <span style={sealBox}>직인</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/seal.png" alt="직인" style={sealImg} />
         </div>
       </div>
     </div>
@@ -386,16 +388,8 @@ const companyDetail: React.CSSProperties = {
   marginBottom: '0.15rem',
 };
 
-const sealBox: React.CSSProperties = {
-  display: 'inline-block',
-  width: 60,
-  height: 60,
-  border: '2px solid #dc2626',
-  color: '#dc2626',
-  fontWeight: 700,
-  fontSize: '1rem',
-  lineHeight: '60px',
-  textAlign: 'center',
-  borderRadius: '50%',
-  marginLeft: '1rem',
+const sealImg: React.CSSProperties = {
+  width: 80,
+  height: 80,
+  objectFit: 'contain',
 };
