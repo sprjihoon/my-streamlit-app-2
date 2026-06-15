@@ -55,6 +55,7 @@ interface PendingApproval {
   requester_nickname: string;
   requester_department: string;
   requester_position: string;
+  approval_type: 'normal' | 'cancel';  // cancel = 취소결재
 }
 
 interface ApprovalHistory {
@@ -94,10 +95,11 @@ interface AdminUser {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; bg: string; color: string }> = {
-    pending:   { label: '결재중', bg: '#fff3cd', color: '#856404' },
-    approved:  { label: '승인',   bg: '#d1e7dd', color: '#0a3622' },
-    rejected:  { label: '반려',   bg: '#f8d7da', color: '#842029' },
-    cancelled: { label: '취소',   bg: '#e2e3e5', color: '#41464b' },
+    pending:          { label: '결재중',    bg: '#fff3cd', color: '#856404' },
+    approved:         { label: '승인',      bg: '#d1e7dd', color: '#0a3622' },
+    rejected:         { label: '반려',      bg: '#f8d7da', color: '#842029' },
+    cancelled:        { label: '취소',      bg: '#e2e3e5', color: '#41464b' },
+    cancel_requested: { label: '취소결재중', bg: '#fff0e6', color: '#c45000' },
   };
   const s = map[status] || { label: status, bg: '#e9ecef', color: '#495057' };
   return (
@@ -216,6 +218,10 @@ export default function LeavePage() {
   const [cancelingId, setCancelingId] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
+  // 취소결재 반려 모달
+  const [rejectingCancelId, setRejectingCancelId] = useState<number | null>(null);  // request_id
+  const [rejectCancelComment, setRejectCancelComment] = useState('');
+
   // 신청 폼
   const [showForm, setShowForm] = useState(false);
   const [formLeaveType, setFormLeaveType] = useState('연차');
@@ -331,12 +337,30 @@ export default function LeavePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || '취소 실패');
-      showMsg(data.message || '연차가 취소되었습니다. 기록은 이력에 보존됩니다.');
+      showMsg(data.message || '연차가 취소되었습니다.');
       setCancelingId(null); setCancelReason('');
       fetchMySummary(); fetchMyRequests();
       if (isAdmin) fetchAdminData();
     } catch (err) {
       showMsg(err instanceof Error ? err.message : '취소 실패', true);
+    }
+  }
+
+  // 취소결재 승인/반려
+  async function handleCancelApprove(requestId: number, action: 'approve' | 'reject', comment = '') {
+    try {
+      const res = await fetch(`${API_URL}/leave/requests/${requestId}/cancel-approve?token=${token}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, comment }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '처리 실패');
+      showMsg(data.message || '처리되었습니다.');
+      setRejectingCancelId(null); setRejectCancelComment('');
+      fetchPendingApprovals(); fetchApprovalHistory(); fetchMySummary();
+    } catch (err) {
+      showMsg(err instanceof Error ? err.message : '처리 실패', true);
     }
   }
 
@@ -507,13 +531,25 @@ export default function LeavePage() {
           )}
 
           {/* 취소 확인 모달 */}
-          {cancelingId !== null && (
+          {cancelingId !== null && (() => {
+            const targetReq = requests.find(r => r.id === cancelingId);
+            const isApproved = targetReq?.status === 'approved';
+            return (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ background: 'white', borderRadius: 10, padding: '1.5rem', width: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
-                <h4 style={{ marginBottom: '0.5rem', color: '#dc3545' }}>⚠️ 연차 취소</h4>
+              <div style={{ background: 'white', borderRadius: 10, padding: '1.5rem', width: 380, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+                <h4 style={{ marginBottom: '0.5rem', color: isApproved ? '#fd7e14' : '#dc3545' }}>
+                  {isApproved ? '🔄 승인된 연차 취소 요청' : '⚠️ 연차 취소'}
+                </h4>
                 <p style={{ fontSize: '0.875rem', color: '#555', marginBottom: '1rem' }}>
-                  취소 후에도 모든 기록은 이력에 보존됩니다.<br />
-                  승인된 연차를 취소하면 잔여 연차가 복구됩니다.
+                  {isApproved
+                    ? <>
+                        승인된 연차는 <strong>결재라인 전원의 취소 승인</strong>이 필요합니다.<br />
+                        모든 결재자가 승인해야 취소가 확정됩니다.
+                      </>
+                    : <>
+                        취소 후에도 모든 기록은 이력에 보존됩니다.
+                      </>
+                  }
                 </p>
                 <div style={{ marginBottom: '1rem' }}>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: '#555', marginBottom: '0.3rem' }}>취소 사유 (선택)</label>
@@ -527,13 +563,14 @@ export default function LeavePage() {
                     닫기
                   </button>
                   <button onClick={() => handleCancel(cancelingId, cancelReason)}
-                    style={{ padding: '0.45rem 1rem', background: '#dc3545', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
-                    취소 확정
+                    style={{ padding: '0.45rem 1rem', background: isApproved ? '#fd7e14' : '#dc3545', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+                    {isApproved ? '취소 요청 접수' : '취소 확정'}
                   </button>
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* 신청 목록 */}
           <div style={card}>
@@ -568,12 +605,33 @@ export default function LeavePage() {
                           }) : '-'}
                         </td>
                         <td style={{ padding: '0.6rem 0.5rem' }}>
-                          {(r.status === 'pending' || r.status === 'approved') && (
-                            <button onClick={() => { setCancelingId(r.id); setCancelReason(''); }}
-                              style={{ padding: '2px 8px', fontSize: '0.75rem', backgroundColor: r.status === 'approved' ? '#fd7e14' : '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                              {r.status === 'approved' ? '취소 요청' : '취소'}
-                            </button>
-                          )}
+                          {(() => {
+                            const today = new Date().toISOString().slice(0, 10);
+                            const isPast = r.end_date < today;
+                            if (r.status === 'cancel_requested') {
+                              return (
+                                <span style={{ fontSize: '0.72rem', color: '#c45000', fontStyle: 'italic' }}>취소결재 진행중</span>
+                              );
+                            }
+                            if (r.status === 'pending' || r.status === 'approved') {
+                              return (
+                                <button
+                                  onClick={() => { if (!isPast) { setCancelingId(r.id); setCancelReason(''); } }}
+                                  disabled={isPast}
+                                  title={isPast ? '이미 사용된 연차는 취소할 수 없습니다.' : ''}
+                                  style={{
+                                    padding: '2px 8px', fontSize: '0.75rem',
+                                    backgroundColor: isPast ? '#dee2e6' : (r.status === 'approved' ? '#fd7e14' : '#dc3545'),
+                                    color: isPast ? '#aaa' : 'white',
+                                    border: 'none', borderRadius: '4px',
+                                    cursor: isPast ? 'not-allowed' : 'pointer',
+                                  }}>
+                                  {r.status === 'approved' ? '취소 요청' : '취소'}
+                                </button>
+                              );
+                            }
+                            return null;
+                          })()}
                         </td>
                       </tr>
                     ))}
@@ -602,63 +660,112 @@ export default function LeavePage() {
               <p style={{ color: '#6c757d', fontSize: '0.875rem' }}>결재 대기 중인 연차가 없습니다. ✅</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {pendingApprovals.map(a => (
-                  <div key={a.approval_id} style={{
-                    border: '2px solid #0d6efd', borderRadius: '8px', padding: '1rem',
-                    backgroundColor: '#f0f6ff',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <div>
-                        <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-                          {a.requester_nickname}
-                          <span style={{ fontSize: '0.8rem', color: '#6c757d', fontWeight: 400, marginLeft: '0.5rem' }}>
-                            {a.requester_department} · {a.requester_position} · {a.step}차 결재
+                {pendingApprovals.map(a => {
+                  const isCancel = a.approval_type === 'cancel';
+                  return (
+                    <div key={`${isCancel ? 'c' : 'n'}-${a.approval_id}`} style={{
+                      border: `2px solid ${isCancel ? '#fd7e14' : '#0d6efd'}`,
+                      borderRadius: '8px', padding: '1rem',
+                      backgroundColor: isCancel ? '#fff5eb' : '#f0f6ff',
+                    }}>
+                      {/* 헤더 배지 */}
+                      {isCancel && (
+                        <div style={{ marginBottom: '0.5rem' }}>
+                          <span style={{ background: '#fd7e14', color: 'white', borderRadius: 6, padding: '2px 10px', fontSize: '0.75rem', fontWeight: 700 }}>
+                            🔄 취소결재 요청
+                          </span>
+                          <span style={{ fontSize: '0.78rem', color: '#c45000', marginLeft: '0.5rem' }}>
+                            승인 시 해당 연차가 취소됩니다
                           </span>
                         </div>
-                        <div style={{ fontSize: '0.875rem', color: '#495057' }}>
-                          <strong>{a.leave_type}</strong> &nbsp;
-                          {a.start_date === a.end_date ? a.start_date : `${a.start_date} ~ ${a.end_date}`}
-                          &nbsp; <strong>{a.days_requested}일</strong> ({a.hours_requested}h)
-                        </div>
-                        {a.reason && (
-                          <div style={{ fontSize: '0.8rem', color: '#6c757d', marginTop: '0.25rem' }}>
-                            사유: {a.reason}
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+                            {a.requester_nickname}
+                            <span style={{ fontSize: '0.8rem', color: '#6c757d', fontWeight: 400, marginLeft: '0.5rem' }}>
+                              {a.requester_department} · {a.requester_position} · {a.step}차 {isCancel ? '취소결재' : '결재'}
+                            </span>
                           </div>
-                        )}
-                        <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: '0.2rem' }}>
-                          신청일: {new Date(a.created_at).toLocaleDateString('ko-KR')}
+                          <div style={{ fontSize: '0.875rem', color: '#495057' }}>
+                            <strong>{a.leave_type}</strong> &nbsp;
+                            {a.start_date === a.end_date ? a.start_date : `${a.start_date} ~ ${a.end_date}`}
+                            &nbsp; <strong>{a.days_requested}일</strong> ({a.hours_requested}h)
+                          </div>
+                          {a.reason && (
+                            <div style={{ fontSize: '0.8rem', color: '#6c757d', marginTop: '0.25rem' }}>
+                              {isCancel ? '취소 사유' : '사유'}: {a.reason}
+                            </div>
+                          )}
+                          <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: '0.2rem' }}>
+                            {isCancel ? '취소요청일' : '신청일'}: {a.created_at ? new Date(a.created_at).toLocaleDateString('ko-KR') : '-'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          {isCancel ? (
+                            <>
+                              <button onClick={() => handleCancelApprove(a.request_id, 'approve')}
+                                style={{ padding: '0.4rem 1rem', backgroundColor: '#fd7e14', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
+                                ✅ 취소 승인
+                              </button>
+                              <button onClick={() => setRejectingCancelId(rejectingCancelId === a.request_id ? null : a.request_id)}
+                                style={{ padding: '0.4rem 1rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
+                                ❌ 취소 반려
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => handleApprove(a.approval_id)}
+                                style={{ padding: '0.4rem 1rem', backgroundColor: '#198754', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
+                                ✅ 승인
+                              </button>
+                              <button onClick={() => setRejectingId(rejectingId === a.approval_id ? null : a.approval_id)}
+                                style={{ padding: '0.4rem 1rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
+                                ❌ 반려
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                        <button onClick={() => handleApprove(a.approval_id)}
-                          style={{ padding: '0.4rem 1rem', backgroundColor: '#198754', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
-                          ✅ 승인
-                        </button>
-                        <button onClick={() => setRejectingId(rejectingId === a.approval_id ? null : a.approval_id)}
-                          style={{ padding: '0.4rem 1rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
-                          ❌ 반려
-                        </button>
-                      </div>
+                      {/* 일반 반려 입력 */}
+                      {!isCancel && rejectingId === a.approval_id && (
+                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+                          <input type="text" value={rejectComment}
+                            onChange={e => setRejectComment(e.target.value)}
+                            placeholder="반려 사유를 입력하세요 (필수)"
+                            autoFocus
+                            style={{ flex: 1, padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }} />
+                          <button onClick={() => handleReject(a.approval_id)}
+                            style={{ padding: '0.4rem 0.75rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                            반려 확정
+                          </button>
+                          <button onClick={() => { setRejectingId(null); setRejectComment(''); }}
+                            style={{ padding: '0.4rem 0.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                            닫기
+                          </button>
+                        </div>
+                      )}
+                      {/* 취소결재 반려 입력 */}
+                      {isCancel && rejectingCancelId === a.request_id && (
+                        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+                          <input type="text" value={rejectCancelComment}
+                            onChange={e => setRejectCancelComment(e.target.value)}
+                            placeholder="취소 반려 사유를 입력하세요 (선택)"
+                            autoFocus
+                            style={{ flex: 1, padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }} />
+                          <button onClick={() => handleCancelApprove(a.request_id, 'reject', rejectCancelComment)}
+                            style={{ padding: '0.4rem 0.75rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                            반려 확정
+                          </button>
+                          <button onClick={() => { setRejectingCancelId(null); setRejectCancelComment(''); }}
+                            style={{ padding: '0.4rem 0.5rem', backgroundColor: '#aaa', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                            닫기
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {rejectingId === a.approval_id && (
-                      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-                        <input type="text" value={rejectComment}
-                          onChange={e => setRejectComment(e.target.value)}
-                          placeholder="반려 사유를 입력하세요 (필수)"
-                          autoFocus
-                          style={{ flex: 1, padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }} />
-                        <button onClick={() => handleReject(a.approval_id)}
-                          style={{ padding: '0.4rem 0.75rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                          반려 확정
-                        </button>
-                        <button onClick={() => { setRejectingId(null); setRejectComment(''); }}
-                          style={{ padding: '0.4rem 0.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                          취소
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
