@@ -209,6 +209,7 @@ const NAV_GROUPS = [
       { href: '/leave', label: '🗓️ 연월차 관리' },
       { href: '/leave/calendar', label: '📅 연차 달력' },
       { href: '/receipts', label: '🧾 영수증 처리' },
+      { href: '/certificates', label: '📄 증명서 발급' },
     ],
   },
   {

@@ -25,6 +25,7 @@ from backend.app.api.invoice_analytics import router as invoice_analytics_router
 from backend.app.api.wp_analytics import router as wp_analytics_router
 from backend.app.api.leave import router as leave_router
 from backend.app.api.receipt import router as receipt_router
+from backend.app.api.certificates import router as certificates_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -68,6 +69,7 @@ app.include_router(invoice_analytics_router)
 app.include_router(wp_analytics_router)
 app.include_router(leave_router)
 app.include_router(receipt_router)
+app.include_router(certificates_router)
 
 
 # 루트 엔드포인트
