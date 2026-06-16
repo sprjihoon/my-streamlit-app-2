@@ -552,7 +552,13 @@ export default function RootLayout({
             
             <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               {/* 일반 그룹 (아코디언) — adminOnly 항목은 관리자만 표시 */}
-              {NAV_GROUPS.map(group => {
+              {/* 비관리자는 그룹웨어 카테고리를 맨 위로 */}
+              {(user?.is_admin
+                ? NAV_GROUPS
+                : [...NAV_GROUPS].sort((a, b) =>
+                    a.key === 'groupware' ? -1 : b.key === 'groupware' ? 1 : 0
+                  )
+              ).map(group => {
                 const visibleItems = group.items.filter(
                   item => user?.is_admin || !item.adminOnly
                 );
