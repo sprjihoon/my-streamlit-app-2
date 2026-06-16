@@ -1,8 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// A4 기준 픽셀 (96dpi: 210mm × 297mm)
+const A4_W = 794;
+const A4_H = 1123;
 
 // ─── 타입 ───────────────────────────────────────────────────────────
 interface CertInfo {
@@ -41,8 +45,11 @@ const PRINT_STYLE = `
     width: 210mm !important; min-height: 297mm !important;
     margin: 0 !important; padding: 20mm 25mm !important;
     box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
     background: white !important;
     font-family: 'Malgun Gothic', '맑은 고딕', AppleGothic, sans-serif !important;
+    transform: none !important;
   }
   @page { size: A4 portrait; margin: 0; }
 }
@@ -179,6 +186,15 @@ export default function CertificatesPage() {
   const [purpose, setPurpose] = useState('');
   const [printing, setPrinting] = useState(false);
   const styleRef = useRef<HTMLStyleElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(1);
+
+  const updateScale = useCallback(() => {
+    if (!wrapperRef.current) return;
+    const available = wrapperRef.current.clientWidth;
+    const s = Math.min(1, available / A4_W);
+    setScale(s);
+  }, []);
 
   useEffect(() => {
     const tok = localStorage.getItem('token') || '';
@@ -204,6 +220,13 @@ export default function CertificatesPage() {
       if (styleRef.current) document.head.removeChild(styleRef.current);
     };
   }, []);
+
+  // 뷰포트 변경 시 스케일 재계산
+  useEffect(() => {
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, [updateScale]);
 
   const handlePrint = async () => {
     if (!token) return;
@@ -285,11 +308,21 @@ export default function CertificatesPage() {
         💡 PDF 저장 방법: 인쇄 버튼 클릭 → 프린터를 <strong>"PDF로 저장"</strong> 선택 → 저장
       </div>
 
-      {/* 증명서 미리보기 */}
-      {certType === 'employment'
-        ? <EmploymentCert info={info} purpose={purpose} />
-        : <CareerCert info={info} purpose={purpose} />
-      }
+      {/* 증명서 미리보기 — A4 고정 비율 유지 */}
+      <div ref={wrapperRef} style={{ width: '100%', overflow: 'hidden' }}>
+        <div style={{
+          width: A4_W,
+          height: A4_H,
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left',
+          marginBottom: scale < 1 ? A4_H * scale - A4_H : 0,
+        }}>
+          {certType === 'employment'
+            ? <EmploymentCert info={info} purpose={purpose} />
+            : <CareerCert info={info} purpose={purpose} />
+          }
+        </div>
+      </div>
     </div>
   );
 }
@@ -299,9 +332,11 @@ const certWrap: React.CSSProperties = {
   background: 'white',
   border: '1px solid #d1d5db',
   borderRadius: 8,
-  padding: '40px 50px',
+  padding: '60px 70px',
   fontFamily: "'Malgun Gothic', '맑은 고딕', AppleGothic, sans-serif",
-  maxWidth: 680,
+  width: A4_W,
+  minHeight: A4_H,
+  boxSizing: 'border-box',
   boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
 };
 
