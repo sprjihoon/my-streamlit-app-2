@@ -4,10 +4,9 @@ import pandas as pd
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton, QTableView, QMessageBox
 )
-from PySide6.QtWidgets import QHeaderView
 
 from common import get_connection
-from native_app.qt_utils import df_to_model
+from native_app.qt_utils import df_to_model, configure_table
 
 
 SKU_OPTS  = ["≤100", "≤300", "≤500", "≤1,000", "≤2,000", ">2,000"]
@@ -23,6 +22,7 @@ class MappedSuppliersTab(QWidget):
         super().__init__(parent)
 
         self.tbl_main = QTableView(self)
+        configure_table(self.tbl_main)
         self.ed_search = QLineEdit(self)
         self.cb_vendor = QComboBox(self)
         self.cb_rate = QComboBox(self); self.cb_rate.addItems(["A","STD"])
@@ -32,8 +32,9 @@ class MappedSuppliersTab(QWidget):
             cb.addItems(["YES","NO"])
         self.txt_alias = {ft: QTextEdit(self) for ft in FILE_TYPES}
 
-        self.btn_save = QPushButton("변경 사항 저장", self)
-        self.btn_delete = QPushButton("공급처 삭제", self)
+        self.btn_save = QPushButton("💾  변경 사항 저장", self)
+        self.btn_delete = QPushButton("🗑  공급처 삭제", self)
+        self.btn_delete.setProperty("danger", "true")
 
         lay = QVBoxLayout(self)
         top = QHBoxLayout(); lay.addLayout(top)

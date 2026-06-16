@@ -10,10 +10,9 @@ from PySide6.QtCore import QDate, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QDateEdit, QPushButton, QTableView, QMessageBox, QListWidget, QListWidgetItem, QAbstractItemView, QProgressDialog, QComboBox
 )
-from PySide6.QtWidgets import QHeaderView
 
 from common import get_connection
-from native_app.qt_utils import df_to_model
+from native_app.qt_utils import df_to_model, configure_table
 
 # 전체 비용 항목 반영
 from core.utils_shipping import shipping_stats
@@ -48,9 +47,11 @@ class InvoiceAllTab(QWidget):
         self.dt_to.setDate(today)
 
         self.btn_load_vendors = QPushButton("공급처 불러오기", self)
-        self.btn_run = QPushButton("인보이스 일괄 생성", self)
+        self.btn_load_vendors.setProperty("secondary", "true")
+        self.btn_run = QPushButton("⚡  인보이스 일괄 생성", self)
         self.lst_vendors = QListWidget(self); self.lst_vendors.setSelectionMode(QAbstractItemView.MultiSelection)
         self.tbl_log = QTableView(self)
+        configure_table(self.tbl_log)
         
         # 작업일지 소스 선택 콤보박스
         self.cmb_worklog_source = QComboBox(self)

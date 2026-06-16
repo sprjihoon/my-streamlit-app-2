@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from common import get_connection
-from native_app.qt_utils import df_to_model
+from native_app.qt_utils import df_to_model, configure_table
 
 
 SKU_OPTS = ["≤100","≤300","≤500","≤1,000","≤2,000",">2,000"]
@@ -32,9 +32,11 @@ class MappingManagerTab(QWidget):
         for ft, w in self.txt_alias.items():
             w.setPlaceholderText(f"{ft} 별칭을 콤마(,)로 구분하여 입력")
 
-        self.btn_save = QPushButton("공급처 저장/업데이트", self)
-        self.btn_refresh_unmatched = QPushButton("미매칭 검사", self)
+        self.btn_save = QPushButton("💾  공급처 저장/업데이트", self)
+        self.btn_refresh_unmatched = QPushButton("🔍  미매칭 검사", self)
+        self.btn_refresh_unmatched.setProperty("secondary", "true")
         self.tbl_unmatched = QTableView(self)
+        configure_table(self.tbl_unmatched, sortable=False)
 
         # layout
         lay = QVBoxLayout(self)

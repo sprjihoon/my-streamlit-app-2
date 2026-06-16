@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QHeaderView
 
 from common import get_connection
-from native_app.qt_utils import df_to_model
+from native_app.qt_utils import df_to_model, configure_table
 
 
 class ShippingInsightTab(QWidget):
@@ -20,10 +20,14 @@ class ShippingInsightTab(QWidget):
         self.sel_qty_col = QComboBox(self)
         self.filter_kw = QLineEdit(self)
         self.btn_reload = QPushButton("새로고침", self)
+        self.btn_reload.setProperty("secondary", "true")
 
         self.tbl_summary = QTableView(self)
+        configure_table(self.tbl_summary, sortable=False)
         self.tbl_top = QTableView(self)
+        configure_table(self.tbl_top, sortable=False)
         self.tbl_kw = QTableView(self)
+        configure_table(self.tbl_kw, sortable=False)
 
         top1 = QHBoxLayout()
         top1.addWidget(QLabel("테이블"))

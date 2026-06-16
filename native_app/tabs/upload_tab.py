@@ -7,12 +7,11 @@ from typing import Dict, Optional
 import pandas as pd
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog,
-    QTableView, QComboBox, QMessageBox
+    QTableView, QComboBox, QMessageBox,
 )
-from PySide6.QtWidgets import QHeaderView
 
 from common import get_connection
-from native_app.qt_utils import df_to_model, model_to_df, df_to_xlsx_bytes
+from native_app.qt_utils import df_to_model, model_to_df, df_to_xlsx_bytes, configure_table
 
 
 TARGETS: Dict[str, Dict[str, str]] = {
@@ -32,15 +31,20 @@ class UploadTab(QWidget):
         for k, meta in TARGETS.items():
             self.tbl_select.addItem(meta["label"], k)
 
-        self.btn_pick = QPushButton("엑셀 선택…", self)
-        self.btn_save = QPushButton("신규 데이터 저장", self)
-        self.btn_export = QPushButton("현재 데이터 다운로드", self)
-        self.btn_delete = QPushButton("테이블 삭제(백업)", self)
+        self.btn_pick = QPushButton("📂  엑셀 선택", self)
+        self.btn_save = QPushButton("💾  저장", self)
+        self.btn_export = QPushButton("⬇  다운로드", self)
+        self.btn_export.setProperty("secondary", "true")
+        self.btn_delete = QPushButton("🗑  삭제(백업)", self)
+        self.btn_delete.setProperty("danger", "true")
 
         self.table = QTableView(self)
+        configure_table(self.table)
 
         top = QHBoxLayout()
-        top.addWidget(QLabel("대상 테이블"))
+        lbl = QLabel("대상 테이블")
+        lbl.setStyleSheet("font-weight: 600; color: #4A4E69;")
+        top.addWidget(lbl)
         top.addWidget(self.tbl_select)
         top.addStretch(1)
         top.addWidget(self.btn_pick)
@@ -49,6 +53,8 @@ class UploadTab(QWidget):
         top.addWidget(self.btn_delete)
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 12)
+        lay.setSpacing(10)
         lay.addLayout(top)
         lay.addWidget(self.table)
 
@@ -148,7 +154,5 @@ class UploadTab(QWidget):
             except Exception:
                 df = pd.DataFrame()
         self.table.setModel(df_to_model(df))
-        hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(QHeaderView.Stretch)
 
 

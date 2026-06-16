@@ -14,12 +14,12 @@ from PySide6.QtCore import Qt, QDate
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableView, QMessageBox, QDateEdit, QComboBox, QSplitter,
-    QGroupBox, QFormLayout, QLineEdit, QHeaderView, QAbstractItemView,
+    QGroupBox, QFormLayout, QLineEdit, QAbstractItemView,
     QCheckBox, QFileDialog,
 )
 
 from common import get_connection
-from native_app.qt_utils import df_to_model
+from native_app.qt_utils import df_to_model, configure_table
 
 
 class EstimateTab(QWidget):
@@ -61,10 +61,11 @@ class EstimateTab(QWidget):
 
         filter_layout.addStretch(1)
 
-        self.btn_search = QPushButton("검색", self)
+        self.btn_search = QPushButton("🔍  검색", self)
         filter_layout.addWidget(self.btn_search)
 
         self.btn_refresh = QPushButton("새로고침", self)
+        self.btn_refresh.setProperty("secondary", "true")
         filter_layout.addWidget(self.btn_refresh)
 
         main_layout.addWidget(filter_group)
@@ -93,22 +94,19 @@ class EstimateTab(QWidget):
         # 삭제 버튼들
         self.btn_delete_selected = QPushButton("선택 삭제", self)
         self.btn_delete_selected.setEnabled(False)
-        self.btn_delete_selected.setStyleSheet("QPushButton { color: #c0392b; }")
+        self.btn_delete_selected.setProperty("danger", "true")
         select_layout.addWidget(self.btn_delete_selected)
 
         self.btn_delete_current = QPushButton("현재 견적서 삭제", self)
         self.btn_delete_current.setEnabled(False)
-        self.btn_delete_current.setStyleSheet("QPushButton { color: #c0392b; }")
+        self.btn_delete_current.setProperty("danger", "true")
         select_layout.addWidget(self.btn_delete_current)
 
         list_layout.addLayout(select_layout)
 
         self.tbl_list = QTableView(self)
-        self.tbl_list.setSelectionBehavior(QAbstractItemView.SelectRows)
+        configure_table(self.tbl_list)
         self.tbl_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tbl_list.setSortingEnabled(True)
-        self.tbl_list.setAlternatingRowColors(True)
-        self.tbl_list.verticalHeader().setVisible(False)
         list_layout.addWidget(self.tbl_list)
 
         # 페이지네이션
@@ -133,7 +131,7 @@ class EstimateTab(QWidget):
         # 상세 헤더
         detail_header = QHBoxLayout()
         detail_header.addWidget(QLabel("📄 견적서 상세"))
-        self.btn_export_pdf = QPushButton("PDF 다운로드", self)
+        self.btn_export_pdf = QPushButton("⬇  PDF 다운로드", self)
         self.btn_export_pdf.setEnabled(False)
         detail_header.addStretch(1)
         detail_header.addWidget(self.btn_export_pdf)
@@ -174,10 +172,11 @@ class EstimateTab(QWidget):
         detail_layout.addWidget(info_group)
 
         # 견적 항목 테이블
-        detail_layout.addWidget(QLabel("📦 견적 항목"))
+        items_lbl = QLabel("📦  견적 항목")
+        items_lbl.setStyleSheet("font-weight: 700; font-size: 13px; color: #4A4E69; margin-top: 4px;")
+        detail_layout.addWidget(items_lbl)
         self.tbl_items = QTableView(self)
-        self.tbl_items.setAlternatingRowColors(True)
-        self.tbl_items.verticalHeader().setVisible(False)
+        configure_table(self.tbl_items, sortable=False)
         detail_layout.addWidget(self.tbl_items)
 
         splitter.addWidget(detail_widget)
@@ -400,7 +399,6 @@ class EstimateTab(QWidget):
                     df["총금액"] = df["총금액"].apply(lambda x: f"{int(x):,}원" if x else "0원")
 
                 self.tbl_list.setModel(df_to_model(df))
-                self.tbl_list.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
                 # 상태 업데이트
                 self.lbl_total.setText(f"총 {self._total_count:,}건")
@@ -514,7 +512,6 @@ class EstimateTab(QWidget):
             df = pd.DataFrame(rows)
 
         self.tbl_items.setModel(df_to_model(df))
-        self.tbl_items.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
     def _on_export_pdf(self) -> None:
         """PDF 다운로드"""

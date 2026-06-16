@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QHeaderView
 
 from common import get_connection
-from native_app.qt_utils import df_to_model, model_to_df
+from native_app.qt_utils import df_to_model, model_to_df, configure_table
 
 
 TABLES = {
@@ -50,17 +50,23 @@ class RateManagerTab(QWidget):
 			self.sel.addItem(v, k)
 
 		self.btn_load = QPushButton("불러오기", self)
-		self.btn_save = QPushButton("저장", self)
+		self.btn_load.setProperty("secondary", "true")
+		self.btn_save = QPushButton("💾  저장", self)
 		self.table = QTableView(self)
+		configure_table(self.table, sortable=False)
 
 		top = QHBoxLayout()
-		top.addWidget(QLabel("요금 테이블"))
+		lbl = QLabel("요금 테이블")
+		lbl.setStyleSheet("font-weight: 600; color: #4A4E69;")
+		top.addWidget(lbl)
 		top.addWidget(self.sel)
 		top.addStretch(1)
 		top.addWidget(self.btn_load)
 		top.addWidget(self.btn_save)
 
 		lay = QVBoxLayout(self)
+		lay.setContentsMargins(16, 16, 16, 12)
+		lay.setSpacing(10)
 		lay.addLayout(top)
 		lay.addWidget(self.table)
 

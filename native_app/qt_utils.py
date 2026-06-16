@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import pandas as pd
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView
 
 
 def df_to_model(df: pd.DataFrame) -> QStandardItemModel:
@@ -18,6 +20,31 @@ def df_to_model(df: pd.DataFrame) -> QStandardItemModel:
             row_items.append(item)
         model.appendRow(row_items)
     return model
+
+
+def configure_table(
+    table: QTableView,
+    row_height: int = 36,
+    resize_mode: QHeaderView.ResizeMode = QHeaderView.Stretch,
+    sortable: bool = True,
+) -> None:
+    """테이블 공통 스타일 설정 헬퍼."""
+    table.setAlternatingRowColors(True)
+    table.setShowGrid(False)
+    table.setSortingEnabled(sortable)
+    table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    table.setFocusPolicy(Qt.StrongFocus)
+
+    vh = table.verticalHeader()
+    vh.setVisible(False)
+    vh.setDefaultSectionSize(row_height)
+
+    hh = table.horizontalHeader()
+    hh.setHighlightSections(False)
+    hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    hh.setSectionResizeMode(resize_mode)
+    hh.setStretchLastSection(True)
 
 
 def model_to_df(model: QStandardItemModel) -> pd.DataFrame:
