@@ -42,23 +42,28 @@ function NavGroup({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0.4rem 0.75rem',
-          background: hasActive ? '#e8f0fe' : 'transparent',
+          padding: '0.45rem 0.75rem',
+          background: hasActive ? 'rgba(255,255,255,0.12)' : 'transparent',
           border: 'none',
           borderRadius: '6px',
-          color: hasActive ? '#1a56db' : '#6c757d',
+          color: hasActive ? '#ffffff' : 'rgba(255,255,255,0.5)',
           cursor: 'pointer',
-          fontSize: '0.7rem',
+          fontSize: '0.675rem',
           fontWeight: 700,
-          letterSpacing: '0.06em',
+          letterSpacing: '0.08em',
           textTransform: 'uppercase',
-          transition: 'background 0.15s',
-          marginTop: '0.25rem',
+          transition: 'all 0.15s',
+          marginTop: '0.5rem',
+          fontFamily: 'inherit',
         }}
       >
-        <span>{icon} {label}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          <span>{icon}</span>
+          <span>{label}</span>
+        </span>
         <span style={{
-          fontSize: '0.6rem',
+          fontSize: '0.55rem',
+          opacity: 0.7,
           transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
           transition: 'transform 0.2s',
         }}>▼</span>
@@ -66,7 +71,7 @@ function NavGroup({
 
       <div style={{
         overflow: 'hidden',
-        maxHeight: open ? `${items.length * 44}px` : '0px',
+        maxHeight: open ? `${items.length * 40}px` : '0px',
         transition: 'max-height 0.25s ease',
       }}>
         {items.map(item => (
@@ -74,7 +79,7 @@ function NavGroup({
             key={item.href}
             href={item.href}
             className={pathname === item.href ? 'active' : ''}
-            style={{ paddingLeft: '1.25rem', fontSize: '0.85rem' }}
+            style={{ paddingLeft: '1.5rem', fontSize: '0.8375rem' }}
           >
             {item.label}
           </Link>
@@ -414,26 +419,51 @@ export default function RootLayout({
         <div className="layout">
           {/* 사이드바 */}
           <aside className="sidebar">
-            <h1>📋 청구서 시스템</h1>
-            
-            {/* 사용자 정보 - 항상 표시 */}
+            <h1>
+              <span style={{ fontSize: '1.1rem' }}>📋</span>
+              틸리언 그룹웨어
+            </h1>
+
+            {/* 사용자 정보 */}
             {user ? (
-              <div
-                style={{
-                  padding: '0.75rem',
-                  marginBottom: '1rem',
-                  backgroundColor: '#f0f4f8',
-                  borderRadius: '4px',
-                  border: '1px solid #dee2e6',
-                }}
-              >
-                <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#212529' }}>
-                  👤 {user.nickname}
+              <div style={{
+                margin: '0.75rem 0.6rem',
+                padding: '0.75rem',
+                background: 'rgba(255,255,255,0.07)',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  marginBottom: '0.5rem',
+                }}>
+                  <div style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #4361ee, #7b9cff)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    color: '#fff',
+                    flexShrink: 0,
+                  }}>
+                    {user.nickname.charAt(0)}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.875rem', color: '#fff', lineHeight: 1.2 }}>
+                      {user.nickname}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.45)', marginTop: '1px' }}>
+                      {user.is_admin ? '관리자' : '일반 사용자'}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>
-                  {user.is_admin ? '🔐 관리자' : '👤 일반 사용자'}
-                </div>
-                <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.375rem' }}>
                   <button
                     onClick={() => {
                       setShowPasswordModal(true);
@@ -445,13 +475,15 @@ export default function RootLayout({
                     }}
                     style={{
                       flex: 1,
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.75rem',
-                      backgroundColor: '#0d6efd',
-                      color: 'white',
+                      padding: '0.3rem 0.4rem',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      background: 'rgba(67,97,238,0.7)',
+                      color: '#fff',
                       border: 'none',
-                      borderRadius: '4px',
+                      borderRadius: '5px',
                       cursor: 'pointer',
+                      fontFamily: 'inherit',
                     }}
                   >
                     비번변경
@@ -460,13 +492,15 @@ export default function RootLayout({
                     onClick={handleLogout}
                     style={{
                       flex: 1,
-                      padding: '0.25rem 0.5rem',
-                      fontSize: '0.75rem',
-                      backgroundColor: '#6c757d',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
+                      padding: '0.3rem 0.4rem',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      background: 'rgba(255,255,255,0.1)',
+                      color: 'rgba(255,255,255,0.75)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: '5px',
                       cursor: 'pointer',
+                      fontFamily: 'inherit',
                     }}
                   >
                     로그아웃
@@ -474,26 +508,19 @@ export default function RootLayout({
                 </div>
               </div>
             ) : (
-              <div
-                style={{
-                  padding: '0.75rem',
-                  marginBottom: '1rem',
-                  backgroundColor: '#f0f4f8',
-                  borderRadius: '4px',
-                  border: '1px solid #dee2e6',
-                }}
-              >
+              <div style={{ margin: '0.75rem 0.6rem' }}>
                 <button
                   onClick={handleLogout}
                   style={{
                     width: '100%',
-                    padding: '0.5rem',
-                    fontSize: '0.875rem',
-                    backgroundColor: '#6c757d',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
+                    padding: '0.4rem',
+                    fontSize: '0.8rem',
+                    background: 'rgba(255,255,255,0.1)',
+                    color: 'rgba(255,255,255,0.75)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: '6px',
                     cursor: 'pointer',
+                    fontFamily: 'inherit',
                   }}
                 >
                   🔓 로그아웃
@@ -542,7 +569,9 @@ export default function RootLayout({
           </aside>
 
           {/* 메인 콘텐츠 */}
-          <main className="main-content">{children}</main>
+          <main className="main-content">
+            {children}
+          </main>
         </div>
 
         {/* 최초 로그인 비밀번호 강제 변경 모달 */}
