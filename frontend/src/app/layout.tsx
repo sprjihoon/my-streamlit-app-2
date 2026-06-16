@@ -377,7 +377,7 @@ export default function RootLayout({
     return (
       <html lang="ko">
         <head>
-          <title>{isPublicPage ? '견적서 만들기' : '로그인'} - 청구서 관리 시스템</title>
+          <title>{isPublicPage ? '견적서 만들기' : '로그인'} - 틸리언 그룹웨어</title>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
         <body style={isPublicPage ? { background: '#000', minHeight: '100vh' } : undefined}>{children}</body>
@@ -390,7 +390,7 @@ export default function RootLayout({
     return (
       <html lang="ko">
         <head>
-          <title>청구서 관리 시스템</title>
+          <title>틸리언 그룹웨어</title>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
         <body>
@@ -405,7 +405,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <head>
-        <title>청구서 관리 시스템</title>
+        <title>틸리언 그룹웨어</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body>
