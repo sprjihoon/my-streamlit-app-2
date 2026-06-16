@@ -3,14 +3,21 @@
 import './globals.css';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import {
+  LayoutDashboard, ClipboardList, Upload, Link2, List, DollarSign,
+  BarChart2, FileText, FileSpreadsheet, TrendingUp, CalendarDays,
+  Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package,
+  PlusCircle, Users, ScrollText, Settings, ChevronDown,
+  User, LogOut, KeyRound, ShieldCheck,
+} from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // ─────────────────────────────────────
 // 아코디언 네비게이션 그룹 컴포넌트
 // ─────────────────────────────────────
-interface NavItem { href: string; label: string; adminOnly?: boolean; }
+interface NavItem { href: string; label: string; icon: React.ReactNode; adminOnly?: boolean; }
 
 function NavGroup({
   label,
@@ -20,7 +27,7 @@ function NavGroup({
   defaultOpen,
 }: {
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   items: NavItem[];
   pathname: string;
   defaultOpen?: boolean;
@@ -57,8 +64,8 @@ function NavGroup({
           fontFamily: 'inherit',
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <span>{icon}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ display: 'flex', alignItems: 'center', opacity: 0.8 }}>{icon}</span>
           <span>{label}</span>
         </span>
         <span style={{
@@ -79,9 +86,10 @@ function NavGroup({
             key={item.href}
             href={item.href}
             className={pathname === item.href ? 'active' : ''}
-            style={{ paddingLeft: '1.5rem', fontSize: '0.8375rem' }}
+            style={{ paddingLeft: '1rem', fontSize: '0.8375rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           >
-            {item.label}
+            <span style={{ display: 'flex', alignItems: 'center', opacity: pathname === item.href ? 1 : 0.65, flexShrink: 0 }}>{item.icon}</span>
+            <span>{item.label}</span>
           </Link>
         ))}
       </div>
@@ -134,7 +142,11 @@ function MustChangePasswordModal({ onSuccess }: { onSuccess: () => void }) {
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
       <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '2rem', width: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔐</div>
+          <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'center' }}>
+            <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <KeyRound size={24} style={{ color: '#4361ee' }} />
+            </div>
+          </div>
           <h3 style={{ margin: 0, marginBottom: '0.5rem' }}>비밀번호 변경 필요</h3>
           <p style={{ margin: 0, fontSize: '0.875rem', color: '#6c757d' }}>
             초기 비밀번호(123456)를 변경해야 합니다.<br />
@@ -169,75 +181,77 @@ function MustChangePasswordModal({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+const IC = { size: 14, strokeWidth: 1.75 };
+
 // adminOnly: true → 관리자(is_admin)만 표시
 // adminOnly 없음 → 모든 로그인 사용자 표시
 const NAV_GROUPS = [
   {
     key: 'home',
     label: '기본',
-    icon: '🏠',
+    icon: <LayoutDashboard {...IC} />,
     items: [
-      { href: '/', label: '🏠 대시보드', adminOnly: true },
-      { href: '/work-log', label: '📋 작업일지', adminOnly: true },
-      { href: '/upload', label: '📤 데이터 업로드', adminOnly: true },
-      { href: '/mapping', label: '🔗 업체 매핑 관리', adminOnly: true },
-      { href: '/vendors', label: '📋 매핑 리스트', adminOnly: true },
-      { href: '/rates', label: '💰 요금표 관리', adminOnly: true },
-      { href: '/insights', label: '📈 데이터 인사이트' },
+      { href: '/', label: '대시보드', icon: <LayoutDashboard {...IC} />, adminOnly: true },
+      { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} />, adminOnly: true },
+      { href: '/upload', label: '데이터 업로드', icon: <Upload {...IC} />, adminOnly: true },
+      { href: '/mapping', label: '업체 매핑 관리', icon: <Link2 {...IC} />, adminOnly: true },
+      { href: '/vendors', label: '매핑 리스트', icon: <List {...IC} />, adminOnly: true },
+      { href: '/rates', label: '요금표 관리', icon: <DollarSign {...IC} />, adminOnly: true },
+      { href: '/insights', label: '데이터 인사이트', icon: <TrendingUp {...IC} /> },
     ],
   },
   {
     key: 'invoice',
     label: '인보이스',
-    icon: '📊',
+    icon: <BarChart2 {...IC} />,
     items: [
-      { href: '/invoice', label: '📊 인보이스 계산', adminOnly: true },
-      { href: '/invoice-list', label: '📜 인보이스 목록', adminOnly: true },
-      { href: '/invoice-analytics', label: '📈 청구금액 분석' },
+      { href: '/invoice', label: '인보이스 계산', icon: <FileSpreadsheet {...IC} />, adminOnly: true },
+      { href: '/invoice-list', label: '인보이스 목록', icon: <List {...IC} />, adminOnly: true },
+      { href: '/invoice-analytics', label: '청구금액 분석', icon: <TrendingUp {...IC} /> },
     ],
   },
   {
     key: 'estimate',
     label: '견적서',
-    icon: '📄',
+    icon: <FileText {...IC} />,
     items: [
-      { href: '/estimate', label: '📄 견적서 만들기' },
-      { href: '/estimate-list', label: '📑 견적서 목록' },
-      { href: '/estimate-analytics', label: '📊 견적서 분석' },
+      { href: '/estimate', label: '견적서 만들기', icon: <FileText {...IC} /> },
+      { href: '/estimate-list', label: '견적서 목록', icon: <List {...IC} /> },
+      { href: '/estimate-analytics', label: '견적서 분석', icon: <BarChart2 {...IC} /> },
     ],
   },
   {
     key: 'groupware',
     label: '그룹웨어',
-    icon: '🗓️',
+    icon: <CalendarDays {...IC} />,
     items: [
-      { href: '/leave', label: '🗓️ 연월차 관리' },
-      { href: '/leave/calendar', label: '📅 연차 달력' },
-      { href: '/receipts', label: '🧾 영수증 처리' },
-      { href: '/certificates', label: '📄 증명서 발급' },
+      { href: '/leave', label: '연월차 관리', icon: <CalendarDays {...IC} /> },
+      { href: '/leave/calendar', label: '연차 달력', icon: <Calendar {...IC} /> },
+      { href: '/receipts', label: '영수증 처리', icon: <Receipt {...IC} /> },
+      { href: '/certificates', label: '증명서 발급', icon: <BadgeCheck {...IC} /> },
     ],
   },
   {
     key: 'marketing',
     label: '마케팅',
-    icon: '🌐',
+    icon: <Globe {...IC} />,
     items: [
-      { href: '/wp-analytics', label: '🌐 사이트 방문 분석' },
+      { href: '/wp-analytics', label: '사이트 방문 분석', icon: <Globe {...IC} /> },
     ],
   },
 ];
 
 const BILLING_INVOICE_NAV_ITEMS = [
-  { href: '/billing-invoice', label: '📑 실 인보이스 관리' },
-  { href: '/billing-invoice/analytics', label: '📊 청구금액 분석' },
+  { href: '/billing-invoice', label: '실 인보이스 관리', icon: <CreditCard {...IC} /> },
+  { href: '/billing-invoice/analytics', label: '청구금액 분석', icon: <BarChart2 {...IC} /> },
 ];
 
 const ADMIN_NAV_ITEMS = [
-  { href: '/storage', label: '📦 보관료 관리' },
-  { href: '/vendor-charges', label: '💰 추가비용 관리' },
-  { href: '/users', label: '👥 사용자 관리' },
-  { href: '/logs', label: '📝 활동 로그' },
-  { href: '/settings', label: '⚙️ 회사 설정' },
+  { href: '/storage', label: '보관료 관리', icon: <Package {...IC} /> },
+  { href: '/vendor-charges', label: '추가비용 관리', icon: <PlusCircle {...IC} /> },
+  { href: '/users', label: '사용자 관리', icon: <Users {...IC} /> },
+  { href: '/logs', label: '활동 로그', icon: <ScrollText {...IC} /> },
+  { href: '/settings', label: '회사 설정', icon: <Settings {...IC} /> },
 ];
 
 export default function RootLayout({
@@ -420,7 +434,7 @@ export default function RootLayout({
           {/* 사이드바 */}
           <aside className="sidebar">
             <h1>
-              <span style={{ fontSize: '1.1rem' }}>📋</span>
+              <ShieldCheck size={18} strokeWidth={2} style={{ color: '#7b9cff', flexShrink: 0 }} />
               틸리언 그룹웨어
             </h1>
 
@@ -440,8 +454,8 @@ export default function RootLayout({
                   marginBottom: '0.5rem',
                 }}>
                   <div style={{
-                    width: '30px',
-                    height: '30px',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '50%',
                     background: 'linear-gradient(135deg, #4361ee, #7b9cff)',
                     display: 'flex',
@@ -452,7 +466,7 @@ export default function RootLayout({
                     color: '#fff',
                     flexShrink: 0,
                   }}>
-                    {user.nickname.charAt(0)}
+                    <User size={15} strokeWidth={2} />
                   </div>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '0.875rem', color: '#fff', lineHeight: 1.2 }}>
@@ -484,9 +498,13 @@ export default function RootLayout({
                       borderRadius: '5px',
                       cursor: 'pointer',
                       fontFamily: 'inherit',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.3rem',
                     }}
                   >
-                    비번변경
+                    <KeyRound size={11} strokeWidth={2} /> 비번변경
                   </button>
                   <button
                     onClick={handleLogout}
@@ -501,9 +519,13 @@ export default function RootLayout({
                       borderRadius: '5px',
                       cursor: 'pointer',
                       fontFamily: 'inherit',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.3rem',
                     }}
                   >
-                    로그아웃
+                    <LogOut size={11} strokeWidth={2} /> 로그아웃
                   </button>
                 </div>
               </div>
@@ -523,7 +545,7 @@ export default function RootLayout({
                     fontFamily: 'inherit',
                   }}
                 >
-                  🔓 로그아웃
+                  <LogOut size={13} strokeWidth={2} style={{ marginRight: '0.3rem' }} /> 로그아웃
                 </button>
               </div>
             )}
@@ -550,7 +572,7 @@ export default function RootLayout({
               {user?.is_admin && (
                 <NavGroup
                   label="실 청구서"
-                  icon="📑"
+                  icon={<CreditCard {...IC} />}
                   items={BILLING_INVOICE_NAV_ITEMS}
                   pathname={pathname}
                 />
@@ -560,7 +582,7 @@ export default function RootLayout({
               {user?.is_admin && (
                 <NavGroup
                   label="관리자"
-                  icon="⚙️"
+                  icon={<Settings {...IC} />}
                   items={ADMIN_NAV_ITEMS}
                   pathname={pathname}
                 />
@@ -605,7 +627,9 @@ export default function RootLayout({
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 style={{ marginBottom: '1rem' }}>🔑 비밀번호 변경</h3>
+              <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <KeyRound size={18} style={{ color: '#4361ee' }} /> 비밀번호 변경
+              </h3>
 
               {passwordError && (
                 <div style={{ padding: '0.5rem', marginBottom: '1rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', fontSize: '0.875rem' }}>
