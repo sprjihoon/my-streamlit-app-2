@@ -16,7 +16,6 @@ interface Analytics {
   by_feature: { feature: string; target_type: string; count: number }[];
   hourly: { hour: number; count: number }[];
   user_breakdown: { user_nickname: string; action_type: string; count: number }[];
-  unusual_activity: { user_nickname: string; hour_bucket: string; count: number }[];
 }
 
 interface LogEntry {
@@ -277,12 +276,11 @@ export default function LogsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
             {/* 요약 KPI */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
               {[
                 { label: '이번 주 활동', value: analytics.summary.this_week.toLocaleString(), sub: <Arrow pct={analytics.summary.week_change_pct} />, color: '#2563eb' },
                 { label: '지난 주 활동', value: analytics.summary.last_week.toLocaleString(), sub: null, color: '#6b7280' },
                 { label: '주간 활성 사용자', value: analytics.summary.active_users_7d + '명', sub: null, color: '#7c3aed' },
-                { label: '이상 활동 탐지', value: analytics.unusual_activity.length + '건', sub: analytics.unusual_activity.length > 0 ? <span style={{ color: '#dc2626', fontSize: '0.75rem' }}>확인 필요</span> : <span style={{ color: '#16a34a', fontSize: '0.75rem' }}>정상</span>, color: analytics.unusual_activity.length > 0 ? '#dc2626' : '#16a34a' },
               ].map((kpi, i) => (
                 <div key={i} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                   <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{kpi.label}</div>
@@ -369,34 +367,6 @@ export default function LogsPage() {
               </div>
             </div>
 
-            {/* 이상 활동 */}
-            {analytics.unusual_activity.length > 0 && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 10, padding: '1rem' }}>
-                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#dc2626', marginBottom: '0.5rem' }}>⚠️ 집중 활동 탐지 (1시간 내 10건 이상)</div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #fca5a5' }}>
-                        {['사용자', '시간대', '활동 건수'].map(h => (
-                          <th key={h} style={{ padding: '0.4rem 0.6rem', textAlign: 'left', color: '#9f1239' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {analytics.unusual_activity.map((r, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #fee2e2' }}>
-                          <td style={{ padding: '0.4rem 0.6rem', fontWeight: 600 }}>{r.user_nickname}</td>
-                          <td style={{ padding: '0.4rem 0.6rem', color: '#6b7280' }}>{r.hour_bucket}</td>
-                          <td style={{ padding: '0.4rem 0.6rem' }}>
-                            <span style={{ background: '#dc2626', color: 'white', padding: '0.15rem 0.5rem', borderRadius: 4, fontWeight: 700 }}>{r.count}건</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
 
           </div>
         ) : null
