@@ -378,6 +378,7 @@ export default function RootLayout({
       <html lang="ko">
         <head>
           <title>{isPublicPage ? '견적서 만들기' : '로그인'} - 틸리언 그룹웨어</title>
+          <link rel="icon" href="/favicon.png" type="image/png" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
         <body style={isPublicPage ? { background: '#000', minHeight: '100vh' } : undefined}>{children}</body>
@@ -406,6 +407,7 @@ export default function RootLayout({
     <html lang="ko">
       <head>
         <title>틸리언 그룹웨어</title>
+        <link rel="icon" href="/favicon.png" type="image/png" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body>
