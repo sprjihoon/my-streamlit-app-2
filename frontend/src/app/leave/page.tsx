@@ -1,9 +1,25 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const HOURS_PER_DAY = 7;
+
+/** 주말만 제외한 근무일 수 계산 (공휴일 미반영, 미리보기용) */
+function countWeekdays(start: string, end: string): number {
+  if (!start || !end) return 0;
+  const s = new Date(start);
+  const e = new Date(end);
+  if (s > e) return 0;
+  let count = 0;
+  const cur = new Date(s);
+  while (cur <= e) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
 
 // ─────────────────────────────────────
 // 타입 정의
@@ -251,6 +267,15 @@ export default function LeavePage() {
   const [formEndDate, setFormEndDate] = useState('');
   const [formReason, setFormReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // 미리보기 근무일 수 (주말 제외, 공휴일 미반영)
+  const previewDays = useMemo(() => {
+    if (formLeaveType !== '연차') return formStartDate ? 0.5 : 0;
+    return countWeekdays(formStartDate, formEndDate);
+  }, [formLeaveType, formStartDate, formEndDate]);
+
+  // 반차 신청 버튼 활성화 여부 (날짜 선택 여부로만 판단)
+  const canSubmit = formLeaveType === '연차' ? previewDays > 0 : !!formStartDate;
 
   // 관리자
   const [adminData, setAdminData] = useState<AdminUser[]>([]);
@@ -515,48 +540,100 @@ export default function LeavePage() {
           {/* 신청 폼 */}
           {showForm && (
             <div style={{ ...card, border: '2px solid #0d6efd' }}>
-              <h4 style={{ marginBottom: '1rem' }}>연차 신청</h4>
+              <h4 style={{ marginBottom: '0.25rem' }}>연차 신청</h4>
+              <p style={{ fontSize: '0.82rem', color: '#6c757d', marginBottom: '1rem' }}>
+                연차는 시작일과 종료일을 다르게 설정하면 여러 날을 한 번에 신청할 수 있습니다.
+              </p>
               <form onSubmit={handleSubmit}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>종류</label>
-                    <select value={formLeaveType} onChange={e => setFormLeaveType(e.target.value)}
-                      style={{ width: '100%', padding: '0.5rem', border: '1px solid #dee2e6', borderRadius: '4px' }}>
-                      <option value="연차">연차</option>
-                      <option value="반차(오전)">반차(오전)</option>
-                      <option value="반차(오후)">반차(오후)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>시작일</label>
-                    <input type="date" value={formStartDate}
-                      onChange={e => { setFormStartDate(e.target.value); if (!formEndDate) setFormEndDate(e.target.value); }}
-                      style={{ width: '100%', padding: '0.5rem', border: '1px solid #dee2e6', borderRadius: '4px' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                      {formLeaveType === '연차' ? '종료일' : '날짜'}
-                    </label>
-                    <input type="date" value={formEndDate}
-                      onChange={e => setFormEndDate(e.target.value)}
-                      disabled={formLeaveType !== '연차'}
-                      style={{ width: '100%', padding: '0.5rem', border: '1px solid #dee2e6', borderRadius: '4px', backgroundColor: formLeaveType !== '연차' ? '#f8f9fa' : 'white' }} />
-                  </div>
-                </div>
+                {/* 종류 선택 */}
                 <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>사유 (선택)</label>
-                  <input type="text" value={formReason} onChange={e => setFormReason(e.target.value)}
-                    placeholder="연차 사유를 입력하세요 (선택사항)"
-                    style={{ width: '100%', padding: '0.5rem', border: '1px solid #dee2e6', borderRadius: '4px' }} />
+                  <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.35rem' }}>휴가 종류</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {['연차', '반차(오전)', '반차(오후)'].map(t => (
+                      <button key={t} type="button"
+                        onClick={() => {
+                          setFormLeaveType(t);
+                          if (t !== '연차') setFormEndDate(formStartDate);
+                        }}
+                        style={{
+                          padding: '0.45rem 1rem', border: '2px solid',
+                          borderColor: formLeaveType === t ? '#0d6efd' : '#dee2e6',
+                          borderRadius: '20px', cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500,
+                          backgroundColor: formLeaveType === t ? '#e8f0fe' : 'white',
+                          color: formLeaveType === t ? '#0d6efd' : '#495057',
+                        }}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* 날짜 선택 */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+                    신청 기간
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '0.78rem', color: '#6c757d', marginBottom: '0.2rem' }}>시작일</div>
+                      <input type="date" value={formStartDate}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setFormStartDate(v);
+                          // 종료일이 시작일보다 이전이면 자동 보정
+                          if (!formEndDate || formEndDate < v) setFormEndDate(v);
+                        }}
+                        style={{ padding: '0.5rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '6px', fontSize: '0.9rem' }} />
+                    </div>
+                    {formLeaveType === '연차' && (
+                      <>
+                        <span style={{ fontSize: '1.1rem', color: '#adb5bd', paddingTop: '1.2rem' }}>→</span>
+                        <div>
+                          <div style={{ fontSize: '0.78rem', color: '#6c757d', marginBottom: '0.2rem' }}>종료일</div>
+                          <input type="date" value={formEndDate}
+                            min={formStartDate}
+                            onChange={e => setFormEndDate(e.target.value)}
+                            style={{ padding: '0.5rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '6px', fontSize: '0.9rem' }} />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* 미리보기 배지 */}
+                {formStartDate && (
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                    padding: '0.35rem 0.9rem', borderRadius: '20px', marginBottom: '1rem',
+                    backgroundColor: canSubmit ? '#e8f5e9' : '#fff3e0',
+                    color: canSubmit ? '#2e7d32' : '#e65100',
+                    fontSize: '0.85rem', fontWeight: 600,
+                  }}>
+                    {formLeaveType === '연차'
+                      ? (previewDays > 0
+                          ? `약 ${previewDays}근무일 (공휴일 반영 전)`
+                          : '선택된 기간에 근무일이 없습니다 (주말/공휴일 확인)')
+                      : `${formLeaveType} · 0.5일`
+                    }
+                  </div>
+                )}
+
+                {/* 사유 */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.35rem' }}>사유 <span style={{ fontWeight: 400, color: '#adb5bd' }}>(선택)</span></label>
+                  <input type="text" value={formReason} onChange={e => setFormReason(e.target.value)}
+                    placeholder="예: 개인 사정, 여행 등"
+                    style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '6px', fontSize: '0.9rem', boxSizing: 'border-box' }} />
+                </div>
+
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button type="submit" disabled={submitting}
-                    style={{ padding: '0.5rem 1.5rem', backgroundColor: submitting ? '#ccc' : '#0d6efd', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+                  <button type="submit" disabled={submitting || !canSubmit}
+                    style={{ padding: '0.55rem 1.5rem', backgroundColor: (submitting || !canSubmit) ? '#adb5bd' : '#0d6efd', color: 'white', border: 'none', borderRadius: '6px', cursor: (submitting || !canSubmit) ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
                     {submitting ? '신청 중...' : '신청'}
                   </button>
                   <button type="button" onClick={() => setShowForm(false)}
-                    style={{ padding: '0.5rem 1rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                    취소
+                    style={{ padding: '0.55rem 1rem', backgroundColor: 'white', color: '#6c757d', border: '1px solid #dee2e6', borderRadius: '6px', cursor: 'pointer' }}>
+                    닫기
                   </button>
                 </div>
               </form>
