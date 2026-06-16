@@ -389,6 +389,7 @@ class LeaveRequestCreate(BaseModel):
     start_date: str
     end_date: str
     reason: Optional[str] = None
+    custom_approvers: Optional[list] = None  # [user_id, ...] 지정 시 기본 체인 대신 사용
 
 
 class ApprovalAction(BaseModel):
@@ -498,6 +499,63 @@ async def get_my_requests(token: str, year: Optional[int] = None):
 
 
 # ─────────────────────────────────────
+# API: 기본 결재라인 조회
+# ─────────────────────────────────────
+
+@router.get("/approval-chain")
+async def get_my_approval_chain(token: str):
+    """로그인 사용자의 기본 결재라인 반환 (이름 + user_id)"""
+    ensure_leave_tables()
+    with get_connection() as con:
+        session = con.execute(
+            "SELECT user_id FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if not session:
+            raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+        user_id = session[0]
+
+        chain_ids = get_approval_chain(user_id, con)
+        result = []
+        for i, uid in enumerate(chain_ids, start=1):
+            row = con.execute(
+                "SELECT user_id, nickname, can_jeongyeol FROM users WHERE user_id = ?", (uid,)
+            ).fetchone()
+            if row:
+                result.append({
+                    "step": i,
+                    "user_id": row[0],
+                    "nickname": row[1],
+                    "can_jeongyeol": bool(row[2]),
+                })
+    return result
+
+
+# ─────────────────────────────────────
+# API: 사용 가능한 결재자 목록 (신청 시 선택용)
+# ─────────────────────────────────────
+
+@router.get("/approver-candidates")
+async def get_approver_candidates(token: str):
+    """결재자로 선택 가능한 사용자 목록 (leave_exempt=0, 본인 제외)"""
+    ensure_leave_tables()
+    with get_connection() as con:
+        session = con.execute(
+            "SELECT user_id FROM sessions WHERE token = ?", (token,)
+        ).fetchone()
+        if not session:
+            raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+        user_id = session[0]
+
+        rows = con.execute(
+            """SELECT user_id, nickname, can_jeongyeol FROM users
+               WHERE leave_exempt = 0 AND user_id != ?
+               ORDER BY nickname""",
+            (user_id,)
+        ).fetchall()
+    return [{"user_id": r[0], "nickname": r[1], "can_jeongyeol": bool(r[2])} for r in rows]
+
+
+# ─────────────────────────────────────
 # API: 연차 신청
 # ─────────────────────────────────────
 
@@ -554,8 +612,20 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         )
         request_id = cur.lastrowid
 
-        # 결재 라인 생성 — 모든 결재자 즉시 waiting (순서 무관 처리)
-        chain = get_approval_chain(user_id, con)
+        # 결재 라인 생성 — custom_approvers 지정 시 우선 사용, 없으면 기본 체인
+        if data.custom_approvers is not None and len(data.custom_approvers) > 0:
+            # 유효한 user_id인지 검증
+            chain = []
+            for uid in data.custom_approvers:
+                row = con.execute(
+                    "SELECT user_id FROM users WHERE user_id = ? AND leave_exempt = 0",
+                    (int(uid),)
+                ).fetchone()
+                if row and row[0] != user_id:
+                    chain.append(row[0])
+        else:
+            chain = get_approval_chain(user_id, con)
+
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
                 """INSERT INTO leave_approvals (request_id, approver_id, step, status)

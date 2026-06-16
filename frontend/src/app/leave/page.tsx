@@ -268,6 +268,12 @@ export default function LeavePage() {
   const [formReason, setFormReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // 결재라인
+  interface ApproverItem { user_id: number; nickname: string; can_jeongyeol: boolean; }
+  const [formApprovers, setFormApprovers] = useState<ApproverItem[]>([]);
+  const [candidates, setCandidates] = useState<ApproverItem[]>([]);
+  const [approverModified, setApproverModified] = useState(false); // 기본값에서 변경됐는지
+
   // 미리보기 근무일 수 (주말 제외, 공휴일 미반영)
   const previewDays = useMemo(() => {
     if (formLeaveType !== '연차') return formStartDate ? 0.5 : 0;
@@ -367,21 +373,27 @@ export default function LeavePage() {
 
     setSubmitting(true);
     try {
+      const body: Record<string, unknown> = {
+        leave_type: formLeaveType,
+        start_date: formStartDate,
+        end_date: formEndDate,
+        reason: formReason || null,
+      };
+      // 결재라인이 수정된 경우에만 custom_approvers 전송
+      if (approverModified) {
+        body.custom_approvers = formApprovers.map(a => a.user_id);
+      }
       const res = await fetch(`${API_URL}/leave/requests?token=${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          leave_type: formLeaveType,
-          start_date: formStartDate,
-          end_date: formEndDate,
-          reason: formReason || null,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || '신청 실패');
       showMsg(`연차 신청 완료! ${data.days_requested}일 (${data.hours_requested}시간)`);
       setShowForm(false);
       setFormStartDate(''); setFormEndDate(''); setFormReason(''); setFormLeaveType('연차');
+      setFormApprovers([]); setApproverModified(false);
       fetchMySummary(); fetchMyRequests();
     } catch (err) {
       showMsg(err instanceof Error ? err.message : '신청 실패', true);
@@ -527,7 +539,23 @@ export default function LeavePage() {
           {/* 신청 버튼 */}
           {summary && !summary.exempt && !summary.no_join_date && (
             <div style={{ marginBottom: '1.5rem' }}>
-              <button onClick={() => setShowForm(!showForm)}
+              <button onClick={async () => {
+                if (showForm) {
+                  setShowForm(false);
+                  return;
+                }
+                setShowForm(true);
+                setApproverModified(false);
+                // 기본 결재라인 + 후보 목록 동시 로드
+                try {
+                  const [chainRes, candRes] = await Promise.all([
+                    fetch(`${API_URL}/leave/approval-chain?token=${token}`),
+                    fetch(`${API_URL}/leave/approver-candidates?token=${token}`),
+                  ]);
+                  if (chainRes.ok) setFormApprovers(await chainRes.json());
+                  if (candRes.ok) setCandidates(await candRes.json());
+                } catch {}
+              }}
                 style={{
                   padding: '0.6rem 1.25rem', backgroundColor: '#0d6efd', color: 'white',
                   border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600,
@@ -617,6 +645,71 @@ export default function LeavePage() {
                     }
                   </div>
                 )}
+
+                {/* 결재라인 */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <label style={{ fontSize: '0.875rem', fontWeight: 600 }}>결재라인</label>
+                    {approverModified && (
+                      <span style={{ fontSize: '0.75rem', color: '#e65100', background: '#fff3e0', padding: '0.15rem 0.5rem', borderRadius: '10px' }}>수정됨</span>
+                    )}
+                    {approverModified && (
+                      <button type="button" onClick={async () => {
+                        try {
+                          const res = await fetch(`${API_URL}/leave/approval-chain?token=${token}`);
+                          if (res.ok) { setFormApprovers(await res.json()); setApproverModified(false); }
+                        } catch {}
+                      }} style={{ fontSize: '0.75rem', color: '#6c757d', background: 'none', border: '1px solid #dee2e6', borderRadius: '4px', padding: '0.1rem 0.5rem', cursor: 'pointer' }}>
+                        기본값으로 되돌리기
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 결재자 목록 */}
+                  {formApprovers.length === 0 ? (
+                    <p style={{ fontSize: '0.82rem', color: '#adb5bd', marginBottom: '0.5rem' }}>결재자 없음 (즉시 처리)</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                      {formApprovers.map((a, idx) => (
+                        <span key={a.user_id} style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                          padding: '0.3rem 0.6rem', borderRadius: '20px',
+                          backgroundColor: a.can_jeongyeol ? '#fff3e0' : '#e8f0fe',
+                          border: `1px solid ${a.can_jeongyeol ? '#ffb74d' : '#90caf9'}`,
+                          fontSize: '0.82rem', fontWeight: 500,
+                        }}>
+                          <span style={{ color: '#9e9e9e', fontSize: '0.72rem' }}>{idx + 1}.</span>
+                          {a.nickname}
+                          {a.can_jeongyeol && <span style={{ fontSize: '0.68rem', color: '#e65100' }}>전결</span>}
+                          <button type="button" onClick={() => {
+                            setFormApprovers(prev => prev.filter(x => x.user_id !== a.user_id));
+                            setApproverModified(true);
+                          }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#adb5bd', fontSize: '0.85rem', padding: '0', lineHeight: 1 }}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 결재자 추가 */}
+                  {candidates.filter(c => !formApprovers.find(a => a.user_id === c.user_id)).length > 0 && (
+                    <select onChange={e => {
+                      const uid = parseInt(e.target.value);
+                      if (!uid) return;
+                      const cand = candidates.find(c => c.user_id === uid);
+                      if (cand) {
+                        setFormApprovers(prev => [...prev, cand]);
+                        setApproverModified(true);
+                      }
+                      e.target.value = '';
+                    }}
+                      style={{ fontSize: '0.82rem', padding: '0.3rem 0.6rem', border: '1px dashed #90caf9', borderRadius: '6px', color: '#0d6efd', background: 'white', cursor: 'pointer' }}>
+                      <option value="">+ 결재자 추가</option>
+                      {candidates.filter(c => !formApprovers.find(a => a.user_id === c.user_id)).map(c => (
+                        <option key={c.user_id} value={c.user_id}>{c.nickname}{c.can_jeongyeol ? ' (전결)' : ''}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
 
                 {/* 사유 */}
                 <div style={{ marginBottom: '1rem' }}>
