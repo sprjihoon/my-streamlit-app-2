@@ -2,16 +2,13 @@
 const nextConfig = {
   reactStrictMode: true,
   
-  // Standalone 빌드 (Railway/Docker 배포용)
-  output: 'standalone',
+  // Standalone 빌드: Docker(Railway)용. Vercel은 자체 서빙 방식을 사용하므로 제외
+  ...(process.env.VERCEL ? {} : { output: 'standalone' }),
   
   // 환경변수
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
   },
-  
-  // 프로덕션 빌드 최적화
-  swcMinify: true,
   
   // 이미지 최적화 (필요시)
   images: {

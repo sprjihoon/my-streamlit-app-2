@@ -7,9 +7,9 @@ FROM node:20-alpine AS builder
 # 작업 디렉토리
 WORKDIR /app
 
-# 의존성 설치
+# 의존성 설치 (devDependencies 포함 - typescript, eslint 등 빌드에 필요)
 COPY frontend/package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 # 소스 코드 복사
 COPY frontend/ .
