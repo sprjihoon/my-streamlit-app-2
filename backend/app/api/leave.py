@@ -1221,10 +1221,8 @@ async def get_all_leave_status(token: str, year: Optional[int] = None):
 
 @router.get("/admin/requests")
 async def get_all_requests(token: str, year: Optional[int] = None, status: Optional[str] = None):
-    """전체 연차 신청 목록 (관리자)"""
+    """전체 연차 신청 목록 (관리자) — 모든 상태 포함, 취소 내역 포함"""
     ensure_leave_tables()
-    if year is None:
-        year = date.today().year
 
     with get_connection() as con:
         session = con.execute(
@@ -1236,16 +1234,28 @@ async def get_all_requests(token: str, year: Optional[int] = None, status: Optio
 
         query = """
             SELECT r.id, r.leave_type, r.start_date, r.end_date, r.hours_requested,
-                   r.reason, r.status, r.created_at,
-                   u.nickname, u.department, u.position
+                   r.reason, r.status, r.created_at, r.updated_at,
+                   u.nickname, u.department, u.position,
+                   r.cancel_reason, r.cancelled_by, r.cancelled_at,
+                   r.cancel_requested_at, r.cancel_requested_by,
+                   (SELECT GROUP_CONCAT(au.nickname || ':' || a.status, '|')
+                    FROM leave_approvals a JOIN users au ON a.approver_id = au.user_id
+                    WHERE a.request_id = r.id ORDER BY a.step) AS approvals
             FROM leave_requests r
             JOIN users u ON r.user_id = u.user_id
-            WHERE strftime('%Y', r.start_date) = ?
+            WHERE 1=1
         """
-        params = [str(year)]
+        params: list = []
+
+        # year 파라미터: 지정 시 해당 연도, 없으면 전체 기간
+        if year:
+            query += " AND strftime('%Y', r.start_date) = ?"
+            params.append(str(year))
+
         if status:
             query += " AND r.status = ?"
             params.append(status)
+
         query += " ORDER BY r.created_at DESC"
 
         rows = con.execute(query, params).fetchall()
@@ -1261,9 +1271,16 @@ async def get_all_requests(token: str, year: Optional[int] = None, status: Optio
             "reason": r[5],
             "status": r[6],
             "created_at": r[7],
-            "nickname": r[8],
-            "department": r[9],
-            "position": r[10],
+            "updated_at": r[8],
+            "nickname": r[9],
+            "department": r[10],
+            "position": r[11],
+            "cancel_reason": r[12],
+            "cancelled_by": r[13],
+            "cancelled_at": r[14],
+            "cancel_requested_at": r[15],
+            "cancel_requested_by": r[16],
+            "approvals": r[17] or "",
         }
         for r in rows
     ]

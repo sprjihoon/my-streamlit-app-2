@@ -89,6 +89,28 @@ interface AdminUser {
   no_join_date?: boolean;
 }
 
+interface AdminRequest {
+  id: number;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  hours_requested: number;
+  days_requested: number;
+  reason: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string | null;
+  nickname: string;
+  department: string;
+  position: string;
+  cancel_reason: string | null;
+  cancelled_by: string | null;
+  cancelled_at: string | null;
+  cancel_requested_at: string | null;
+  cancel_requested_by: string | null;
+  approvals: string;
+}
+
 // ─────────────────────────────────────
 // 상태 배지
 // ─────────────────────────────────────
@@ -232,6 +254,10 @@ export default function LeavePage() {
 
   // 관리자
   const [adminData, setAdminData] = useState<AdminUser[]>([]);
+  const [adminRequests, setAdminRequests] = useState<AdminRequest[]>([]);
+  const [adminReqStatus, setAdminReqStatus] = useState('');   // 상태 필터 ''=전체
+  const [adminReqYear, setAdminReqYear] = useState<number | ''>('');  // 연도 필터 ''=전체
+  const [adminTab, setAdminTab] = useState<'summary' | 'requests'>('summary');
 
   useEffect(() => {
     const t = localStorage.getItem('token') || '';
@@ -283,14 +309,25 @@ export default function LeavePage() {
     } catch {}
   }, [token, isAdmin, year]);
 
+  const fetchAdminRequests = useCallback(async () => {
+    if (!token || !isAdmin) return;
+    try {
+      const params = new URLSearchParams({ token });
+      if (adminReqYear) params.set('year', String(adminReqYear));
+      if (adminReqStatus) params.set('status', adminReqStatus);
+      const res = await fetch(`${API_URL}/leave/admin/requests?${params}`);
+      if (res.ok) setAdminRequests(await res.json());
+    } catch {}
+  }, [token, isAdmin, adminReqYear, adminReqStatus]);
+
   useEffect(() => {
     if (!token) return;
     fetchMySummary();
     fetchMyRequests();
     fetchPendingApprovals();
     fetchApprovalHistory();
-    if (isAdmin) fetchAdminData();
-  }, [token, year, fetchMySummary, fetchMyRequests, fetchPendingApprovals, fetchApprovalHistory, fetchAdminData]);
+    if (isAdmin) { fetchAdminData(); fetchAdminRequests(); }
+  }, [token, year, fetchMySummary, fetchMyRequests, fetchPendingApprovals, fetchApprovalHistory, fetchAdminData, fetchAdminRequests]);
 
   function showMsg(msg: string, isError = false) {
     if (isError) { setError(msg); setSuccess(null); }
@@ -829,47 +866,168 @@ export default function LeavePage() {
 
       {/* ── 관리자 전체 현황 탭 ── */}
       {tab === 'admin' && isAdmin && (
-        <div style={card}>
-          <h4 style={{ marginBottom: '1rem' }}>{year}년 전체 직원 연차 현황</h4>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #dee2e6', backgroundColor: '#f8f9fa' }}>
-                  {['이름', '팀', '직급', '총 부여', '사용', '잔여', '비고'].map(h => (
-                    <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {adminData.map((u) => (
-                  <tr key={u.user_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>{u.nickname}</td>
-                    <td style={{ padding: '0.6rem 0.75rem', color: '#495057' }}>{u.department || '-'}</td>
-                    <td style={{ padding: '0.6rem 0.75rem', color: '#495057' }}>{u.position || '-'}</td>
-                    {u.exempt ? (
-                      <td colSpan={4} style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontStyle: 'italic' }}>연차 관리 제외</td>
-                    ) : u.no_join_date ? (
-                      <td colSpan={4} style={{ padding: '0.6rem 0.75rem', color: '#dc3545' }}>입사일 미등록</td>
-                    ) : (
-                      <>
-                        <td style={{ padding: '0.6rem 0.75rem' }}>{u.total_days}일</td>
-                        <td style={{ padding: '0.6rem 0.75rem' }}>{u.used_days}일</td>
-                        <td style={{ padding: '0.6rem 0.75rem' }}>
-                          <span style={{ color: u.remaining_days < 0 ? '#dc3545' : u.remaining_days < 3 ? '#856404' : '#0a3622', fontWeight: 600 }}>
-                            {u.remaining_days}일
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.6rem 0.75rem' }}>
-                          {u.remaining_days < 0 && <span style={{ fontSize: '0.75rem', color: '#dc3545' }}>마이너스</span>}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          {/* 서브 탭 */}
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+            {[
+              { key: 'summary', label: '연차 현황' },
+              { key: 'requests', label: `전체 신청내역 (취소 포함)` },
+            ].map(({ key, label }) => (
+              <button key={key} onClick={() => { setAdminTab(key as any); if (key === 'requests') fetchAdminRequests(); }}
+                style={{
+                  padding: '0.45rem 1rem', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.875rem',
+                  backgroundColor: adminTab === key ? '#1e2140' : '#e9ecef',
+                  color: adminTab === key ? 'white' : '#495057',
+                  fontWeight: adminTab === key ? 600 : 400,
+                }}>
+                {label}
+              </button>
+            ))}
           </div>
-        </div>
+
+          {/* 연차 현황 서브탭 */}
+          {adminTab === 'summary' && (
+            <div style={card}>
+              <h4 style={{ marginBottom: '1rem' }}>{year}년 전체 직원 연차 현황</h4>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #dee2e6', backgroundColor: '#f8f9fa' }}>
+                      {['이름', '팀', '직급', '총 부여', '사용', '잔여', '비고'].map(h => (
+                        <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminData.map((u) => (
+                      <tr key={u.user_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                        <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>{u.nickname}</td>
+                        <td style={{ padding: '0.6rem 0.75rem', color: '#495057' }}>{u.department || '-'}</td>
+                        <td style={{ padding: '0.6rem 0.75rem', color: '#495057' }}>{u.position || '-'}</td>
+                        {u.exempt ? (
+                          <td colSpan={4} style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontStyle: 'italic' }}>연차 관리 제외</td>
+                        ) : u.no_join_date ? (
+                          <td colSpan={4} style={{ padding: '0.6rem 0.75rem', color: '#dc3545' }}>입사일 미등록</td>
+                        ) : (
+                          <>
+                            <td style={{ padding: '0.6rem 0.75rem' }}>{u.total_days}일</td>
+                            <td style={{ padding: '0.6rem 0.75rem' }}>{u.used_days}일</td>
+                            <td style={{ padding: '0.6rem 0.75rem' }}>
+                              <span style={{ color: u.remaining_days < 0 ? '#dc3545' : u.remaining_days < 3 ? '#856404' : '#0a3622', fontWeight: 600 }}>
+                                {u.remaining_days}일
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.6rem 0.75rem' }}>
+                              {u.remaining_days < 0 && <span style={{ fontSize: '0.75rem', color: '#dc3545' }}>마이너스</span>}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 전체 신청내역 서브탭 */}
+          {adminTab === 'requests' && (
+            <div style={card}>
+              {/* 필터 */}
+              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <h4 style={{ margin: 0 }}>전체 신청내역</h4>
+                <select
+                  value={adminReqYear}
+                  onChange={e => setAdminReqYear(e.target.value ? Number(e.target.value) : '')}
+                  style={{ padding: '0.35rem 0.6rem', border: '1px solid #dee2e6', borderRadius: 4, fontSize: '0.875rem' }}>
+                  <option value="">전체 연도</option>
+                  {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
+                </select>
+                <select
+                  value={adminReqStatus}
+                  onChange={e => setAdminReqStatus(e.target.value)}
+                  style={{ padding: '0.35rem 0.6rem', border: '1px solid #dee2e6', borderRadius: 4, fontSize: '0.875rem' }}>
+                  <option value="">전체 상태</option>
+                  <option value="pending">결재중</option>
+                  <option value="approved">승인</option>
+                  <option value="rejected">반려</option>
+                  <option value="cancelled">취소</option>
+                  <option value="cancel_requested">취소결재중</option>
+                </select>
+                <button onClick={fetchAdminRequests}
+                  style={{ padding: '0.35rem 0.9rem', backgroundColor: '#1e2140', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem' }}>
+                  조회
+                </button>
+                <span style={{ fontSize: '0.8rem', color: '#6c757d', marginLeft: 'auto' }}>총 {adminRequests.length}건</span>
+              </div>
+
+              {adminRequests.length === 0 ? (
+                <p style={{ color: '#6c757d', fontSize: '0.875rem' }}>조건에 맞는 신청내역이 없습니다.</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                    <thead>
+                      <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                        {['#', '신청자', '팀', '종류', '기간', '일수', '사유', '상태', '결재자', '취소정보', '신청일'].map(h => (
+                          <th key={h} style={{ padding: '0.5rem 0.6rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminRequests.map(r => (
+                        <tr key={r.id} style={{
+                          borderBottom: '1px solid #f0f0f0',
+                          backgroundColor: r.status === 'cancelled' ? '#fafafa' : r.status === 'rejected' ? '#fff8f8' : 'white',
+                          opacity: r.status === 'cancelled' ? 0.75 : 1,
+                        }}>
+                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>#{r.id}</td>
+                          <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.nickname}</td>
+                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>{r.department || '-'}</td>
+                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>{r.leave_type}</td>
+                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>
+                            {r.start_date === r.end_date ? r.start_date : `${r.start_date}~${r.end_date}`}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>{r.days_requested}일</td>
+                          <td style={{ padding: '0.45rem 0.6rem', color: '#555', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={r.reason || ''}>
+                            {r.reason || '-'}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.6rem' }}><StatusBadge status={r.status} /></td>
+                          <td style={{ padding: '0.45rem 0.6rem', fontSize: '0.75rem', color: '#6c757d' }}>
+                            {r.approvals ? r.approvals.split('|').map((a, i) => {
+                              const [name, st] = a.split(':');
+                              const color = st === 'approved' ? '#198754' : st === 'rejected' ? '#dc3545' : st === 'skipped' ? '#aaa' : '#6c757d';
+                              const label = st === 'approved' ? '✓' : st === 'rejected' ? '✗' : st === 'skipped' ? '건너뜀' : '대기';
+                              return (
+                                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginRight: 4, color }}>
+                                  {name}<span style={{ fontSize: '0.68rem' }}>({label})</span>
+                                </span>
+                              );
+                            }) : <span style={{ color: '#ccc' }}>결재라인없음</span>}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.6rem', fontSize: '0.75rem' }}>
+                            {(r.status === 'cancelled' || r.status === 'cancel_requested') && (
+                              <div style={{ color: '#e65100' }}>
+                                {r.cancelled_by && <div>취소: {r.cancelled_by}</div>}
+                                {r.cancel_requested_by && !r.cancelled_by && <div>취소요청: {r.cancel_requested_by}</div>}
+                                {r.cancel_reason && <div style={{ color: '#888' }}>{r.cancel_reason}</div>}
+                                {r.cancelled_at && <div style={{ color: '#aaa' }}>{new Date(r.cancelled_at).toLocaleDateString('ko-KR')}</div>}
+                              </div>
+                            )}
+                            {r.status !== 'cancelled' && r.status !== 'cancel_requested' && <span style={{ color: '#ccc' }}>-</span>}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>
+                            {new Date(r.created_at).toLocaleDateString('ko-KR')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
