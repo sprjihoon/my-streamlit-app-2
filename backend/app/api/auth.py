@@ -28,6 +28,7 @@ class UserCreate(BaseModel):
     approver_id: Optional[int] = None
     is_admin: bool = False
     leave_exempt: bool = False
+    can_jeongyeol: bool = False
 
 
 class UserUpdate(BaseModel):
@@ -40,6 +41,7 @@ class UserUpdate(BaseModel):
     naver_works_id: Optional[str] = None
     approver_id: Optional[int] = None
     leave_exempt: Optional[bool] = None
+    can_jeongyeol: Optional[bool] = None
 
 
 class LoginRequest(BaseModel):
@@ -58,6 +60,7 @@ class UserResponse(BaseModel):
     naver_works_id: Optional[str] = None
     approver_id: Optional[int] = None
     leave_exempt: bool = False
+    can_jeongyeol: bool = False
 
 
 # ─────────────────────────────────────
@@ -93,6 +96,7 @@ def ensure_users_table():
             ("join_date",            "TEXT"),
             ("must_change_password", "INTEGER DEFAULT 0"),
             ("leave_exempt",         "INTEGER DEFAULT 0"),
+            ("can_jeongyeol",        "INTEGER DEFAULT 0"),  # 전결권: 1이면 단독 승인으로 즉시 확정
         ]
         existing_cols = [row[1] for row in con.execute("PRAGMA table_info(users)")]
         for col_name, col_def in new_cols:
@@ -224,7 +228,7 @@ async def get_current_user(token: str):
         user_id = session[0]
         user = con.execute(
             """SELECT user_id, username, nickname, is_admin,
-                      department, position, join_date, naver_works_id, approver_id, leave_exempt
+                      department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol
                FROM users WHERE user_id = ?""",
             (user_id,)
         ).fetchone()
@@ -243,6 +247,7 @@ async def get_current_user(token: str):
             "naver_works_id": user[7],
             "approver_id": user[8],
             "leave_exempt": bool(user[9]) if user[9] else False,
+            "can_jeongyeol": bool(user[10]) if user[10] else False,
         }
 
 
@@ -285,7 +290,7 @@ async def list_users(token: str):
 
         rows = con.execute(
             """SELECT user_id, username, nickname, is_admin,
-                      department, position, join_date, naver_works_id, approver_id, leave_exempt
+                      department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol
                FROM users ORDER BY department, position_order DESC, nickname"""
         ).fetchall()
 
@@ -301,6 +306,7 @@ async def list_users(token: str):
             "naver_works_id": r[7],
             "approver_id": r[8],
             "leave_exempt": bool(r[9]) if r[9] else False,
+            "can_jeongyeol": bool(r[10]) if r[10] else False,
         }
         for r in rows
     ]
@@ -415,6 +421,10 @@ async def update_user(user_id: int, data: UserUpdate, token: str):
             updates.append("approver_id = ?"); params.append(data.approver_id)
         if data.leave_exempt is not None:
             updates.append("leave_exempt = ?"); params.append(1 if data.leave_exempt else 0)
+        if data.can_jeongyeol is not None:
+            if not is_admin:
+                raise HTTPException(status_code=403, detail="전결권 설정은 관리자만 가능합니다.")
+            updates.append("can_jeongyeol = ?"); params.append(1 if data.can_jeongyeol else 0)
 
         if updates:
             params.append(user_id)

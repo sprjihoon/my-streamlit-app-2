@@ -1044,8 +1044,10 @@ async def act_on_approval(approval_id: int, data: ApprovalAction, token: str):
             raise HTTPException(status_code=400, detail="처리할 수 없는 신청 상태입니다.")
         requester_id, leave_type, start_date, end_date, hours, _ = req
 
-        actor = con.execute("SELECT nickname, naver_works_id FROM users WHERE user_id=?", (actor_id,)).fetchone()
+        actor = con.execute("SELECT nickname, naver_works_id, can_jeongyeol FROM users WHERE user_id=?", (actor_id,)).fetchone()
         actor_name = actor[0] if actor else str(actor_id)
+        actor_nw_id = actor[1] if actor else None
+        actor_jeongyeol = bool(actor[2]) if actor and actor[2] else False
 
         requester = con.execute("SELECT nickname, naver_works_id FROM users WHERE user_id=?", (requester_id,)).fetchone()
         requester_name = requester[0] if requester else str(requester_id)
@@ -1087,6 +1089,39 @@ async def act_on_approval(approval_id: int, data: ApprovalAction, token: str):
                 "UPDATE leave_approvals SET status='approved', comment=?, acted_at=? WHERE id=?",
                 (data.comment, now, approval_id)
             )
+
+            # ── 전결권 처리 ──────────────────────────────────────────────
+            if actor_jeongyeol:
+                # 전결권자: 나머지 waiting 항목 모두 'skipped' 처리 후 즉시 확정
+                con.execute(
+                    "UPDATE leave_approvals SET status='skipped', acted_at=? WHERE request_id=? AND status='waiting'",
+                    (now, request_id)
+                )
+                con.execute(
+                    "UPDATE leave_requests SET status='approved', updated_at=? WHERE id=?",
+                    (now, request_id)
+                )
+                con.commit()
+
+                add_log("연차 전결", "leave", str(request_id), requester_name, actor_name,
+                        f"#{request_id} {leave_type} {start_date}~{end_date} ({hours}시간) 전결 처리")
+
+                summary = get_leave_summary_data(requester_id)
+                remaining = summary.get("remaining_hours", 0) if summary else 0
+                days_str = round(hours / HOURS_PER_DAY, 1)
+                msg = (
+                    f"연차 전결 승인\n"
+                    f"━━━━━━━━━━━━━━━━\n"
+                    f"기간: {start_date} ~ {end_date} ({leave_type})\n"
+                    f"{hours}시간 ({days_str}일) 차감\n"
+                    f"전결자: {actor_name}\n"
+                    f"잔여: {remaining}시간 ({round(remaining/HOURS_PER_DAY,1)}일)"
+                )
+                import asyncio
+                asyncio.create_task(send_nw_dm(requester_nw_id, msg))
+
+                return {"success": True, "message": "전결 처리 완료. 연차가 즉시 확정되었습니다.", "jeongyeol": True}
+            # ─────────────────────────────────────────────────────────────
 
             # 전원 승인 여부 확인 (순서 무관 — 남은 waiting 건수)
             remaining_approvals = con.execute(

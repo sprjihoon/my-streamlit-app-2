@@ -22,6 +22,7 @@ interface User {
   naver_works_id: string | null;
   approver_id: number | null;
   leave_exempt: boolean;
+  can_jeongyeol: boolean;
 }
 
 interface ActorInfo {
@@ -90,6 +91,7 @@ export default function UsersPage() {
     approver_id: '',
     leave_exempt: false,
     is_admin: false,
+    can_jeongyeol: false,
   });
 
   function getToken(): string | null {
@@ -198,6 +200,7 @@ export default function UsersPage() {
       approver_id: user.approver_id ? String(user.approver_id) : '',
       leave_exempt: user.leave_exempt,
       is_admin: user.is_admin,
+      can_jeongyeol: user.can_jeongyeol || false,
     });
   }
 
@@ -221,6 +224,7 @@ export default function UsersPage() {
       }
       if (editForm.leave_exempt !== editUser.leave_exempt) updateData.leave_exempt = editForm.leave_exempt;
       if (actorInfo?.is_admin && editForm.is_admin !== editUser.is_admin) updateData.is_admin = editForm.is_admin;
+      if (actorInfo?.is_admin && editForm.can_jeongyeol !== (editUser.can_jeongyeol || false)) updateData.can_jeongyeol = editForm.can_jeongyeol;
 
       if (Object.keys(updateData).length === 0) {
         setEditUser(null);
@@ -373,7 +377,7 @@ export default function UsersPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f8f9fa' }}>
-                  {['성함', '아이디', '직급', '입사일', '결재자', '연차제외', '권한', '작업'].map(h => (
+                  {['성함', '아이디', '직급', '입사일', '결재자', '연차제외', '권한', '전결', '작업'].map(h => (
                     <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', borderBottom: '2px solid #e0e0e0', fontWeight: 600, color: '#555', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -408,6 +412,12 @@ export default function UsersPage() {
                       <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.78rem', backgroundColor: user.is_admin ? '#e3f2fd' : '#f5f5f5', color: user.is_admin ? '#1976d2' : '#666' }}>
                         {user.is_admin ? '관리자' : '일반'}
                       </span>
+                    </td>
+                    <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
+                      {user.can_jeongyeol
+                        ? <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', backgroundColor: '#fff3e0', color: '#e65100', fontWeight: 700 }}>전결</span>
+                        : <span style={{ color: '#ccc', fontSize: '0.8rem' }}>-</span>
+                      }
                     </td>
                     <td style={{ padding: '0.6rem 0.75rem' }}>
                       <button onClick={() => handleEditClick(user)} style={{ padding: '0.25rem 0.6rem', marginRight: '0.4rem', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}>수정</button>
@@ -507,7 +517,7 @@ export default function UsersPage() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '2rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', marginBottom: '1.5rem' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
                 <input type="checkbox" checked={editForm.leave_exempt} onChange={e => setEditForm(f => ({ ...f, leave_exempt: e.target.checked }))} />
                 연월차 관리 제외
@@ -516,6 +526,15 @@ export default function UsersPage() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
                   <input type="checkbox" checked={editForm.is_admin} onChange={e => setEditForm(f => ({ ...f, is_admin: e.target.checked }))} />
                   관리자 권한
+                </label>
+              )}
+              {actorInfo?.is_admin && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input type="checkbox" checked={editForm.can_jeongyeol} onChange={e => setEditForm(f => ({ ...f, can_jeongyeol: e.target.checked }))} />
+                  <span>
+                    전결권 부여
+                    <span style={{ display: 'block', fontSize: '0.75rem', color: '#e65100', fontWeight: 400 }}>단독 승인으로 연차 즉시 확정</span>
+                  </span>
                 </label>
               )}
             </div>

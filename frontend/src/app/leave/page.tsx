@@ -713,7 +713,7 @@ export default function LeavePage() {
                             <>
                               <button onClick={() => handleApprove(a.approval_id)}
                                 style={{ padding: '0.4rem 1rem', backgroundColor: '#198754', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
-                                ✅ 승인
+                                승인
                               </button>
                               <button onClick={() => setRejectingId(rejectingId === a.approval_id ? null : a.approval_id)}
                                 style={{ padding: '0.4rem 1rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>
