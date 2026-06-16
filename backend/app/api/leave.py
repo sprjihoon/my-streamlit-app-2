@@ -554,25 +554,25 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         )
         request_id = cur.lastrowid
 
-        # 결재 라인 생성
+        # 결재 라인 생성 — 모든 결재자 즉시 waiting (순서 무관 처리)
         chain = get_approval_chain(user_id, con)
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
                 """INSERT INTO leave_approvals (request_id, approver_id, step, status)
-                   VALUES (?, ?, ?, ?)""",
-                (request_id, approver_id, step, "waiting" if step == 1 else "pending_prev")
+                   VALUES (?, ?, ?, 'waiting')""",
+                (request_id, approver_id, step)
             )
 
         con.commit()
 
-        # 결재자 정보 조회 (DM 발송용)
+        # 결재자 정보 조회 (DM 발송용) — 전체 결재자에게 알림
         approver_nw_ids = []
-        if chain:
-            first_approver = con.execute(
-                "SELECT nickname, naver_works_id FROM users WHERE user_id = ?", (chain[0],)
+        for approver_id in chain:
+            approver_row = con.execute(
+                "SELECT nickname, naver_works_id FROM users WHERE user_id = ?", (approver_id,)
             ).fetchone()
-            if first_approver:
-                approver_nw_ids.append((first_approver[0], first_approver[1]))
+            if approver_row:
+                approver_nw_ids.append((approver_row[0], approver_row[1]))
 
     # 로그
     add_log(
@@ -1088,45 +1088,26 @@ async def act_on_approval(approval_id: int, data: ApprovalAction, token: str):
                 (data.comment, now, approval_id)
             )
 
-            # 다음 결재 단계 확인
-            next_step = con.execute(
-                "SELECT id, approver_id FROM leave_approvals WHERE request_id=? AND step=?",
-                (request_id, step + 1)
-            ).fetchone()
+            # 전원 승인 여부 확인 (순서 무관 — 남은 waiting 건수)
+            remaining_approvals = con.execute(
+                "SELECT COUNT(*) FROM leave_approvals WHERE request_id=? AND status='waiting'",
+                (request_id,)
+            ).fetchone()[0]
 
-            if next_step:
-                # 다음 단계 활성화
-                con.execute(
-                    "UPDATE leave_approvals SET status='waiting' WHERE id=?",
-                    (next_step[0],)
-                )
+            if remaining_approvals > 0:
+                # 아직 미처리 결재자 존재 → 대기 유지
                 con.commit()
-
-                # 다음 결재자에게 DM
-                next_approver = con.execute(
-                    "SELECT nickname, naver_works_id FROM users WHERE user_id=?", (next_step[1],)
-                ).fetchone()
-                if next_approver and next_approver[1]:
-                    days_str = round(hours / HOURS_PER_DAY, 1)
-                    msg = (
-                        f"📋 연차 결재 요청 ({step + 1}차)\n"
-                        f"━━━━━━━━━━━━━━━━\n"
-                        f"👤 신청자: {requester_name}\n"
-                        f"📅 기간: {start_date} ~ {end_date}\n"
-                        f"🏷️ 종류: {leave_type}\n"
-                        f"⏱️ {hours}시간 ({days_str}일)\n"
-                        f"✅ {actor_name} 승인 완료\n"
-                        f"━━━━━━━━━━━━━━━━\n"
-                        f"승인: '승인 #{request_id}'\n"
-                        f"반려: '반려 #{request_id} 사유입력'"
-                    )
-                    import asyncio
-                    asyncio.create_task(send_nw_dm(next_approver[1], msg))
-
-                return {"success": True, "message": f"{step}차 승인 완료. 다음 결재자에게 전달되었습니다."}
+                total_approvals = con.execute(
+                    "SELECT COUNT(*) FROM leave_approvals WHERE request_id=?",
+                    (request_id,)
+                ).fetchone()[0]
+                done = total_approvals - remaining_approvals
+                add_log("연차 부분승인", "leave", str(request_id), requester_name, actor_name,
+                        f"#{request_id} {step}단계 승인 / 전체 {total_approvals}명 중 {done}명 완료")
+                return {"success": True, "message": f"승인했습니다. 잔여 결재자 {remaining_approvals}명 대기 중입니다."}
 
             else:
-                # 최종 승인
+                # 전원 승인 → 최종 확정
                 con.execute(
                     "UPDATE leave_requests SET status='approved', updated_at=? WHERE id=?",
                     (now, request_id)
@@ -1134,23 +1115,23 @@ async def act_on_approval(approval_id: int, data: ApprovalAction, token: str):
                 con.commit()
 
                 add_log("연차 승인", "leave", str(request_id), requester_name, actor_name,
-                        f"#{request_id} {leave_type} {start_date}~{end_date} ({hours}시간)")
+                        f"#{request_id} {leave_type} {start_date}~{end_date} ({hours}시간) 전원승인")
 
                 # 신청자에게 DM
                 summary = get_leave_summary_data(requester_id)
                 remaining = summary.get("remaining_hours", 0) if summary else 0
                 days_str = round(hours / HOURS_PER_DAY, 1)
                 msg = (
-                    f"✅ 연차 승인 완료!\n"
+                    f"연차 승인 완료\n"
                     f"━━━━━━━━━━━━━━━━\n"
-                    f"📅 {start_date} ~ {end_date} ({leave_type})\n"
-                    f"⏱️ {hours}시간 ({days_str}일) 차감\n"
-                    f"📊 잔여: {remaining}시간 ({round(remaining/HOURS_PER_DAY,1)}일)"
+                    f"기간: {start_date} ~ {end_date} ({leave_type})\n"
+                    f"{hours}시간 ({days_str}일) 차감\n"
+                    f"잔여: {remaining}시간 ({round(remaining/HOURS_PER_DAY,1)}일)"
                 )
                 import asyncio
                 asyncio.create_task(send_nw_dm(requester_nw_id, msg))
 
-                return {"success": True, "message": "최종 승인 완료. 연차가 차감되었습니다."}
+                return {"success": True, "message": "전원 승인 완료. 연차가 확정되었습니다."}
 
 
 # ─────────────────────────────────────
@@ -1479,15 +1460,15 @@ def bot_apply_leave(naver_works_id: str, leave_type: str, start_date: str, end_d
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
                 """INSERT INTO leave_approvals (request_id, approver_id, step, status)
-                   VALUES (?, ?, ?, ?)""",
-                (request_id, approver_id, step, "waiting" if step == 1 else "pending_prev")
+                   VALUES (?, ?, ?, 'waiting')""",
+                (request_id, approver_id, step)
             )
         con.commit()
 
-        # 결재자 DM 발송
-        if chain:
+        # 결재자 DM 발송 — 전체 결재자에게
+        for approver_id in chain:
             approver = con.execute(
-                "SELECT nickname, naver_works_id FROM users WHERE user_id=?", (chain[0],)
+                "SELECT nickname, naver_works_id FROM users WHERE user_id=?", (approver_id,)
             ).fetchone()
             if approver and approver[1]:
                 days_str = round(hours / HOURS_PER_DAY, 1)
@@ -1591,31 +1572,15 @@ def bot_approve_leave(naver_works_id: str, request_id: int, comment: str = None)
         requester_name = requester[0] if requester else str(requester_id)
         requester_nw_id = requester[1] if requester else None
 
-        if next_step:
-            con.execute("UPDATE leave_approvals SET status='waiting' WHERE id=?", (next_step[0],))
+        # 전원 승인 여부 확인
+        remaining_approvals = con.execute(
+            "SELECT COUNT(*) FROM leave_approvals WHERE request_id=? AND status='waiting'",
+            (request_id,)
+        ).fetchone()[0]
+
+        if remaining_approvals > 0:
             con.commit()
-            next_approver = con.execute(
-                "SELECT nickname, naver_works_id FROM users WHERE user_id=?", (next_step[1],)
-            ).fetchone()
-            if next_approver and next_approver[1]:
-                days_str = round(hours / HOURS_PER_DAY, 1)
-                msg = (
-                    f"📋 연차 결재 요청 ({step+1}차)\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"👤 신청자: {requester_name}\n"
-                    f"📅 {start_date} ~ {end_date} ({leave_type})\n"
-                    f"⏱️ {hours}시간 ({days_str}일)\n"
-                    f"✅ {actor_name} 승인 완료\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"승인: '승인 #{request_id}'\n"
-                    f"반려: '반려 #{request_id} 사유입력'"
-                )
-                import asyncio
-                try:
-                    asyncio.create_task(send_nw_dm(next_approver[1], msg))
-                except Exception:
-                    pass
-            return {"success": True, "message": f"#{request_id} {step}차 승인 완료. 다음 결재자에게 전달했습니다."}
+            return {"success": True, "message": f"#{request_id} 승인 완료. 잔여 결재자 {remaining_approvals}명 대기 중입니다."}
         else:
             con.execute(
                 "UPDATE leave_requests SET status='approved', updated_at=? WHERE id=?",
@@ -1626,11 +1591,11 @@ def bot_approve_leave(naver_works_id: str, request_id: int, comment: str = None)
             remaining = summary.get("remaining_hours", 0) if summary else 0
             days_str = round(hours / HOURS_PER_DAY, 1)
             msg = (
-                f"✅ 연차 승인 완료!\n"
+                f"연차 승인 완료\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"📅 {start_date} ~ {end_date} ({leave_type})\n"
-                f"⏱️ {hours}시간 ({days_str}일) 차감\n"
-                f"📊 잔여: {remaining}시간 ({round(remaining/HOURS_PER_DAY,1)}일)"
+                f"기간: {start_date} ~ {end_date} ({leave_type})\n"
+                f"{hours}시간 ({days_str}일) 차감\n"
+                f"잔여: {remaining}시간 ({round(remaining/HOURS_PER_DAY,1)}일)"
             )
             import asyncio
             try:
@@ -1638,8 +1603,8 @@ def bot_approve_leave(naver_works_id: str, request_id: int, comment: str = None)
             except Exception:
                 pass
             add_log("연차 승인", "leave", str(request_id), requester_name, actor_name,
-                    f"#{request_id} {leave_type} {start_date}~{end_date}")
-            return {"success": True, "message": f"#{request_id} 최종 승인 완료! {requester_name}에게 알림을 보냈습니다."}
+                    f"#{request_id} {leave_type} {start_date}~{end_date} 전원승인")
+            return {"success": True, "message": f"#{request_id} 전원 승인 완료. {requester_name}에게 알림을 보냈습니다."}
 
 
 def bot_reject_leave(naver_works_id: str, request_id: int, comment: str = None) -> dict:

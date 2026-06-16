@@ -216,7 +216,7 @@ h1, h2, h3, h4 {
 }
 
 /* ─────────────────────────────────────────
-   페이지 헤더 (공통 h1)
+   페이지 헤더
 ───────────────────────────────────────── */
 .main-content h1 {
   font-size: 1.375rem;
@@ -224,6 +224,55 @@ h1, h2, h3, h4 {
   color: var(--text-primary);
   line-height: 1.3;
   letter-spacing: -0.01em;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-header h1 {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.page-header p {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 1rem;
+}
+
+/* 섹션 구분 h2/h3/h4 */
+.section-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.main-content h4 {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.875rem;
 }
 
 /* ─────────────────────────────────────────

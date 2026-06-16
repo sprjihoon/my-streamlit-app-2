@@ -680,7 +680,7 @@ export default function LeavePage() {
                           <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
                             {a.requester_nickname}
                             <span style={{ fontSize: '0.8rem', color: '#6c757d', fontWeight: 400, marginLeft: '0.5rem' }}>
-                              {a.requester_department} · {a.requester_position} · {a.step}차 {isCancel ? '취소결재' : '결재'}
+                              {a.requester_department} · {a.requester_position} · {isCancel ? '취소결재' : '결재 요청'}
                             </span>
                           </div>
                           <div style={{ fontSize: '0.875rem', color: '#495057' }}>

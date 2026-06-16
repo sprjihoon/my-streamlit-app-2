@@ -255,10 +255,10 @@ export default function LogsPage() {
     <div style={{ padding: '1.25rem', maxWidth: 1100, margin: '0 auto' }}>
       {/* 헤더 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#111' }}>활동 로그 분석</h1>
+        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>활동 로그 분석</h1>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button style={tabStyle('dashboard')} onClick={() => switchTab('dashboard')}>📊 대시보드</button>
-          <button style={tabStyle('logs')} onClick={() => switchTab('logs')}>📋 로그 목록</button>
+          <button style={tabStyle('dashboard')} onClick={() => switchTab('dashboard')}>대시보드</button>
+          <button style={tabStyle('logs')} onClick={() => switchTab('logs')}>로그 목록</button>
         </div>
       </div>
 
