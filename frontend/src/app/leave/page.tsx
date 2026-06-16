@@ -407,22 +407,18 @@ export default function LeavePage() {
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '960px' }}>
-      <h2 style={{ marginBottom: '0.5rem' }}>🗓️ 연월차 관리</h2>
-      <p style={{ color: '#6c757d', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
-        근로기준법 기준 | 1일 = 7시간 (10:00~18:00)
-      </p>
+      <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0, lineHeight: 1.3 }}>
+          연월차 관리
+        </h1>
+        <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+          근로기준법 기준 | 1일 = 7시간 (10:00~18:00)
+        </p>
+      </div>
 
       {/* 알림 */}
-      {error && (
-        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#f8d7da', color: '#842029', borderRadius: '6px', marginBottom: '1rem' }}>
-          {error}
-        </div>
-      )}
-      {success && (
-        <div style={{ padding: '0.75rem 1rem', backgroundColor: '#d1e7dd', color: '#0a3622', borderRadius: '6px', marginBottom: '1rem' }}>
-          {success}
-        </div>
-      )}
+      {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
 
       {/* 연도 선택 + 탭 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
@@ -474,7 +470,7 @@ export default function LeavePage() {
                   padding: '0.6rem 1.25rem', backgroundColor: '#0d6efd', color: 'white',
                   border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600,
                 }}>
-                {showForm ? '✕ 닫기' : '+ 연차 신청'}
+                {showForm ? '닫기' : '연차 신청'}
               </button>
             </div>
           )}
@@ -538,7 +534,7 @@ export default function LeavePage() {
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ background: 'white', borderRadius: 10, padding: '1.5rem', width: 380, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
                 <h4 style={{ marginBottom: '0.5rem', color: isApproved ? '#fd7e14' : '#dc3545' }}>
-                  {isApproved ? '🔄 승인된 연차 취소 요청' : '⚠️ 연차 취소'}
+                  {isApproved ? '승인된 연차 취소 요청' : '연차 취소'}
                 </h4>
                 <p style={{ fontSize: '0.875rem', color: '#555', marginBottom: '1rem' }}>
                   {isApproved

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Card from '@/components/Card';
 import Loading from '@/components/Loading';
 import Alert from '@/components/Alert';
+import PageHeader from '@/components/PageHeader';
 import { checkHealth, getUploadList } from '@/lib/api';
 
 /**
@@ -52,16 +53,16 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: '1rem' }}>📊 대시보드</h1>
+      <PageHeader title="대시보드" subtitle="시스템 현황 및 빠른 작업" />
 
       {error && <Alert type="error">{error}</Alert>}
 
       {/* API 상태 */}
-      <Card title="🔌 API 상태">
+      <Card title="API 상태">
         {health ? (
           <div className="flex gap-1">
             <div className="metric">
-              <div className="metric-value" style={{ color: 'green' }}>●</div>
+              <div className="metric-value" style={{ color: 'var(--color-success)', fontSize: '1.2rem' }}>●</div>
               <div className="metric-label">상태: {health.status}</div>
             </div>
             <div className="metric">
@@ -75,7 +76,7 @@ export default function Dashboard() {
       </Card>
 
       {/* 데이터 현황 */}
-      <Card title="📁 데이터 현황">
+      <Card title="데이터 현황">
         <div className="grid grid-5">
           {[
             { key: 'inbound_slip', label: '입고전표' },
@@ -93,7 +94,7 @@ export default function Dashboard() {
       </Card>
 
       {/* 최근 업로드 */}
-      <Card title="📤 최근 업로드">
+      <Card title="최근 업로드">
         {uploads.length === 0 ? (
           <p className="text-muted">업로드된 파일이 없습니다.</p>
         ) : (
@@ -121,11 +122,11 @@ export default function Dashboard() {
       </Card>
 
       {/* 빠른 링크 */}
-      <Card title="🚀 빠른 작업">
+      <Card title="빠른 작업">
         <div className="flex gap-1">
-          <a href="/upload" className="btn btn-primary">📤 데이터 업로드</a>
-          <a href="/invoice" className="btn btn-success">📊 인보이스 계산</a>
-          <a href="/invoice-list" className="btn btn-secondary">📜 인보이스 목록</a>
+          <a href="/upload" className="btn btn-primary">데이터 업로드</a>
+          <a href="/invoice" className="btn btn-success">인보이스 계산</a>
+          <a href="/invoice-list" className="btn btn-secondary">인보이스 목록</a>
         </div>
       </Card>
     </div>

@@ -140,7 +140,7 @@ export default function BillingAnalyticsPage() {
       {/* 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1a3c6e', marginBottom: '0.2rem' }}>📊 청구금액 분석</h2>
+          <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>청구금액 분석</h2>
           <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>실 청구서 기준 매출·미수금 분석</p>
         </div>
         <div style={{ display: 'flex', gap: '0.4rem' }}>

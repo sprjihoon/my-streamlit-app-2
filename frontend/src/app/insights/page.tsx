@@ -192,7 +192,7 @@ export default function InsightsPage() {
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '2rem' }}>데이터 인사이트</h1>
+      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>데이터 인사이트</h1>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 

@@ -90,7 +90,7 @@ export default function LoginPage() {
     >
       <Card style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>📦 인보이스 관리 시스템</h1>
+          <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', fontWeight: 700 }}>인보이스 관리 시스템</h1>
           <p style={{ color: '#666' }}>로그인이 필요합니다</p>
         </div>
 

@@ -238,7 +238,7 @@ export default function EstimateAnalyticsPage() {
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '1rem' }}>
-      <h1 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '1rem', color: '#1f2937' }}>
+      <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
         견적서 로그 분석
       </h1>
 

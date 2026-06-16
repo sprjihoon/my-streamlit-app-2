@@ -287,13 +287,13 @@ export default function UsersPage() {
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1100px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-        <h1 style={{ margin: 0 }}>👥 사용자 관리</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+        <h1 style={{ margin: 0, fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)' }}>사용자 관리</h1>
         <button
           onClick={() => { setShowForm(!showForm); resetForm(); }}
-          style={{ padding: '0.6rem 1.2rem', backgroundColor: showForm ? '#9e9e9e' : '#4CAF50', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+          className={showForm ? 'btn btn-secondary' : 'btn btn-success'}
         >
-          {showForm ? '✕ 취소' : '➕ 직원 추가'}
+          {showForm ? '취소' : '직원 추가'}
         </button>
       </div>
 

@@ -227,7 +227,7 @@ export default function LeaveCalendarPage() {
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1100px' }}>
-      <h2 style={{ marginBottom: '0.5rem' }}>📅 연차 달력</h2>
+      <h2 style={{ marginBottom: '0.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)' }}>연차 달력</h2>
       <p style={{ color: '#6c757d', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
         승인된 연차를 달력으로 확인합니다.
       </p>

@@ -285,8 +285,8 @@ export default function WorkLogPage() {
 
   return (
     <div style={{ padding: '1rem' }}>
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem' }}>
-        📋 작업일지
+      <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+        작업일지
       </h1>
 
       {message && (

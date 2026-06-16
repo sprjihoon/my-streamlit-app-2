@@ -263,7 +263,7 @@ export default function BillingInvoicePage() {
   return (
     <div style={{ padding: '1.25rem', maxWidth: 1100 }}>
       <div style={{ marginBottom: '1.25rem' }}>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1a3c6e', marginBottom: '0.2rem' }}>📑 실 인보이스 관리</h2>
+        <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>실 인보이스 관리</h2>
         <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>PDF 청구서 업로드 → AI 자동 파싱 → 납부 추적</p>
       </div>
 

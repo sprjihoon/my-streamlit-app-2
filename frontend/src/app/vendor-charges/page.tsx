@@ -197,19 +197,10 @@ export default function VendorChargesPage() {
 
   return (
     <div style={{ padding: '1rem' }}>
-      <h1 style={{ marginBottom: '1.5rem' }}>💰 거래처별 추가 비용 관리</h1>
+      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>거래처별 추가 비용 관리</h1>
 
-      {error && (
-        <div style={{ padding: '1rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem' }}>
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div style={{ padding: '1rem', backgroundColor: '#e8f5e9', color: '#2e7d32', borderRadius: '4px', marginBottom: '1rem' }}>
-          {success}
-        </div>
-      )}
+      {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
 
       {/* 필터 및 추가 버튼 */}
       <Card title="🔍 필터">
@@ -252,14 +243,14 @@ export default function VendorChargesPage() {
                 cursor: 'pointer',
               }}
             >
-              ➕ 새 항목 추가
+              새 항목 추가
             </button>
           )}
         </div>
       </Card>
 
       {/* 목록 */}
-      <Card title={`📋 청구 비용 목록 (${charges.length}건)`} style={{ marginTop: '1rem' }}>
+      <Card title={`청구 비용 목록 (${charges.length}건)`} style={{ marginTop: '1rem' }}>
         {loading ? (
           <Loading />
         ) : charges.length === 0 ? (

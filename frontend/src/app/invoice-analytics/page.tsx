@@ -129,10 +129,12 @@ export default function InvoiceAnalyticsPage() {
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '0.5rem' }}>청구금액 분석</h1>
-      <p style={{ color: '#666', marginBottom: '1.5rem' }}>
-        인보이스 기반 월별 청구금액 추이를 확인합니다.
-      </p>
+      <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>청구금액 분석</h1>
+        <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontSize: '0.8125rem' }}>
+          인보이스 기반 월별 청구금액 추이를 확인합니다.
+        </p>
+      </div>
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 

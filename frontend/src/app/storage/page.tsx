@@ -294,28 +294,18 @@ export default function StoragePage() {
 
   return (
     <div style={{ padding: '1rem' }}>
-      <h1 style={{ marginBottom: '1.5rem' }}>📦 보관료 관리</h1>
+      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>보관료 관리</h1>
 
-      {error && (
-        <div style={{ padding: '1rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem' }}>
-          {error}
-          <button onClick={() => setError(null)} style={{ float: 'right', border: 'none', background: 'none', cursor: 'pointer' }}>✕</button>
-        </div>
-      )}
-
-      {success && (
-        <div style={{ padding: '1rem', backgroundColor: '#e8f5e9', color: '#2e7d32', borderRadius: '4px', marginBottom: '1rem' }}>
-          {success}
-        </div>
-      )}
+      {error && <div className="alert alert-error" style={{ marginBottom: '1rem', position: 'relative' }}>{error}<button onClick={() => setError(null)} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: '1rem' }}>×</button></div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
 
       {/* 탭 */}
       <div style={{ marginBottom: '0' }}>
         <button style={tabStyle(activeTab === 'vendor')} onClick={() => setActiveTab('vendor')}>
-          🏢 거래처별 보관료
+          거래처별 보관료
         </button>
         <button style={tabStyle(activeTab === 'rates')} onClick={() => setActiveTab('rates')}>
-          💰 보관료 단가표
+          보관료 단가표
         </button>
       </div>
 

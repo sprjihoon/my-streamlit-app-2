@@ -417,12 +417,9 @@ export default function WpAnalyticsPage() {
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '1rem' }}>
 
       {/* ── 헤더 ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
-        <div style={{ width: 38, height: 38, background: '#6366f1', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>🌐</div>
-        <div>
-          <h1 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#1f2937', margin: 0 }}>WordPress 사이트 분석</h1>
-          <p style={{ fontSize: '0.73rem', color: '#9ca3af', margin: 0 }}>spring3pl.co.kr 전체 페이지 방문자 데이터</p>
-        </div>
+      <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
+        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>WordPress 사이트 분석</h1>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>spring3pl.co.kr 전체 페이지 방문자 데이터</p>
       </div>
 
       {/* ── 날짜 필터 + 프리셋 ── */}

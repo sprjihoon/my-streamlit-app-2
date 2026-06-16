@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Card from '../../components/Card';
 import Loading from '../../components/Loading';
+import PageHeader from '../../components/PageHeader';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -120,46 +121,19 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ padding: '1rem' }}>
-      <h1 style={{ marginBottom: '1.5rem' }}>⚙️ 회사 설정</h1>
+    <div>
+      <PageHeader title="회사 설정" subtitle="사업자 정보 및 계좌 정보를 관리합니다" />
 
-      {error && (
-        <div style={{ 
-          padding: '1rem', 
-          backgroundColor: '#ffebee', 
-          color: '#c62828', 
-          borderRadius: '4px',
-          marginBottom: '1rem'
-        }}>
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div style={{ 
-          padding: '1rem', 
-          backgroundColor: '#e8f5e9', 
-          color: '#2e7d32', 
-          borderRadius: '4px',
-          marginBottom: '1rem'
-        }}>
-          {success}
-        </div>
-      )}
+      {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
 
       {!isAdmin && (
-        <div style={{ 
-          padding: '1rem', 
-          backgroundColor: '#fff3e0', 
-          color: '#e65100', 
-          borderRadius: '4px',
-          marginBottom: '1rem'
-        }}>
-          ⚠️ 관리자만 설정을 수정할 수 있습니다. (읽기 전용)
+        <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
+          관리자만 설정을 수정할 수 있습니다. (읽기 전용)
         </div>
       )}
 
-      <Card title="🏢 사업자 정보">
+      <Card title="사업자 정보">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
           <div style={fieldGroupStyle}>
             <label style={labelStyle}>상호 (회사명)</label>
@@ -230,7 +204,7 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <Card title="🏦 계좌 정보" style={{ marginTop: '1rem' }}>
+      <Card title="계좌 정보" style={{ marginTop: '1rem' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
           <div style={fieldGroupStyle}>
             <label style={labelStyle}>은행명</label>
@@ -270,17 +244,9 @@ export default function SettingsPage() {
           <button
             onClick={handleSave}
             disabled={saving}
-            style={{
-              padding: '0.75rem 2rem',
-              backgroundColor: saving ? '#ccc' : '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              cursor: saving ? 'not-allowed' : 'pointer',
-            }}
+            className="btn btn-success"
           >
-            {saving ? '저장 중...' : '💾 설정 저장'}
+            {saving ? '저장 중...' : '설정 저장'}
           </button>
         </div>
       )}

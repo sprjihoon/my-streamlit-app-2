@@ -316,7 +316,7 @@ export default function InvoicePage() {
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '2rem' }}>📊 인보이스 계산</h1>
+      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>인보이스 계산</h1>
 
       {!isAdmin && (
         <Alert type="error" message="계산 권한이 없습니다. 관리자만 인보이스를 계산할 수 있습니다." onClose={() => {}} />
