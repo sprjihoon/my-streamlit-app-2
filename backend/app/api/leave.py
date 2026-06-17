@@ -1472,10 +1472,10 @@ async def get_leave_calendar(token: str, year: int, month: int):
 
         rows = con.execute(
             """SELECT r.start_date, r.end_date, r.leave_type, r.hours_requested,
-                      u.nickname, u.department, u.position
+                      u.nickname, u.department, u.position, r.status
                FROM leave_requests r
                JOIN users u ON r.user_id = u.user_id
-               WHERE r.status = 'approved'
+               WHERE r.status IN ('approved', 'pending', 'cancel_requested')
                AND r.end_date >= ? AND r.start_date <= ?
                ORDER BY u.department, u.nickname""",
             (month_start, month_end)
@@ -1489,7 +1489,7 @@ async def get_leave_calendar(token: str, year: int, month: int):
 
     # 날짜별로 그룹화
     day_map: dict = {}
-    for start_str, end_str, leave_type, hours, nickname, dept, pos in rows:
+    for start_str, end_str, leave_type, hours, nickname, dept, pos, status in rows:
         start = date.fromisoformat(start_str)
         end = date.fromisoformat(end_str)
         cur = start
@@ -1504,6 +1504,7 @@ async def get_leave_calendar(token: str, year: int, month: int):
                     "position": pos,
                     "leave_type": leave_type,
                     "hours": hours,
+                    "status": status,
                 })
             cur += timedelta(days=1)
 

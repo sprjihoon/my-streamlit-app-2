@@ -10,6 +10,7 @@ interface CalendarLeaver {
   position: string;
   leave_type: string;
   hours: number;
+  status: 'approved' | 'pending' | 'cancel_requested';
 }
 
 interface CalendarData {
@@ -46,7 +47,7 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
   return (
     <div>
       {/* 범례 */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.8rem' }}>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.8rem', alignItems: 'center' }}>
         {Object.entries(DEPT_COLORS).map(([dept, color]) => (
           <div key={dept} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color }} />
@@ -60,6 +61,10 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: '#fff3cd', border: '1px solid #ffc107' }} />
           <span>공휴일</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{ width: 26, height: 10, borderRadius: 2, border: '1.5px dashed #adb5bd', backgroundColor: '#f8f9fa' }} />
+          <span style={{ color: '#6c757d' }}>결재중</span>
         </div>
       </div>
 
@@ -135,22 +140,23 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
                     {leavers.slice(0, 3).map((leaver, i) => {
                       const color = DEPT_COLORS[leaver.department] || '#fd7e14';
                       const isHalf = leaver.leave_type.includes('반차');
+                      const isPending = leaver.status === 'pending';
                       return (
                         <div key={i} style={{
                           fontSize: '0.68rem',
                           padding: '1px 5px',
                           marginBottom: '2px',
                           borderRadius: '3px',
-                          backgroundColor: color + '20',
-                          color: color,
-                          borderLeft: `3px solid ${color}`,
+                          backgroundColor: isPending ? '#f8f9fa' : color + '20',
+                          color: isPending ? '#6c757d' : color,
+                          borderLeft: isPending ? '3px dashed #adb5bd' : `3px solid ${color}`,
                           fontWeight: 500,
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           opacity: isHalf ? 0.7 : 1,
                         }}>
-                          {leaver.nickname}{isHalf ? '(반)' : ''}
+                          {leaver.nickname}{isHalf ? '(반)' : ''}{isPending ? '?' : ''}
                         </div>
                       );
                     })}
@@ -189,6 +195,9 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
               }}>
                 {l.leave_type}
               </span>
+              {l.status === 'pending' && (
+                <span style={{ marginLeft: '0.4rem', fontSize: '0.65rem', color: '#fd7e14', backgroundColor: '#fff3e0', padding: '1px 4px', borderRadius: '3px' }}>결재중</span>
+              )}
             </div>
           ))}
         </div>
@@ -273,24 +282,29 @@ export default function LeaveCalendarPage() {
             <h5 style={{ margin: '0 0 0.75rem 0', color: '#495057' }}>{month}월 연차 신청자</h5>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
               {(() => {
-                const personMap: Record<string, { days: string[]; dept: string; type: string }> = {};
+                const personMap: Record<string, { days: string[]; dept: string; type: string; status: string }> = {};
                 Object.entries(calendarData.days).forEach(([date, leavers]) => {
                   leavers.forEach(l => {
-                    if (!personMap[l.nickname]) personMap[l.nickname] = { days: [], dept: l.department, type: l.leave_type };
+                    if (!personMap[l.nickname]) personMap[l.nickname] = { days: [], dept: l.department, type: l.leave_type, status: l.status };
                     if (!personMap[l.nickname].days.includes(date)) personMap[l.nickname].days.push(date);
+                    // approved가 하나라도 있으면 approved로
+                    if (l.status === 'approved') personMap[l.nickname].status = 'approved';
                   });
                 });
                 return Object.entries(personMap).map(([name, info]) => {
                   const color = DEPT_COLORS[info.dept] || '#fd7e14';
+                  const isPending = info.status === 'pending';
                   return (
                     <div key={name} style={{
                       padding: '0.4rem 0.75rem', borderRadius: '6px',
-                      backgroundColor: color + '15', border: `1px solid ${color}40`,
+                      backgroundColor: color + '15', border: `1px solid ${isPending ? '#adb5bd' : color}40`,
                       fontSize: '0.8rem',
+                      opacity: isPending ? 0.8 : 1,
                     }}>
                       <span style={{ fontWeight: 600, color }}>{name}</span>
                       <span style={{ color: '#6c757d', marginLeft: '0.4rem' }}>{info.dept}</span>
                       <span style={{ color: '#495057', marginLeft: '0.4rem' }}>{info.days.length}일</span>
+                      {isPending && <span style={{ marginLeft: '0.3rem', fontSize: '0.7rem', color: '#fd7e14' }}>결재중</span>}
                     </div>
                   );
                 });
