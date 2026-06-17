@@ -527,17 +527,21 @@ export default function LeavePage() {
           <div style={card}>
             {summary && !summary.exempt && !summary.no_join_date ? (
               <LeaveDonut summary={summary} />
-            ) : summary?.exempt ? (
+            ) : summary?.exempt && !isAdmin ? (
               <p style={{ color: '#6c757d' }}>연차 관리 대상이 아닙니다.</p>
-            ) : summary?.no_join_date ? (
+            ) : summary?.no_join_date && !isAdmin ? (
               <p style={{ color: '#dc3545' }}>입사일이 등록되지 않았습니다. 관리자에게 문의하세요.</p>
+            ) : summary?.exempt && isAdmin ? (
+              <p style={{ color: '#6c757d', fontSize: '0.85rem' }}>관리자 계정은 연차 현황이 설정되지 않았습니다. 신청 폼은 아래에서 확인할 수 있습니다.</p>
+            ) : summary?.no_join_date && isAdmin ? (
+              <p style={{ color: '#e65100', fontSize: '0.85rem' }}>입사일이 등록되지 않았습니다. (사용자 관리에서 설정) 신청 폼 구조는 아래에서 확인할 수 있습니다.</p>
             ) : (
               <p style={{ color: '#6c757d' }}>연차 정보를 불러오는 중...</p>
             )}
           </div>
 
-          {/* 신청 버튼 */}
-          {summary && !summary.exempt && !summary.no_join_date && (
+          {/* 신청 버튼 — 관리자는 항상 표시 */}
+          {(isAdmin || (summary && !summary.exempt && !summary.no_join_date)) && (
             <div style={{ marginBottom: '1.5rem' }}>
               <button onClick={async () => {
                 if (showForm) {
