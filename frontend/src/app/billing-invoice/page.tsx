@@ -329,8 +329,21 @@ export default function BillingInvoicePage() {
     await load(token);
   }
 
-  async function handleBulkComplete() {
-    if (!confirm('현재 조회된 모든 인보이스를 완납으로 변경하시겠습니까?')) return;
+  async function handleDeleteAllInvoices() {
+    const total = invoices.length;
+    if (!confirm(`⚠️ 전체 삭제 확인\n\n현재 등록된 인보이스 ${total}건을 모두 삭제합니다.\n이 작업은 되돌릴 수 없습니다.\n\n정말 삭제하시겠습니까?`)) return;
+    const confirmed = prompt(`확인을 위해 "전체삭제" 를 입력하세요:`);
+    if (confirmed !== '전체삭제') { alert('취소되었습니다.'); return; }
+    try {
+      const r = await fetch(`${API}/billing-invoice/delete-all?token=${token}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(`삭제 실패: ${d.detail || r.status}`); return; }
+      alert(`🗑 ${d.deleted || 0}건 전체 삭제 완료`);
+    } catch (e) { alert(`오류: ${e}`); }
+    await load(token);
+  }
+
+  async function handleBulkComplete() {    if (!confirm('현재 조회된 모든 인보이스를 완납으로 변경하시겠습니까?')) return;
     try {
       const r = await fetch(`${API}/billing-invoice/bulk-status?token=${token}&status=완납`, { method: 'PUT' });
       const d = await r.json().catch(() => ({}));
@@ -563,6 +576,10 @@ export default function BillingInvoicePage() {
           <button onClick={handleBulkComplete}
             style={{ padding: '0.28rem 0.65rem', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
             ✅ 전체 완납 설정
+          </button>
+          <button onClick={handleDeleteAllInvoices}
+            style={{ padding: '0.28rem 0.65rem', background: '#7f1d1d', color: 'white', border: '1px solid #991b1b', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}>
+            ☠ 전체삭제
           </button>
         </div>
       </div>

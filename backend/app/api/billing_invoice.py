@@ -904,6 +904,20 @@ def cleanup_empty_invoices(token: str):
     return {"success": True, "deleted": deleted}
 
 
+@router.delete("/delete-all")
+def delete_all_invoices(token: str):
+    """전체 인보이스 삭제 (관리자 전용)"""
+    ensure_tables()
+    user = _require_admin(token)
+    with get_connection() as con:
+        count = con.execute("SELECT COUNT(*) FROM billing_invoices").fetchone()[0]
+        con.execute("DELETE FROM billing_invoice_items")
+        con.execute("DELETE FROM billing_invoices")
+        con.commit()
+    add_log("인보이스 전체 삭제", "billing_invoice", None, None, user["nickname"],
+            f"총 {count}건 삭제")
+    return {"success": True, "deleted": count}
+
 @router.delete("/dedup")
 def dedup_invoices(token: str):
     """중복 인보이스 제거: 같은 (client_name, service_month, total_amount) 중 최신 1개만 보존"""
