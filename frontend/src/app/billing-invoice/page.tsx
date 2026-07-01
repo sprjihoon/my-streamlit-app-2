@@ -412,10 +412,12 @@ export default function BillingInvoicePage() {
                       <td style={{ padding: '0.55rem 0.75rem', color: unpaid > 0 ? '#dc2626' : '#16a34a', fontWeight: unpaid > 0 ? 700 : 400 }}>{unpaid.toLocaleString()}</td>
                       <td style={{ padding: '0.55rem 0.75rem' }}><StatusBadge status={inv.status} /></td>
                       <td style={{ padding: '0.55rem 0.75rem', color: '#9ca3af' }}>{inv.created_by || '-'}</td>
-                      <td style={{ padding: '0.55rem 0.75rem', display: 'flex', gap: '0.35rem' }}>
-                        <button onClick={() => setDetailId(inv.id)} style={{ ...btnSm, background: '#eff6ff', color: '#1d4ed8' }}>상세</button>
-                        <button onClick={() => setPayingInv(inv)} style={{ ...btnSm, background: '#f0fdf4', color: '#16a34a' }}>납부</button>
-                        <button onClick={() => handleDelete(inv.id)} style={{ ...btnSm, background: '#fef2f2', color: '#dc2626' }}>삭제</button>
+                      <td style={{ padding: '0.4rem 0.75rem' }}>
+                        <div style={{ display: 'flex', gap: '0.35rem' }}>
+                          <button onClick={(e) => { e.stopPropagation(); setDetailId(inv.id); }} style={{ ...btnSm, background: '#eff6ff', color: '#1d4ed8' }}>상세</button>
+                          <button onClick={(e) => { e.stopPropagation(); setPayingInv(inv); }} style={{ ...btnSm, background: '#f0fdf4', color: '#16a34a' }}>납부</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(inv.id); }} style={{ ...btnSm, background: '#fef2f2', color: '#dc2626' }}>삭제</button>
+                        </div>
                       </td>
                     </tr>
                   );
