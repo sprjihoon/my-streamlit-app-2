@@ -267,8 +267,29 @@ export default function BillingInvoicePage() {
 
   async function handleDelete(id: string) {
     if (!confirm('삭제하시겠습니까?')) return;
-    await fetch(`${API}/billing-invoice/${id}?token=${token}`, { method: 'DELETE' });
-    load(token);
+    try {
+      const r = await fetch(`${API}/billing-invoice/${id}?token=${token}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(`삭제 실패: ${d.detail || r.status}`);
+        return;
+      }
+    } catch (e) {
+      alert(`삭제 오류: ${e}`);
+      return;
+    }
+    await load(token);
+  }
+
+  async function handleDeleteAll() {
+    if (!confirm(`0원짜리 항목을 전체 삭제하시겠습니까?`)) return;
+    try {
+      const r = await fetch(`${API}/billing-invoice/cleanup-empty?token=${token}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(`삭제 실패: ${d.detail || r.status}`); return; }
+      alert(`${d.deleted || 0}개 삭제됨`);
+    } catch (e) { alert(`오류: ${e}`); }
+    await load(token);
   }
 
   if (!isAdmin) return <div style={{ padding: '2rem', color: '#dc2626' }}>관리자 권한이 필요합니다.</div>;
@@ -380,6 +401,10 @@ export default function BillingInvoicePage() {
           <option value="">전체 상태</option>
           {['미납', '부분납', '완납'].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <button onClick={handleDeleteAll}
+          style={{ marginLeft: 'auto', padding: '0.35rem 0.75rem', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}>
+          🗑 빈 항목 정리
+        </button>
       </div>
 
       {/* 목록 테이블 */}
