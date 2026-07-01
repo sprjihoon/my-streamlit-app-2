@@ -262,10 +262,13 @@ export default function BillingInvoicePage() {
       const fd = new FormData();
       fd.append('token', token);
       fd.append('file', file);
-      try {
+        try {
         const r = await fetch(`${API}/billing-invoice/upload`, { method: 'POST', body: fd });
         const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || '업로드 실패');
+        if (!r.ok) {
+          const msg = r.status === 409 ? `⚠️ 중복: ${d.detail}` : (d.detail || '업로드 실패');
+          throw new Error(msg);
+        }
         results.push({ name: file.name, ok: true, msg: `${d.parsed?.client_name} / ${d.parsed?.service_month} — ${d.item_count}개 항목` });
       } catch (e) {
         results.push({ name: file.name, ok: false, msg: e instanceof Error ? e.message : '업로드 실패' });

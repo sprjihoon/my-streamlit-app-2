@@ -223,8 +223,24 @@ async def upload_invoice(token: str = Form(...), file: UploadFile = File(...)):
         pdf_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"AI 파싱 실패: {e}")
 
-    # PDF 파싱 완료 후 즉시 파일 삭제 (정보만 DB에 저장)
+    # GPT 파싱 완료 후 즉시 파일 삭제 (정보만 DB에 저장)
     pdf_path.unlink(missing_ok=True)
+
+    # 중복 방지: 같은 (거래처, 서비스월, 청구합계) 이미 존재하면 차단
+    client_name_parsed = parsed.get("client_name", "미상")
+    service_month_parsed = parsed.get("service_month")
+    total_amount_parsed = parsed.get("total_amount", 0)
+    with get_connection() as con:
+        existing = con.execute("""
+            SELECT id FROM billing_invoices
+            WHERE client_name = ? AND service_month = ? AND total_amount = ?
+            LIMIT 1
+        """, (client_name_parsed, service_month_parsed, total_amount_parsed)).fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"이미 동일한 인보이스가 존재합니다: {client_name_parsed} / {service_month_parsed} / {total_amount_parsed:,.0f}원 (ID: {existing[0][:8]}...)"
+        )
 
     # DB 저장
     items = parsed.pop("items", [])
