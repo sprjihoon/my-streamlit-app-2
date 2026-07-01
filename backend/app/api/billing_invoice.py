@@ -690,6 +690,75 @@ def cleanup_empty_invoices(token: str):
     return {"success": True, "deleted": deleted}
 
 
+@router.get("/diagnostics")
+def diagnostics(token: str):
+    """중복 인보이스 진단 (같은 client_name + service_month + total_amount)"""
+    ensure_tables()
+    _require_admin(token)
+    with get_connection() as con:
+        # 전체 요약
+        total = con.execute("SELECT COUNT(*), SUM(total_amount) FROM billing_invoices").fetchone()
+        # (거래처, 서비스월, 청구액) 중복 그룹
+        dups = con.execute("""
+            SELECT client_name, service_month, total_amount, COUNT(*) as cnt,
+                   GROUP_CONCAT(id, ',') as ids,
+                   GROUP_CONCAT(created_at, ',') as dates
+            FROM billing_invoices
+            GROUP BY client_name, service_month, total_amount
+            HAVING COUNT(*) > 1
+            ORDER BY cnt DESC
+        """).fetchall()
+        # 월별 합계
+        monthly = con.execute("""
+            SELECT COALESCE(service_month, strftime('%Y-%m', invoice_date)) as ym,
+                   COUNT(*) as cnt, SUM(total_amount) as total
+            FROM billing_invoices
+            GROUP BY ym ORDER BY ym DESC LIMIT 12
+        """).fetchall()
+    return {
+        "total_invoices": total[0] or 0,
+        "total_amount": total[1] or 0,
+        "duplicate_groups": [
+            {"client_name": r[0], "service_month": r[1], "total_amount": r[2],
+             "count": r[3], "ids": r[4].split(","), "dates": r[5].split(",")}
+            for r in dups
+        ],
+        "monthly_summary": [
+            {"month": r[0], "count": r[1], "total": r[2] or 0}
+            for r in monthly
+        ],
+    }
+
+
+@router.delete("/dedup")
+def dedup_invoices(token: str):
+    """중복 인보이스 제거: 같은 (client_name, service_month, total_amount) 중 최신 1개만 보존"""
+    ensure_tables()
+    user = _require_admin(token)
+    with get_connection() as con:
+        dups = con.execute("""
+            SELECT client_name, service_month, total_amount, COUNT(*) as cnt
+            FROM billing_invoices
+            GROUP BY client_name, service_month, total_amount
+            HAVING COUNT(*) > 1
+        """).fetchall()
+        deleted = 0
+        for client, smonth, amount, cnt in dups:
+            # 가장 최근 1개 제외하고 나머지 삭제
+            old_rows = con.execute("""
+                SELECT id FROM billing_invoices
+                WHERE client_name=? AND service_month=? AND total_amount=?
+                ORDER BY created_at DESC LIMIT -1 OFFSET 1
+            """, (client, smonth, amount)).fetchall()
+            for (inv_id,) in old_rows:
+                con.execute("DELETE FROM billing_invoice_items WHERE invoice_id=?", (inv_id,))
+                con.execute("DELETE FROM billing_invoices WHERE id=?", (inv_id,))
+                deleted += 1
+        con.commit()
+    add_log("중복 인보이스 제거", "billing_invoice", None, None, user["nickname"], f"{deleted}개 삭제")
+    return {"success": True, "deleted": deleted}
+
+
 # ─────────────────────────────────────
 # API: 삭제
 # ─────────────────────────────────────

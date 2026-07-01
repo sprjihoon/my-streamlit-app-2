@@ -309,6 +309,26 @@ export default function BillingInvoicePage() {
     await load(token);
   }
 
+  async function handleDedup() {
+    try {
+      const dr = await fetch(`${API}/billing-invoice/diagnostics?token=${token}`);
+      const diag = await dr.json();
+      const dupCount = diag.duplicate_groups?.length || 0;
+      const totalDups = diag.duplicate_groups?.reduce((s: number, g: any) => s + (g.count - 1), 0) || 0;
+      if (dupCount === 0) { alert(`중복 없음 — 전체 ${diag.total_invoices}건, 합계 ${(diag.total_amount || 0).toLocaleString()}원`); return; }
+      const msg = `⚠️ 중복 발견: ${dupCount}그룹, ${totalDups}개 중복\n\n` +
+        diag.duplicate_groups.slice(0, 5).map((g: any) => `• ${g.client_name} / ${g.service_month} / ${(g.total_amount || 0).toLocaleString()}원 × ${g.count}건`).join('\n') +
+        (dupCount > 5 ? `\n... 외 ${dupCount - 5}그룹` : '') +
+        `\n\n중복 제거하시겠습니까? (최신 1건만 보존)`;
+      if (!confirm(msg)) return;
+      const r2 = await fetch(`${API}/billing-invoice/dedup?token=${token}`, { method: 'DELETE' });
+      const d2 = await r2.json().catch(() => ({}));
+      if (!r2.ok) { alert(`실패: ${d2.detail || r2.status}`); return; }
+      alert(`✅ ${d2.deleted || 0}개 중복 제거 완료`);
+    } catch (e) { alert(`오류: ${e}`); }
+    await load(token);
+  }
+
   if (!isAdmin) return <div style={{ padding: '2rem', color: '#dc2626' }}>관리자 권한이 필요합니다.</div>;
 
   const totalBilled = invoices.reduce((s, r) => s + (r.total_amount || 0), 0);
@@ -500,6 +520,10 @@ export default function BillingInvoicePage() {
           <button onClick={handleDeleteAll}
             style={{ marginLeft: 'auto', padding: '0.28rem 0.65rem', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
             🗑 빈 항목 정리
+          </button>
+          <button onClick={handleDedup}
+            style={{ padding: '0.28rem 0.65rem', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
+            🔍 중복 진단/제거
           </button>
         </div>
       </div>
