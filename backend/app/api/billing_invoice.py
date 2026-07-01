@@ -334,94 +334,242 @@ def list_invoices(
 # API: 분석 (반드시 /{invoice_id} GET 앞에 정의해야 라우팅 충돌 방지)
 # ─────────────────────────────────────
 
+def _build_client_category(rows: list) -> list:
+    """업체별 카테고리 합산 → {client_name, categories: [{category, total, ratio}]}"""
+    from collections import defaultdict
+    data: dict = defaultdict(lambda: defaultdict(float))
+    for client, cat, total in rows:
+        data[client][cat or "기타"] += total or 0
+    result = []
+    for client, cats in data.items():
+        client_total = sum(cats.values())
+        result.append({
+            "client_name": client,
+            "total": client_total,
+            "categories": [
+                {"category": c, "total": v,
+                 "ratio": round(v / client_total * 100, 1) if client_total else 0}
+                for c, v in sorted(cats.items(), key=lambda x: -x[1])
+            ],
+        })
+    return sorted(result, key=lambda x: -x["total"])
+
+
+def _build_monthly_category(rows: list) -> list:
+    """월별 카테고리 합산 → [{month, categories: {cat: total}, total}]"""
+    from collections import defaultdict, OrderedDict
+    data: dict = defaultdict(lambda: defaultdict(float))
+    for ym, cat, total in rows:
+        data[ym][cat or "기타"] += total or 0
+    result = []
+    for ym in sorted(data.keys()):
+        cats = data[ym]
+        month_total = sum(cats.values())
+        result.append({
+            "month": ym,
+            "total": month_total,
+            "categories": {c: v for c, v in cats.items()},
+        })
+    return result
+
+
 @router.get("/analytics/summary")
 def analytics_summary(token: str, year: Optional[int] = None):
     ensure_tables()
     _require_admin(token)
 
     y = str(year) if year else str(date.today().year)
+    today = date.today().isoformat()
+
     with get_connection() as con:
+        # ── 월별 청구 추이 (service_month 기준) ──────────────────
         monthly = con.execute("""
-            SELECT strftime('%Y-%m', invoice_date) as ym,
-                   COUNT(*) as invoice_count,
+            SELECT COALESCE(service_month, strftime('%Y-%m', invoice_date)) as ym,
+                   COUNT(*) as cnt,
                    SUM(total_amount) as total,
                    SUM(paid_amount) as paid
             FROM billing_invoices
-            WHERE strftime('%Y', invoice_date) = ?
+            WHERE (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', invoice_date) = ?))
             GROUP BY ym ORDER BY ym
-        """, (y,)).fetchall()
+        """, (f"{y}-%", y)).fetchall()
 
+        # ── 거래처별 현황 + 납부율 ────────────────────────────────
         by_client = con.execute("""
             SELECT client_name,
-                   COUNT(*) as invoice_count,
+                   COUNT(*) as cnt,
                    SUM(total_amount) as total,
                    SUM(paid_amount) as paid,
-                   SUM(total_amount - paid_amount) as unpaid
+                   SUM(total_amount - paid_amount) as unpaid,
+                   MIN(invoice_date) as first_inv,
+                   MAX(invoice_date) as last_inv
             FROM billing_invoices
-            WHERE strftime('%Y', invoice_date) = ?
+            WHERE (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', invoice_date) = ?))
             GROUP BY client_name ORDER BY total DESC
-        """, (y,)).fetchall()
+        """, (f"{y}-%", y)).fetchall()
 
+        # ── 카테고리별 비중 (양수 항목만) ────────────────────────
         by_category = con.execute("""
-            SELECT ii.category,
-                   SUM(ii.amount) as total
+            SELECT ii.category, SUM(ii.amount) as total, COUNT(*) as cnt
             FROM billing_invoice_items ii
             JOIN billing_invoices inv ON ii.invoice_id = inv.id
-            WHERE strftime('%Y', inv.invoice_date) = ?
+            WHERE (inv.service_month LIKE ? OR (inv.service_month IS NULL AND strftime('%Y', inv.invoice_date) = ?))
               AND ii.amount > 0
             GROUP BY ii.category ORDER BY total DESC
-        """, (y,)).fetchall()
+        """, (f"{y}-%", y)).fetchall()
 
+        # ── 업체별 카테고리 비용 분해 ─────────────────────────────
+        by_client_category = con.execute("""
+            SELECT inv.client_name, ii.category, SUM(ii.amount) as total
+            FROM billing_invoice_items ii
+            JOIN billing_invoices inv ON ii.invoice_id = inv.id
+            WHERE (inv.service_month LIKE ? OR (inv.service_month IS NULL AND strftime('%Y', inv.invoice_date) = ?))
+              AND ii.amount > 0
+            GROUP BY inv.client_name, ii.category
+            ORDER BY inv.client_name, total DESC
+        """, (f"{y}-%", y)).fetchall()
+
+        # ── 월별 카테고리 추이 ────────────────────────────────────
+        monthly_category = con.execute("""
+            SELECT COALESCE(inv.service_month, strftime('%Y-%m', inv.invoice_date)) as ym,
+                   ii.category, SUM(ii.amount) as total
+            FROM billing_invoice_items ii
+            JOIN billing_invoices inv ON ii.invoice_id = inv.id
+            WHERE (inv.service_month LIKE ? OR (inv.service_month IS NULL AND strftime('%Y', inv.invoice_date) = ?))
+              AND ii.amount > 0
+            GROUP BY ym, ii.category
+            ORDER BY ym, total DESC
+        """, (f"{y}-%", y)).fetchall()
+
+        # ── 차감 항목 (음수) ──────────────────────────────────────
+        deductions = con.execute("""
+            SELECT ii.category, SUM(ii.amount) as total, COUNT(*) as cnt
+            FROM billing_invoice_items ii
+            JOIN billing_invoices inv ON ii.invoice_id = inv.id
+            WHERE (inv.service_month LIKE ? OR (inv.service_month IS NULL AND strftime('%Y', inv.invoice_date) = ?))
+              AND ii.amount < 0
+            GROUP BY ii.category ORDER BY total ASC
+        """, (f"{y}-%", y)).fetchall()
+
+        # ── 미수금 / 연체 현황 ────────────────────────────────────
         unpaid = con.execute("""
-            SELECT id, client_name, invoice_date, due_date,
+            SELECT id, client_name, service_month, invoice_date, due_date,
                    total_amount, paid_amount,
                    (total_amount - paid_amount) as unpaid_amount,
                    status
             FROM billing_invoices
             WHERE status IN ('미납', '부분납')
-              AND strftime('%Y', invoice_date) = ?
-            ORDER BY due_date ASC NULLS LAST
-        """, (y,)).fetchall()
+              AND (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', invoice_date) = ?))
+            ORDER BY due_date ASC
+        """, (f"{y}-%", y)).fetchall()
 
+        # ── 납부 소요일 (완납 건만) ───────────────────────────────
+        paid_days = con.execute("""
+            SELECT client_name,
+                   AVG(julianday(paid_date) - julianday(invoice_date)) as avg_days,
+                   COUNT(*) as cnt
+            FROM billing_invoices
+            WHERE status = '완납'
+              AND paid_date IS NOT NULL AND invoice_date IS NOT NULL
+              AND (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', invoice_date) = ?))
+            GROUP BY client_name ORDER BY avg_days ASC
+        """, (f"{y}-%", y)).fetchall()
+
+        # ── 연간 합계 ─────────────────────────────────────────────
         total_row = con.execute("""
-            SELECT COUNT(*), SUM(total_amount), SUM(paid_amount)
-            FROM billing_invoices WHERE strftime('%Y', invoice_date) = ?
-        """, (y,)).fetchone()
+            SELECT COUNT(*), SUM(total_amount), SUM(paid_amount),
+                   COUNT(CASE WHEN status='완납' THEN 1 END),
+                   COUNT(CASE WHEN status='미납' THEN 1 END),
+                   COUNT(CASE WHEN status='부분납' THEN 1 END)
+            FROM billing_invoices
+            WHERE (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', invoice_date) = ?))
+        """, (f"{y}-%", y)).fetchone()
 
-    today = date.today().isoformat()
+    total_billed = total_row[1] or 0
+    total_paid = total_row[2] or 0
+    total_cnt = total_row[0] or 0
+    payment_rate = round(total_paid / total_billed * 100, 1) if total_billed else 0
+
+    # 월별 전월 대비 증감
+    monthly_list = []
+    for i, r in enumerate(monthly):
+        prev_total = monthly[i - 1][2] or 0 if i > 0 else 0
+        cur_total = r[2] or 0
+        mom = round((cur_total - prev_total) / prev_total * 100, 1) if prev_total else None
+        monthly_list.append({
+            "month": r[0], "invoice_count": r[1],
+            "total": cur_total, "paid": r[3] or 0,
+            "unpaid": cur_total - (r[3] or 0),
+            "payment_rate": round((r[3] or 0) / cur_total * 100, 1) if cur_total else 0,
+            "mom_change": mom,
+        })
+
+    # 카테고리 비중
+    cat_total = sum(r[1] or 0 for r in by_category)
+    by_category_list = [
+        {
+            "category": r[0] or "기타",
+            "total": r[1] or 0,
+            "count": r[2],
+            "ratio": round((r[1] or 0) / cat_total * 100, 1) if cat_total else 0,
+        }
+        for r in by_category
+    ]
+
+    # 연체 일수 계산
+    unpaid_list = []
+    for r in unpaid:
+        overdue_days = None
+        if r[4] and r[4] < today:
+            try:
+                from datetime import datetime
+                overdue_days = (datetime.fromisoformat(today) - datetime.fromisoformat(r[4])).days
+            except Exception:
+                pass
+        unpaid_list.append({
+            "id": r[0], "client_name": r[1],
+            "service_month": r[2], "invoice_date": r[3], "due_date": r[4],
+            "total_amount": r[5] or 0, "paid_amount": r[6] or 0,
+            "unpaid_amount": r[7] or 0, "status": r[8],
+            "overdue": bool(r[4] and r[4] < today),
+            "overdue_days": overdue_days,
+        })
 
     return {
         "year": y,
         "summary": {
-            "invoice_count": total_row[0] or 0,
-            "total_billed": total_row[1] or 0,
-            "total_paid": total_row[2] or 0,
-            "total_unpaid": (total_row[1] or 0) - (total_row[2] or 0),
+            "invoice_count": total_cnt,
+            "total_billed": total_billed,
+            "total_paid": total_paid,
+            "total_unpaid": total_billed - total_paid,
+            "payment_rate": payment_rate,
+            "status_breakdown": {
+                "완납": total_row[3] or 0,
+                "미납": total_row[4] or 0,
+                "부분납": total_row[5] or 0,
+            },
         },
-        "monthly": [
-            {"month": r[0], "invoice_count": r[1], "total": r[2] or 0, "paid": r[3] or 0,
-             "unpaid": (r[2] or 0) - (r[3] or 0)}
-            for r in monthly
-        ],
+        "monthly": monthly_list,
         "by_client": [
-            {"client_name": r[0], "invoice_count": r[1],
-             "total": r[2] or 0, "paid": r[3] or 0, "unpaid": r[4] or 0}
+            {
+                "client_name": r[0], "invoice_count": r[1],
+                "total": r[2] or 0, "paid": r[3] or 0, "unpaid": r[4] or 0,
+                "payment_rate": round((r[3] or 0) / (r[2] or 1) * 100, 1) if r[2] else 0,
+                "first_invoice": r[5], "last_invoice": r[6],
+            }
             for r in by_client
         ],
-        "by_category": [
-            {"category": r[0] or "기타", "total": r[1] or 0}
-            for r in by_category
+        "by_category": by_category_list,
+        "deductions": [
+            {"category": r[0] or "차감", "total": r[1] or 0, "count": r[2]}
+            for r in deductions
         ],
-        "unpaid_list": [
-            {
-                "id": r[0], "client_name": r[1],
-                "invoice_date": r[2], "due_date": r[3],
-                "total_amount": r[4] or 0, "paid_amount": r[5] or 0,
-                "unpaid_amount": r[6] or 0, "status": r[7],
-                "overdue": bool(r[3] and r[3] < today),
-            }
-            for r in unpaid
+        "unpaid_list": unpaid_list,
+        "payment_speed": [
+            {"client_name": r[0], "avg_days": round(r[1], 1) if r[1] else None, "count": r[2]}
+            for r in paid_days
         ],
+        "by_client_category": _build_client_category(by_client_category),
+        "monthly_category": _build_monthly_category(monthly_category),
     }
 
 
@@ -434,13 +582,14 @@ def analytics_client_trend(token: str, client_name: str, year: Optional[int] = N
     y = str(year) if year else str(date.today().year)
     with get_connection() as con:
         rows = con.execute("""
-            SELECT strftime('%Y-%m', invoice_date) as ym,
+            SELECT COALESCE(service_month, strftime('%Y-%m', invoice_date)) as ym,
                    SUM(total_amount) as total,
                    SUM(paid_amount) as paid
             FROM billing_invoices
-            WHERE client_name LIKE ? AND strftime('%Y', invoice_date) = ?
+            WHERE client_name LIKE ?
+              AND (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', invoice_date) = ?))
             GROUP BY ym ORDER BY ym
-        """, (f"%{client_name}%", y)).fetchall()
+        """, (f"%{client_name}%", f"{y}-%", y)).fetchall()
 
     return [{"month": r[0], "total": r[1] or 0, "paid": r[2] or 0,
              "unpaid": (r[1] or 0) - (r[2] or 0)} for r in rows]

@@ -205,6 +205,10 @@ export default function BillingInvoicePage() {
   const [payingInv, setPayingInv] = useState<BillingInvoice | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
+  const [activeTab, setActiveTab] = useState<'list' | 'analytics'>('list');
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [analyticsYear, setAnalyticsYear] = useState(new Date().getFullYear());
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -215,6 +219,19 @@ export default function BillingInvoicePage() {
     if (!admin) { setLoading(false); return; }
     load(tok);
   }, []); // eslint-disable-line
+
+  async function loadAnalytics(tok: string, year: number) {
+    setAnalyticsLoading(true);
+    try {
+      const r = await fetch(`${API}/billing-invoice/analytics/summary?token=${tok}&year=${year}`);
+      if (r.ok) setAnalytics(await r.json());
+    } catch { /* silent */ }
+    setAnalyticsLoading(false);
+  }
+
+  useEffect(() => {
+    if (activeTab === 'analytics' && token && isAdmin) loadAnalytics(token, analyticsYear);
+  }, [activeTab, analyticsYear, token, isAdmin]); // eslint-disable-line
 
   const load = useCallback(async (tok: string) => {
     setLoading(true);
@@ -310,14 +327,28 @@ export default function BillingInvoicePage() {
 
   return (
     <div style={{ padding: '1.25rem', maxWidth: 1100 }}>
-      <div style={{ marginBottom: '1.25rem' }}>
-        <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>실 인보이스 관리</h2>
-        <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>PDF 청구서 업로드 → AI 자동 파싱 → 납부 추적</p>
+      <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>실 인보이스 관리</h2>
+          <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>PDF 청구서 업로드 → AI 자동 파싱 → 납부 추적</p>
+        </div>
+        {/* 탭 */}
+        <div style={{ display: 'flex', gap: '0.35rem' }}>
+          {([['list', '📋 목록'], ['analytics', '📊 분석']] as const).map(([tab, label]) => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              style={{ padding: '0.4rem 1rem', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+                borderColor: activeTab === tab ? '#1a3c6e' : '#e5e7eb',
+                background: activeTab === tab ? '#1a3c6e' : 'white',
+                color: activeTab === tab ? 'white' : '#374151' }}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {activeTab === 'list' && (<>
       {/* KPI */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>
-        {[
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>        {[
           { label: '조회 건수', value: `${invoices.length}건`, color: '#1a3c6e' },
           { label: '총 청구액', value: totalBilled.toLocaleString() + '원', color: '#1d4ed8' },
           { label: '미수금', value: totalUnpaid.toLocaleString() + '원', color: totalUnpaid > 0 ? '#dc2626' : '#16a34a' },
@@ -518,11 +549,317 @@ export default function BillingInvoicePage() {
           </div>
         )}
       </div>
+      </>)}
+
+      {/* ── 분석 탭 ─────────────────────────────────────────────── */}
+      {activeTab === 'analytics' && (
+        <div>
+          {/* 연도 선택 */}
+          <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1rem', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>분석 연도:</span>
+            {[2024, 2025, 2026, 2027].map(y => (
+              <button key={y} onClick={() => setAnalyticsYear(y)}
+                style={{ padding: '0.3rem 0.7rem', borderRadius: 20, border: '1px solid', cursor: 'pointer', fontSize: '0.78rem', fontWeight: analyticsYear === y ? 700 : 400,
+                  borderColor: analyticsYear === y ? '#1a3c6e' : '#e5e7eb',
+                  background: analyticsYear === y ? '#1a3c6e' : 'white',
+                  color: analyticsYear === y ? 'white' : '#374151' }}>
+                {y}
+              </button>
+            ))}
+          </div>
+
+          {analyticsLoading ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>분석 데이터 로딩 중...</div>
+          ) : !analytics ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</div>
+          ) : (
+            <>
+              {/* KPI 요약 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.6rem', marginBottom: '1.25rem' }}>
+                {[
+                  { label: '청구 건수', value: `${analytics.summary.invoice_count}건`, color: '#1a3c6e', sub: null },
+                  { label: '총 청구액', value: `${(analytics.summary.total_billed / 10000).toFixed(0)}만원`, color: '#1d4ed8', sub: null },
+                  { label: '총 납부액', value: `${(analytics.summary.total_paid / 10000).toFixed(0)}만원`, color: '#16a34a', sub: null },
+                  { label: '미수금', value: `${(analytics.summary.total_unpaid / 10000).toFixed(0)}만원`, color: analytics.summary.total_unpaid > 0 ? '#dc2626' : '#16a34a', sub: null },
+                  { label: '납부율', value: `${analytics.summary.payment_rate}%`, color: analytics.summary.payment_rate >= 80 ? '#16a34a' : '#ea580c', sub: `완납 ${analytics.summary.status_breakdown['완납']}건` },
+                ].map(k => (
+                  <div key={k.label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '0.85rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                    <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginBottom: '0.15rem' }}>{k.label}</div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 700, color: k.color }}>{k.value}</div>
+                    {k.sub && <div style={{ fontSize: '0.65rem', color: '#6b7280', marginTop: '0.1rem' }}>{k.sub}</div>}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                {/* 월별 청구 추이 */}
+                <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>📅 서비스월별 청구 추이</div>
+                  {analytics.monthly.length === 0 ? <div style={{ color: '#9ca3af', fontSize: '0.8rem' }}>데이터 없음</div> : (
+                    <div>
+                      {analytics.monthly.map((m: any) => {
+                        const maxT = Math.max(...analytics.monthly.map((x: any) => x.total), 1);
+                        const barW = Math.max(Math.round(m.total / maxT * 100), 2);
+                        const paidW = Math.max(Math.round(m.paid / maxT * 100), 0);
+                        return (
+                          <div key={m.month} style={{ marginBottom: '0.55rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#374151', marginBottom: '0.2rem' }}>
+                              <span style={{ fontWeight: 600 }}>{m.month}</span>
+                              <span style={{ color: '#6b7280' }}>
+                                {(m.total / 10000).toFixed(0)}만원
+                                {m.mom_change != null && (
+                                  <span style={{ marginLeft: 6, color: m.mom_change > 0 ? '#dc2626' : '#16a34a', fontSize: '0.68rem' }}>
+                                    {m.mom_change > 0 ? '▲' : '▼'}{Math.abs(m.mom_change)}%
+                                  </span>
+                                )}
+                                <span style={{ marginLeft: 6, color: m.payment_rate >= 100 ? '#16a34a' : '#ea580c' }}>납부율 {m.payment_rate}%</span>
+                              </span>
+                            </div>
+                            <div style={{ position: 'relative', height: 12, background: '#f3f4f6', borderRadius: 6 }}>
+                              <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${barW}%`, background: '#dbeafe', borderRadius: 6 }} />
+                              <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${paidW}%`, background: '#1d4ed8', borderRadius: 6 }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.65rem', color: '#6b7280' }}>
+                        <span><span style={{ display: 'inline-block', width: 8, height: 8, background: '#1d4ed8', borderRadius: 2, marginRight: 3 }} />납부</span>
+                        <span><span style={{ display: 'inline-block', width: 8, height: 8, background: '#dbeafe', borderRadius: 2, marginRight: 3 }} />미수금</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 카테고리별 비중 */}
+                <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>📦 비용 카테고리 분석</div>
+                  {analytics.by_category.length === 0 ? <div style={{ color: '#9ca3af', fontSize: '0.8rem' }}>데이터 없음</div> : (
+                    <div>
+                      {analytics.by_category.map((c: any) => (
+                        <div key={c.category} style={{ marginBottom: '0.55rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginBottom: '0.2rem' }}>
+                            <span style={{ fontWeight: 600, color: '#374151' }}>{c.category}</span>
+                            <span style={{ color: '#6b7280' }}>{(c.total / 10000).toFixed(0)}만원 <span style={{ color: '#1d4ed8' }}>({c.ratio}%)</span></span>
+                          </div>
+                          <div style={{ height: 10, background: '#f3f4f6', borderRadius: 5 }}>
+                            <div style={{ height: '100%', width: `${c.ratio}%`, background: catColor(c.category), borderRadius: 5 }} />
+                          </div>
+                        </div>
+                      ))}
+                      {analytics.deductions.length > 0 && (
+                        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #f3f4f6' }}>
+                          <div style={{ fontSize: '0.68rem', color: '#6b7280', marginBottom: '0.3rem' }}>차감 항목</div>
+                          {analytics.deductions.map((d: any) => (
+                            <div key={d.category} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#dc2626' }}>
+                              <span>{d.category}</span><span>{d.total.toLocaleString()}원</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                {/* 거래처별 현황 */}
+                <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>🏢 거래처별 청구 현황</div>
+                  {analytics.by_client.length === 0 ? <div style={{ color: '#9ca3af', fontSize: '0.8rem' }}>데이터 없음</div> : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #e5e7eb', color: '#6b7280' }}>
+                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'left', fontWeight: 600 }}>거래처</th>
+                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'right', fontWeight: 600 }}>청구액</th>
+                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'right', fontWeight: 600 }}>미수금</th>
+                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'center', fontWeight: 600 }}>납부율</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analytics.by_client.map((c: any) => (
+                          <tr key={c.client_name} style={{ borderBottom: '1px solid #f9fafb' }}>
+                            <td style={{ padding: '0.35rem 0.4rem', fontWeight: 600, color: '#1a3c6e' }}>{c.client_name}</td>
+                            <td style={{ padding: '0.35rem 0.4rem', textAlign: 'right', color: '#374151' }}>{(c.total / 10000).toFixed(0)}만</td>
+                            <td style={{ padding: '0.35rem 0.4rem', textAlign: 'right', color: c.unpaid > 0 ? '#dc2626' : '#16a34a', fontWeight: c.unpaid > 0 ? 700 : 400 }}>
+                              {c.unpaid > 0 ? `${(c.unpaid / 10000).toFixed(0)}만` : '완납'}
+                            </td>
+                            <td style={{ padding: '0.35rem 0.4rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <div style={{ flex: 1, height: 6, background: '#f3f4f6', borderRadius: 3 }}>
+                                  <div style={{ height: '100%', width: `${Math.min(c.payment_rate, 100)}%`, background: c.payment_rate >= 100 ? '#16a34a' : c.payment_rate >= 50 ? '#f59e0b' : '#dc2626', borderRadius: 3 }} />
+                                </div>
+                                <span style={{ fontSize: '0.68rem', color: '#6b7280', minWidth: 28, textAlign: 'right' }}>{c.payment_rate}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* 납부 패턴 & 미수금 */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {/* 납부 소요일 */}
+                  {analytics.payment_speed.length > 0 && (
+                    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem' }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.6rem' }}>💳 평균 납부 소요일 (완납 기준)</div>
+                      {analytics.payment_speed.map((p: any) => (
+                        <div key={p.client_name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', padding: '0.25rem 0', borderBottom: '1px solid #f9fafb' }}>
+                          <span style={{ color: '#374151', fontWeight: 500 }}>{p.client_name}</span>
+                          <span style={{ color: p.avg_days > 30 ? '#dc2626' : p.avg_days > 14 ? '#ea580c' : '#16a34a', fontWeight: 700 }}>
+                            {p.avg_days != null ? `${p.avg_days}일` : '-'} <span style={{ color: '#9ca3af', fontWeight: 400 }}>({p.count}건)</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 연체/미수금 */}
+                  {analytics.unpaid_list.length > 0 && (
+                    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem' }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.6rem' }}>
+                        ⚠️ 미수금 현황 <span style={{ fontSize: '0.7rem', color: '#dc2626', marginLeft: 4 }}>
+                          {analytics.unpaid_list.filter((u: any) => u.overdue).length}건 연체
+                        </span>
+                      </div>
+                      <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                        {analytics.unpaid_list.map((u: any) => (
+                          <div key={u.id} style={{ padding: '0.35rem 0', borderBottom: '1px solid #f9fafb', fontSize: '0.73rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ fontWeight: 600, color: u.overdue ? '#dc2626' : '#374151' }}>
+                                {u.overdue && '🔴 '}{u.client_name}
+                              </span>
+                              <span style={{ color: '#dc2626', fontWeight: 700 }}>
+                                {(u.unpaid_amount / 10000).toFixed(1)}만원
+                              </span>
+                            </div>
+                            <div style={{ color: '#6b7280', fontSize: '0.68rem', marginTop: 1 }}>
+                              {u.service_month || u.invoice_date} · {u.status}
+                              {u.overdue_days && <span style={{ color: '#dc2626', marginLeft: 6 }}>연체 {u.overdue_days}일</span>}
+                              {u.due_date && !u.overdue && <span style={{ marginLeft: 6 }}>납기 {u.due_date}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 업체별 카테고리 비용 비율 */}
+              {analytics.by_client_category?.length > 0 && (
+                <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>🏢 업체별 비용 카테고리 비율</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+                    {analytics.by_client_category.map((c: any) => (
+                      <div key={c.client_name} style={{ border: '1px solid #f3f4f6', borderRadius: 8, padding: '0.65rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1a3c6e' }}>{c.client_name}</span>
+                          <span style={{ fontSize: '0.7rem', color: '#6b7280' }}>총 {(c.total / 10000).toFixed(0)}만원</span>
+                        </div>
+                        {c.categories.map((cat: any) => (
+                          <div key={cat.category} style={{ marginBottom: '0.3rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: '0.15rem' }}>
+                              <span style={{ color: catColor(cat.category), fontWeight: 600 }}>{cat.category}</span>
+                              <span style={{ color: '#6b7280' }}>{(cat.total / 10000).toFixed(1)}만 ({cat.ratio}%)</span>
+                            </div>
+                            <div style={{ height: 7, background: '#f3f4f6', borderRadius: 4 }}>
+                              <div style={{ height: '100%', width: `${cat.ratio}%`, background: catColor(cat.category), borderRadius: 4, opacity: 0.8 }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 월별 카테고리 추이 */}
+              {analytics.monthly_category?.length > 0 && (
+                <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>📈 월별 카테고리 비용 추이</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', fontSize: '0.72rem', minWidth: '100%' }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          <th style={{ padding: '0.4rem 0.6rem', textAlign: 'left', color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap', borderBottom: '1px solid #e5e7eb' }}>카테고리</th>
+                          {analytics.monthly_category.map((m: any) => (
+                            <th key={m.month} style={{ padding: '0.4rem 0.6rem', textAlign: 'right', color: '#1a3c6e', fontWeight: 700, whiteSpace: 'nowrap', borderBottom: '1px solid #e5e7eb' }}>{m.month.slice(2)}</th>
+                          ))}
+                          <th style={{ padding: '0.4rem 0.6rem', textAlign: 'right', color: '#374151', fontWeight: 600, borderBottom: '1px solid #e5e7eb' }}>합계</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const allCats = Array.from(new Set(analytics.monthly_category.flatMap((m: any) => Object.keys(m.categories)))).sort((a: any, b: any) => {
+                            const totA = analytics.monthly_category.reduce((s: number, m: any) => s + (m.categories[a] || 0), 0);
+                            const totB = analytics.monthly_category.reduce((s: number, m: any) => s + (m.categories[b] || 0), 0);
+                            return totB - totA;
+                          });
+                          return allCats.map((cat: any) => {
+                            const rowTotal = analytics.monthly_category.reduce((s: number, m: any) => s + (m.categories[cat] || 0), 0);
+                            const maxVal = Math.max(...analytics.monthly_category.map((m: any) => m.categories[cat] || 0), 1);
+                            return (
+                              <tr key={cat} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                <td style={{ padding: '0.35rem 0.6rem', whiteSpace: 'nowrap' }}>
+                                  <span style={{ display: 'inline-block', width: 8, height: 8, background: catColor(cat), borderRadius: 2, marginRight: 5 }} />
+                                  <span style={{ fontWeight: 600, color: '#374151' }}>{cat}</span>
+                                </td>
+                                {analytics.monthly_category.map((m: any) => {
+                                  const val = m.categories[cat] || 0;
+                                  const intensity = Math.round((val / maxVal) * 100);
+                                  return (
+                                    <td key={m.month} style={{ padding: '0.35rem 0.6rem', textAlign: 'right',
+                                      background: val > 0 ? `${catColor(cat)}${Math.round(intensity * 0.3 + 10).toString(16).padStart(2, '0')}` : 'transparent',
+                                      color: val > 0 ? '#111' : '#d1d5db', fontWeight: val > 0 ? 600 : 400 }}>
+                                      {val > 0 ? `${(val / 10000).toFixed(0)}만` : '-'}
+                                    </td>
+                                  );
+                                })}
+                                <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 700, color: '#1a3c6e' }}>
+                                  {(rowTotal / 10000).toFixed(0)}만
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                        {/* 월 합계 행 */}
+                        <tr style={{ background: '#f9fafb', borderTop: '2px solid #e5e7eb' }}>
+                          <td style={{ padding: '0.35rem 0.6rem', fontWeight: 700, color: '#374151' }}>월 합계</td>
+                          {analytics.monthly_category.map((m: any) => (
+                            <td key={m.month} style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 700, color: '#1a3c6e' }}>
+                              {(m.total / 10000).toFixed(0)}만
+                            </td>
+                          ))}
+                          <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 700, color: '#dc2626' }}>
+                            {(analytics.monthly_category.reduce((s: number, m: any) => s + m.total, 0) / 10000).toFixed(0)}만
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </>
+          )}
+        </div>
+      )}
 
       {payingInv && <PayModal inv={payingInv} token={token} onClose={() => setPayingInv(null)} onSaved={() => load(token)} />}
       {detailId && <DetailModal invId={detailId} token={token} onClose={() => setDetailId(null)} />}
     </div>
   );
+}
+
+function catColor(cat: string): string {
+  const map: Record<string, string> = {
+    '택배비': '#3b82f6', '포장비': '#8b5cf6', '입출고비': '#f59e0b',
+    '보관료': '#10b981', '바코드': '#6366f1', '도서산간': '#ec4899',
+    '부대비용': '#14b8a6', '차감': '#ef4444', '기타': '#9ca3af',
+  };
+  return map[cat] || '#9ca3af';
 }
 
 const btnBlue: React.CSSProperties = { padding: '0.45rem 1rem', background: '#1a3c6e', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' };
