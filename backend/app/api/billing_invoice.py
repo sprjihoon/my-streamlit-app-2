@@ -223,6 +223,9 @@ async def upload_invoice(token: str = Form(...), file: UploadFile = File(...)):
         pdf_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"AI 파싱 실패: {e}")
 
+    # PDF 파싱 완료 후 즉시 파일 삭제 (정보만 DB에 저장)
+    pdf_path.unlink(missing_ok=True)
+
     # DB 저장
     items = parsed.pop("items", [])
     invoice_id = pdf_id
@@ -249,7 +252,7 @@ async def upload_invoice(token: str = Form(...), file: UploadFile = File(...)):
             parsed.get("bank_name"),
             parsed.get("account_holder"),
             parsed.get("account_number"),
-            safe_name,
+            None,
             user["nickname"],
         ))
 
@@ -523,14 +526,11 @@ def cleanup_empty_invoices(token: str):
     user = _require_admin(token)
     with get_connection() as con:
         rows = con.execute(
-            "SELECT id, pdf_filename FROM billing_invoices WHERE total_amount = 0 OR total_amount IS NULL"
+            "SELECT id FROM billing_invoices WHERE total_amount = 0 OR total_amount IS NULL"
         ).fetchall()
         deleted = 0
         for row in rows:
-            inv_id, pdf_name = row
-            if pdf_name:
-                p = UPLOAD_DIR / pdf_name
-                p.unlink(missing_ok=True)
+            inv_id = row[0]
             con.execute("DELETE FROM billing_invoice_items WHERE invoice_id=?", (inv_id,))
             con.execute("DELETE FROM billing_invoices WHERE id=?", (inv_id,))
             deleted += 1
@@ -550,15 +550,12 @@ def delete_invoice(invoice_id: str, token: str):
     user = _require_admin(token)
 
     with get_connection() as con:
-        row = con.execute("SELECT pdf_filename, client_name FROM billing_invoices WHERE id=?", (invoice_id,)).fetchone()
+        row = con.execute("SELECT client_name FROM billing_invoices WHERE id=?", (invoice_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="인보이스를 찾을 수 없습니다.")
-        if row[0]:
-            p = UPLOAD_DIR / row[0]
-            p.unlink(missing_ok=True)
         con.execute("DELETE FROM billing_invoice_items WHERE invoice_id=?", (invoice_id,))
         con.execute("DELETE FROM billing_invoices WHERE id=?", (invoice_id,))
         con.commit()
 
-    add_log("인보이스 삭제", "billing_invoice", invoice_id, row[1], user["nickname"], "")
+    add_log("인보이스 삭제", "billing_invoice", invoice_id, row[0], user["nickname"], "")
     return {"success": True}
