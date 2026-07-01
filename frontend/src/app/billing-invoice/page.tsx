@@ -269,7 +269,10 @@ export default function BillingInvoicePage() {
           const msg = r.status === 409 ? `⚠️ 중복: ${d.detail}` : (d.detail || '업로드 실패');
           throw new Error(msg);
         }
-        results.push({ name: file.name, ok: true, msg: `${d.parsed?.client_name} / ${d.parsed?.service_month} — ${d.item_count}개 항목` });
+        const warn = d.parsed?._parse_warning ? ` ⚠️ ${d.parsed._parse_warning}` : '';
+        const reparse = d.parsed?._reparse_applied ? ' (재파싱 적용)' : '';
+        const regexFix = d.parsed?._regex_corrections?.length ? ` 🔧 regex교정(${d.parsed._regex_corrections.length}건)` : '';
+        results.push({ name: file.name, ok: true, msg: `${d.parsed?.client_name} / ${d.parsed?.service_month} — ${d.item_count}개 항목${reparse}${regexFix}${warn}` });
       } catch (e) {
         results.push({ name: file.name, ok: false, msg: e instanceof Error ? e.message : '업로드 실패' });
       }

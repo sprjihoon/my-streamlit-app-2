@@ -48,9 +48,13 @@ CATEGORY_MAP = {
 GPT_SYSTEM_PROMPT = """
 너는 물류 풀필먼트 청구서 PDF 텍스트를 분석해서 구조화된 JSON으로 반환하는 AI야.
 
-PDF 텍스트는 멀티컬럼 레이아웃 때문에 순서가 뒤섞여 있을 수 있어.
-항목 행(No, 수량, 단가, 금액)과 품명이 분리되어 나타날 수 있으니 No 순서대로 품명을 매핑해.
-금액이 음수(차감)인 경우 그대로 음수로 반환해.
+[파싱 규칙 - 반드시 준수]
+1. PDF 텍스트는 멀티컬럼 레이아웃 때문에 순서가 뒤섞여 있을 수 있어. No 순서대로 품명을 매핑해.
+2. 금액이 음수(차감)인 경우 그대로 음수로 반환해.
+3. 숫자 앞의 행번호(1, 2, 3...)를 금액에 포함시키지 마. 예: 행번호 1, 금액 4,104,420 → amount: 4104420 (14104420 아님).
+4. 모든 items의 amount 합계(양수)가 supply_amount(공급가액)와 일치하는지 반드시 확인해. 일치하지 않으면 누락된 항목이 있는지 다시 점검해.
+5. 소계/합계 행은 items에 포함하지 마. 개별 항목만 포함해.
+6. 텍스트가 잘려 있거나 불명확한 금액은 주변 맥락(단가×수량)으로 검증해.
 
 반드시 아래 JSON 형식만 반환하고 다른 설명은 하지 마:
 
@@ -156,27 +160,165 @@ def _guess_category(item_name: str) -> str:
     return "기타"
 
 
-def _parse_pdf_text(text: str) -> dict:
-    """GPT-4o로 PDF 텍스트 파싱"""
-    from openai import OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+def _fix_pdf_number_spaces(text: str) -> str:
+    """pdfplumber가 큰 숫자 안에 삽입하는 공백을 제거합니다.
+    예: '1 4,344,660' → '14,344,660'
+    패턴: 숫자(1-2자리) + 공백 + 숫자·쉼표 연속
+    """
+    import re
+    # 반복 적용 (여러 번 삽입된 경우 처리)
+    for _ in range(5):
+        fixed = re.sub(r'(\d{1,2}) (\d{3}[,\d]*)', r'\1\2', text)
+        if fixed == text:
+            break
+        text = fixed
+    return text
 
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": GPT_SYSTEM_PROMPT},
-            {"role": "user", "content": f"아래 PDF 텍스트를 분석해:\n\n{text}"},
+
+def _regex_extract_totals(text: str) -> dict:
+    """regex로 공급가액·부가세·청구합계를 직접 추출 (pdfplumber 공백 처리 포함)."""
+    import re
+
+    def _clean(raw: str) -> int | None:
+        val = re.sub(r'[\s,]', '', raw)
+        return int(val) if val.isdigit() and int(val) > 0 else None
+
+    result = {}
+    patterns = {
+        "total_amount": [
+            r'청구금액\s*[₩￦]\s*([\d ,]+)',
+            r'청\s*구\s*금\s*액\s*[₩￦]\s*([\d ,]+)',
         ],
-        temperature=0,
-        max_tokens=4000,
+        "supply_amount": [
+            r'공급가액\s*[₩￦]?\s*([\d ,]+)',
+            r'합계\s*금\s*액\s*[₩￦]\s*([\d ,]+)',
+        ],
+        "vat_amount": [
+            r'부가세\s*[₩￦]?\s*([\d ,]+)',
+            r'세\s*액\s*[₩￦]?\s*([\d ,]+)',
+        ],
+    }
+    for key, pats in patterns.items():
+        for pat in pats:
+            m = re.search(pat, text)
+            if m:
+                val = _clean(m.group(1))
+                if val:
+                    result[key] = val
+                    break
+    return result
+
+
+def _gpt_parse(client, text: str, extra_messages: list | None = None) -> dict:
+    """GPT 호출 + JSON 추출 헬퍼."""
+    messages = [
+        {"role": "system", "content": GPT_SYSTEM_PROMPT},
+        {"role": "user", "content": f"아래 PDF 텍스트를 분석해:\n\n{text}"},
+    ]
+    if extra_messages:
+        messages.extend(extra_messages)
+    resp = client.chat.completions.create(
+        model="gpt-4o", messages=messages, temperature=0, max_tokens=4000,
     )
     raw = resp.choices[0].message.content.strip()
-    # JSON 블록 추출
     if "```" in raw:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    return json.loads(raw)
+    return json.loads(raw), resp.choices[0].message.content
+
+
+def _parse_pdf_text(text: str) -> dict:
+    """
+    2중 파싱 검증:
+      1단계) regex (윈도우 프로그램 동일 로직) → 업체명·합계금액 추출 (신뢰도 최고)
+      2단계) GPT → 전체 구조 파싱 (items 상세 포함)
+      3단계) 비교 교정 → GPT 금액이 regex와 다르면 regex 값으로 덮어씀
+             items 합계가 supply_amount와 1% 이상 차이 → GPT 재검토 요청
+    """
+    from openai import OpenAI
+    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+    # ── 1단계: regex 파싱 (pdfplumber 공백 정규화 포함) ──────────
+    cleaned_text = _fix_pdf_number_spaces(text)
+    regex_result = _regex_extract_totals(cleaned_text)
+    r_total   = regex_result.get("total_amount")
+    r_supply  = regex_result.get("supply_amount")
+    r_vat     = regex_result.get("vat_amount")
+
+    # ── 2단계: GPT 파싱 (정규화된 텍스트 전달) ───────────────────
+    parsed, gpt_raw = _gpt_parse(client, cleaned_text)
+
+    # ── 3단계-A: GPT 합계 vs regex 합계 비교 교정 ─────────────────
+    corrections = []
+    if r_total and parsed.get("total_amount") and abs(parsed["total_amount"] - r_total) > 100:
+        corrections.append(
+            f"total_amount: GPT={parsed['total_amount']:,.0f} → regex={r_total:,.0f}"
+        )
+        parsed["total_amount"] = r_total
+    elif r_total and not parsed.get("total_amount"):
+        parsed["total_amount"] = r_total
+
+    if r_supply and parsed.get("supply_amount") and abs(parsed["supply_amount"] - r_supply) > 100:
+        corrections.append(
+            f"supply_amount: GPT={parsed['supply_amount']:,.0f} → regex={r_supply:,.0f}"
+        )
+        parsed["supply_amount"] = r_supply
+    elif r_supply and not parsed.get("supply_amount"):
+        parsed["supply_amount"] = r_supply
+
+    if r_vat and parsed.get("vat_amount") and abs(parsed["vat_amount"] - r_vat) > 100:
+        parsed["vat_amount"] = r_vat
+    elif r_vat and not parsed.get("vat_amount"):
+        parsed["vat_amount"] = r_vat
+
+    if corrections:
+        parsed["_regex_corrections"] = corrections
+
+    # ── 3단계-B: items 합계 vs supply_amount 검증 → 차이 시 재파싱 ─
+    supply = parsed.get("supply_amount") or 0
+    items = parsed.get("items", [])
+    items_sum = sum(it.get("amount", 0) or 0 for it in items if (it.get("amount") or 0) > 0)
+
+    if supply > 0 and abs(items_sum - supply) / supply > 0.01:
+        verify_prompt = (
+            f"[regex 검증 결과]\n"
+            f"  청구합계(regex): {r_total:,.0f}원\n"
+            f"  공급가액(regex): {r_supply:,.0f}원\n\n"
+            f"[GPT 파싱 결과]\n"
+            f"  items 합계: {items_sum:,.0f}원\n"
+            f"  공급가액: {supply:,.0f}원\n"
+            f"  차이: {items_sum - supply:,.0f}원\n\n"
+            f"items 합계가 공급가액과 일치하지 않습니다. "
+            f"PDF를 다시 꼼꼼히 확인해 누락된 항목을 추가하거나 잘못된 금액을 수정해주세요. "
+            f"특히 행번호(1, 2, 3...)가 금액 앞에 붙어 있는지 확인하세요. "
+            f"수정된 전체 JSON을 반환하세요."
+        )
+        try:
+            parsed2, _ = _gpt_parse(client, cleaned_text, extra_messages=[
+                {"role": "assistant", "content": gpt_raw},
+                {"role": "user", "content": verify_prompt},
+            ])
+            items2 = parsed2.get("items", [])
+            items_sum2 = sum(it.get("amount", 0) or 0 for it in items2 if (it.get("amount") or 0) > 0)
+            if abs(items_sum2 - supply) < abs(items_sum - supply):
+                # 재파싱이 더 정확 → items만 교체 (합계는 이미 regex로 고정됨)
+                parsed["items"] = items2
+                parsed["_reparse_applied"] = True
+        except Exception:
+            pass
+
+    # ── 최종 경고 (재파싱 후에도 차이 남은 경우) ──────────────────
+    final_items = parsed.get("items", [])
+    final_sum = sum(it.get("amount", 0) or 0 for it in final_items if (it.get("amount") or 0) > 0)
+    final_supply = parsed.get("supply_amount") or 0
+    if final_supply > 0 and abs(final_sum - final_supply) > 100:
+        parsed["_parse_warning"] = (
+            f"항목합계({final_sum:,.0f})와 공급가액({final_supply:,.0f}) 차이: "
+            f"{abs(final_sum - final_supply):,.0f}원 — 항목을 직접 확인하세요"
+        )
+
+    return parsed
 
 
 # ─────────────────────────────────────
