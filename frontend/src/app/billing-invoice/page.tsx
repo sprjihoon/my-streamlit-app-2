@@ -309,6 +309,31 @@ export default function BillingInvoicePage() {
     await load(token);
   }
 
+  async function handleToggleStatus(inv: BillingInvoice) {
+    const newStatus = inv.status === '완납' ? '미납' : '완납';
+    const newPaid = newStatus === '완납' ? inv.total_amount : 0;
+    try {
+      const r = await fetch(`${API}/billing-invoice/${inv.id}?token=${token}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, paid_amount: newPaid }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(`변경 실패: ${d.detail || r.status}`); return; }
+    } catch (e) { alert(`오류: ${e}`); return; }
+    await load(token);
+  }
+
+  async function handleBulkComplete() {
+    if (!confirm('현재 조회된 모든 인보이스를 완납으로 변경하시겠습니까?')) return;
+    try {
+      const r = await fetch(`${API}/billing-invoice/bulk-status?token=${token}&status=완납`, { method: 'PUT' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(`실패: ${d.detail || r.status}`); return; }
+      alert(`✅ ${d.updated || 0}건 완납으로 변경됨`);
+    } catch (e) { alert(`오류: ${e}`); }
+    await load(token);
+  }
+
   async function handleDedup() {
     try {
       const dr = await fetch(`${API}/billing-invoice/diagnostics?token=${token}`);
@@ -517,6 +542,10 @@ export default function BillingInvoicePage() {
             <option value="">전체 상태</option>
             {['미납', '부분납', '완납'].map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+          <button onClick={() => setFilterStatus(filterStatus === '미납' ? '' : '미납')}
+            style={{ padding: '0.28rem 0.65rem', background: filterStatus === '미납' ? '#fef2f2' : 'white', color: '#dc2626', border: `1px solid ${filterStatus === '미납' ? '#dc2626' : '#e5e7eb'}`, borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: filterStatus === '미납' ? 700 : 400 }}>
+            미납만
+          </button>
           <button onClick={handleDeleteAll}
             style={{ marginLeft: 'auto', padding: '0.28rem 0.65rem', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
             🗑 빈 항목 정리
@@ -524,6 +553,10 @@ export default function BillingInvoicePage() {
           <button onClick={handleDedup}
             style={{ padding: '0.28rem 0.65rem', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
             🔍 중복 진단/제거
+          </button>
+          <button onClick={handleBulkComplete}
+            style={{ padding: '0.28rem 0.65rem', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
+            ✅ 전체 완납 설정
           </button>
         </div>
       </div>
@@ -556,7 +589,14 @@ export default function BillingInvoicePage() {
                       <td style={{ padding: '0.55rem 0.75rem', fontWeight: 600 }}>{(inv.total_amount || 0).toLocaleString()}</td>
                       <td style={{ padding: '0.55rem 0.75rem', color: '#16a34a' }}>{(inv.paid_amount || 0).toLocaleString()}</td>
                       <td style={{ padding: '0.55rem 0.75rem', color: unpaid > 0 ? '#dc2626' : '#16a34a', fontWeight: unpaid > 0 ? 700 : 400 }}>{unpaid.toLocaleString()}</td>
-                      <td style={{ padding: '0.55rem 0.75rem' }}><StatusBadge status={inv.status} /></td>
+                      <td style={{ padding: '0.55rem 0.75rem' }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleToggleStatus(inv); }}
+                          title={inv.status === '완납' ? '클릭하면 미납으로 변경' : '클릭하면 완납으로 변경'}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                          <StatusBadge status={inv.status} />
+                        </button>
+                      </td>
                       <td style={{ padding: '0.55rem 0.75rem', color: '#9ca3af' }}>{inv.created_by || '-'}</td>
                       <td style={{ padding: '0.4rem 0.75rem' }}>
                         <div style={{ display: 'flex', gap: '0.35rem' }}>

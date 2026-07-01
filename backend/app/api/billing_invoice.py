@@ -235,9 +235,10 @@ async def upload_invoice(token: str = Form(...), file: UploadFile = File(...)):
             INSERT INTO billing_invoices
               (id, invoice_no, client_name, invoice_date, due_date, service_month,
                subject, supply_amount, vat_amount, total_amount,
+               paid_amount, status,
                bank_name, account_holder, account_number,
                pdf_filename, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             invoice_id,
             parsed.get("invoice_no"),
@@ -249,6 +250,8 @@ async def upload_invoice(token: str = Form(...), file: UploadFile = File(...)):
             parsed.get("supply_amount", 0),
             parsed.get("vat_amount", 0),
             parsed.get("total_amount", 0),
+            parsed.get("total_amount", 0),  # 기본값: 완납 (paid_amount = total_amount)
+            "완납",
             parsed.get("bank_name"),
             parsed.get("account_holder"),
             parsed.get("account_number"),
@@ -757,6 +760,22 @@ def dedup_invoices(token: str):
         con.commit()
     add_log("중복 인보이스 제거", "billing_invoice", None, None, user["nickname"], f"{deleted}개 삭제")
     return {"success": True, "deleted": deleted}
+
+
+@router.put("/bulk-status")
+def bulk_status_update(token: str, status: str = "완납"):
+    """전체 인보이스 상태 일괄 변경 (완납 시 paid_amount = total_amount)"""
+    ensure_tables()
+    user = _require_admin(token)
+    with get_connection() as con:
+        if status == "완납":
+            con.execute("UPDATE billing_invoices SET status='완납', paid_amount=total_amount WHERE status != '완납'")
+        else:
+            con.execute("UPDATE billing_invoices SET status=? WHERE 1=1", (status,))
+        cnt = con.execute("SELECT changes()").fetchone()[0]
+        con.commit()
+    add_log("상태 일괄변경", "billing_invoice", None, None, user["nickname"], f"{status}으로 {cnt}건 변경")
+    return {"success": True, "updated": cnt}
 
 
 # ─────────────────────────────────────
