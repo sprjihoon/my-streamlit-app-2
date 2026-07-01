@@ -1,142 +1,186 @@
-# 통합 정산 관리 시스템
+# 통합 물류 정산 관리 시스템
 
-기존 Streamlit 기반 앱을 **React + FastAPI** 구조로 마이그레이션한 프로젝트입니다.
+React (Next.js) + FastAPI 기반의 물류 풀필먼트 업무 통합 관리 플랫폼입니다.
+
+---
 
 ## 📁 프로젝트 구조
 
 ```
-my-streamlit-app-2/
-├── backend/                 # FastAPI 백엔드
-│   ├── app/
-│   │   ├── api/            # API 라우터 (endpoints)
-│   │   ├── core/           # 설정, 데이터베이스
-│   │   ├── models/         # Pydantic 스키마
-│   │   ├── services/       # 비즈니스 로직
-│   │   └── main.py         # FastAPI 앱 진입점
-│   └── requirements.txt
-│
-├── frontend/                # React 프론트엔드
-│   ├── src/
-│   │   ├── api/            # API 클라이언트
-│   │   ├── components/     # 재사용 컴포넌트
-│   │   ├── pages/          # 페이지 컴포넌트
-│   │   └── App.tsx
-│   └── package.json
-│
-├── billing.db               # SQLite 데이터베이스
-└── README.md
+my-streamlit-app/
+├── backend/
+│   └── app/
+│       ├── api/            # API 라우터
+│       ├── models/         # Pydantic 스키마
+│       ├── services/       # AI 파서, 네이버웍스 봇, 스케줄러
+│       └── main.py
+├── frontend/               # Next.js 14 App Router
+│   └── src/app/
+│       ├── billing-invoice/   # 실인보이스 관리
+│       ├── receipts/          # 영수증(장끼) 관리
+│       ├── invoice/           # 인보이스 계산서 생성
+│       ├── invoice-list/      # 인보이스 목록
+│       ├── invoice-analytics/ # 인보이스 통계
+│       ├── estimate/          # 견적서 작성
+│       ├── estimate-list/     # 견적서 목록
+│       ├── estimate-analytics/# 견적 통계
+│       ├── work-log/          # 작업일지 (AI 봇 연동)
+│       ├── leave/             # 연차 신청/관리
+│       ├── vendors/           # 업체 관리
+│       ├── vendor-charges/    # 업체별 청구 관리
+│       ├── rates/             # 요금표 관리
+│       ├── mapping/           # 매핑 관리
+│       ├── upload/            # 엑셀 업로드
+│       ├── insights/          # 배송 인사이트
+│       ├── wp-analytics/      # WP 분석
+│       ├── certificates/      # 알림장 관리
+│       ├── storage/           # 창고 보관 관리
+│       ├── settings/          # 시스템 설정
+│       ├── users/             # 사용자 관리
+│       └── logs/              # 시스템 로그
+├── logic/                  # 인보이스 계산 핵심 로직
+├── scripts/                # 유틸리티 스크립트
+├── docker-compose.yml
+├── Dockerfile.backend
+├── Dockerfile.frontend
+├── railway.json            # Railway 배포 설정
+└── requirements.txt
 ```
 
-## 🚀 빠른 시작
+---
 
-### 백엔드 실행
+## 🚀 주요 기능
 
-```bash
-# 가상환경 생성 (선택사항)
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
+### 💰 실인보이스 관리 (Billing Invoice)
+- PDF 업로드 → **GPT-4o AI 자동 파싱** → 구조화된 데이터 저장
+- 다중 파일 드래그 앤 드롭 업로드 지원
+- 인보이스 항목별 카테고리 자동 분류 (택배비, 포장비, 입출고비 등)
+- 납부 현황 추적 (미납/완납), 통계 분석 페이지
 
-# 의존성 설치
-pip install -r backend/requirements.txt
+### 🧾 영수증(장끼) 관리 (Receipt)
+- 이미지 업로드 → **GPT-4o Vision AI OCR** → 거래처/품목 자동 추출
+- 수기 영수증 포함, 금액 검산 (단가×수량=금액) 자동 확인
+- 확인 필요 항목 자동 표시, 엑셀 일괄 다운로드
 
-# 서버 실행
-cd backend
-uvicorn app.main:app --reload --port 8000
-```
+### 📋 인보이스 계산서 (Invoice)
+- 업체별 물류비 자동 계산 (배송비, 포장비, 출고비, 보관료 등)
+- 엑셀 업로드 기반 청구서 자동 생성 및 PDF 출력
 
-백엔드 API 문서: http://localhost:8000/docs
+### 📝 작업일지 (Work Log)
+- **네이버웍스 봇 AI** (GPT Function Calling) 연동 자연어 입력
+- "틸리언 하차 3만원" → 자동 파싱 & 저장
+- 이전 단가 자동 조회 및 확인, 멀티턴 대화 지원
+- 연차 신청/조회/승인 챗봇 연동
 
-### 프론트엔드 실행
+### 🗓️ 연차 관리 (Leave)
+- 연차/반차 신청 및 결재 워크플로우 (팀원 → 팀장 → 인사과장)
+- 캘린더 뷰, 잔여 연차 자동 계산
+- 연차 승인/반려, 네이버웍스 봇 연동
 
-```bash
-cd frontend
+### 📦 업체/요금표/매핑 관리
+- 업체 등록·별칭 관리, 요금표 CRUD
+- 엑셀 업로드 매핑 설정
 
-# 의존성 설치
-npm install
+### 📊 분석 및 통계
+- 인보이스 월별/업체별 통계, 배송 인사이트
+- WP(워드프레스) 주문 분석
 
-# 개발 서버 실행
-npm run dev
-```
-
-프론트엔드: http://localhost:5173
-
-## 📚 API 엔드포인트
-
-### 공급처 (Vendors)
-- `GET /api/v1/vendors` - 목록 조회
-- `GET /api/v1/vendors/{vendor}` - 상세 조회
-- `POST /api/v1/vendors` - 등록
-- `PUT /api/v1/vendors/{vendor}` - 수정
-- `DELETE /api/v1/vendors/{vendor}` - 삭제
-
-### 인보이스 (Invoices)
-- `GET /api/v1/invoices` - 목록 조회
-- `GET /api/v1/invoices/{id}` - 상세 조회
-- `POST /api/v1/invoices/batch` - 일괄 생성
-- `DELETE /api/v1/invoices/{id}` - 삭제
-
-### 요금표 (Rates)
-- `GET /api/v1/rates/shipping-zone` - 배송요금 조회
-- `GET /api/v1/rates/out-basic` - 출고비 조회
-- `GET /api/v1/rates/out-extra` - 추가작업비 조회
-
-### 업로드 (Upload)
-- `POST /api/v1/upload/{table}` - Excel 업로드
-- `GET /api/v1/upload/tables/status` - 테이블 상태 조회
-- `DELETE /api/v1/upload/{table}` - 테이블 삭제
-
-### 대시보드 (Dashboard)
-- `GET /api/v1/dashboard/metrics` - 핵심 지표
-- `GET /api/v1/dashboard/top-products` - 인기 상품
-- `GET /api/v1/dashboard/top-vendors` - 출고량 TOP 거래처
-- `GET /api/v1/dashboard/revenue-vendors` - 매출 TOP 거래처
+---
 
 ## 🛠 기술 스택
 
-### 백엔드
-- **FastAPI** - 고성능 API 프레임워크
-- **SQLite** - 경량 데이터베이스
-- **Pandas** - 데이터 처리
-- **Pydantic** - 데이터 검증
+| 영역 | 기술 |
+|---|---|
+| 프론트엔드 | Next.js 14 (App Router), TypeScript, TailwindCSS, Recharts |
+| 백엔드 | FastAPI, Python 3.12, SQLite |
+| AI | OpenAI GPT-4o / GPT-4o-mini (Function Calling, Vision) |
+| 봇 | 네이버웍스 Webhook Bot |
+| 배포 | Railway (Docker), Vercel (프론트엔드 옵션) |
 
-### 프론트엔드
-- **React 18** - UI 라이브러리
-- **TypeScript** - 타입 안정성
-- **Vite** - 빌드 도구
-- **TailwindCSS** - 스타일링
-- **React Query** - 서버 상태 관리
-- **Recharts** - 차트 라이브러리
+---
 
-## 🔄 마이그레이션 상세
+## ⚙️ 로컬 실행
 
-### 유지된 로직
-- 모든 비즈니스 계산 로직 (100% 보존)
-- 데이터베이스 스키마 및 쿼리
-- 인보이스 생성 알고리즘
-- 요금 계산 로직
+### 환경변수 설정
 
-### 변경된 부분
-- **UI**: React + TailwindCSS (Next.js)
-- **API**: RESTful API (FastAPI)
-- **상태 관리**: React Query
-
-## 📦 프로덕션 배포
-
-### 백엔드
 ```bash
-pip install gunicorn
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app
+cp env.example .env
+# .env 파일에서 아래 값 설정
 ```
 
+| 변수 | 설명 |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI API 키 (AI 파싱 기능 필수) |
+| `NAVER_WORKS_*` | 네이버웍스 봇 설정 |
+| `SECRET_KEY` | JWT 시크릿 키 |
+| `DATABASE_PATH` | SQLite DB 경로 |
+
+### 백엔드
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate      # Windows
+pip install -r requirements.txt
+
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+API 문서: http://localhost:8000/docs
+
 ### 프론트엔드
+
 ```bash
 cd frontend
-npm run build
-# dist/ 폴더를 정적 파일 서버로 제공
+npm install
+npm run dev
 ```
+
+프론트엔드: http://localhost:3000
+
+---
+
+## 🐳 Docker 실행
+
+```bash
+docker-compose up --build
+```
+
+---
+
+## 🚂 Railway 배포
+
+```bash
+# railway.json 설정 후
+railway up
+```
+
+- 백엔드: `Dockerfile.backend`
+- 프론트엔드: `Dockerfile.frontend`
+- 데이터 볼륨: `/app/data` (DB, 업로드 파일)
+
+---
+
+## 📌 현재 개발 현황 (2026-07)
+
+| 기능 | 상태 |
+|---|---|
+| 실인보이스 AI PDF 파싱 | ✅ 완료 |
+| 영수증 AI Vision OCR | ✅ 완료 |
+| 인보이스 계산서 생성 | ✅ 완료 |
+| 작업일지 AI 봇 (네이버웍스) | ✅ 완료 |
+| 연차 관리 / 결재 워크플로우 | ✅ 완료 |
+| 연차 캘린더 뷰 | ✅ 완료 |
+| 업체/요금표/매핑 관리 | ✅ 완료 |
+| 인보이스·견적 통계 분석 | ✅ 완료 |
+| 배송 인사이트 | ✅ 완료 |
+| WP 분석 | ✅ 완료 |
+| 창고 보관 관리 | ✅ 완료 |
+| 알림장 관리 | ✅ 완료 |
+| 사용자/권한 관리 | ✅ 완료 |
+| 시스템 로그 | ✅ 완료 |
+
+---
 
 ## 📝 라이선스
 
-MIT License
-
+Private — All rights reserved.
