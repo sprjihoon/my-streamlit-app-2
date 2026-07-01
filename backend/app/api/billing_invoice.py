@@ -324,7 +324,7 @@ def list_invoices(
 
     with get_connection() as con:
         rows = con.execute(query, params).fetchall()
-        cols = [d[0] for d in con.execute("PRAGMA table_info(billing_invoices)").fetchall()]
+        cols = [d[1] for d in con.execute("PRAGMA table_info(billing_invoices)").fetchall()]
 
     return [dict(zip(cols, r)) for r in rows]
 
@@ -455,12 +455,12 @@ def get_invoice(invoice_id: str, token: str):
     _require_admin(token)
 
     with get_connection() as con:
-        inv_cols = [d[0] for d in con.execute("PRAGMA table_info(billing_invoices)").fetchall()]
+        inv_cols = [d[1] for d in con.execute("PRAGMA table_info(billing_invoices)").fetchall()]
         inv_row = con.execute("SELECT * FROM billing_invoices WHERE id=?", (invoice_id,)).fetchone()
         if not inv_row:
             raise HTTPException(status_code=404, detail="인보이스를 찾을 수 없습니다.")
 
-        item_cols = [d[0] for d in con.execute("PRAGMA table_info(billing_invoice_items)").fetchall()]
+        item_cols = [d[1] for d in con.execute("PRAGMA table_info(billing_invoice_items)").fetchall()]
         item_rows = con.execute(
             "SELECT * FROM billing_invoice_items WHERE invoice_id=? ORDER BY line_no",
             (invoice_id,)
