@@ -308,12 +308,13 @@ def list_invoices(
 
     query = "SELECT * FROM billing_invoices WHERE 1=1"
     params: list = []
-    if year:
-        query += " AND strftime('%Y', COALESCE(invoice_date, created_at)) = ?"
-        params.append(str(year))
-    if month:
-        query += " AND strftime('%m', COALESCE(invoice_date, created_at)) = ?"
-        params.append(str(month).zfill(2))
+    if year and month:
+        service_m = f"{year}-{str(month).zfill(2)}"
+        query += " AND (service_month = ? OR (service_month IS NULL AND strftime('%Y-%m', COALESCE(invoice_date, created_at)) = ?))"
+        params.extend([service_m, service_m])
+    elif year:
+        query += " AND (service_month LIKE ? OR (service_month IS NULL AND strftime('%Y', COALESCE(invoice_date, created_at)) = ?))"
+        params.extend([f"{year}-%", str(year)])
     if client_name:
         query += " AND client_name LIKE ?"
         params.append(f"%{client_name}%")

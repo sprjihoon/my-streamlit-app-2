@@ -297,6 +297,17 @@ export default function BillingInvoicePage() {
   const totalBilled = invoices.reduce((s, r) => s + (r.total_amount || 0), 0);
   const totalUnpaid = invoices.reduce((s, r) => s + ((r.total_amount || 0) - (r.paid_amount || 0)), 0);
 
+  // 서비스월별 집계 (로드된 데이터 기반)
+  const monthlyMap: Record<string, { billed: number; paid: number }> = {};
+  for (const inv of invoices) {
+    const key = inv.service_month || inv.invoice_date?.slice(0, 7) || '미상';
+    if (!monthlyMap[key]) monthlyMap[key] = { billed: 0, paid: 0 };
+    monthlyMap[key].billed += inv.total_amount || 0;
+    monthlyMap[key].paid += inv.paid_amount || 0;
+  }
+  const monthlySorted = Object.entries(monthlyMap).sort(([a], [b]) => a.localeCompare(b));
+  const maxBilled = Math.max(...monthlySorted.map(([, v]) => v.billed), 1);
+
   return (
     <div style={{ padding: '1.25rem', maxWidth: 1100 }}>
       <div style={{ marginBottom: '1.25rem' }}>
@@ -317,6 +328,44 @@ export default function BillingInvoicePage() {
           </div>
         ))}
       </div>
+
+      {/* 월별 청구 현황 */}
+      {monthlySorted.length > 0 && (
+        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', marginBottom: '1.25rem' }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>📊 서비스월별 청구 현황</div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', overflowX: 'auto', paddingBottom: '0.25rem' }}>
+            {monthlySorted.map(([month, v]) => {
+              const barH = Math.max(Math.round((v.billed / maxBilled) * 80), 4);
+              const paidH = Math.max(Math.round((v.paid / maxBilled) * 80), 0);
+              const unpaid = v.billed - v.paid;
+              return (
+                <div key={month} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 52, cursor: 'pointer' }}
+                  onClick={() => {
+                    const [y, m] = month.split('-');
+                    if (y && m) { setFilterYear(Number(y)); setFilterMonth(Number(m)); }
+                  }}
+                  title={`${month}\n청구: ${v.billed.toLocaleString()}원\n납부: ${v.paid.toLocaleString()}원\n미수금: ${unpaid.toLocaleString()}원`}>
+                  <div style={{ fontSize: '0.65rem', color: '#6b7280', marginBottom: '0.2rem', fontWeight: 600 }}>
+                    {(v.billed / 10000).toFixed(0)}만
+                  </div>
+                  <div style={{ position: 'relative', width: 28, height: barH, borderRadius: '3px 3px 0 0', background: '#dbeafe', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: paidH, background: '#1d4ed8', borderRadius: '0 0 0 0' }} />
+                    {unpaid > 0 && <div style={{ position: 'absolute', top: 0, right: 1, width: 4, height: 4, background: '#dc2626', borderRadius: '0 3px 0 0' }} />}
+                  </div>
+                  <div style={{ fontSize: '0.65rem', color: '#374151', marginTop: '0.25rem', whiteSpace: 'nowrap' }}>
+                    {month.slice(2)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', fontSize: '0.68rem', color: '#6b7280' }}>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#1d4ed8', borderRadius: 2, marginRight: 3 }} />납부</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, background: '#dbeafe', borderRadius: 2, marginRight: 3 }} />미수금</span>
+            <span style={{ color: '#9ca3af' }}>※ 막대 클릭 시 해당 월 필터</span>
+          </div>
+        </div>
+      )}
 
       {/* 업로드 존 */}
       <div
@@ -381,30 +430,47 @@ export default function BillingInvoicePage() {
       )}
 
       {/* 필터 */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        {[2024, 2025, 2026, 2027].map(y => (
-          <button key={y} onClick={() => setFilterYear(y)}
-            style={{ padding: '0.35rem 0.75rem', border: '1px solid', borderColor: filterYear === y ? '#1a3c6e' : '#d1d5db', background: filterYear === y ? '#1a3c6e' : 'white', color: filterYear === y ? 'white' : '#374151', borderRadius: 6, cursor: 'pointer', fontSize: '0.8rem' }}>
-            {y}년
+      <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+        {/* 연도 */}
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28 }}>연도</span>
+          {[2024, 2025, 2026, 2027].map(y => (
+            <button key={y} onClick={() => { setFilterYear(y); setFilterMonth(0); }}
+              style={{ padding: '0.25rem 0.65rem', border: '1px solid', borderColor: filterYear === y ? '#1a3c6e' : '#e5e7eb', background: filterYear === y ? '#1a3c6e' : 'white', color: filterYear === y ? 'white' : '#374151', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem', fontWeight: filterYear === y ? 700 : 400 }}>
+              {y}
+            </button>
+          ))}
+        </div>
+        {/* 서비스월 */}
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28 }}>월</span>
+          <button onClick={() => setFilterMonth(0)}
+            style={{ padding: '0.25rem 0.65rem', border: '1px solid', borderColor: filterMonth === 0 ? '#6b7280' : '#e5e7eb', background: filterMonth === 0 ? '#6b7280' : 'white', color: filterMonth === 0 ? 'white' : '#374151', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem' }}>
+            전체
           </button>
-        ))}
-        <select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))}
-          style={{ padding: '0.35rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.8rem' }}>
-          <option value={0}>전체 월</option>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}월</option>)}
-        </select>
-        <input type="text" placeholder="거래처 검색" value={filterClient}
-          onChange={e => setFilterClient(e.target.value)}
-          style={{ padding: '0.35rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.8rem', width: 120 }} />
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          style={{ padding: '0.35rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.8rem' }}>
-          <option value="">전체 상태</option>
-          {['미납', '부분납', '완납'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <button onClick={handleDeleteAll}
-          style={{ marginLeft: 'auto', padding: '0.35rem 0.75rem', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}>
-          🗑 빈 항목 정리
-        </button>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+            <button key={m} onClick={() => setFilterMonth(m)}
+              style={{ padding: '0.25rem 0.6rem', border: '1px solid', borderColor: filterMonth === m ? '#1d4ed8' : '#e5e7eb', background: filterMonth === m ? '#1d4ed8' : 'white', color: filterMonth === m ? 'white' : '#374151', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem', fontWeight: filterMonth === m ? 700 : 400 }}>
+              {m}월
+            </button>
+          ))}
+        </div>
+        {/* 거래처 + 상태 + 빈항목 */}
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28 }}>검색</span>
+          <input type="text" placeholder="거래처명" value={filterClient}
+            onChange={e => setFilterClient(e.target.value)}
+            style={{ padding: '0.28rem 0.6rem', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: '0.78rem', width: 110 }} />
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+            style={{ padding: '0.28rem 0.6rem', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: '0.78rem' }}>
+            <option value="">전체 상태</option>
+            {['미납', '부분납', '완납'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <button onClick={handleDeleteAll}
+            style={{ marginLeft: 'auto', padding: '0.28rem 0.65rem', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
+            🗑 빈 항목 정리
+          </button>
+        </div>
       </div>
 
       {/* 목록 테이블 */}
