@@ -1,0 +1,16 @@
+기존 테스트 기준 결과 (리팩터링 전, 2026-09-04)
+
+1) tests/test_shipping_zone.py :: test_followme_202506
+   - 실행: python -c "from tests.test_shipping_zone import test_followme_202506; test_followme_202506()"
+   - 결과: FAIL AssertionError
+   - 원인: 로컬 billing.db에 2025-06 팔로우미 배송 데이터가 없어 counts={}
+   - 리팩터링 후 동일 테스트가 같은 방식으로 실패하거나, 데이터가 있으면 동일 assert를 유지해야 함.
+   - 인보이스 계산 코드(utils.utils_courier.add_courier_fee_by_zone)는 호출만 했으며 수정하지 않음.
+
+2) pytest
+   - 결과: pytest 모듈 없음. 위 함수 직접 호출로 대체.
+
+3) 보존 대상 함수는 이 리팩터링에서 본문을 수정하지 않음.
+   - bot_tools._save_work_log / _save_multiple_work_logs / _lookup_price_from_history
+   - repair_bot.receive_photo / finalize_photo_set / handle_user_text 응답 문구
+   - logic.invoice_calc, upload, 업체 매칭·별칭 실행부
