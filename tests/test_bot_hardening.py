@@ -1,9 +1,10 @@
-"""모드 보완: inbox 방 분리, execute_tool 가드, 만료, qty 회귀."""
+"""모드 보완: inbox 방 분리, execute_tool 가드, 만료, qty 회귀. 임시 DB만 사용."""
 from __future__ import annotations
 
 import asyncio
 import inspect
 import time
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from backend.app.services.bot_mode import (
@@ -19,6 +20,7 @@ from backend.app.services.bot_mode import (
 from backend.app.services.bot_tools import (
     TRUSTED_EXCEL_UPLOAD,
     execute_tool,
+    get_tools_for_mode,
     validate_tool_args,
 )
 from backend.app.services.conversation_state import get_conversation_manager
@@ -28,12 +30,6 @@ from logic.db import get_connection
 
 def _ids(suffix: str):
     return f"hard-user-{suffix}", f"hard-ch-{suffix}"
-
-
-def _any_vendor() -> str | None:
-    with get_connection() as con:
-        row = con.execute("SELECT vendor FROM vendors WHERE vendor IS NOT NULL LIMIT 1").fetchone()
-    return row[0] if row else None
 
 
 def test_execute_tool_missing_mode_rejects_write():
@@ -50,6 +46,18 @@ def test_execute_tool_missing_mode_rejects_write():
     with get_connection() as con:
         after = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
     assert after == before
+
+
+def test_execute_tool_typo_mode_rejects_write():
+    uid, _ = _ids("typo")
+    result = execute_tool(
+        "save_work_log",
+        {"vendor": "틸리언", "work_type": "하차", "unit_price": 30000},
+        uid, "tester", mode="journall",
+    )
+    assert result.get("success") is False
+    with get_connection() as con:
+        assert con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0] == 0
 
 
 def test_query_direct_and_indirect_writes_unchanged():
@@ -76,24 +84,18 @@ def test_query_direct_and_indirect_writes_unchanged():
 
 
 def test_trusted_excel_upload_saves():
-    vendor = _any_vendor()
-    if not vendor:
-        return
     uid, _ = _ids("excel")
     result = execute_tool(
         "save_work_log",
-        {"vendor": vendor, "work_type": "하차", "unit_price": 1234, "qty": 2, "remark": "[엑셀] test"},
+        {"vendor": "틸리언", "work_type": "하차", "unit_price": 1234, "qty": 2, "remark": "[엑셀] test"},
         uid, "excel-tester",
         trusted_source=TRUSTED_EXCEL_UPLOAD,
     )
     assert result.get("success") is True, result
     assert result["data"]["qty"] == 2
-    rid = result["record_id"]
     with get_connection() as con:
-        row = con.execute("SELECT 수량 FROM work_log WHERE id = ?", (rid,)).fetchone()
+        row = con.execute("SELECT 수량 FROM work_log WHERE id = ?", (result["record_id"],)).fetchone()
         assert row[0] == 2
-        con.execute("DELETE FROM work_log WHERE id = ?", (rid,))
-        con.commit()
 
 
 def test_trusted_excel_cannot_delete():
@@ -148,21 +150,11 @@ def test_journal_qty_five_survives_confirm_and_fill():
     pending = {"pending_data": {"vendor": "틸리언", "work_type": "하차", "qty": 5}}
     assert parser._resolve_qty("네", {}, pending) == 5
     merged = pending["pending_data"].copy()
-    for key, value in {"unit_price": 30000}.items():
-        if value:
-            merged[key] = value
+    merged["unit_price"] = 30000
     assert merged["qty"] == 5
-    merged2 = {"vendor": None, "work_type": "하차", "qty": 5}
-    for key, value in {"vendor": "틸리언"}.items():
-        if value:
-            merged2[key] = value
-    assert merged2["qty"] == 5
-    vendor = _any_vendor()
-    if not vendor:
-        return
     result = execute_tool(
         "save_work_log",
-        {"vendor": vendor, "work_type": "하차", "unit_price": 30000, "qty": 5},
+        {"vendor": "틸리언", "work_type": "하차", "unit_price": 30000, "qty": 5},
         uid, "tester", mode=MODE_JOURNAL,
     )
     assert result.get("success") is True, result
@@ -170,8 +162,28 @@ def test_journal_qty_five_survives_confirm_and_fill():
     with get_connection() as con:
         row = con.execute("SELECT 수량 FROM work_log WHERE id = ?", (result["record_id"],)).fetchone()
         assert row[0] == 5
-        con.execute("DELETE FROM work_log WHERE id = ?", (result["record_id"],))
-        con.commit()
+
+
+def test_parser_default_and_typo_mode_cannot_save():
+    from backend.app.services.ai_parser import AIParser
+
+    uid, cid = _ids("idle-default")
+    parser = object.__new__(AIParser)
+    parser.conv_manager = get_conversation_manager()
+
+    async def _run():
+        missing = await parser.process_message("틸리언 하차 3만원", uid, user_name="t", channel_id=cid)
+        typo = await parser.process_message(
+            "틸리언 하차 3만원", uid, user_name="t", channel_id=cid, mode="journall"
+        )
+        return missing, typo
+
+    missing, typo = asyncio.run(_run())
+    assert "모드" in (missing.get("response") or "")
+    assert "모드" in (typo.get("response") or "")
+    assert get_tools_for_mode(MODE_IDLE) == []
+    with get_connection() as con:
+        assert con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0] == 0
 
 
 def test_photos_not_downloaded_outside_repair():
@@ -204,12 +216,27 @@ def test_repair_prefix_once():
     assert twice == once
 
 
-def test_excel_prefix_policy_mode_independent():
-    from backend.app.api import naver_works_webhook as wh
-    src = inspect.getsource(wh.process_excel_upload)
-    assert "_send_prefixed" not in src
+def test_excel_prefix_once_all_statuses():
+    from backend.app.api.naver_works_webhook import EXCEL_PREFIX, _excel_text
+
+    samples = [
+        "📊 'a.xlsx' 처리 중...",
+        "📊 엑셀 업로드 완료",
+        "⚠️ 엑셀 업로드 일부 실패",
+        "❌ 엑셀 업로드 전체 실패",
+        "❌ 엑셀 처리 오류: boom",
+        "❌ 파일 다운로드 실패 (상태: 500)",
+        "❌ 필수 컬럼 누락: 날짜",
+    ]
+    for body in samples:
+        once = _excel_text(body)
+        twice = _excel_text(once)
+        assert once.startswith(EXCEL_PREFIX)
+        assert once.count(EXCEL_PREFIX) == 1
+        assert twice == once
+    src = inspect.getsource(__import__("backend.app.api.naver_works_webhook", fromlist=["process_excel_upload"]).process_excel_upload)
+    assert "_send_excel" in src
     assert "TRUSTED_EXCEL_UPLOAD" in src
-    assert "trusted_source" in src
 
 
 def test_lookup_tools_are_bounded():
@@ -218,7 +245,6 @@ def test_lookup_tools_are_bounded():
     r2 = execute_tool("lookup_rate_tables", {"table": "out_basic", "limit": 999}, "u", "t", mode=MODE_QUERY)
     assert r2.get("success") is True
     assert r2["limit"] <= 50
-    assert "rows" in r2
     src = inspect.getsource(execute_tool.__globals__["_lookup_rate_tables"])
     assert "SELECT *" not in src
 
@@ -239,9 +265,6 @@ def test_inbox_rooms_isolated():
         assert claimed_a["channel_id"] == a
         assert rb._inbox_count(uid, a) == 0
         assert rb._inbox_count(uid, b) == 3
-        assert all((p.data or b"").startswith(b"B") or p.data for p in claimed_a["photos"]) or True
-        names_a = {p.name for p in claimed_a["photos"]}
-        assert names_a <= {f"a{i}.jpg" for i in range(3)} or names_a
 
         for i in range(3):
             rb._append_inbox_photo(uid, a, "group", "n", b"AAA", f"a2{i}.jpg", ".jpg")
@@ -289,34 +312,92 @@ def test_inbox_rooms_isolated():
     asyncio.run(_run())
 
 
-def main():
-    import sys
-    sys.stdout.reconfigure(encoding="utf-8")
-    tests = [
-        test_execute_tool_missing_mode_rejects_write,
-        test_query_direct_and_indirect_writes_unchanged,
-        test_trusted_excel_upload_saves,
-        test_trusted_excel_cannot_delete,
-        test_validate_tool_args_rejects_bad_types,
-        test_conversation_expiry_unix,
-        test_journal_qty_five_survives_confirm_and_fill,
-        test_photos_not_downloaded_outside_repair,
-        test_repair_prefix_once,
-        test_excel_prefix_policy_mode_independent,
-        test_lookup_tools_are_bounded,
-        test_inbox_rooms_isolated,
-    ]
-    failed = []
-    for fn in tests:
-        try:
-            fn()
-            print(f"[PASS] {fn.__name__}")
-        except Exception as e:
-            print(f"[FAIL] {fn.__name__} — {type(e).__name__}: {e}")
-            failed.append(fn.__name__)
-    print(f"\n{len(tests) - len(failed)} passed, {len(failed)} failed")
-    raise SystemExit(1 if failed else 0)
+def test_legacy_and_v2_inbox_sixty_day_cleanup():
+    from backend.app.api.repair_log import (
+        _clear_photo_refs,
+        _collect_stale_photo_names,
+        ensure_repair_tables,
+    )
 
+    uid = "purge-user"
+    room_a, room_b = "purge-a", "purge-b"
+    old = (datetime.now() - timedelta(days=70)).isoformat()
+    recent = (datetime.now() - timedelta(days=10)).isoformat()
+    cutoff = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+    ensure_repair_tables()
+    rb.ensure_inbox_v2_tables()
 
-if __name__ == "__main__":
-    main()
+    with get_connection() as con:
+        con.execute(
+            "INSERT INTO repair_photo_inbox (user_id, channel_id) VALUES (?, ?)",
+            (uid, "legacy"),
+        )
+        con.execute(
+            "INSERT INTO repair_photo_inbox_file (user_id, filename, created_at) VALUES (?,?,?)",
+            (uid, "legacy-old.jpg", old),
+        )
+        con.execute(
+            "INSERT INTO repair_photo_inbox_file (user_id, filename, created_at) VALUES (?,?,?)",
+            (uid, "legacy-new.jpg", recent),
+        )
+        con.execute(
+            """INSERT INTO repair_photo_inbox_v2 (user_id, channel_id, channel_type)
+               VALUES (?, ?, 'group')""",
+            (uid, room_a),
+        )
+        con.execute(
+            """INSERT INTO repair_photo_inbox_v2 (user_id, channel_id, channel_type)
+               VALUES (?, ?, 'group')""",
+            (uid, room_b),
+        )
+        con.execute(
+            """INSERT INTO repair_photo_inbox_file_v2
+               (user_id, channel_id, filename, created_at) VALUES (?,?,?,?)""",
+            (uid, room_a, "v2-a-old.jpg", old),
+        )
+        con.execute(
+            """INSERT INTO repair_photo_inbox_file_v2
+               (user_id, channel_id, filename, created_at) VALUES (?,?,?,?)""",
+            (uid, room_a, "v2-a-new.jpg", recent),
+        )
+        con.execute(
+            """INSERT INTO repair_photo_inbox_file_v2
+               (user_id, channel_id, filename, created_at) VALUES (?,?,?,?)""",
+            (uid, room_b, "v2-b-new.jpg", recent),
+        )
+        con.execute(
+            """INSERT INTO repair_work_log
+               (날짜, 업체명, 제품명, 작업, 저장시간, before_image)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (datetime.now().strftime("%Y-%m-%d"), "틸리언", "상의", "스팀", recent, "kept-recent.jpg"),
+        )
+        con.commit()
+        names, _ = _collect_stale_photo_names(con, cutoff)
+        assert "legacy-old.jpg" in names
+        assert "legacy-new.jpg" not in names
+        assert "v2-a-old.jpg" in names
+        assert "v2-a-new.jpg" not in names
+        assert "v2-b-new.jpg" not in names
+        assert "kept-recent.jpg" not in names
+        _clear_photo_refs(con, names)
+        con.commit()
+        legacy = {r[0] for r in con.execute("SELECT filename FROM repair_photo_inbox_file")}
+        v2 = {(r[0], r[1], r[2]) for r in con.execute(
+            "SELECT user_id, channel_id, filename FROM repair_photo_inbox_file_v2"
+        )}
+        metas = {(r[0], r[1]) for r in con.execute(
+            "SELECT user_id, channel_id FROM repair_photo_inbox_v2"
+        )}
+        kept_log = con.execute(
+            "SELECT before_image FROM repair_work_log WHERE before_image = ?",
+            ("kept-recent.jpg",),
+        ).fetchone()
+        assert "legacy-old.jpg" not in legacy
+        assert "legacy-new.jpg" in legacy
+        assert (uid, room_a, "v2-a-old.jpg") not in v2
+        assert (uid, room_a, "v2-a-new.jpg") in v2
+        assert (uid, room_b, "v2-b-new.jpg") in v2
+        assert (uid, room_a) in metas
+        assert (uid, room_b) in metas
+        assert kept_log is not None
+        assert kept_log[0] == "kept-recent.jpg"

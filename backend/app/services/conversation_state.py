@@ -271,3 +271,10 @@ def get_conversation_manager() -> ConversationStateManager:
     if _manager is None:
         _manager = ConversationStateManager()
     return _manager
+
+
+def reset_conversation_manager(db_path: Optional[str] = None) -> Optional[ConversationStateManager]:
+    """테스트용. 싱글톤을 비우거나 지정 DB로 다시 만든다."""
+    global _manager
+    _manager = ConversationStateManager(db_path=db_path) if db_path else None
+    return _manager
