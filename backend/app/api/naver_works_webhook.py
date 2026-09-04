@@ -287,11 +287,24 @@ async def process_image_upload(
             user_name = await nw_client.get_user_name(user_id)
         except Exception:
             pass
-        if file_url:
-            data = await nw_client.download_url(file_url)
-        elif file_id:
-            data = await nw_client.download_attachment(file_id)
-        else:
+        data = None
+        last_error = None
+        # 이미지는 fileId가 정식 경로. resourceUrl이 있으면 보조로 쓴다.
+        if file_id:
+            try:
+                data = await nw_client.download_attachment(file_id)
+            except Exception as e:
+                last_error = e
+                add_debug_log("repair_image_fileid_fail", {"file_id": file_id, "error": str(e)})
+        if data is None and file_url:
+            try:
+                data = await nw_client.download_url(file_url)
+            except Exception as e:
+                last_error = e
+                add_debug_log("repair_image_url_fail", {"error": str(e)})
+        if data is None:
+            if last_error:
+                raise last_error
             await nw_client.send_text_message(channel_id, "사진을 받지 못했어요. 다시 보내주세요.", channel_type)
             return
         await receive_photo(
@@ -307,7 +320,11 @@ async def process_image_upload(
         add_debug_log("repair_image_error", error=str(e))
         try:
             nw_client = get_naver_works_client()
-            await nw_client.send_text_message(channel_id, f"❌ 사진 처리 오류: {e}", channel_type)
+            await nw_client.send_text_message(
+                channel_id,
+                "❌ 사진을 받지 못했어요. 같은 사진 3장을 다시 한 번에 보내주세요.",
+                channel_type,
+            )
         except Exception:
             pass
 
@@ -399,7 +416,12 @@ async def naver_works_webhook(
             file_info = content.get("file") or {}
             file_name = file_info.get("name") or content.get("fileName") or "photo.jpg"
             file_url = file_info.get("resourceUrl") or content.get("resourceUrl") or ""
-            file_id = file_info.get("fileId") or content.get("fileId") or ""
+            file_id = (
+                file_info.get("fileId")
+                or content.get("fileId")
+                or content.get("resourceId")
+                or ""
+            )
 
             if content_type == "image" or is_image_filename(file_name):
                 background_tasks.add_task(

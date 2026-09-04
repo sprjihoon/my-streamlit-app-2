@@ -503,8 +503,8 @@ function LogFormModal({
   }
 
   return (
-    <Modal title={title} onClose={onClose}>
-      <div style={{ display: 'grid', gap: '0.75rem' }}>
+    <Modal title={title} onClose={onClose} maxWidth={860}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem 1.25rem' }}>
         <Field label="날짜 *">
           <input type="date" value={form.날짜} onChange={(e) => setForm({ ...form, 날짜: e.target.value })} style={inputStyle} />
         </Field>
@@ -597,29 +597,31 @@ function LogFormModal({
             <input type="number" min={0} value={form.비용} onChange={(e) => { setForm({ ...form, 비용: Number(e.target.value) }); setPriceHint(''); }} style={inputStyle} />
           </Field>
         </div>
-        {priceHint && <p style={{ fontSize: '0.8rem', color: '#2563eb', margin: 0 }}>{priceHint}</p>}
-        <Field label="비고">
-          <input value={form.비고} onChange={(e) => setForm({ ...form, 비고: e.target.value })} style={inputStyle} />
-        </Field>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        {priceHint && <p style={{ gridColumn: '1 / -1', fontSize: '0.8rem', color: '#2563eb', margin: 0 }}>{priceHint}</p>}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Field label="비고">
+            <input value={form.비고} onChange={(e) => setForm({ ...form, 비고: e.target.value })} style={inputStyle} />
+          </Field>
+        </div>
+        <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, minWidth: 0 }}>
           <Field label="수선 전">
-            <input type="file" accept="image/*" onChange={(e) => setBeforeFile(e.target.files?.[0] || null)} />
+            <input type="file" accept="image/*" onChange={(e) => setBeforeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
           <Field label="수선 후">
-            <input type="file" accept="image/*" onChange={(e) => setAfterFile(e.target.files?.[0] || null)} />
+            <input type="file" accept="image/*" onChange={(e) => setAfterFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
           <Field label="바코드 사진">
-            <input type="file" accept="image/*" onChange={(e) => setBarcodeFile(e.target.files?.[0] || null)} />
+            <input type="file" accept="image/*" onChange={(e) => setBarcodeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
         </div>
         {initial && (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
             <PhotoThumb filename={initial.before_image} label="전" onClick={() => {}} />
             <PhotoThumb filename={initial.after_image} label="후" onClick={() => {}} />
             <PhotoThumb filename={initial.barcode_image} label="바코드" onClick={() => {}} />
           </div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+        <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
           <button onClick={onClose} style={btn('#6b7280')}>취소</button>
           <button onClick={save} disabled={saving} style={btn('#2563eb')}>{saving ? '저장 중...' : '저장'}</button>
         </div>
@@ -1072,7 +1074,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({ title, onClose, children, maxWidth = 560 }: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  maxWidth?: number;
+}) {
   return (
     <div style={{
       position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1080,7 +1087,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     }}>
       <div style={{
         backgroundColor: 'white', padding: '1.5rem', borderRadius: 8,
-        maxWidth: 560, width: '92%', maxHeight: '90vh', overflowY: 'auto',
+        maxWidth, width: '92%', maxHeight: '90vh', overflowY: 'auto', overflowX: 'hidden',
+        boxSizing: 'border-box',
       }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '1rem' }}>{title}</h2>
         {children}

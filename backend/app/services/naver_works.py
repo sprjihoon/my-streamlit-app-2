@@ -11,6 +11,7 @@ import jwt
 import httpx
 from typing import Optional, Dict, Any
 from pathlib import Path
+from urllib.parse import quote, urljoin
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -186,22 +187,30 @@ class NaverWorksClient:
             
             return response.json() if response.text else {"success": True}
     
-    async def download_url(self, url: str) -> bytes:
+    async def _download_authorized(self, url: str, label: str = "File") -> bytes:
+        """네이버웍스 파일 다운로드. 302 Location은 자동 따라가지 않고 Bearer를 다시 붙여 요청한다."""
         token = await self._get_access_token()
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        headers = {"Authorization": f"Bearer {token}"}
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code in (301, 302, 303, 307, 308):
+                location = response.headers.get("location") or response.headers.get("Location")
+                if not location:
+                    raise Exception(f"{label} download failed: {response.status_code} (no Location)")
+                if location.startswith("/"):
+                    location = urljoin(str(response.url), location)
+                response = await client.get(location, headers=headers)
             if response.status_code != 200:
-                raise Exception(f"File download failed: {response.status_code}")
+                raise Exception(f"{label} download failed: {response.status_code}")
             return response.content
 
+    async def download_url(self, url: str) -> bytes:
+        return await self._download_authorized(url, "File")
+
     async def download_attachment(self, file_id: str) -> bytes:
-        token = await self._get_access_token()
-        url = f"{self.API_BASE}/bots/{self.bot_id}/attachments/{file_id}"
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-            if response.status_code != 200:
-                raise Exception(f"Attachment download failed: {response.status_code}")
-            return response.content
+        encoded = quote(str(file_id or "").strip(), safe="")
+        url = f"{self.API_BASE}/bots/{self.bot_id}/attachments/{encoded}"
+        return await self._download_authorized(url, "Attachment")
 
     async def send_text_message(
         self,
