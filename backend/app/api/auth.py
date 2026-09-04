@@ -128,14 +128,14 @@ async def login(request: LoginRequest):
     
     with get_connection() as con:
         user = con.execute(
-            "SELECT user_id, username, nickname, is_admin, password_hash FROM users WHERE username = ?",
+            "SELECT user_id, username, nickname, is_admin, password_hash, department FROM users WHERE username = ?",
             (request.username,)
         ).fetchone()
         
         if not user:
             raise HTTPException(status_code=401, detail="잘못된 아이디 또는 비밀번호입니다.")
         
-        user_id, username, nickname, is_admin, password_hash = user
+        user_id, username, nickname, is_admin, password_hash, department = user
         
         if password_hash != hash_password(request.password):
             raise HTTPException(status_code=401, detail="잘못된 아이디 또는 비밀번호입니다.")
@@ -178,7 +178,8 @@ async def login(request: LoginRequest):
                 "user_id": user_id,
                 "username": username,
                 "nickname": nickname,
-                "is_admin": bool(is_admin)
+                "is_admin": bool(is_admin),
+                "department": department,
             }
         }
 

@@ -12,6 +12,8 @@ import {
   deleteRepairLog,
   uploadRepairPhotos,
   getRepairLogExportUrl,
+  getOldRepairPhotos,
+  purgeOldRepairPhotos,
   getRepairBarcodes,
   lookupRepairBarcode,
   createRepairBarcode,
@@ -64,6 +66,14 @@ function monthRange() {
 function formatPrice(n: number | null | undefined) {
   if (n == null) return '-';
   return `${n.toLocaleString()}원`;
+}
+
+function formatDateTime(dateStr: string | null) {
+  if (!dateStr) return '-';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function PhotoThumb({
@@ -167,6 +177,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<RepairLog | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [purgingOld, setPurgingOld] = useState(false);
 
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -266,6 +277,32 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
           <a href={getRepairLogExportUrl(periodFrom, periodTo)} style={{ ...btn('#0f766e'), textDecoration: 'none' }}>
             엑셀 다운로드
           </a>
+          <button
+            onClick={async () => {
+              try {
+                const info = await getOldRepairPhotos(2);
+                if (!info.files) {
+                  onMessage({ type: 'success', text: `${info.cutoff} 이전 삭제할 사진이 없습니다.` });
+                  return;
+                }
+                if (!window.confirm(`${info.cutoff} 이전 전·후 사진 ${info.files}장(${info.logs}건)을 서버에서 삭제할까요?\n일지 내용은 그대로 남습니다.`)) {
+                  return;
+                }
+                setPurgingOld(true);
+                const result = await purgeOldRepairPhotos(2);
+                onMessage({ type: 'success', text: result.message });
+                load();
+              } catch (e) {
+                onMessage({ type: 'error', text: e instanceof Error ? e.message : '사진 삭제 실패' });
+              } finally {
+                setPurgingOld(false);
+              }
+            }}
+            disabled={purgingOld}
+            style={btn('#b45309')}
+          >
+            {purgingOld ? '삭제 중...' : '2개월 이전 사진 삭제'}
+          </button>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
             <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}>
@@ -298,7 +335,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    {['날짜', '업체명', '제품명', '옵션', '바코드', '불량명', '작업', '수량', '비용', '작성자', '전', '후', ''].map((h) => (
+                    {['날짜', '업체명', '제품명', '옵션', '바코드', '불량명', '작업', '수량', '비용', '작성자', '수정자', '수정시간', '전', '후', ''].map((h) => (
                       <th key={h} style={{ padding: '0.5rem', textAlign: h === '수량' || h === '비용' ? 'right' : 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
                     ))}
                   </tr>
@@ -316,6 +353,8 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
                       <td style={{ padding: '0.5rem', textAlign: 'right' }}>{log.수량?.toLocaleString() ?? '-'}</td>
                       <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>{formatPrice(log.비용)}</td>
                       <td style={{ padding: '0.5rem' }}>{log.작성자 || '-'}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.수정자 || '-'}</td>
+                      <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>{formatDateTime(log.수정시간)}</td>
                       <td style={{ padding: '0.5rem' }}><PhotoThumb filename={log.before_image} label="전" onClick={setPreview} /></td>
                       <td style={{ padding: '0.5rem' }}><PhotoThumb filename={log.after_image} label="후" onClick={setPreview} /></td>
                       <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>

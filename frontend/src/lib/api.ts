@@ -781,6 +781,8 @@ export interface WorkLog {
   작성자: string | null;
   저장시간: string | null;
   출처: string | null;
+  수정자: string | null;
+  수정시간: string | null;
 }
 
 export interface WorkLogFilters {
@@ -884,7 +886,9 @@ export async function updateWorkLog(id: number, data: {
   수량?: number;
   비고1?: string;
 }) {
-  return fetchApi<{ success: boolean; message: string }>(`/work-log/${id}`, {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const q = token ? `?token=${encodeURIComponent(token)}` : '';
+  return fetchApi<{ success: boolean; message: string }>(`/work-log/${id}${q}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
@@ -918,6 +922,8 @@ export interface RepairLog {
   작성자: string | null;
   저장시간: string | null;
   출처: string | null;
+  수정자: string | null;
+  수정시간: string | null;
   barcode_image: string | null;
   before_image: string | null;
   after_image: string | null;
@@ -1030,7 +1036,9 @@ export async function updateRepairLog(id: number, data: Partial<{
   비용: number;
   비고: string;
 }>) {
-  return fetchApi<{ success: boolean; message: string }>(`/repair-log/${id}`, {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const q = token ? `?token=${encodeURIComponent(token)}` : '';
+  return fetchApi<{ success: boolean; message: string }>(`/repair-log/${id}${q}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });
@@ -1060,6 +1068,19 @@ export async function uploadRepairPhotos(
 
 export function getRepairLogExportUrl(startDate: string, endDate: string) {
   return `${API_BASE}/repair-log/export?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+}
+
+export async function getOldRepairPhotos(days = 60) {
+  return fetchApi<{ cutoff: string; days: number; logs: number; files: number }>(
+    `/repair-log/photos/old?days=${days}`
+  );
+}
+
+export async function purgeOldRepairPhotos(days = 60) {
+  return fetchApi<{ success: boolean; cutoff: string; logs: number; deleted_files: number; message: string }>(
+    `/repair-log/photos/purge-old?days=${days}`,
+    { method: 'POST' }
+  );
 }
 
 export async function getRepairBarcodes(params?: {

@@ -9,7 +9,7 @@ from __future__ import annotations
 import io
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
@@ -122,6 +122,14 @@ def ensure_repair_tables():
                 after_image TEXT
             )
         """)
+        existing_cols = [c[1] for c in con.execute("PRAGMA table_info(repair_work_log)")]
+        for col, coltype in [
+            ("불량명", "TEXT"),
+            ("수정자", "TEXT"),
+            ("수정시간", "TIMESTAMP"),
+        ]:
+            if col not in existing_cols:
+                con.execute(f"ALTER TABLE repair_work_log ADD COLUMN [{col}] {coltype}")
         con.execute("""
             CREATE TABLE IF NOT EXISTS repair_photo_inbox (
                 user_id TEXT PRIMARY KEY,
@@ -144,6 +152,16 @@ def ensure_repair_tables():
                 created_at TEXT
             )
         """)
+        leftover = con.execute(
+            """SELECT id, barcode_image FROM repair_work_log
+               WHERE IFNULL(barcode_image, '') != ''"""
+        ).fetchall()
+        for log_id, fn in leftover:
+            _delete_image(fn)
+            con.execute(
+                "UPDATE repair_work_log SET barcode_image = NULL WHERE id = ?",
+                (log_id,),
+            )
         con.commit()
     repair_catalog.ensure_catalog_tables()
 
@@ -157,6 +175,17 @@ class WorkTypeBody(BaseModel):
 class DefectBody(BaseModel):
     불량명: str
     별칭: Optional[str] = None
+
+
+def _editor_name(token: Optional[str]) -> str:
+    if not token:
+        return "웹"
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,),
+        ).fetchone()
+    return (row[0] if row and row[0] else None) or "웹"
 
 
 def _clean(v) -> Optional[str]:
@@ -238,15 +267,110 @@ async def _save_upload(file: UploadFile) -> str:
     return filename
 
 
-def _delete_image(filename: Optional[str]):
+def _image_path(filename: Optional[str]) -> Optional[Path]:
     if not filename:
-        return
-    path = UPLOAD_DIR / filename
-    if path.exists() and path.parent == UPLOAD_DIR:
-        try:
-            path.unlink()
-        except OSError:
-            pass
+        return None
+    name = Path(str(filename)).name
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        return None
+    root = UPLOAD_DIR.resolve()
+    path = (root / name).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    return path
+
+
+def _delete_image(filename: Optional[str]) -> bool:
+    """서버 디스크의 수선 사진 파일을 실제로 삭제한다."""
+    path = _image_path(filename)
+    if not path or not path.is_file():
+        return False
+    try:
+        path.unlink()
+        return not path.exists()
+    except OSError:
+        return False
+
+
+def _old_photo_cutoff(days: int = 60) -> str:
+    return (datetime.now() - timedelta(days=max(1, days))).strftime("%Y-%m-%d")
+
+
+def _collect_stale_photo_names(con, cutoff: str) -> tuple[set[str], int]:
+    """60일 지난 바코드/전후 사진 + 어디에도 안 묶인 서버 파일."""
+    cutoff_ts = datetime.strptime(cutoff, "%Y-%m-%d").timestamp()
+    names: set[str] = set()
+    rows = con.execute(
+        """SELECT id, barcode_image, before_image, after_image
+           FROM repair_work_log
+           WHERE (날짜 < ? OR IFNULL(저장시간, '') < ?)
+             AND (
+               IFNULL(barcode_image, '') != ''
+               OR IFNULL(before_image, '') != ''
+               OR IFNULL(after_image, '') != ''
+             )""",
+        (cutoff, cutoff),
+    ).fetchall()
+    for _id, *fns in rows:
+        for fn in fns:
+            if fn:
+                names.add(Path(str(fn)).name)
+
+    if UPLOAD_DIR.exists():
+        for path in UPLOAD_DIR.iterdir():
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in IMAGE_EXTS:
+                continue
+            try:
+                if path.stat().st_mtime < cutoff_ts:
+                    names.add(path.name)
+            except OSError:
+                continue
+
+    try:
+        inbox = con.execute(
+            "SELECT filename, created_at FROM repair_photo_inbox_file"
+        ).fetchall()
+    except Exception:
+        inbox = []
+    for fn, created in inbox:
+        if not fn:
+            continue
+        if created and str(created)[:10] < cutoff:
+            names.add(Path(str(fn)).name)
+
+    return names, len(rows)
+
+
+def _clear_photo_refs(con, names: set[str]) -> int:
+    """일지·인박스에서 해당 파일 참조를 완전히 끊는다."""
+    if not names:
+        return 0
+    cleared = 0
+    files = list(names)
+    placeholders = ",".join("?" * len(files))
+    for col in ("barcode_image", "before_image", "after_image"):
+        cur = con.execute(
+            f"""UPDATE repair_work_log SET {col} = NULL
+                WHERE {col} IN ({placeholders})""",
+            files,
+        )
+        cleared += cur.rowcount or 0
+    try:
+        con.execute(
+            f"DELETE FROM repair_photo_inbox_file WHERE filename IN ({placeholders})",
+            files,
+        )
+        con.execute(
+            """DELETE FROM repair_photo_inbox
+               WHERE user_id NOT IN (SELECT user_id FROM repair_photo_inbox_file)"""
+        )
+    except Exception:
+        pass
+    return cleared
 
 
 # ─────────────────────────────────────
@@ -650,6 +774,53 @@ async def get_repair_image(filename: str):
     return FileResponse(path)
 
 
+@router.get("/photos/old")
+async def old_photo_stats(days: int = Query(60, ge=1, le=365)):
+    """60일(기본) 지난 수선 사진 건수. 바코드·고아 파일 포함."""
+    ensure_repair_tables()
+    cutoff = _old_photo_cutoff(days)
+    with get_connection() as con:
+        names, logs = _collect_stale_photo_names(con, cutoff)
+    return {"cutoff": cutoff, "days": days, "logs": logs, "files": len(names)}
+
+
+@router.post("/photos/purge-old")
+async def purge_old_photos(days: int = Query(60, ge=1, le=365)):
+    """60일 지난 사진을 서버 디스크에서 완전 삭제. 일지 행은 남긴다."""
+    ensure_repair_tables()
+    cutoff = _old_photo_cutoff(days)
+    with get_connection() as con:
+        names, logs = _collect_stale_photo_names(con, cutoff)
+        deleted = 0
+        for name in names:
+            if _delete_image(name):
+                deleted += 1
+        _clear_photo_refs(con, names)
+        con.commit()
+
+    leftover = [
+        name for name in names
+        if (path := _image_path(name)) is not None and path.is_file()
+    ]
+    add_log(
+        action_type="수선사진_정리",
+        target_type="repair_work_log",
+        target_id=cutoff,
+        target_name=f"{days}일 이전 사진",
+        user_nickname="웹",
+        details=f"{logs}건 일지, 서버 파일 {deleted}개 완전 삭제 (기준일 {cutoff}, 잔여 {len(leftover)})",
+    )
+    return {
+        "success": True,
+        "cutoff": cutoff,
+        "days": days,
+        "logs": logs,
+        "deleted_files": deleted,
+        "remaining_files": leftover,
+        "message": f"{cutoff} 이전 서버 사진 {deleted}장을 완전히 삭제했습니다. 일지는 그대로입니다.",
+    }
+
+
 @router.get("/stats")
 async def get_stats(
     period_from: Optional[str] = None,
@@ -697,7 +868,7 @@ async def export_logs(
     ensure_repair_tables()
     with get_connection() as con:
         rows = con.execute(
-            """SELECT 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고, 작성자, 출처, 저장시간
+            """SELECT 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고, 작성자, 출처, 저장시간, 수정자, 수정시간
                FROM repair_work_log
                WHERE 날짜 >= ? AND 날짜 <= ?
                ORDER BY 날짜 DESC, id DESC""",
@@ -708,7 +879,7 @@ async def export_logs(
         raise HTTPException(status_code=404, detail="해당 기간에 수선일지가 없습니다.")
 
     df = pd.DataFrame(rows, columns=[
-        "날짜", "업체명", "제품명", "옵션", "바코드", "불량명", "작업", "수량", "비용", "비고", "작성자", "출처", "저장시간",
+        "날짜", "업체명", "제품명", "옵션", "바코드", "불량명", "작업", "수량", "비용", "비고", "작성자", "출처", "저장시간", "수정자", "수정시간",
     ])
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -771,7 +942,7 @@ async def list_logs(
         total = con.execute(f"SELECT COUNT(*) FROM repair_work_log {where}", params).fetchone()[0]
         rows = con.execute(
             f"""SELECT id, 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고,
-                       작성자, 저장시간, 출처, barcode_image, before_image, after_image
+                       작성자, 저장시간, 출처, barcode_image, before_image, after_image, 수정자, 수정시간
                 FROM repair_work_log {where}
                 ORDER BY COALESCE(저장시간, 날짜) DESC, id DESC
                 LIMIT ? OFFSET ?""",
@@ -810,6 +981,8 @@ async def list_logs(
             "barcode_image": r[14],
             "before_image": r[15],
             "after_image": r[16],
+            "수정자": r[17],
+            "수정시간": str(r[18]) if r[18] else None,
         })
     return {
         "logs": logs,
@@ -866,6 +1039,11 @@ def insert_repair_log_record(
             vendor = _resolve_vendor(con, vendor)
         if not vendor or not product:
             raise ValueError("업체명과 제품명이 필요합니다. 바코드를 등록하거나 직접 입력하세요.")
+
+        # 바코드 숫자는 남기고, 인식에 쓴 바코드 사진은 보관하지 않는다.
+        if barcode_image:
+            _delete_image(barcode_image)
+            barcode_image = None
 
         cur = con.execute(
             """INSERT INTO repair_work_log
@@ -1010,7 +1188,7 @@ async def upload_photos(
 
 
 @router.put("/{log_id}")
-async def update_log(log_id: int, data: RepairLogUpdate):
+async def update_log(log_id: int, data: RepairLogUpdate, token: Optional[str] = Query(None)):
     ensure_repair_tables()
     with get_connection() as con:
         existing = con.execute(
@@ -1040,6 +1218,10 @@ async def update_log(log_id: int, data: RepairLogUpdate):
 
         if not updates:
             raise HTTPException(status_code=400, detail="수정할 내용이 없습니다.")
+        updates.append("수정자 = ?")
+        params.append(_editor_name(token))
+        updates.append("수정시간 = ?")
+        params.append(datetime.now().isoformat())
         params.append(log_id)
         con.execute(f"UPDATE repair_work_log SET {', '.join(updates)} WHERE id = ?", params)
         con.commit()

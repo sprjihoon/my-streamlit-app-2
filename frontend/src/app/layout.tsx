@@ -17,7 +17,26 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 // ─────────────────────────────────────
 // 아코디언 네비게이션 그룹 컴포넌트
 // ─────────────────────────────────────
-interface NavItem { href: string; label: string; icon: React.ReactNode; adminOnly?: boolean; }
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  adminOnly?: boolean;
+  allowDepartments?: string[];
+}
+
+function canSeeNavItem(user: { is_admin?: boolean; department?: string } | null, item: NavItem) {
+  if (user?.is_admin) return true;
+  if (item.allowDepartments?.length) {
+    const dept = (user?.department || '').replace(/\s/g, '');
+    return item.allowDepartments.some((allowed) => {
+      const a = allowed.replace(/\s/g, '');
+      if (!dept || !a) return false;
+      return dept === a || dept.includes(a.replace(/팀$/, '')) || a.includes(dept.replace(/팀$/, ''));
+    });
+  }
+  return !item.adminOnly;
+}
 
 function NavGroup({
   label,
@@ -192,8 +211,8 @@ const NAV_GROUPS = [
     icon: <LayoutDashboard {...IC} />,
     items: [
       { href: '/', label: '대시보드', icon: <LayoutDashboard {...IC} />, adminOnly: true },
-      { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} />, adminOnly: true },
-      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} />, adminOnly: true },
+      { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} /> },
+      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} />, allowDepartments: ['패션팀'] },
       { href: '/upload', label: '데이터 업로드', icon: <Upload {...IC} />, adminOnly: true },
       { href: '/mapping', label: '업체 매핑 관리', icon: <Link2 {...IC} />, adminOnly: true },
       { href: '/vendors', label: '매핑 리스트', icon: <List {...IC} />, adminOnly: true },
@@ -560,9 +579,7 @@ export default function RootLayout({
                     a.key === 'groupware' ? -1 : b.key === 'groupware' ? 1 : 0
                   )
               ).map(group => {
-                const visibleItems = group.items.filter(
-                  item => user?.is_admin || !item.adminOnly
-                );
+                const visibleItems = group.items.filter((item) => canSeeNavItem(user, item));
                 if (visibleItems.length === 0) return null;
                 return (
                   <NavGroup

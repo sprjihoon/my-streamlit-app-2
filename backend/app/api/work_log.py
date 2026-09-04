@@ -16,6 +16,17 @@ from backend.app.api.logs import add_log
 router = APIRouter(prefix="/work-log", tags=["work-log"])
 
 
+def _editor_name(token: Optional[str]) -> str:
+    if not token:
+        return "웹"
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,),
+        ).fetchone()
+    return (row[0] if row and row[0] else None) or "웹"
+
+
 # ─────────────────────────────────────
 # Pydantic Models
 # ─────────────────────────────────────
@@ -56,6 +67,8 @@ class WorkLogResponse(BaseModel):
     작성자: Optional[str]
     저장시간: Optional[str]
     출처: Optional[str]
+    수정자: Optional[str] = None
+    수정시간: Optional[str] = None
 
 
 # ─────────────────────────────────────
@@ -82,6 +95,8 @@ def ensure_work_log_columns():
             ("저장시간", "TIMESTAMP"),
             ("출처", "TEXT"),
             ("works_user_id", "TEXT"),
+            ("수정자", "TEXT"),
+            ("수정시간", "TIMESTAMP"),
         ]
         
         for col, coltype in new_cols:
@@ -216,6 +231,8 @@ async def get_work_logs(
             "작성자": row.get('작성자') if pd.notna(row.get('작성자')) else None,
             "저장시간": str(row['저장시간']) if pd.notna(row.get('저장시간')) else None,
             "출처": row.get('출처') if pd.notna(row.get('출처')) else None,
+            "수정자": row.get('수정자') if pd.notna(row.get('수정자')) else None,
+            "수정시간": str(row['수정시간']) if pd.notna(row.get('수정시간')) else None,
         })
     
     return {
@@ -334,7 +351,7 @@ async def create_work_log(log: WorkLogCreate):
 
 
 @router.put("/{log_id}")
-async def update_work_log(log_id: int, log: WorkLogUpdate):
+async def update_work_log(log_id: int, log: WorkLogUpdate, token: Optional[str] = Query(None)):
     """작업일지 수정"""
     ensure_work_log_columns()
     
@@ -396,6 +413,13 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
         
         if not update_fields:
             raise HTTPException(status_code=400, detail="수정할 내용이 없습니다.")
+
+        editor = _editor_name(token)
+        edited_at = datetime.now().isoformat()
+        update_fields.append("수정자 = ?")
+        params.append(editor)
+        update_fields.append("수정시간 = ?")
+        params.append(edited_at)
         
         params.append(log_id)
         query = f"UPDATE work_log SET {', '.join(update_fields)} WHERE id = ?"
@@ -408,7 +432,7 @@ async def update_work_log(log_id: int, log: WorkLogUpdate):
         target_type="work_log",
         target_id=str(log_id),
         target_name=f"{log.업체명 or existing_data.get('업체명')} {log.분류 or existing_data.get('분류')}",
-        user_nickname="웹",
+        user_nickname=editor,
         details=", ".join(changed_fields) if changed_fields else "수정됨"
     )
     
@@ -538,9 +562,10 @@ async def export_work_logs(
     from fastapi.responses import StreamingResponse
     import io
     
+    ensure_work_log_columns()
     with get_connection() as con:
         rows = con.execute(
-            """SELECT 날짜, 업체명, 분류, 수량, 단가, 합계, 비고1, 작성자, 출처, 저장시간
+            """SELECT 날짜, 업체명, 분류, 수량, 단가, 합계, 비고1, 작성자, 출처, 저장시간, 수정자, 수정시간
                FROM work_log 
                WHERE 날짜 >= ? AND 날짜 <= ?
                ORDER BY 날짜 DESC, id DESC""",
@@ -552,7 +577,7 @@ async def export_work_logs(
     
     # DataFrame 생성
     df = pd.DataFrame(rows, columns=[
-        "날짜", "업체명", "분류", "수량", "단가", "합계", "비고", "작성자", "출처", "저장시간"
+        "날짜", "업체명", "분류", "수량", "단가", "합계", "비고", "작성자", "출처", "저장시간", "수정자", "수정시간"
     ])
     
     if format == "json":
@@ -637,4 +662,6 @@ async def get_work_log(log_id: int):
         "작성자": data.get('작성자'),
         "저장시간": str(data['저장시간']) if data.get('저장시간') else None,
         "출처": data.get('출처'),
+        "수정자": data.get('수정자'),
+        "수정시간": str(data['수정시간']) if data.get('수정시간') else None,
     }

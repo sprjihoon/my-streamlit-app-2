@@ -23,6 +23,7 @@ from backend.app.api.repair_log import (
     ensure_repair_tables,
     insert_repair_log_record,
     save_image_bytes,
+    _delete_image,
     upsert_repair_barcode_record,
 )
 from backend.app.services import repair_catalog
@@ -51,6 +52,24 @@ PRICE_RE = re.compile(
 )
 YES_RE = re.compile(r"^(네|넵|예|응|어|맞아|맞아요|그래|그래요|ㅇㅇ|ㅇㅋ|저장|저장해|그대로|좋아|ㅇ)$")
 CANCEL_RE = re.compile(r"^(취소|그만|아니야|아니)$")
+QTY_RE = re.compile(r"(?:한\s*건)|(?:(\d+)\s*(?:건|개|장|벌))")
+VENDOR_MENTION_RE = re.compile(r"업체명\s*(?:은|는|:)?\s*([가-힣A-Za-z0-9_]+)")
+BARCODE_RETRY_RE = re.compile(r"다시\s*읽|다시읽|재인식|다시\s*봐")
+ASCII_BARCODE_RE = re.compile(r"^[A-Za-z0-9]{6,24}$")
+COMMAND_HINTS = (
+    "보여줘", "보여주", "리스트", "목록", "다시읽", "다시찍어",
+    "상관없이", "알려줘", "알려주", "작업당", "비용목록",
+)
+DEFECT_DEFAULT_WORK = {
+    "구멍": "단순바느질",
+    "올풀림": "단순바느질",
+    "봉제 불량": "단순바느질",
+    "열펜": "열펜제거",
+    "잡사": "잡사제거",
+    "오염": "부분세탁",
+    "기름얼룩": "부분세탁",
+    "넥라인불량": "손뜨개작업",
+}
 
 
 @dataclass
@@ -67,10 +86,28 @@ def is_image_filename(name: str) -> bool:
     return (name or "").lower().endswith(IMAGE_EXTS)
 
 
+def is_cost_catalog_query(text: str, *, pending_repair: bool = False) -> bool:
+    t = (text or "").replace(" ", "")
+    if not t or any(s in t for s in LOGISTICS_SIGNALS):
+        return False
+    has_list = any(k in t for k in ("목록", "리스트", "보여"))
+    if not has_list:
+        return False
+    if "작업당" in t and "비용" in t:
+        return True
+    if "수선" in t and ("비용" in t or "작업" in t):
+        return True
+    if "등록" in t and "작업" in t and "비용" in t:
+        return True
+    return pending_repair and ("비용" in t or "작업" in t)
+
+
 def is_repair_text(text: str) -> bool:
     t = (text or "").replace(" ", "")
     if any(s in t for s in LOGISTICS_SIGNALS):
         return False
+    if is_cost_catalog_query(text):
+        return True
     return any(s in t for s in REPAIR_SIGNALS)
 
 
@@ -107,20 +144,68 @@ def extract_price(text: str) -> Optional[int]:
 
 def extract_barcode_token(text: str) -> Optional[str]:
     for token in re.findall(r"[A-Za-z0-9]{8,24}", text or ""):
-        if looks_like_barcode(token):
+        if looks_like_barcode(token) or (token.isdigit() and 8 <= len(token) <= 14):
             return token
+    return None
+
+
+def extract_vendor_mention(text: str) -> Optional[str]:
+    m = VENDOR_MENTION_RE.search(text or "")
+    if not m:
+        return None
+    name = m.group(1).strip()
+    if not name or name in ("알려주세요", "뭐예요", "뭐야"):
+        return None
+    return name
+
+
+def is_conversational_command(text: str) -> bool:
+    t = (text or "").replace(" ", "")
+    return any(k in t for k in COMMAND_HINTS) or bool(BARCODE_RETRY_RE.search(text or ""))
+
+
+def is_manual_barcode(text: str) -> bool:
+    """한글 문장은 바코드가 아니다. Python isalnum()은 한글도 True라 쓰면 안 된다."""
+    s = re.sub(r"[\s\-]", "", text or "")
+    if not ASCII_BARCODE_RE.fullmatch(s):
+        return False
+    return looks_like_barcode(s) or (s.isdigit() and 8 <= len(s) <= 14)
+
+
+def format_work_cost_list() -> str:
+    rows = repair_catalog.list_work_types()
+    if not rows:
+        return "등록된 작업 비용이 없어요."
+    lines = ["등록된 수선 작업 비용이에요."]
+    for r in rows:
+        alias = f" ({r['별칭']})" if r.get("별칭") else ""
+        lines.append(f"• {r['작업명']}{alias} — {int(r['기본비용']):,}원")
+    return "\n".join(lines)
+
+
+def extract_qty(text: str) -> Optional[int]:
+    if not text:
+        return None
+    if re.search(r"한\s*건", text):
+        return 1
+    m = re.search(r"(\d+)\s*(?:건|개|장|벌)", text)
+    if m:
+        n = int(m.group(1))
+        return n if n > 0 else None
     return None
 
 
 def parse_repair_text(text: str) -> Dict[str, Any]:
     price = extract_price(text)
     barcode = extract_barcode_token(text)
+    qty = extract_qty(text)
     work = repair_catalog.resolve_work_type(text)
     defect = repair_catalog.resolve_defect(text)
     return {
         "price": price,
         "price_stated": price is not None,
         "barcode": barcode,
+        "qty": qty,
         "work": work["작업명"] if work else None,
         "defect": defect["불량명"] if defect else None,
     }
@@ -147,6 +232,13 @@ def _set_pending(user_id: str, channel_id: str, data: Dict[str, Any], missing: L
     )
 
 
+def _ask(user_id: str, channel_id: str, data: Dict[str, Any], missing: List[str], question: str) -> str:
+    """같은 질문을 워커가 여러 번 보내지 않는다."""
+    prev = (get_conversation_manager().get_state(user_id) or {}).get("last_question")
+    _set_pending(user_id, channel_id, data, missing, question)
+    return "" if prev == question else question
+
+
 def _clear_pending(user_id: str) -> None:
     get_conversation_manager().clear_state(user_id)
 
@@ -162,7 +254,27 @@ def _merge_parsed(data: Dict[str, Any], parsed: Dict[str, Any]) -> Dict[str, Any
     if parsed.get("price") is not None:
         out["unit_price"] = parsed["price"]
         out["price_stated"] = True
+    if parsed.get("qty"):
+        out["qty"] = parsed["qty"]
     return out
+
+
+def _infer_work(data: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(data)
+    if out.get("work_type"):
+        return out
+    defect = out.get("defect")
+    if defect and defect in DEFECT_DEFAULT_WORK:
+        out["work_type"] = DEFECT_DEFAULT_WORK[defect]
+    return out
+
+
+def _job_label(data: Dict[str, Any]) -> str:
+    defect = data.get("defect")
+    work = data.get("work_type")
+    if defect and work and defect != work:
+        return f"{defect} / {work}"
+    return defect or work or "수선"
 
 
 def _lookup(barcode: Optional[str]) -> Optional[dict]:
@@ -214,6 +326,18 @@ def _try_save(data: Dict[str, Any], user_name: Optional[str], price_stated: bool
     return result
 
 
+def _confirm_cost_qty(data: Dict[str, Any], user_id: str, channel_id: str) -> str:
+    price = int(data.get("unit_price") or 0)
+    label = _job_label(data)
+    qty = data.get("qty")
+    if qty:
+        q = f"{label} {price:,}원 {int(qty)}건으로 저장할까요?"
+    else:
+        q = f"{label} {price:,}원 맞아요? 몇 건이에요?"
+    data["awaiting_price_confirm"] = True
+    return _ask(user_id, channel_id, data, ["qty"], q)
+
+
 def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id: str) -> str:
     """사진/텍스트가 합쳐진 뒤 다음에 할 말."""
     if data.get("barcode") and not data.get("vendor"):
@@ -221,51 +345,44 @@ def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id
         if found:
             data = _attach_master(data, found)
         else:
-            q = f"등록 안 된 바코드예요 ({data['barcode']}). 업체명 알려주세요."
-            _set_pending(user_id, channel_id, data, ["vendor"], q)
-            return q
+            return _ask(
+                user_id, channel_id, data, ["vendor"],
+                f"등록 안 된 바코드예요 ({data['barcode']}). 업체명 알려주세요.",
+            )
 
     if not data.get("vendor"):
-        q = "업체명 알려주세요."
-        _set_pending(user_id, channel_id, data, ["vendor"], q)
-        return q
+        return _ask(user_id, channel_id, data, ["vendor"], "업체명 알려주세요.")
     if not data.get("product"):
-        q = "제품명 알려주세요."
-        _set_pending(user_id, channel_id, data, ["product"], q)
-        return q
+        return _ask(user_id, channel_id, data, ["product"], "제품명 알려주세요.")
+
+    data = _infer_work(data)
+    if not data.get("work_type") and not data.get("defect"):
+        return _ask(
+            user_id, channel_id, data, ["work_type"],
+            f"{_item_line(data)} 맞아요. 작업이랑 금액 알려주세요.",
+        )
     if not data.get("work_type"):
-        q = f"{_item_line(data)} 맞아요. 작업이랑 금액 알려주세요."
-        _set_pending(user_id, channel_id, data, ["work_type"], q)
-        return q
-
-    if data.get("unit_price"):
-        if data.get("price_stated"):
-            saved = _try_save(data, data.get("user_name"), True)
-            _clear_pending(user_id)
-            return f"✅ {saved['message']}"
-        q = (
-            f"{display_vendor(data.get('vendor')) or data.get('vendor')} "
-            f"{data['work_type']} 최근 비용은 {int(data['unit_price']):,}원이었습니다. "
-            f"그대로 저장할까요?"
+        return _ask(
+            user_id, channel_id, data, ["work_type"],
+            f"{_item_line(data)} / {data.get('defect')} 맞아요. 작업은 뭐로 할까요?",
         )
-        data["awaiting_price_confirm"] = True
-        _set_pending(user_id, channel_id, data, [], q)
-        return q
 
-    price_info = repair_catalog.lookup_repair_price(data.get("vendor"), data.get("work_type"))
-    if price_info.get("found") and price_info.get("비용"):
-        data["unit_price"] = price_info["비용"]
-        data["work_type"] = price_info.get("작업명") or data["work_type"]
-        q = price_info.get("message") or (
-            f"{data.get('vendor')} {data['work_type']} 최근 비용은 {price_info['비용']:,}원이었습니다. 그대로 저장할까요?"
-        )
-        data["awaiting_price_confirm"] = True
-        _set_pending(user_id, channel_id, data, [], q)
-        return q
+    if not data.get("unit_price"):
+        price_info = repair_catalog.lookup_repair_price(data.get("vendor"), data.get("work_type"))
+        if price_info.get("found") and price_info.get("비용"):
+            data["unit_price"] = price_info["비용"]
+            data["work_type"] = price_info.get("작업명") or data["work_type"]
+            data["price_stated"] = False
+            return _confirm_cost_qty(data, user_id, channel_id)
+        return _ask(user_id, channel_id, data, ["unit_price"], "금액이 얼마예요?")
 
-    q = "등록된 비용이 없어요. 금액을 알려주세요."
-    _set_pending(user_id, channel_id, data, ["unit_price"], q)
-    return q
+    if data.get("qty") and data.get("price_stated") and data.get("awaiting_price_confirm") is not True:
+        # 작업·금액·건수를 한 번에 말한 경우만 바로 저장
+        saved = _try_save(data, data.get("user_name"), True)
+        _clear_pending(user_id)
+        return f"✅ {saved['message']}"
+
+    return _confirm_cost_qty(data, user_id, channel_id)
 
 
 async def handle_user_text(
@@ -284,40 +401,87 @@ async def handle_user_text(
         _clear_pending(user_id)
         return "🚫 수선 입력을 취소했어요."
 
-    if data.get("awaiting_price_confirm") and YES_RE.match(raw):
-        saved = _try_save(data, user_name or data.get("user_name"), False)
-        _clear_pending(user_id)
-        return f"✅ {saved['message']}"
+    if is_cost_catalog_query(raw, pending_repair=bool(data or missing)):
+        listing = format_work_cost_list()
+        last_q = (get_conversation_manager().get_state(user_id) or {}).get("last_question") or ""
+        if last_q and last_q not in listing:
+            return f"{listing}\n\n{last_q}"
+        return listing
 
     parsed = parse_repair_text(raw)
+    vendor_mention = extract_vendor_mention(raw)
+    if vendor_mention and not data.get("vendor"):
+        with get_connection() as con:
+            data["vendor"] = _resolve_vendor(con, vendor_mention)
 
-    if data.get("awaiting_price_confirm") and parsed.get("price") is not None:
-        data["unit_price"] = parsed["price"]
-        data["price_stated"] = True
-        if data.get("work_type"):
-            try:
-                repair_catalog.upsert_work_type(data["work_type"], parsed["price"])
-            except Exception:
-                pass
-        saved = _try_save(data, user_name or data.get("user_name"), True)
-        _clear_pending(user_id)
-        return f"✅ {saved['message']}"
+    if data.get("awaiting_price_confirm"):
+        prev_price = data.get("unit_price")
+        if parsed.get("qty"):
+            data["qty"] = parsed["qty"]
+        if parsed.get("price") is not None:
+            data["unit_price"] = parsed["price"]
+            data["price_stated"] = True
+            if data.get("work_type"):
+                try:
+                    repair_catalog.upsert_work_type(data["work_type"], parsed["price"])
+                except Exception:
+                    pass
+        if parsed.get("work"):
+            data["work_type"] = parsed["work"]
+        if parsed.get("defect"):
+            data["defect"] = parsed["defect"]
+            data = _infer_work(data)
+        if YES_RE.match(raw):
+            data["qty"] = data.get("qty") or 1
+            saved = _try_save(data, user_name or data.get("user_name"), bool(data.get("price_stated")))
+            _clear_pending(user_id)
+            return f"✅ {saved['message']}"
+        if data.get("qty") and data.get("unit_price"):
+            saved = _try_save(data, user_name or data.get("user_name"), bool(data.get("price_stated")))
+            _clear_pending(user_id)
+            return f"✅ {saved['message']}"
+        if parsed.get("price") is not None and parsed["price"] != prev_price:
+            return _confirm_cost_qty(data, user_id, channel_id)
+        return _ask(user_id, channel_id, data, ["qty"], "몇 건인지 숫자로 알려주세요. 예: 1건")
 
     if "barcode" in missing and raw:
-        token = extract_barcode_token(raw) or re.sub(r"\s", "", raw)
-        if looks_like_barcode(token) or (token.isalnum() and len(token) >= 6):
+        token = extract_barcode_token(raw)
+        compact = re.sub(r"[\s\-]", "", raw)
+        if not token and is_manual_barcode(compact):
+            token = compact
+        if token:
             data["barcode"] = token
+            if data.get("barcode_image"):
+                _delete_image(data["barcode_image"])
+                data["barcode_image"] = None
             found = _lookup(token)
             if found:
                 data = _attach_master(data, found)
             return continue_after_photos_or_text(data, user_id, channel_id)
+        if vendor_mention or BARCODE_RETRY_RE.search(raw) or is_conversational_command(raw):
+            q = "바코드 숫자를 직접 입력해 주세요. 예: ON56S152917"
+            if data.get("vendor"):
+                q = (
+                    f"{display_vendor(data['vendor'])} 업체로 받을게요. "
+                    "바코드 숫자를 직접 입력해 주세요. 예: ON56S152917"
+                )
+            return _ask(user_id, channel_id, data, ["barcode"], q)
+        return _ask(
+            user_id, channel_id, data, ["barcode"],
+            "바코드로 안 보여요. ON56S152917처럼 숫자·영문을 입력해 주세요.",
+        )
 
     if "vendor" in missing and raw:
+        if is_conversational_command(raw) and not vendor_mention:
+            return _ask(user_id, channel_id, data, ["vendor"], "업체명만 알려주세요. 예: 로지킴")
+        vendor_text = vendor_mention or raw.strip()
         with get_connection() as con:
-            data["vendor"] = _resolve_vendor(con, raw)
+            data["vendor"] = _resolve_vendor(con, vendor_text)
         return continue_after_photos_or_text(data, user_id, channel_id)
 
     if "product" in missing and raw:
+        if is_conversational_command(raw):
+            return _ask(user_id, channel_id, data, ["product"], "제품명만 알려주세요.")
         data["product"] = raw
         if data.get("barcode") and data.get("vendor"):
             try:
@@ -336,12 +500,18 @@ async def handle_user_text(
     if "work_type" in missing or not data.get("work_type"):
         if parsed.get("work"):
             data["work_type"] = parsed["work"]
-        elif raw and not parsed.get("price") and "vendor" not in missing:
-            # 마스터에 없는 새 작업명
+        elif (
+            raw
+            and not parsed.get("price")
+            and not parsed.get("qty")
+            and not YES_RE.match(raw)
+            and not is_conversational_command(raw)
+            and "vendor" not in missing
+        ):
             leftover = raw
-            for token in ("원",):
-                leftover = leftover.replace(token, "")
             leftover = PRICE_RE.sub("", leftover).strip()
+            leftover = QTY_RE.sub("", leftover).strip()
+            leftover = leftover.replace("원", "").strip()
             if leftover and leftover not in REPAIR_SIGNALS:
                 if not parsed.get("defect") or leftover != parsed.get("defect"):
                     data["work_type"] = leftover
@@ -349,6 +519,7 @@ async def handle_user_text(
                         repair_catalog.upsert_work_type(leftover, parsed["price"])
 
     data = _merge_parsed(data, parsed)
+    data = _infer_work(data)
 
     if parsed.get("work") and not parsed.get("price") and data.get("vendor"):
         # 작업만 새로 온 경우 비용 조회
@@ -506,6 +677,10 @@ def _claim_inbox_photos(user_id: str, need: int = 3) -> Optional[dict]:
                 name=name or filename,
                 ext=ext or ".jpg",
             ))
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
             con.execute("DELETE FROM repair_photo_inbox_file WHERE id = ?", (_id,))
         left = con.execute(
             "SELECT COUNT(*) FROM repair_photo_inbox_file WHERE user_id = ?",
@@ -653,23 +828,27 @@ async def finalize_photo_set(
 ) -> str:
     ensure_repair_tables()
     classified = classified or await classify_photos([p.data for p in photos])
-    saved_names = []
-    for p in photos:
-        saved_names.append(save_image_bytes(p.data, p.ext))
+    bi = classified.get("barcode_index")
+    decoded = bool(classified.get("barcode")) and not classified.get("ambiguous")
+    saved_names: List[Optional[str]] = [None] * len(photos)
+    for i, p in enumerate(photos):
+        if decoded and i == bi:
+            continue
+        saved_names[i] = save_image_bytes(p.data, p.ext)
 
     data = _get_pending(user_id)
     data.setdefault("user_name", user_name)
     data["entry_type"] = "repair"
-    bi = classified.get("barcode_index")
-    if bi is not None:
-        data["barcode_image"] = saved_names[bi]
     if classified.get("before_index") is not None:
         data["before_image"] = saved_names[classified["before_index"]]
     if classified.get("after_index") is not None:
         data["after_image"] = saved_names[classified["after_index"]]
+    data.pop("barcode_image", None)
 
     if classified.get("ambiguous"):
         data["barcode"] = classified.get("barcode") or data.get("barcode")
+        if bi is not None and saved_names[bi]:
+            data["barcode_image"] = saved_names[bi]
         q = "바코드가 여러 장에서 읽혔어요. 맞는 바코드를 적어주세요."
         _set_pending(user_id, channel_id, data, ["barcode"], q)
         return q
@@ -680,6 +859,8 @@ async def finalize_photo_set(
         if found:
             data = _attach_master(data, found)
     else:
+        if bi is not None and saved_names[bi]:
+            data["barcode_image"] = saved_names[bi]
         q = "바코드를 못 읽었어요. 바코드 숫자를 직접 입력해 주세요."
         _set_pending(user_id, channel_id, data, ["barcode"], q)
         return q

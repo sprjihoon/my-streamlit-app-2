@@ -492,6 +492,8 @@ export default function WorkLogPage() {
                   <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>작성자</th>
                   <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>출처</th>
                   <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>저장시간</th>
+                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>수정자</th>
+                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>수정시간</th>
                   <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #ddd' }}>작업</th>
                 </tr>
               </thead>
@@ -510,6 +512,10 @@ export default function WorkLogPage() {
                     <td style={{ padding: '0.5rem' }}>{getSourceBadge(log.출처)}</td>
                     <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
                       {formatDateTime(log.저장시간)}
+                    </td>
+                    <td style={{ padding: '0.5rem' }}>{log.수정자 || '-'}</td>
+                    <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
+                      {formatDateTime(log.수정시간)}
                     </td>
                     <td style={{ padding: '0.5rem', textAlign: 'center' }}>
                       <button
