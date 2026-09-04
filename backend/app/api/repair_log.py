@@ -330,25 +330,41 @@ def _collect_stale_photo_names(con, cutoff: str) -> tuple[set[str], int]:
             except OSError:
                 continue
 
+    names.update(_legacy_inbox_stale_filenames(con, cutoff))
+    names.update(_v2_inbox_stale_filenames(con, cutoff))
+    return names, len(rows)
+
+
+def _inbox_filenames_older_than(rows, cutoff: str) -> set[str]:
+    stale: set[str] = set()
+    for fn, created in rows:
+        if not fn:
+            continue
+        if created and str(created)[:10] < cutoff:
+            stale.add(Path(str(fn)).name)
+    return stale
+
+
+def _legacy_inbox_stale_filenames(con, cutoff: str) -> set[str]:
+    """legacy inbox cleanup: 구 user-PK 테이블의 60일 초과 임시 파일만."""
     try:
         inbox = con.execute(
             "SELECT filename, created_at FROM repair_photo_inbox_file"
         ).fetchall()
     except Exception:
         inbox = []
+    return _inbox_filenames_older_than(inbox, cutoff)
+
+
+def _v2_inbox_stale_filenames(con, cutoff: str) -> set[str]:
+    """v2 inbox cleanup: (user_id, channel_id) 단위 60일 초과 임시 파일만."""
     try:
         inbox_v2 = con.execute(
             "SELECT filename, created_at FROM repair_photo_inbox_file_v2"
         ).fetchall()
     except Exception:
         inbox_v2 = []
-    for fn, created in list(inbox) + list(inbox_v2):
-        if not fn:
-            continue
-        if created and str(created)[:10] < cutoff:
-            names.add(Path(str(fn)).name)
-
-    return names, len(rows)
+    return _inbox_filenames_older_than(inbox_v2, cutoff)
 
 
 def _clear_photo_refs(con, names: set[str]) -> int:
@@ -366,6 +382,7 @@ def _clear_photo_refs(con, names: set[str]) -> int:
         )
         cleared += cur.rowcount or 0
     try:
+        # legacy inbox cleanup: 구 user-PK 잔여 행만
         con.execute(
             f"DELETE FROM repair_photo_inbox_file WHERE filename IN ({placeholders})",
             files,
@@ -374,6 +391,7 @@ def _clear_photo_refs(con, names: set[str]) -> int:
             """DELETE FROM repair_photo_inbox
                WHERE user_id NOT IN (SELECT user_id FROM repair_photo_inbox_file)"""
         )
+        # v2 inbox cleanup: 방 키 (user_id, channel_id)로 빈 메타만 삭제
         con.execute(
             f"DELETE FROM repair_photo_inbox_file_v2 WHERE filename IN ({placeholders})",
             files,
