@@ -764,7 +764,8 @@ class AIParser:
         message: str,
         user_id: str,
         user_name: str = None,
-        pending_action: Dict = None
+        pending_action: Dict = None,
+        mode: str = None,
     ) -> Dict[str, Any]:
         """
         확인이 필요한 작업 처리 (삭제 확인 등)
@@ -779,7 +780,7 @@ class AIParser:
             처리 결과
         """
         if not pending_action:
-            return await self.process_message(message, user_id, user_name)
+            return await self.process_message(message, user_id, user_name, mode=mode or MODE_IDLE)
         
         # 확인 응답 해석
         message_lower = message.strip().lower()
@@ -794,7 +795,7 @@ class AIParser:
             action = pending_action.get("action")
             args = pending_action.get("args", {})
             
-            tool_result = execute_tool(action, args, user_id, user_name, mode=None)
+            tool_result = execute_tool(action, args, user_id, user_name, mode=mode)
             
             if tool_result.get("success"):
                 return {

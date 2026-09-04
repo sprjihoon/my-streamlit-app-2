@@ -33,6 +33,7 @@ from backend.app.services.repair_bot import (
     is_image_filename,
     receive_photo,
 )
+from backend.app.services.bot_tools import TRUSTED_EXCEL_UPLOAD, execute_tool
 from logic.db import get_connection
 from backend.app.api.logs import add_log
 
@@ -194,7 +195,7 @@ async def process_excel_upload(
     file_name: str,
     channel_type: str
 ):
-    """엑셀 파일 업로드 처리"""
+    """엑셀 파일 업로드 처리. 모드 무관 경로이므로 응답에 모드 접두어를 붙이지 않는다."""
     import httpx
     
     add_debug_log("excel_upload_start", {"file_name": file_name})
@@ -261,14 +262,20 @@ async def process_excel_upload(
                 합계 = 단가 * 수량
                 
                 # 저장
-                result = execute_tool("save_work_log", {
-                    "vendor": 업체명,
-                    "work_type": 분류,
-                    "unit_price": 단가,
-                    "qty": 수량,
-                    "date": 날짜,
-                    "remark": f"[엑셀] {비고}".strip()
-                }, user_id, user_name)
+                result = execute_tool(
+                    "save_work_log",
+                    {
+                        "vendor": 업체명,
+                        "work_type": 분류,
+                        "unit_price": 단가,
+                        "qty": 수량,
+                        "date": 날짜,
+                        "remark": f"[엑셀] {비고}".strip()
+                    },
+                    user_id,
+                    user_name,
+                    trusted_source=TRUSTED_EXCEL_UPLOAD,
+                )
                 
                 if result.get("success"):
                     saved_count += 1
