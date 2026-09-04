@@ -280,16 +280,16 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
           <button
             onClick={async () => {
               try {
-                const info = await getOldRepairPhotos(2);
+                const info = await getOldRepairPhotos(60);
                 if (!info.files) {
                   onMessage({ type: 'success', text: `${info.cutoff} 이전 삭제할 사진이 없습니다.` });
                   return;
                 }
-                if (!window.confirm(`${info.cutoff} 이전 전·후 사진 ${info.files}장(${info.logs}건)을 서버에서 삭제할까요?\n일지 내용은 그대로 남습니다.`)) {
+                if (!window.confirm(`${info.cutoff} 이전 사진 ${info.files}장(바코드·전후·연결 없는 파일, ${info.logs}건)을 서버에서 완전히 삭제할까요?\n일지 내용은 그대로 남습니다. 되돌릴 수 없습니다.`)) {
                   return;
                 }
                 setPurgingOld(true);
-                const result = await purgeOldRepairPhotos(2);
+                const result = await purgeOldRepairPhotos(60);
                 onMessage({ type: 'success', text: result.message });
                 load();
               } catch (e) {
@@ -301,7 +301,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             disabled={purgingOld}
             style={btn('#b45309')}
           >
-            {purgingOld ? '삭제 중...' : '2개월 이전 사진 삭제'}
+            {purgingOld ? '삭제 중...' : '60일 이전 사진 완전 삭제'}
           </button>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
