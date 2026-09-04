@@ -9,9 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from backend.app.config import settings
 
 from backend.app.api.repair_log import (
     _lookup_barcode,
@@ -28,8 +32,9 @@ from logic.db import get_connection
 
 logger = logging.getLogger(__name__)
 
-PHOTO_WAIT_SEC = 2.5
-PHOTO_EXTRA_WAIT_SEC = 1.5
+PHOTO_WAIT_SEC = 5.0
+PHOTO_EXTRA_WAIT_SEC = 2.5
+PHOTO_MAX_EXTRA_ROUNDS = 2
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 
 REPAIR_SIGNALS = (
@@ -55,18 +60,7 @@ class BufferedPhoto:
     ext: str = ".jpg"
 
 
-@dataclass
-class PhotoSession:
-    user_id: str
-    channel_id: str
-    channel_type: str
-    user_name: Optional[str] = None
-    photos: List[BufferedPhoto] = field(default_factory=list)
-    task: Optional[asyncio.Task] = None
-    extra_waited: bool = False
-
-
-_sessions: Dict[str, PhotoSession] = {}
+_flush_tasks: Dict[str, asyncio.Task] = {}
 
 
 def is_image_filename(name: str) -> bool:
@@ -82,9 +76,9 @@ def is_repair_text(text: str) -> bool:
 
 def pending_is_repair(user_id: str) -> bool:
     state = get_conversation_manager().get_state(user_id)
-    if not state:
-        return False
-    return (state.get("pending_data") or {}).get("entry_type") == "repair"
+    if state and (state.get("pending_data") or {}).get("entry_type") == "repair":
+        return True
+    return _inbox_count(user_id) > 0
 
 
 def should_handle_repair(user_id: str, text: str) -> bool:
@@ -285,7 +279,8 @@ async def handle_user_text(
     data.setdefault("user_name", user_name)
     missing = (get_conversation_manager().get_state(user_id) or {}).get("missing") or []
 
-    if data and CANCEL_RE.match(raw):
+    if CANCEL_RE.match(raw) and (data or _inbox_count(user_id) > 0):
+        clear_photo_inbox(user_id)
         _clear_pending(user_id)
         return "🚫 수선 입력을 취소했어요."
 
@@ -378,6 +373,177 @@ async def handle_user_text(
     return continue_after_photos_or_text(data, user_id, channel_id)
 
 
+def _inbox_dir() -> Path:
+    path = Path(settings.UPLOAD_DIR) / "repair"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _inbox_count(user_id: str) -> int:
+    if not user_id:
+        return 0
+    ensure_repair_tables()
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT COUNT(*) FROM repair_photo_inbox_file WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def clear_photo_inbox(user_id: str) -> None:
+    if not user_id:
+        return
+    ensure_repair_tables()
+    folder = _inbox_dir()
+    with get_connection() as con:
+        rows = con.execute(
+            "SELECT filename FROM repair_photo_inbox_file WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        con.execute("DELETE FROM repair_photo_inbox_file WHERE user_id = ?", (user_id,))
+        con.execute("DELETE FROM repair_photo_inbox WHERE user_id = ?", (user_id,))
+        con.commit()
+    for row in rows:
+        try:
+            (folder / row[0]).unlink(missing_ok=True)
+        except Exception:
+            pass
+    task = _flush_tasks.pop(user_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
+def _append_inbox_photo(
+    user_id: str,
+    channel_id: str,
+    channel_type: str,
+    user_name: Optional[str],
+    data: bytes,
+    name: str,
+    ext: str,
+) -> int:
+    ensure_repair_tables()
+    filename = save_image_bytes(data, ext)
+    now = datetime.now().isoformat()
+    flush_after = time.time() + PHOTO_WAIT_SEC
+    with get_connection() as con:
+        con.execute(
+            """
+            INSERT INTO repair_photo_inbox
+                (user_id, channel_id, channel_type, user_name, extra_rounds, notified_n, flush_after, updated_at)
+            VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                channel_type = excluded.channel_type,
+                user_name = COALESCE(excluded.user_name, repair_photo_inbox.user_name),
+                extra_rounds = 0,
+                flush_after = excluded.flush_after,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, channel_id, channel_type, user_name, flush_after, now),
+        )
+        con.execute(
+            """
+            INSERT INTO repair_photo_inbox_file (user_id, filename, name, ext, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, filename, name, ext, now),
+        )
+        count = con.execute(
+            "SELECT COUNT(*) FROM repair_photo_inbox_file WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()[0]
+        con.commit()
+    return int(count)
+
+
+def _claim_inbox_photos(user_id: str, need: int = 3) -> Optional[dict]:
+    """워커 여러 개가 동시에 비우지 않도록 3장을 한 번에 가져온다."""
+    ensure_repair_tables()
+    folder = _inbox_dir()
+    now = datetime.now().isoformat()
+    with get_connection() as con:
+        meta = con.execute(
+            """SELECT channel_id, channel_type, user_name, extra_rounds, notified_n, flush_after
+               FROM repair_photo_inbox WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+        files = con.execute(
+            """SELECT id, filename, name, ext FROM repair_photo_inbox_file
+               WHERE user_id = ? ORDER BY id""",
+            (user_id,),
+        ).fetchall()
+        if not meta or not files:
+            return None
+        n = len(files)
+        if n < need:
+            return {
+                "ready": False,
+                "count": n,
+                "channel_id": meta[0],
+                "channel_type": meta[1],
+                "user_name": meta[2],
+                "extra_rounds": int(meta[3] or 0),
+                "notified_n": int(meta[4] or 0),
+                "flush_after": float(meta[5] or 0),
+            }
+        claimed = con.execute(
+            """UPDATE repair_photo_inbox SET extra_rounds = -1, updated_at = ?
+               WHERE user_id = ? AND extra_rounds >= 0
+                 AND (SELECT COUNT(*) FROM repair_photo_inbox_file WHERE user_id = ?) >= ?""",
+            (now, user_id, user_id, need),
+        )
+        if claimed.rowcount != 1:
+            con.commit()
+            return None
+        taken = files[-need:] if n > need else files
+        photos = []
+        for _id, filename, name, ext in taken:
+            path = folder / filename
+            photos.append(BufferedPhoto(
+                data=path.read_bytes() if path.exists() else b"",
+                name=name or filename,
+                ext=ext or ".jpg",
+            ))
+            con.execute("DELETE FROM repair_photo_inbox_file WHERE id = ?", (_id,))
+        left = con.execute(
+            "SELECT COUNT(*) FROM repair_photo_inbox_file WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()[0]
+        if left == 0:
+            con.execute("DELETE FROM repair_photo_inbox WHERE user_id = ?", (user_id,))
+        con.commit()
+    return {
+        "ready": True,
+        "count": n,
+        "channel_id": meta[0],
+        "channel_type": meta[1],
+        "user_name": meta[2],
+        "photos": photos,
+    }
+
+
+def _bump_inbox_wait(user_id: str) -> None:
+    with get_connection() as con:
+        con.execute(
+            """UPDATE repair_photo_inbox
+               SET extra_rounds = extra_rounds + 1, flush_after = ?
+               WHERE user_id = ?""",
+            (time.time() + PHOTO_EXTRA_WAIT_SEC, user_id),
+        )
+        con.commit()
+
+
+def _mark_inbox_notified(user_id: str, n: int) -> None:
+    with get_connection() as con:
+        con.execute(
+            "UPDATE repair_photo_inbox SET notified_n = ? WHERE user_id = ?",
+            (n, user_id),
+        )
+        con.commit()
+
+
 async def receive_photo(
     user_id: str,
     channel_id: str,
@@ -387,57 +553,95 @@ async def receive_photo(
     user_name: Optional[str] = None,
     send_fn=None,
 ) -> None:
-    """사진을 버퍼에 넣고 잠시 후 세트로 처리."""
-    sess = _sessions.get(user_id)
-    if sess is None or sess.channel_id != channel_id:
-        sess = PhotoSession(user_id=user_id, channel_id=channel_id, channel_type=channel_type, user_name=user_name)
-        _sessions[user_id] = sess
+    """사진을 워커 공용 버퍼에 넣고 잠시 후 세트로 처리."""
     ext = ".jpg"
     lower = (name or "").lower()
     for e in IMAGE_EXTS:
         if lower.endswith(e):
             ext = e if e != ".jpeg" else ".jpg"
             break
-    sess.photos.append(BufferedPhoto(data=data, name=name or "photo.jpg", ext=ext))
-    sess.user_name = user_name or sess.user_name
-    if sess.task and not sess.task.done():
-        sess.task.cancel()
-    wait = PHOTO_WAIT_SEC if len(sess.photos) < 3 else 1.0
-    sess.task = asyncio.create_task(_flush_later(sess, wait, send_fn))
+    count = _append_inbox_photo(
+        user_id, channel_id, channel_type, user_name, data, name or "photo.jpg", ext
+    )
+    logger.info("repair photo buffered user=%s count=%s", user_id, count)
+    wait = 1.0 if count >= 3 else PHOTO_WAIT_SEC
+    existing = _flush_tasks.get(user_id)
+    if existing and not existing.done():
+        existing.cancel()
+    _flush_tasks[user_id] = asyncio.create_task(_flush_later(user_id, wait, send_fn))
 
 
-async def _flush_later(sess: PhotoSession, wait: float, send_fn) -> None:
+async def _flush_later(user_id: str, wait: float, send_fn, depth: int = 0) -> None:
     try:
         await asyncio.sleep(wait)
-        await _flush_session(sess, send_fn)
+        await _flush_inbox(user_id, send_fn, depth)
     except asyncio.CancelledError:
         return
 
 
-async def _flush_session(sess: PhotoSession, send_fn) -> None:
-    n = len(sess.photos)
-    if n == 0:
+async def _flush_inbox(user_id: str, send_fn, depth: int = 0) -> None:
+    if depth > 6:
         return
-    if n == 2 and not sess.extra_waited:
-        sess.extra_waited = True
-        sess.task = asyncio.create_task(_flush_later(sess, PHOTO_EXTRA_WAIT_SEC, send_fn))
-        return
-    if n < 3:
-        msg = f"사진 {n}장 받았어요. 바코드·수선 전·후 포함해서 한 장 더 보내주세요."
-        if send_fn:
-            await send_fn(sess.channel_id, msg, sess.channel_type)
+    ensure_repair_tables()
+    with get_connection() as con:
+        meta = con.execute(
+            """SELECT channel_id, channel_type, extra_rounds, notified_n, flush_after
+               FROM repair_photo_inbox WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+        n = con.execute(
+            "SELECT COUNT(*) FROM repair_photo_inbox_file WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()[0]
+    if not meta or n == 0:
         return
 
-    photos = sess.photos[:3]
-    _sessions.pop(sess.user_id, None)
+    flush_after = float(meta[4] or 0)
+    remain = flush_after - time.time()
+    if remain > 0.05:
+        await _flush_later(user_id, remain, send_fn, depth + 1)
+        return
+
+    if n < 3:
+        extra = int(meta[2] or 0)
+        if extra < PHOTO_MAX_EXTRA_ROUNDS:
+            _bump_inbox_wait(user_id)
+            await _flush_later(user_id, PHOTO_EXTRA_WAIT_SEC, send_fn, depth + 1)
+            return
+        notified = int(meta[3] or 0)
+        if send_fn and notified != n:
+            _mark_inbox_notified(user_id, n)
+            await send_fn(
+                meta[0],
+                f"사진 {n}장 받았어요. 바코드·수선 전·후 포함해서 한 장 더 보내주세요.",
+                meta[1],
+            )
+        return
+
+    claimed = _claim_inbox_photos(user_id, 3)
+    if not claimed or not claimed.get("ready"):
+        if claimed and claimed.get("count", 0) < 3:
+            await _flush_later(user_id, PHOTO_EXTRA_WAIT_SEC, send_fn, depth + 1)
+        return
+
+    photos = [p for p in claimed["photos"] if p.data]
+    if len(photos) < 3:
+        if send_fn:
+            await send_fn(
+                claimed["channel_id"],
+                "사진을 일부 읽지 못했어요. 바코드·수선 전·후 3장을 다시 보내주세요.",
+                claimed["channel_type"],
+            )
+        return
+
     reply = await finalize_photo_set(
-        user_id=sess.user_id,
-        channel_id=sess.channel_id,
+        user_id=user_id,
+        channel_id=claimed["channel_id"],
         photos=photos,
-        user_name=sess.user_name,
+        user_name=claimed["user_name"],
     )
     if send_fn and reply:
-        await send_fn(sess.channel_id, reply, sess.channel_type)
+        await send_fn(claimed["channel_id"], reply, claimed["channel_type"])
 
 
 async def finalize_photo_set(

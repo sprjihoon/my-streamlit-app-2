@@ -122,6 +122,28 @@ def ensure_repair_tables():
                 after_image TEXT
             )
         """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS repair_photo_inbox (
+                user_id TEXT PRIMARY KEY,
+                channel_id TEXT,
+                channel_type TEXT,
+                user_name TEXT,
+                extra_rounds INTEGER DEFAULT 0,
+                notified_n INTEGER DEFAULT 0,
+                flush_after REAL,
+                updated_at TEXT
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS repair_photo_inbox_file (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                name TEXT,
+                ext TEXT,
+                created_at TEXT
+            )
+        """)
         con.commit()
     repair_catalog.ensure_catalog_tables()
 
