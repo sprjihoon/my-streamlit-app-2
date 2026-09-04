@@ -111,15 +111,16 @@ def is_repair_text(text: str) -> bool:
     return any(s in t for s in REPAIR_SIGNALS)
 
 
-def pending_is_repair(user_id: str) -> bool:
-    state = get_conversation_manager().get_state(user_id)
+def pending_is_repair(user_id: str, channel_id: Optional[str] = None) -> bool:
+    state = get_conversation_manager().get_state(user_id, channel_id)
     if state and (state.get("pending_data") or {}).get("entry_type") == "repair":
         return True
     return _inbox_count(user_id) > 0
 
 
-def should_handle_repair(user_id: str, text: str) -> bool:
-    return pending_is_repair(user_id) or is_repair_text(text)
+def should_handle_repair(user_id: str, text: str, channel_id: Optional[str] = None) -> bool:
+    """키워드 자동 분기는 웹훅에서 수선모드일 때만 호출한다."""
+    return pending_is_repair(user_id, channel_id) or is_repair_text(text)
 
 
 def display_vendor(name: Optional[str]) -> str:
@@ -211,8 +212,8 @@ def parse_repair_text(text: str) -> Dict[str, Any]:
     }
 
 
-def _get_pending(user_id: str) -> Dict[str, Any]:
-    state = get_conversation_manager().get_state(user_id)
+def _get_pending(user_id: str, channel_id: Optional[str] = None) -> Dict[str, Any]:
+    state = get_conversation_manager().get_state(user_id, channel_id)
     if not state:
         return {}
     data = state.get("pending_data") or {}
@@ -234,13 +235,13 @@ def _set_pending(user_id: str, channel_id: str, data: Dict[str, Any], missing: L
 
 def _ask(user_id: str, channel_id: str, data: Dict[str, Any], missing: List[str], question: str) -> str:
     """같은 질문을 워커가 여러 번 보내지 않는다."""
-    prev = (get_conversation_manager().get_state(user_id) or {}).get("last_question")
+    prev = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("last_question")
     _set_pending(user_id, channel_id, data, missing, question)
     return "" if prev == question else question
 
 
-def _clear_pending(user_id: str) -> None:
-    get_conversation_manager().clear_state(user_id)
+def _clear_pending(user_id: str, channel_id: Optional[str] = None) -> None:
+    get_conversation_manager().clear_state(user_id, channel_id)
 
 
 def _merge_parsed(data: Dict[str, Any], parsed: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,7 +380,7 @@ def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id
     if data.get("qty") and data.get("price_stated") and data.get("awaiting_price_confirm") is not True:
         # 작업·금액·건수를 한 번에 말한 경우만 바로 저장
         saved = _try_save(data, data.get("user_name"), True)
-        _clear_pending(user_id)
+        _clear_pending(user_id, channel_id)
         return f"✅ {saved['message']}"
 
     return _confirm_cost_qty(data, user_id, channel_id)
@@ -392,18 +393,18 @@ async def handle_user_text(
     user_name: Optional[str] = None,
 ) -> str:
     raw = (text or "").strip()
-    data = _get_pending(user_id)
+    data = _get_pending(user_id, channel_id)
     data.setdefault("user_name", user_name)
-    missing = (get_conversation_manager().get_state(user_id) or {}).get("missing") or []
+    missing = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
 
     if CANCEL_RE.match(raw) and (data or _inbox_count(user_id) > 0):
-        clear_photo_inbox(user_id)
-        _clear_pending(user_id)
+        clear_photo_inbox(user_id, channel_id)
+        _clear_pending(user_id, channel_id)
         return "🚫 수선 입력을 취소했어요."
 
     if is_cost_catalog_query(raw, pending_repair=bool(data or missing)):
         listing = format_work_cost_list()
-        last_q = (get_conversation_manager().get_state(user_id) or {}).get("last_question") or ""
+        last_q = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("last_question") or ""
         if last_q and last_q not in listing:
             return f"{listing}\n\n{last_q}"
         return listing
@@ -434,11 +435,11 @@ async def handle_user_text(
         if YES_RE.match(raw):
             data["qty"] = data.get("qty") or 1
             saved = _try_save(data, user_name or data.get("user_name"), bool(data.get("price_stated")))
-            _clear_pending(user_id)
+            _clear_pending(user_id, channel_id)
             return f"✅ {saved['message']}"
         if data.get("qty") and data.get("unit_price"):
             saved = _try_save(data, user_name or data.get("user_name"), bool(data.get("price_stated")))
-            _clear_pending(user_id)
+            _clear_pending(user_id, channel_id)
             return f"✅ {saved['message']}"
         if parsed.get("price") is not None and parsed["price"] != prev_price:
             return _confirm_cost_qty(data, user_id, channel_id)
@@ -562,12 +563,19 @@ def _inbox_count(user_id: str) -> int:
     return int(row[0] or 0) if row else 0
 
 
-def clear_photo_inbox(user_id: str) -> None:
+def clear_photo_inbox(user_id: str, channel_id: Optional[str] = None) -> None:
     if not user_id:
         return
     ensure_repair_tables()
     folder = _inbox_dir()
     with get_connection() as con:
+        if channel_id:
+            meta = con.execute(
+                "SELECT channel_id FROM repair_photo_inbox WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if meta and meta[0] and meta[0] != channel_id:
+                return
         rows = con.execute(
             "SELECT filename FROM repair_photo_inbox_file WHERE user_id = ?",
             (user_id,),
@@ -836,7 +844,7 @@ async def finalize_photo_set(
             continue
         saved_names[i] = save_image_bytes(p.data, p.ext)
 
-    data = _get_pending(user_id)
+    data = _get_pending(user_id, channel_id)
     data.setdefault("user_name", user_name)
     data["entry_type"] = "repair"
     if classified.get("before_index") is not None:
@@ -870,7 +878,8 @@ async def finalize_photo_set(
 
 def save_repair_from_tool(args: Dict[str, Any], user_id: str, user_name: str) -> Dict[str, Any]:
     """Function Calling용."""
-    pending = _get_pending(user_id)
+    channel_id = args.get("channel_id")
+    pending = _get_pending(user_id, channel_id)
     data = {**pending, **{k: v for k, v in args.items() if v not in (None, "")}}
     data["vendor"] = data.get("vendor") or args.get("vendor")
     data["work_type"] = data.get("work_type") or args.get("work_type")
@@ -881,7 +890,7 @@ def save_repair_from_tool(args: Dict[str, Any], user_id: str, user_name: str) ->
     data["barcode"] = data.get("barcode") or args.get("barcode")
     try:
         result = _try_save(data, user_name, bool(data.get("price_stated") or args.get("price_stated")))
-        _clear_pending(user_id)
+        _clear_pending(user_id, channel_id)
         return result
     except ValueError as e:
         return {"success": False, "error": str(e)}
