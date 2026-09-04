@@ -678,7 +678,185 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_vendors",
+            "description": "등록 업체와 별칭을 조회합니다. 읽기 전용.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "업체명 또는 별칭 검색어"}
+                },
+                "additionalProperties": False,
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_rate_tables",
+            "description": "출고비·추가작업비·택배비·부자재 단가를 조회합니다. 읽기 전용.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string",
+                        "description": "out_basic, out_extra, shipping_zone, material_rates, all 중 하나"
+                    }
+                },
+                "additionalProperties": False,
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_storage",
+            "description": "보관료 단가와 업체별 보관 설정을 조회합니다. 읽기 전용.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string", "description": "업체명(선택)"}
+                },
+                "additionalProperties": False,
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_vendor_charges",
+            "description": "거래처별 추가 청구 설정을 조회합니다. 읽기 전용.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string", "description": "업체명 또는 vendor_id"}
+                },
+                "additionalProperties": False,
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_repair_catalog",
+            "description": "수선 작업·불량·기본비용을 조회합니다. 읽기 전용.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            }
+        }
+    },
 ]
+
+
+WRITE_TOOL_NAMES = {
+    "save_work_log",
+    "save_multiple_work_logs",
+    "delete_work_log",
+    "update_work_log",
+    "bulk_update_work_logs",
+    "copy_work_logs",
+    "add_memo",
+    "undo_action",
+    "save_repair_log",
+    "apply_leave",
+    "cancel_leave",
+    "approve_leave",
+    "reject_leave",
+}
+
+JOURNAL_TOOL_NAMES = {
+    "save_work_log",
+    "save_multiple_work_logs",
+    "lookup_price_from_history",
+    "update_work_log",
+    "delete_work_log",
+    "add_memo",
+    "ask_missing_info",
+    "complete_pending_entry",
+    "ask_price_confirmation",
+    "cancel_pending_entry",
+}
+
+QUERY_TOOL_NAMES = {
+    "search_work_logs",
+    "get_work_log_stats",
+    "compare_periods",
+    "get_invoice_stats",
+    "lookup_vendors",
+    "lookup_rate_tables",
+    "lookup_storage",
+    "lookup_vendor_charges",
+    "lookup_repair_catalog",
+}
+
+INACTIVE_TOOL_NAMES = {
+    "bulk_update_work_logs",
+    "copy_work_logs",
+    "get_undo_history",
+    "undo_action",
+    "get_dashboard_url",
+    "web_search",
+    "get_help",
+    "save_repair_log",
+    "lookup_repair_price",
+    "lookup_repair_barcode",
+    "check_leave",
+    "apply_leave",
+    "cancel_leave",
+    "approve_leave",
+    "reject_leave",
+    "get_pending_approvals",
+}
+
+_TOOL_BY_NAME = {
+    spec["function"]["name"]: spec for spec in TOOLS if spec.get("function")
+}
+
+
+def _apply_schema_guard(spec: dict, *, strict: bool) -> dict:
+    """가능한 범위에서 additionalProperties=false, strict를 붙인다. 실행 함수는 그대로 둔다."""
+    out = json.loads(json.dumps(spec))
+    fn = out["function"]
+    params = fn.setdefault("parameters", {"type": "object", "properties": {}})
+    params["type"] = "object"
+    params["additionalProperties"] = False
+    props = params.get("properties") or {}
+    if strict and props:
+        params["required"] = list(props.keys())
+        fn["strict"] = True
+    elif not props:
+        params["additionalProperties"] = False
+        if strict:
+            fn["strict"] = True
+            params["required"] = []
+    return out
+
+
+def get_tools_for_mode(mode: str) -> list:
+    """모드에 노출할 도구 스키마만 반환. 비활성 그룹은 삭제하지 않고 여기 넣지 않는다."""
+    if mode == "journal":
+        names = JOURNAL_TOOL_NAMES
+        strict = False
+    elif mode == "query":
+        names = QUERY_TOOL_NAMES
+        strict = True
+    else:
+        return []
+    tools = []
+    for name, spec in _TOOL_BY_NAME.items():
+        if name in names:
+            tools.append(_apply_schema_guard(spec, strict=strict and name.startswith("lookup_")))
+    return tools
+
+
+def allowed_arg_keys(tool_name: str) -> set:
+    spec = _TOOL_BY_NAME.get(tool_name) or {}
+    props = ((spec.get("function") or {}).get("parameters") or {}).get("properties") or {}
+    return set(props.keys())
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -689,20 +867,30 @@ def execute_tool(
     tool_name: str,
     arguments: Dict[str, Any],
     user_id: str,
-    user_name: str = None
+    user_name: str = None,
+    mode: str = None,
 ) -> Dict[str, Any]:
     """
     도구를 실행하고 결과를 반환합니다.
-    
-    Args:
-        tool_name: 실행할 도구 이름
-        arguments: 도구 인자
-        user_id: 사용자 ID
-        user_name: 사용자 이름
-    
-    Returns:
-        실행 결과 딕셔너리
+    조회모드에서는 저장·수정·삭제 도구를 거부한다.
     """
+    if mode == "idle":
+        return {"success": False, "error": "기본상태에서는 업무 도구를 실행할 수 없습니다. 모드를 선택해주세요."}
+    if mode == "query":
+        if tool_name in WRITE_TOOL_NAMES or tool_name not in QUERY_TOOL_NAMES:
+            return {"success": False, "error": "조회모드에서는 저장·수정·삭제를 할 수 없습니다."}
+    if mode == "journal" and tool_name not in JOURNAL_TOOL_NAMES:
+        return {"success": False, "error": "일지모드에서 사용할 수 없는 도구입니다."}
+    if mode == "repair":
+        return {"success": False, "error": "수선모드에서는 GPT 업무 도구를 실행하지 않습니다."}
+
+    allowed = allowed_arg_keys(tool_name)
+    args = dict(arguments or {})
+    if allowed:
+        extra = set(args.keys()) - allowed
+        for key in extra:
+            args.pop(key, None)
+
     tool_functions = {
         "save_work_log": _save_work_log,
         "save_multiple_work_logs": _save_multiple_work_logs,
@@ -724,20 +912,24 @@ def execute_tool(
         "save_repair_log": _save_repair_log,
         "lookup_repair_price": _lookup_repair_price,
         "lookup_repair_barcode": _lookup_repair_barcode_tool,
-        # 연차 관련 도구
         "check_leave": _check_leave,
         "apply_leave": _apply_leave,
         "cancel_leave": _cancel_leave,
         "approve_leave": _approve_leave,
         "reject_leave": _reject_leave,
         "get_pending_approvals": _get_pending_approvals,
+        "lookup_vendors": _lookup_vendors,
+        "lookup_rate_tables": _lookup_rate_tables,
+        "lookup_storage": _lookup_storage,
+        "lookup_vendor_charges": _lookup_vendor_charges_tool,
+        "lookup_repair_catalog": _lookup_repair_catalog,
     }
     
     if tool_name not in tool_functions:
         return {"success": False, "error": f"Unknown tool: {tool_name}"}
     
     try:
-        return tool_functions[tool_name](arguments, user_id, user_name)
+        return tool_functions[tool_name](args, user_id, user_name)
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -2164,6 +2356,104 @@ def _get_pending_approvals(args: Dict, user_id: str, user_name: str) -> Dict:
         return {"success": True, "message": "\n".join(lines)}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def _lookup_vendors(args: Dict, user_id: str, user_name: str) -> Dict:
+    q = (args.get("query") or "").strip()
+    with get_connection() as con:
+        vendors = [r[0] for r in con.execute(
+            "SELECT vendor FROM vendors WHERE vendor IS NOT NULL ORDER BY vendor"
+        ).fetchall() if r[0]]
+        aliases = []
+        try:
+            rows = con.execute(
+                "SELECT alias, vendor FROM aliases WHERE alias IS NOT NULL AND vendor IS NOT NULL"
+            ).fetchall()
+            aliases = [{"alias": a, "vendor": v} for a, v in rows]
+        except Exception:
+            aliases = []
+    if q:
+        nq = q.lower()
+        vendors = [v for v in vendors if nq in v.lower()]
+        aliases = [a for a in aliases if nq in a["alias"].lower() or nq in a["vendor"].lower()]
+    return {"success": True, "vendors": vendors[:80], "aliases": aliases[:80]}
+
+
+def _lookup_rate_tables(args: Dict, user_id: str, user_name: str) -> Dict:
+    table = (args.get("table") or "all").strip()
+    wanted = {"out_basic", "out_extra", "shipping_zone", "material_rates"}
+    if table != "all":
+        wanted = {table} if table in wanted else wanted
+    out: Dict[str, Any] = {"success": True}
+    with get_connection() as con:
+        names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "out_basic" in wanted and "out_basic" in names:
+            cols = [c[1] for c in con.execute("PRAGMA table_info(out_basic)")]
+            rows = con.execute("SELECT * FROM out_basic").fetchall()
+            out["out_basic"] = [dict(zip(cols, r)) for r in rows]
+        if "out_extra" in wanted and "out_extra" in names:
+            cols = [c[1] for c in con.execute("PRAGMA table_info(out_extra)")]
+            rows = con.execute("SELECT * FROM out_extra").fetchall()
+            out["out_extra"] = [dict(zip(cols, r)) for r in rows]
+        if "shipping_zone" in wanted and "shipping_zone" in names:
+            cols = [c[1] for c in con.execute("PRAGMA table_info(shipping_zone)")]
+            rows = con.execute("SELECT * FROM shipping_zone").fetchall()
+            out["shipping_zone"] = [dict(zip(cols, r)) for r in rows]
+        if "material_rates" in wanted and "material_rates" in names:
+            cols = [c[1] for c in con.execute("PRAGMA table_info(material_rates)")]
+            rows = con.execute("SELECT * FROM material_rates").fetchall()
+            out["material_rates"] = [dict(zip(cols, r)) for r in rows]
+    return out
+
+
+def _lookup_storage(args: Dict, user_id: str, user_name: str) -> Dict:
+    vendor = (args.get("vendor") or "").strip()
+    result: Dict[str, Any] = {"success": True, "storage_rates": [], "vendor_storage": []}
+    with get_connection() as con:
+        names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if "storage_rates" in names:
+            cols = [c[1] for c in con.execute("PRAGMA table_info(storage_rates)")]
+            rows = con.execute("SELECT * FROM storage_rates").fetchall()
+            result["storage_rates"] = [dict(zip(cols, r)) for r in rows]
+        if "vendor_storage" in names:
+            cols = [c[1] for c in con.execute("PRAGMA table_info(vendor_storage)")]
+            if vendor:
+                rows = con.execute(
+                    "SELECT * FROM vendor_storage WHERE vendor_id LIKE ? OR item_name LIKE ?",
+                    (f"%{vendor}%", f"%{vendor}%"),
+                ).fetchall()
+            else:
+                rows = con.execute("SELECT * FROM vendor_storage LIMIT 80").fetchall()
+            result["vendor_storage"] = [dict(zip(cols, r)) for r in rows]
+    return result
+
+
+def _lookup_vendor_charges_tool(args: Dict, user_id: str, user_name: str) -> Dict:
+    vendor = (args.get("vendor") or "").strip()
+    with get_connection() as con:
+        exists = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_charges'"
+        ).fetchone()
+        if not exists:
+            return {"success": True, "charges": [], "message": "추가 청구 테이블이 없습니다."}
+        cols = [c[1] for c in con.execute("PRAGMA table_info(vendor_charges)")]
+        if vendor:
+            rows = con.execute(
+                "SELECT * FROM vendor_charges WHERE vendor_id LIKE ? OR item_name LIKE ?",
+                (f"%{vendor}%", f"%{vendor}%"),
+            ).fetchall()
+        else:
+            rows = con.execute("SELECT * FROM vendor_charges LIMIT 80").fetchall()
+    return {"success": True, "charges": [dict(zip(cols, r)) for r in rows]}
+
+
+def _lookup_repair_catalog(args: Dict, user_id: str, user_name: str) -> Dict:
+    from backend.app.services import repair_catalog
+    return {
+        "success": True,
+        "work_types": repair_catalog.list_work_types(),
+        "defects": repair_catalog.list_defects(),
+    }
 
 
 def get_db_context_for_ai() -> str:
