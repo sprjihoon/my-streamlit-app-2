@@ -18,13 +18,20 @@ import pandas as pd
 from io import BytesIO
 
 from backend.app.services import get_naver_works_client, get_ai_parser
-from backend.app.services.bot_tools import execute_tool
 from backend.app.services.conversation_state import get_conversation_manager
+from backend.app.services.bot_mode import (
+    MODE_IDLE,
+    MODE_REPAIR,
+    apply_mode_command,
+    get_mode,
+    idle_guide,
+    parse_mode_command,
+    with_mode_prefix,
+)
 from backend.app.services.repair_bot import (
     handle_user_text,
     is_image_filename,
     receive_photo,
-    should_handle_repair,
 )
 from logic.db import get_connection
 from backend.app.api.logs import add_log
@@ -64,6 +71,12 @@ def add_debug_log(event: str, data: Any = None, error: str = None):
 
 
 
+async def _send_prefixed(nw_client, user_id: str, channel_id: str, text: str, channel_type: str):
+    """모든 봇 응답에 모드 접두어를 한 곳에서만 붙인다."""
+    mode = get_mode(user_id, channel_id)
+    await nw_client.send_text_message(channel_id, with_mode_prefix(text, mode), channel_type)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 메시지 처리 메인 로직
 # ═══════════════════════════════════════════════════════════════════
@@ -101,42 +114,54 @@ async def process_message(
         except:
             user_name = None
     
-    try:
-        ai_parser = get_ai_parser()
-    except Exception as e:
-        add_debug_log("ai_parser_error", error=str(e))
-        await nw_client.send_text_message(channel_id, f"❌ AI 초기화 오류: {str(e)}", channel_type)
-        return
-    
-    # 대화 이력 조회
     conv_manager = get_conversation_manager()
-    conversation_history = conv_manager.get_history(user_id, limit=6)
-    
-    # 사용자 메시지를 이력에 추가
     user_msg_content = f"[{user_name}] {text}" if user_name else text
     conv_manager.add_message(user_id, channel_id, "user", user_msg_content)
 
-    if should_handle_repair(user_id, text):
+    command = parse_mode_command(text)
+    if command:
+        reply = apply_mode_command(user_id, channel_id, command)
+        conv_manager.add_message(user_id, channel_id, "assistant", reply)
+        await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+        return
+
+    mode = get_mode(user_id, channel_id)
+    if mode == MODE_IDLE:
+        reply = idle_guide()
+        conv_manager.add_message(user_id, channel_id, "assistant", reply)
+        await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+        return
+
+    if mode == MODE_REPAIR:
         try:
             reply = await handle_user_text(user_id, channel_id, text, user_name)
             add_debug_log("repair_text_handled", {"reply": (reply or "")[:200]})
             if reply:
                 conv_manager.add_message(user_id, channel_id, "assistant", reply)
-                await nw_client.send_text_message(channel_id, reply, channel_type)
+                await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
             return
         except Exception as e:
             add_debug_log("repair_text_error", error=str(e))
-            await nw_client.send_text_message(channel_id, f"❌ 수선 처리 오류: {e}", channel_type)
+            await _send_prefixed(nw_client, user_id, channel_id, f"❌ 수선 처리 오류: {e}", channel_type)
             return
-    
-    # 메시지 처리 (대화 이력 전달)
+
+    try:
+        ai_parser = get_ai_parser()
+    except Exception as e:
+        add_debug_log("ai_parser_error", error=str(e))
+        await _send_prefixed(nw_client, user_id, channel_id, f"❌ AI 초기화 오류: {str(e)}", channel_type)
+        return
+
+    conversation_history = conv_manager.get_history(user_id, limit=6, channel_id=channel_id)
+
     try:
         result = await ai_parser.process_message(
             message=text,
             user_id=user_id,
             user_name=user_name,
             channel_id=channel_id,
-            conversation_history=conversation_history
+            conversation_history=conversation_history,
+            mode=mode,
         )
         
         add_debug_log("process_result", {
@@ -148,18 +173,17 @@ async def process_message(
         response = result.get("response", "")
         
         if response:
-            # 응답을 이력에 저장
             conv_manager.add_message(user_id, channel_id, "assistant", response)
-            await nw_client.send_text_message(channel_id, response, channel_type)
+            await _send_prefixed(nw_client, user_id, channel_id, response, channel_type)
         else:
-            await nw_client.send_text_message(channel_id, "🤖 응답을 생성하지 못했습니다.", channel_type)
+            await _send_prefixed(nw_client, user_id, channel_id, "🤖 응답을 생성하지 못했습니다.", channel_type)
     
     except Exception as e:
         add_debug_log("process_error", error=f"{type(e).__name__}: {str(e)}")
-        await nw_client.send_text_message(
-            channel_id,
+        await _send_prefixed(
+            nw_client, user_id, channel_id,
             f"❌ 처리 중 오류: {str(e)}",
-            channel_type
+            channel_type,
         )
 
 
@@ -278,10 +302,17 @@ async def process_image_upload(
     file_id: Optional[str],
     file_name: str,
 ):
-    """수선용 사진 수신 → 2~3초 모아 한 세트로 처리."""
+    """수선용 사진 수신 → 수선모드에서만 수선 흐름으로 보낸다."""
     add_debug_log("repair_image_start", {"file_name": file_name, "has_url": bool(file_url), "file_id": file_id})
     try:
         nw_client = get_naver_works_client()
+        if get_mode(user_id, channel_id) != MODE_REPAIR:
+            await _send_prefixed(
+                nw_client, user_id, channel_id,
+                "사진은 수선모드에서만 받아요. 수선모드 시작 을 먼저 보내주세요.",
+                channel_type,
+            )
+            return
         user_name = None
         try:
             user_name = await nw_client.get_user_name(user_id)
@@ -305,8 +336,12 @@ async def process_image_upload(
         if data is None:
             if last_error:
                 raise last_error
-            await nw_client.send_text_message(channel_id, "사진을 받지 못했어요. 다시 보내주세요.", channel_type)
+            await _send_prefixed(nw_client, user_id, channel_id, "사진을 받지 못했어요. 다시 보내주세요.", channel_type)
             return
+
+        async def send_fn(ch_id, msg, ch_type="group"):
+            await _send_prefixed(nw_client, user_id, ch_id, msg, ch_type)
+
         await receive_photo(
             user_id=user_id,
             channel_id=channel_id,
@@ -314,14 +349,14 @@ async def process_image_upload(
             data=data,
             name=file_name or "photo.jpg",
             user_name=user_name,
-            send_fn=nw_client.send_text_message,
+            send_fn=send_fn,
         )
     except Exception as e:
         add_debug_log("repair_image_error", error=str(e))
         try:
             nw_client = get_naver_works_client()
-            await nw_client.send_text_message(
-                channel_id,
+            await _send_prefixed(
+                nw_client, user_id, channel_id,
                 "❌ 사진을 받지 못했어요. 같은 사진 3장을 다시 한 번에 보내주세요.",
                 channel_type,
             )
@@ -336,18 +371,11 @@ async def send_welcome_message(channel_id: str):
         
         welcome_msg = (
             "👋 안녕하세요! 작업일지봇입니다!\n\n"
-            "💬 자연어로 편하게 대화하세요!\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "📝 입력: 틸리언 하차 3만원\n"
-            "🔍 조회: 오늘 작업 보여줘\n"
-            "✏️ 수정: 취소 / 수정해줘\n"
-            "📊 통계: 이번달 총 얼마?\n\n"
-            "💡 정보가 부족하면 물어봐요:\n"
-            '   "틸리언 하차" → "단가가 얼마예요?"\n\n'
-            "🧵 수선: 사진 3장(바코드/전/후) + 작업·금액\n"
-            "📖 도움말: '도움말' 입력\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "무엇이든 물어보세요! 🤖"
+            "먼저 모드를 선택해주세요.\n"
+            "• 일지모드 시작\n"
+            "• 수선모드 시작\n"
+            "• 조회모드 시작\n"
+            "• 모드 종료 / 현재 모드"
         )
         
         await nw_client.send_text_message(channel_id, welcome_msg, "group")
