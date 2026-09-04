@@ -5,10 +5,20 @@ OpenAI Function Calling을 위한 도구(tools) 스키마와 실행 함수를 �
 """
 
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from logic.db import get_connection
 from backend.app.api.logs import add_log
+
+QUERY_DEFAULT_LIMIT = 20
+QUERY_MAX_LIMIT = 50
+QUERY_ALL_TABLE_LIMIT = 15
+TRUSTED_EXCEL_UPLOAD = "excel_upload"
+_SECRET_KEY_RE = re.compile(
+    r"password|passwd|api[_-]?key|secret|token|credential|private[_-]?key|authorization|session|env",
+    re.I,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -686,7 +696,9 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "업체명 또는 별칭 검색어"}
+                    "query": {"type": "string", "description": "업체명 또는 별칭 검색어"},
+                    "limit": {"type": "integer", "description": "최대 행 수 (기본 20, 최대 50)"},
+                    "offset": {"type": "integer", "description": "건너뛸 행 수"},
                 },
                 "additionalProperties": False,
             }
@@ -702,8 +714,10 @@ TOOLS = [
                 "properties": {
                     "table": {
                         "type": "string",
-                        "description": "out_basic, out_extra, shipping_zone, material_rates, all 중 하나"
-                    }
+                        "description": "out_basic, out_extra, shipping_zone, material_rates 중 하나. 전체를 원하면 테이블을 나눠 조회"
+                    },
+                    "limit": {"type": "integer", "description": "최대 행 수 (기본 20, 최대 50)"},
+                    "offset": {"type": "integer", "description": "건너뛸 행 수"},
                 },
                 "additionalProperties": False,
             }
@@ -717,7 +731,9 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "vendor": {"type": "string", "description": "업체명(선택)"}
+                    "vendor": {"type": "string", "description": "업체명(선택)"},
+                    "limit": {"type": "integer", "description": "최대 행 수 (기본 20, 최대 50)"},
+                    "offset": {"type": "integer", "description": "건너뛸 행 수"},
                 },
                 "additionalProperties": False,
             }
@@ -731,7 +747,9 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "vendor": {"type": "string", "description": "업체명 또는 vendor_id"}
+                    "vendor": {"type": "string", "description": "업체명 또는 vendor_id"},
+                    "limit": {"type": "integer", "description": "최대 행 수 (기본 20, 최대 50)"},
+                    "offset": {"type": "integer", "description": "건너뛸 행 수"},
                 },
                 "additionalProperties": False,
             }
@@ -744,7 +762,10 @@ TOOLS = [
             "description": "수선 작업·불량·기본비용을 조회합니다. 읽기 전용.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "limit": {"type": "integer", "description": "최대 행 수 (기본 20, 최대 50)"},
+                    "offset": {"type": "integer", "description": "건너뛸 행 수"},
+                },
                 "additionalProperties": False,
             }
         }
@@ -859,6 +880,83 @@ def allowed_arg_keys(tool_name: str) -> set:
     return set(props.keys())
 
 
+def _coerce_arg(value: Any, typ: Optional[str]) -> Any:
+    if value is None:
+        return None
+    if typ == "integer":
+        if isinstance(value, bool):
+            raise ValueError("boolean is not integer")
+        return int(value)
+    if typ == "number":
+        if isinstance(value, bool):
+            raise ValueError("boolean is not number")
+        return float(value)
+    if typ == "boolean":
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ("true", "1", "yes"):
+            return True
+        if text in ("false", "0", "no"):
+            return False
+        raise ValueError("invalid boolean")
+    if typ == "string":
+        return str(value)
+    if typ == "array":
+        if not isinstance(value, list):
+            raise ValueError("expected array")
+        return value
+    if typ == "object":
+        if not isinstance(value, dict):
+            raise ValueError("expected object")
+        return value
+    return value
+
+
+def validate_tool_args(tool_name: str, arguments: Optional[Dict[str, Any]]) -> tuple:
+    """타입·필수값·허용 필드만 통과시킨다. 선택값은 비워도 된다."""
+    spec = _TOOL_BY_NAME.get(tool_name) or {}
+    params = (spec.get("function") or {}).get("parameters") or {}
+    props = params.get("properties") or {}
+    required = params.get("required") or []
+    raw = dict(arguments or {})
+    cleaned: Dict[str, Any] = {}
+    for key, val in raw.items():
+        if key not in props:
+            continue
+        prop = props[key] or {}
+        typ = prop.get("type")
+        try:
+            if typ == "array" and key == "entries":
+                items_spec = prop.get("items") or {}
+                item_props = items_spec.get("properties") or {}
+                item_req = items_spec.get("required") or []
+                if not isinstance(val, list):
+                    return None, "entries는 배열이어야 합니다."
+                entries = []
+                for item in val:
+                    if not isinstance(item, dict):
+                        return None, "entries 항목이 올바르지 않습니다."
+                    one: Dict[str, Any] = {}
+                    for ik, iv in item.items():
+                        if ik not in item_props:
+                            continue
+                        one[ik] = _coerce_arg(iv, item_props[ik].get("type"))
+                    for rk in item_req:
+                        if one.get(rk) in (None, ""):
+                            return None, f"entries.{rk}은(는) 필수입니다."
+                    entries.append(one)
+                cleaned[key] = entries
+                continue
+            cleaned[key] = _coerce_arg(val, typ)
+        except (TypeError, ValueError):
+            return None, f"{key} 값이 올바르지 않습니다."
+    for rk in required:
+        if cleaned.get(rk) in (None, "", []):
+            return None, f"{rk}은(는) 필수입니다."
+    return cleaned, None
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 도구 실행 함수들
 # ═══════════════════════════════════════════════════════════════════
@@ -869,27 +967,38 @@ def execute_tool(
     user_id: str,
     user_name: str = None,
     mode: str = None,
+    trusted_source: str = None,
 ) -> Dict[str, Any]:
     """
     도구를 실행하고 결과를 반환합니다.
-    조회모드에서는 저장·수정·삭제 도구를 거부한다.
+    GPT/외부 호출은 mode가 없거나 잘못되면 쓰기를 거부한다.
+    엑셀 업로드만 trusted_source='excel_upload'로 저장을 허용한다.
     """
-    if mode == "idle":
-        return {"success": False, "error": "기본상태에서는 업무 도구를 실행할 수 없습니다. 모드를 선택해주세요."}
-    if mode == "query":
-        if tool_name in WRITE_TOOL_NAMES or tool_name not in QUERY_TOOL_NAMES:
+    if trusted_source == TRUSTED_EXCEL_UPLOAD:
+        if tool_name != "save_work_log":
+            return {"success": False, "error": "엑셀 업로드는 작업일지 저장만 허용합니다."}
+    else:
+        if tool_name in WRITE_TOOL_NAMES and mode != "journal":
+            if mode == "query":
+                return {"success": False, "error": "조회모드에서는 저장·수정·삭제를 할 수 없습니다."}
+            if mode == "idle":
+                return {"success": False, "error": "기본상태에서는 업무 도구를 실행할 수 없습니다. 모드를 선택해주세요."}
+            if mode == "repair":
+                return {"success": False, "error": "수선모드에서는 GPT 업무 도구를 실행하지 않습니다."}
+            return {"success": False, "error": "모드가 없거나 올바르지 않아 쓰기를 거부합니다."}
+        if mode == "idle":
+            return {"success": False, "error": "기본상태에서는 업무 도구를 실행할 수 없습니다. 모드를 선택해주세요."}
+        if mode == "query" and (tool_name in WRITE_TOOL_NAMES or tool_name not in QUERY_TOOL_NAMES):
             return {"success": False, "error": "조회모드에서는 저장·수정·삭제를 할 수 없습니다."}
-    if mode == "journal" and tool_name not in JOURNAL_TOOL_NAMES:
-        return {"success": False, "error": "일지모드에서 사용할 수 없는 도구입니다."}
-    if mode == "repair":
-        return {"success": False, "error": "수선모드에서는 GPT 업무 도구를 실행하지 않습니다."}
+        if mode == "journal" and tool_name not in JOURNAL_TOOL_NAMES:
+            return {"success": False, "error": "일지모드에서 사용할 수 없는 도구입니다."}
+        if mode == "repair":
+            return {"success": False, "error": "수선모드에서는 GPT 업무 도구를 실행하지 않습니다."}
 
-    allowed = allowed_arg_keys(tool_name)
-    args = dict(arguments or {})
-    if allowed:
-        extra = set(args.keys()) - allowed
-        for key in extra:
-            args.pop(key, None)
+    cleaned, err = validate_tool_args(tool_name, arguments)
+    if err:
+        return {"success": False, "error": err}
+    args = cleaned
 
     tool_functions = {
         "save_work_log": _save_work_log,
@@ -2358,101 +2467,222 @@ def _get_pending_approvals(args: Dict, user_id: str, user_name: str) -> Dict:
         return {"success": False, "error": str(e)}
 
 
+def _clamp_limit(value, default: int = QUERY_DEFAULT_LIMIT, maximum: int = QUERY_MAX_LIMIT) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(1, min(n, maximum))
+
+
+def _clamp_offset(value) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = 0
+    return max(0, n)
+
+
+def _sql_ident(name: str) -> str:
+    return "[" + str(name).replace("]", "") + "]"
+
+
+def _strip_secrets(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in row.items() if not _SECRET_KEY_RE.search(str(k))}
+
+
+def _fetch_allowed(
+    con,
+    table: str,
+    columns: List[str],
+    *,
+    where: str = "",
+    params: tuple = (),
+    order_by: Optional[str] = None,
+    limit: int = QUERY_DEFAULT_LIMIT,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    allowed_tables = {
+        "vendors", "aliases", "out_basic", "out_extra", "shipping_zone",
+        "material_rates", "storage_rates", "vendor_storage", "vendor_charges",
+        "repair_work_type", "repair_defect",
+    }
+    if table not in allowed_tables:
+        return {"rows": [], "truncated": False, "limit": limit, "offset": offset}
+    exists = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    if not exists:
+        return {"rows": [], "truncated": False, "limit": limit, "offset": offset, "missing": True}
+    real_cols = {c[1] for c in con.execute(f"PRAGMA table_info({_sql_ident(table)})")}
+    cols = [c for c in columns if c in real_cols and not _SECRET_KEY_RE.search(c)]
+    if not cols:
+        return {"rows": [], "truncated": False, "limit": limit, "offset": offset}
+    order_sql = ""
+    if order_by and order_by in cols:
+        order_sql = f" ORDER BY {_sql_ident(order_by)}"
+    sql = f"SELECT {', '.join(_sql_ident(c) for c in cols)} FROM {_sql_ident(table)}"
+    if where:
+        sql += f" WHERE {where}"
+    sql += f"{order_sql} LIMIT ? OFFSET ?"
+    rows = con.execute(sql, (*params, limit, offset)).fetchall()
+    out_rows = [_strip_secrets(dict(zip(cols, r))) for r in rows]
+    return {
+        "rows": out_rows,
+        "truncated": len(out_rows) >= limit,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 def _lookup_vendors(args: Dict, user_id: str, user_name: str) -> Dict:
     q = (args.get("query") or "").strip()
-    with get_connection() as con:
-        vendors = [r[0] for r in con.execute(
-            "SELECT vendor FROM vendors WHERE vendor IS NOT NULL ORDER BY vendor"
-        ).fetchall() if r[0]]
-        aliases = []
-        try:
-            rows = con.execute(
-                "SELECT alias, vendor FROM aliases WHERE alias IS NOT NULL AND vendor IS NOT NULL"
-            ).fetchall()
-            aliases = [{"alias": a, "vendor": v} for a, v in rows]
-        except Exception:
-            aliases = []
+    limit = _clamp_limit(args.get("limit"))
+    offset = _clamp_offset(args.get("offset"))
+    where = "vendor IS NOT NULL"
+    params: tuple = ()
     if q:
-        nq = q.lower()
-        vendors = [v for v in vendors if nq in v.lower()]
-        aliases = [a for a in aliases if nq in a["alias"].lower() or nq in a["vendor"].lower()]
-    return {"success": True, "vendors": vendors[:80], "aliases": aliases[:80]}
+        where += " AND (vendor LIKE ? OR IFNULL(name, '') LIKE ?)"
+        params = (f"%{q}%", f"%{q}%")
+    with get_connection() as con:
+        vendors = _fetch_allowed(
+            con, "vendors", ["vendor", "name"],
+            where=where, params=params, order_by="vendor",
+            limit=limit, offset=offset,
+        )
+        alias_where = "alias IS NOT NULL AND vendor IS NOT NULL"
+        alias_params: tuple = ()
+        if q:
+            alias_where += " AND (alias LIKE ? OR vendor LIKE ?)"
+            alias_params = (f"%{q}%", f"%{q}%")
+        aliases = _fetch_allowed(
+            con, "aliases", ["alias", "vendor"],
+            where=alias_where, params=alias_params, order_by="alias",
+            limit=limit, offset=offset,
+        )
+    return {
+        "success": True,
+        "vendors": [r.get("vendor") for r in vendors["rows"] if r.get("vendor")],
+        "aliases": aliases["rows"],
+        "truncated": vendors["truncated"] or aliases["truncated"],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+_RATE_TABLE_COLS = {
+    "out_basic": ["SKU 구간", "출고비"],
+    "out_extra": ["항목", "단가"],
+    "shipping_zone": ["요금제", "구간", "len_min_cm", "len_max_cm", "요금"],
+    "material_rates": ["항목", "단가", "size_code"],
+}
+_RATE_TABLE_ORDER = {
+    "out_basic": "SKU 구간",
+    "out_extra": "항목",
+    "shipping_zone": "요금제",
+    "material_rates": "항목",
+}
 
 
 def _lookup_rate_tables(args: Dict, user_id: str, user_name: str) -> Dict:
-    table = (args.get("table") or "all").strip()
-    wanted = {"out_basic", "out_extra", "shipping_zone", "material_rates"}
-    if table != "all":
-        wanted = {table} if table in wanted else wanted
-    out: Dict[str, Any] = {"success": True}
+    table = (args.get("table") or "").strip()
+    limit = _clamp_limit(args.get("limit"))
+    offset = _clamp_offset(args.get("offset"))
+    if table == "all" or not table:
+        return {
+            "success": False,
+            "error": "테이블을 하나만 지정하세요: out_basic, out_extra, shipping_zone, material_rates",
+            "allowed_tables": list(_RATE_TABLE_COLS.keys()),
+        }
+    if table not in _RATE_TABLE_COLS:
+        return {"success": False, "error": "허용되지 않은 요금 테이블입니다.", "allowed_tables": list(_RATE_TABLE_COLS)}
     with get_connection() as con:
-        names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        if "out_basic" in wanted and "out_basic" in names:
-            cols = [c[1] for c in con.execute("PRAGMA table_info(out_basic)")]
-            rows = con.execute("SELECT * FROM out_basic").fetchall()
-            out["out_basic"] = [dict(zip(cols, r)) for r in rows]
-        if "out_extra" in wanted and "out_extra" in names:
-            cols = [c[1] for c in con.execute("PRAGMA table_info(out_extra)")]
-            rows = con.execute("SELECT * FROM out_extra").fetchall()
-            out["out_extra"] = [dict(zip(cols, r)) for r in rows]
-        if "shipping_zone" in wanted and "shipping_zone" in names:
-            cols = [c[1] for c in con.execute("PRAGMA table_info(shipping_zone)")]
-            rows = con.execute("SELECT * FROM shipping_zone").fetchall()
-            out["shipping_zone"] = [dict(zip(cols, r)) for r in rows]
-        if "material_rates" in wanted and "material_rates" in names:
-            cols = [c[1] for c in con.execute("PRAGMA table_info(material_rates)")]
-            rows = con.execute("SELECT * FROM material_rates").fetchall()
-            out["material_rates"] = [dict(zip(cols, r)) for r in rows]
-    return out
+        fetched = _fetch_allowed(
+            con, table, _RATE_TABLE_COLS[table],
+            order_by=_RATE_TABLE_ORDER[table],
+            limit=limit, offset=offset,
+        )
+    return {
+        "success": True,
+        "table": table,
+        "rows": fetched["rows"],
+        "truncated": fetched["truncated"],
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def _lookup_storage(args: Dict, user_id: str, user_name: str) -> Dict:
     vendor = (args.get("vendor") or "").strip()
+    limit = _clamp_limit(args.get("limit"))
+    offset = _clamp_offset(args.get("offset"))
     result: Dict[str, Any] = {"success": True, "storage_rates": [], "vendor_storage": []}
     with get_connection() as con:
-        names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        if "storage_rates" in names:
-            cols = [c[1] for c in con.execute("PRAGMA table_info(storage_rates)")]
-            rows = con.execute("SELECT * FROM storage_rates").fetchall()
-            result["storage_rates"] = [dict(zip(cols, r)) for r in rows]
-        if "vendor_storage" in names:
-            cols = [c[1] for c in con.execute("PRAGMA table_info(vendor_storage)")]
-            if vendor:
-                rows = con.execute(
-                    "SELECT * FROM vendor_storage WHERE vendor_id LIKE ? OR item_name LIKE ?",
-                    (f"%{vendor}%", f"%{vendor}%"),
-                ).fetchall()
-            else:
-                rows = con.execute("SELECT * FROM vendor_storage LIMIT 80").fetchall()
-            result["vendor_storage"] = [dict(zip(cols, r)) for r in rows]
+        rates = _fetch_allowed(
+            con, "storage_rates",
+            ["item_name", "unit_price", "unit", "description", "is_active"],
+            order_by="item_name", limit=limit, offset=offset,
+        )
+        result["storage_rates"] = rates["rows"]
+        vs_where = "1=1"
+        vs_params: tuple = ()
+        if vendor:
+            vs_where = "vendor_id LIKE ? OR item_name LIKE ?"
+            vs_params = (f"%{vendor}%", f"%{vendor}%")
+        storage = _fetch_allowed(
+            con, "vendor_storage",
+            ["vendor_id", "item_name", "qty", "unit_price", "amount", "period", "remark", "is_active"],
+            where=vs_where, params=vs_params, order_by="vendor_id",
+            limit=limit, offset=offset,
+        )
+        result["vendor_storage"] = storage["rows"]
+        result["truncated"] = rates["truncated"] or storage["truncated"]
+        result["limit"] = limit
+        result["offset"] = offset
     return result
 
 
 def _lookup_vendor_charges_tool(args: Dict, user_id: str, user_name: str) -> Dict:
     vendor = (args.get("vendor") or "").strip()
+    limit = _clamp_limit(args.get("limit"))
+    offset = _clamp_offset(args.get("offset"))
+    where = "1=1"
+    params: tuple = ()
+    if vendor:
+        where = "vendor_id LIKE ? OR item_name LIKE ?"
+        params = (f"%{vendor}%", f"%{vendor}%")
     with get_connection() as con:
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_charges'"
-        ).fetchone()
-        if not exists:
-            return {"success": True, "charges": [], "message": "추가 청구 테이블이 없습니다."}
-        cols = [c[1] for c in con.execute("PRAGMA table_info(vendor_charges)")]
-        if vendor:
-            rows = con.execute(
-                "SELECT * FROM vendor_charges WHERE vendor_id LIKE ? OR item_name LIKE ?",
-                (f"%{vendor}%", f"%{vendor}%"),
-            ).fetchall()
-        else:
-            rows = con.execute("SELECT * FROM vendor_charges LIMIT 80").fetchall()
-    return {"success": True, "charges": [dict(zip(cols, r)) for r in rows]}
+        fetched = _fetch_allowed(
+            con, "vendor_charges",
+            ["vendor_id", "item_name", "qty", "unit_price", "amount", "remark", "charge_type", "is_active"],
+            where=where, params=params, order_by="vendor_id",
+            limit=limit, offset=offset,
+        )
+    if fetched.get("missing"):
+        return {"success": True, "charges": [], "message": "추가 청구 테이블이 없습니다."}
+    return {
+        "success": True,
+        "charges": fetched["rows"],
+        "truncated": fetched["truncated"],
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def _lookup_repair_catalog(args: Dict, user_id: str, user_name: str) -> Dict:
     from backend.app.services import repair_catalog
+    limit = _clamp_limit(args.get("limit"))
+    offset = _clamp_offset(args.get("offset"))
+    works = repair_catalog.list_work_types()
+    defects = repair_catalog.list_defects()
     return {
         "success": True,
-        "work_types": repair_catalog.list_work_types(),
-        "defects": repair_catalog.list_defects(),
+        "work_types": works[offset:offset + limit],
+        "defects": defects[offset:offset + limit],
+        "truncated": (offset + limit) < max(len(works), len(defects)),
+        "limit": limit,
+        "offset": offset,
     }
 
 
