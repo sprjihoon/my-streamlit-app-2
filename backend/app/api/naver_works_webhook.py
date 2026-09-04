@@ -20,6 +20,12 @@ from io import BytesIO
 from backend.app.services import get_naver_works_client, get_ai_parser
 from backend.app.services.bot_tools import execute_tool
 from backend.app.services.conversation_state import get_conversation_manager
+from backend.app.services.repair_bot import (
+    handle_user_text,
+    is_image_filename,
+    receive_photo,
+    should_handle_repair,
+)
 from logic.db import get_connection
 from backend.app.api.logs import add_log
 
@@ -109,6 +115,19 @@ async def process_message(
     # 사용자 메시지를 이력에 추가
     user_msg_content = f"[{user_name}] {text}" if user_name else text
     conv_manager.add_message(user_id, channel_id, "user", user_msg_content)
+
+    if should_handle_repair(user_id, text):
+        try:
+            reply = await handle_user_text(user_id, channel_id, text, user_name)
+            add_debug_log("repair_text_handled", {"reply": (reply or "")[:200]})
+            if reply:
+                conv_manager.add_message(user_id, channel_id, "assistant", reply)
+                await nw_client.send_text_message(channel_id, reply, channel_type)
+            return
+        except Exception as e:
+            add_debug_log("repair_text_error", error=str(e))
+            await nw_client.send_text_message(channel_id, f"❌ 수선 처리 오류: {e}", channel_type)
+            return
     
     # 메시지 처리 (대화 이력 전달)
     try:
@@ -251,6 +270,48 @@ async def process_excel_upload(
             pass
 
 
+async def process_image_upload(
+    user_id: str,
+    channel_id: str,
+    channel_type: str,
+    file_url: Optional[str],
+    file_id: Optional[str],
+    file_name: str,
+):
+    """수선용 사진 수신 → 2~3초 모아 한 세트로 처리."""
+    add_debug_log("repair_image_start", {"file_name": file_name, "has_url": bool(file_url), "file_id": file_id})
+    try:
+        nw_client = get_naver_works_client()
+        user_name = None
+        try:
+            user_name = await nw_client.get_user_name(user_id)
+        except Exception:
+            pass
+        if file_url:
+            data = await nw_client.download_url(file_url)
+        elif file_id:
+            data = await nw_client.download_attachment(file_id)
+        else:
+            await nw_client.send_text_message(channel_id, "사진을 받지 못했어요. 다시 보내주세요.", channel_type)
+            return
+        await receive_photo(
+            user_id=user_id,
+            channel_id=channel_id,
+            channel_type=channel_type,
+            data=data,
+            name=file_name or "photo.jpg",
+            user_name=user_name,
+            send_fn=nw_client.send_text_message,
+        )
+    except Exception as e:
+        add_debug_log("repair_image_error", error=str(e))
+        try:
+            nw_client = get_naver_works_client()
+            await nw_client.send_text_message(channel_id, f"❌ 사진 처리 오류: {e}", channel_type)
+        except Exception:
+            pass
+
+
 async def send_welcome_message(channel_id: str):
     """봇 초대 시 환영 메시지"""
     try:
@@ -266,6 +327,7 @@ async def send_welcome_message(channel_id: str):
             "📊 통계: 이번달 총 얼마?\n\n"
             "💡 정보가 부족하면 물어봐요:\n"
             '   "틸리언 하차" → "단가가 얼마예요?"\n\n'
+            "🧵 수선: 사진 3장(바코드/전/후) + 작업·금액\n"
             "📖 도움말: '도움말' 입력\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "무엇이든 물어보세요! 🤖"
@@ -333,12 +395,18 @@ async def naver_works_webhook(
                     user_id, channel_id, text, channel_type
                 )
         
-        elif content_type == "file":
-            file_info = content.get("file", {})
-            file_name = file_info.get("name", "")
-            file_url = file_info.get("resourceUrl", "")
-            
-            if file_name.endswith((".xlsx", ".xls")):
+        elif content_type in ("file", "image"):
+            file_info = content.get("file") or {}
+            file_name = file_info.get("name") or content.get("fileName") or "photo.jpg"
+            file_url = file_info.get("resourceUrl") or content.get("resourceUrl") or ""
+            file_id = file_info.get("fileId") or content.get("fileId") or ""
+
+            if content_type == "image" or is_image_filename(file_name):
+                background_tasks.add_task(
+                    process_image_upload,
+                    user_id, channel_id, channel_type, file_url, file_id, file_name,
+                )
+            elif file_name.endswith((".xlsx", ".xls")):
                 background_tasks.add_task(
                     process_excel_upload,
                     user_id, channel_id, file_url, file_name, channel_type
@@ -348,11 +416,55 @@ async def naver_works_webhook(
                 background_tasks.add_task(
                     nw_client.send_text_message,
                     channel_id,
-                    f"📎 파일 수신: {file_name}\n\n📊 엑셀 파일(.xlsx)을 보내주시면 작업일지를 일괄 등록해드려요!",
+                    f"📎 파일 수신: {file_name}\n\n📊 엑셀(.xlsx) 또는 수선 사진 3장을 보내주세요.",
                     channel_type
                 )
     
     return {"status": "ok"}
+
+
+class RepairBotTestBody(BaseModel):
+    user_id: str = "repair-test"
+    channel_id: str = "repair-test"
+    text: Optional[str] = None
+    barcode: Optional[str] = None
+    user_name: Optional[str] = "테스트"
+
+
+@router.post("/test-repair")
+async def test_repair_flow(data: RepairBotTestBody):
+    """로컬에서 수선 봇 텍스트/바코드 흐름을 확인한다."""
+    from backend.app.services.repair_bot import (
+        BufferedPhoto,
+        finalize_photo_set,
+        handle_user_text,
+    )
+    replies = []
+    if data.text:
+        replies.append(await handle_user_text(data.user_id, data.channel_id, data.text, data.user_name))
+    if data.barcode:
+        dummy = b"\xff\xd8\xff\xd9"
+        photos = [
+            BufferedPhoto(data=dummy, name="barcode.jpg"),
+            BufferedPhoto(data=dummy, name="before.jpg"),
+            BufferedPhoto(data=dummy, name="after.jpg"),
+        ]
+        replies.append(await finalize_photo_set(
+            user_id=data.user_id,
+            channel_id=data.channel_id,
+            photos=photos,
+            user_name=data.user_name,
+            classified={
+                "barcode": data.barcode,
+                "barcode_index": 0,
+                "before_index": 1,
+                "after_index": 2,
+                "decoded": [(data.barcode, 0.9), None, None],
+                "ambiguous": False,
+                "hit_count": 1,
+            },
+        ))
+    return {"replies": replies}
 
 
 @router.get("/health")

@@ -20,6 +20,7 @@ from backend.app.api.vendor_charges import router as vendor_charges_router
 from backend.app.api.storage import router as storage_router
 from backend.app.api.naver_works_webhook import router as naver_works_router
 from backend.app.api.work_log import router as work_log_router
+from backend.app.api.repair_log import router as repair_log_router, ensure_repair_tables
 from backend.app.api.estimate_analytics import router as estimate_analytics_router
 from backend.app.api.invoice_analytics import router as invoice_analytics_router
 from backend.app.api.wp_analytics import router as wp_analytics_router
@@ -64,6 +65,7 @@ app.include_router(vendor_charges_router)
 app.include_router(storage_router)
 app.include_router(naver_works_router)
 app.include_router(work_log_router)
+app.include_router(repair_log_router)
 app.include_router(estimate_router)
 app.include_router(estimate_analytics_router)
 app.include_router(invoice_analytics_router)
@@ -97,6 +99,7 @@ async def startup_event():
     ensure_leave_tables()
     from backend.app.api.receipt import ensure_receipt_tables
     ensure_receipt_tables()
+    ensure_repair_tables()
     ensure_billing_tables()
     # 스케줄러 시작 (평일 오전 10시 인사)
     from backend.app.services.scheduler import start_scheduler

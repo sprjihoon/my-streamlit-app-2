@@ -186,6 +186,23 @@ class NaverWorksClient:
             
             return response.json() if response.text else {"success": True}
     
+    async def download_url(self, url: str) -> bytes:
+        token = await self._get_access_token()
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if response.status_code != 200:
+                raise Exception(f"File download failed: {response.status_code}")
+            return response.content
+
+    async def download_attachment(self, file_id: str) -> bytes:
+        token = await self._get_access_token()
+        url = f"{self.API_BASE}/bots/{self.bot_id}/attachments/{file_id}"
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if response.status_code != 200:
+                raise Exception(f"Attachment download failed: {response.status_code}")
+            return response.content
+
     async def send_text_message(
         self,
         channel_id: str,

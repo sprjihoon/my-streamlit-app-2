@@ -507,6 +507,58 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_repair_log",
+            "description": "수선작업일지를 저장합니다. 구멍/스팀/바느질/세탁 등 수선 건만 사용. 물류 하차·입고는 save_work_log.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string", "description": "업체명"},
+                    "product": {"type": "string", "description": "제품명"},
+                    "option": {"type": "string", "description": "옵션/색상"},
+                    "barcode": {"type": "string", "description": "바코드"},
+                    "defect": {"type": "string", "description": "불량명"},
+                    "work_type": {"type": "string", "description": "수선 작업명"},
+                    "unit_price": {"type": "integer", "description": "비용(원)"},
+                    "qty": {"type": "integer", "description": "수량", "default": 1},
+                    "remark": {"type": "string"},
+                    "price_stated": {"type": "boolean", "description": "사용자가 가격을 직접 말했으면 true"}
+                },
+                "required": ["vendor", "work_type", "unit_price"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_repair_price",
+            "description": "수선 업체+작업의 최근 비용 또는 기본비용을 조회합니다. 가격 없이 수선 작업만 왔을 때 사용.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string"},
+                    "work_type": {"type": "string"}
+                },
+                "required": ["work_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_repair_barcode",
+            "description": "수선 바코드 마스터에서 업체명·제품명·옵션을 조회합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "barcode": {"type": "string"}
+                },
+                "required": ["barcode"]
+            }
+        }
+    },
     # ── 연차 관련 도구 ──────────────────────────────────────────────
     {
         "type": "function",
@@ -669,6 +721,9 @@ def execute_tool(
         "web_search": _web_search,
         "get_help": _get_help,
         "lookup_price_from_history": _lookup_price_from_history,
+        "save_repair_log": _save_repair_log,
+        "lookup_repair_price": _lookup_repair_price,
+        "lookup_repair_barcode": _lookup_repair_barcode_tool,
         # 연차 관련 도구
         "check_leave": _check_leave,
         "apply_leave": _apply_leave,
@@ -1787,6 +1842,27 @@ def _lookup_price_from_history(args: Dict, user_id: str, user_name: str) -> Dict
         }
 
 
+def _save_repair_log(args: Dict, user_id: str, user_name: str) -> Dict:
+    from backend.app.services.repair_bot import save_repair_from_tool
+    return save_repair_from_tool(args, user_id, user_name)
+
+
+def _lookup_repair_price(args: Dict, user_id: str, user_name: str) -> Dict:
+    from backend.app.services import repair_catalog
+    return repair_catalog.lookup_repair_price(args.get("vendor"), args.get("work_type"))
+
+
+def _lookup_repair_barcode_tool(args: Dict, user_id: str, user_name: str) -> Dict:
+    from backend.app.api.repair_log import _lookup_barcode, ensure_repair_tables
+    ensure_repair_tables()
+    code = (args.get("barcode") or "").strip()
+    with get_connection() as con:
+        found = _lookup_barcode(con, code)
+    if not found:
+        return {"success": False, "found": False, "message": "등록 안 된 바코드예요."}
+    return {"success": True, "found": True, **found}
+
+
 def _get_help(args: Dict, user_id: str, user_name: str) -> Dict:
     """도움말"""
     topic = args.get("topic", "전체")
@@ -1804,7 +1880,12 @@ def _get_help(args: Dict, user_id: str, user_name: str) -> Dict:
   "틸리언 하차" → "단가가 얼마예요?"
   "3만원" → 자동으로 완성!
 
-💡 입력 후 '취소'로 바로 삭제 가능""",
+💡 입력 후 '취소'로 바로 삭제 가능
+
+🧵 수선작업일지
+• 사진 3장(바코드 / 수선 전 / 수선 후)을 한 번에 보내기
+• "구멍 바느질 1500원"처럼 작업·금액 말하기
+• 물류 하차·입고는 기존처럼 입력""",
 
         "조회": """🔍 조회/검색
 ━━━━━━━━━━━━━━━━━━━━
@@ -2138,6 +2219,13 @@ def get_db_context_for_ai() -> str:
                    ORDER BY i.created_at DESC LIMIT 3"""
             ).fetchall()
         
+        repair_ctx = ""
+        try:
+            from backend.app.services import repair_catalog
+            repair_ctx = repair_catalog.catalog_context_for_ai()
+        except Exception:
+            pass
+
         # 컨텍스트 구성
         context_lines = [
             "## 현재 DB 정보 (참고용, 특정 기간 조회는 반드시 도구 호출!)",
@@ -2150,8 +2238,10 @@ def get_db_context_for_ai() -> str:
             f"- 전체 누적 인보이스: {inv_total[0]}건, 총 {inv_total[1]:,.0f}원",
             "",
             "⚠️ 특정 월/기간 데이터 요청 시: 반드시 get_work_log_stats 또는 get_invoice_stats 호출!",
-            "⚠️ 이 컨텍스트 데이터를 특정 기간 답변에 사용하지 마세요!"
+            "⚠️ 이 컨텍스트 데이터를 특정 기간 답변에 사용하지 마세요!",
         ]
+        if repair_ctx:
+            context_lines.extend(["", "## 수선 마스터 (수선 건만. 하차/입고는 작업일지)", repair_ctx])
         
         return "\n".join(context_lines)
     except Exception as e:

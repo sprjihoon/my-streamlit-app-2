@@ -41,7 +41,15 @@ SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
 4. **삭제**: "방금거 삭제", "삭제해줘" → delete_work_log 호출
 5. **수정**: "수정해줘" → update_work_log 호출
 6. **불완전 정보**: 필수 정보 누락 시 → ask_missing_info 호출
-7. **일반 대화**: 도구 없이 직접 응답
+7. **수선작업일지**: 구멍/스팀/바느질/세탁/열펜/잡사/보풀/넥라인/오염 등 → save_repair_log (save_work_log 금지)
+8. **일반 대화**: 도구 없이 직접 응답
+
+## 🧵 수선 vs 물류 (중요)
+- "틸리언 하차 3만원", "입고", "양품화", "톤상차" → 기존 작업일지 save_work_log
+- "구멍 바느질", "스팀", "열펜제거", "부분세탁" → 수선. save_repair_log / lookup_repair_price
+- 수선 가격이 메시지에 있으면 그 가격으로 저장하고 "표기된 가격 X원으로 저장했습니다"
+- 수선 가격이 없으면 lookup_repair_price 후 확인
+- 이전 대화가 수선(entry_type=repair)이면 complete_pending_entry를 쓰되 물류 저장 금지
 
 ## 🚨🚨🚨 "취소" 처리 규칙 (최우선!) 🚨🚨🚨
 **이전 대화 맥락(pending_context)에 대기 중인 정보가 있을 때** "취소"라고 하면:
@@ -321,6 +329,14 @@ class AIParser:
             parts.append(f"  ✓ 날짜: {pending_data['date']}")
         if pending_data.get("remark"):
             parts.append(f"  ✓ 비고: {pending_data['remark']}")
+        if pending_data.get("entry_type") == "repair":
+            parts.append("  ✓ 유형: 수선작업일지 (save_work_log 금지)")
+            if pending_data.get("product"):
+                parts.append(f"  ✓ 제품명: {pending_data['product']}")
+            if pending_data.get("defect"):
+                parts.append(f"  ✓ 불량명: {pending_data['defect']}")
+            if pending_data.get("barcode"):
+                parts.append(f"  ✓ 바코드: {pending_data['barcode']}")
         
         if missing:
             field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가", "qty": "수량"}
@@ -476,7 +492,11 @@ class AIParser:
                             "unit_price": {"type": "integer", "description": "사용자가 새로 답한 단가 (이전에 누락됐던 경우만)"},
                             "qty": {"type": "integer", "description": "사용자가 새로 답한 수량 (이전에 누락됐던 경우만)"},
                             "date": {"type": "string", "description": "사용자가 새로 답한 날짜 (이전에 누락됐던 경우만)"},
-                            "remark": {"type": "string", "description": "사용자가 새로 답한 비고 (이전에 누락됐던 경우만)"}
+                            "remark": {"type": "string", "description": "사용자가 새로 답한 비고 (이전에 누락됐던 경우만)"},
+                            "defect": {"type": "string", "description": "수선 불량명"},
+                            "product": {"type": "string", "description": "수선 제품명"},
+                            "option": {"type": "string", "description": "수선 옵션"},
+                            "barcode": {"type": "string", "description": "수선 바코드"}
                         }
                     }
                 }
@@ -582,8 +602,12 @@ class AIParser:
                 if tool_name_first == "ask_missing_info":
                     pending_data = {
                         k: v for k, v in tool_args_first.items()
-                        if k in ["vendor", "work_type", "unit_price", "qty", "date", "remark"] and v
+                        if k in ["vendor", "work_type", "unit_price", "qty", "date", "remark", "defect", "product", "option", "barcode"] and v
                     }
+                    if pending_state:
+                        existing = pending_state.get("pending_data") or {}
+                        if existing.get("entry_type") == "repair":
+                            pending_data = {**existing, **pending_data}
                     missing = tool_args_first.get("missing", [])
                     question = tool_args_first.get("question", "추가 정보를 알려주세요.")
                     self.conv_manager.set_state(
@@ -722,26 +746,44 @@ class AIParser:
                                 value = self._map_vendor_alias(value)
                             merged_data[key] = value
                     self.conv_manager.clear_state(user_id)
-                    required = ["vendor", "work_type", "unit_price"]
-                    still_missing = [f for f in required if not merged_data.get(f)]
-                    if still_missing:
-                        field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가"}
-                        missing_kr = [field_names[f] for f in still_missing]
-                        return {
-                            "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
-                            "tool_called": tool_name_first,
-                            "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
-                        }
-                    tool_result = execute_tool("save_work_log", merged_data, user_id, user_name)
+                    if merged_data.get("entry_type") == "repair":
+                        if merged_data.get("product") is None:
+                            required = ["vendor", "work_type", "unit_price", "product"]
+                        else:
+                            required = ["vendor", "work_type", "unit_price"]
+                        still_missing = [f for f in required if not merged_data.get(f)]
+                        if still_missing:
+                            field_names = {"vendor": "업체명", "work_type": "작업", "unit_price": "비용", "product": "제품명"}
+                            missing_kr = [field_names.get(f, f) for f in still_missing]
+                            return {
+                                "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
+                                "tool_called": tool_name_first,
+                                "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
+                            }
+                        tool_result = execute_tool("save_repair_log", merged_data, user_id, user_name)
+                        save_name = "save_repair_log"
+                    else:
+                        required = ["vendor", "work_type", "unit_price"]
+                        still_missing = [f for f in required if not merged_data.get(f)]
+                        if still_missing:
+                            field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가"}
+                            missing_kr = [field_names[f] for f in still_missing]
+                            return {
+                                "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
+                                "tool_called": tool_name_first,
+                                "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
+                            }
+                        tool_result = execute_tool("save_work_log", merged_data, user_id, user_name)
+                        save_name = "save_work_log"
                     if tool_result.get("success"):
                         return {
                             "response": f"✅ {tool_result.get('message', '저장완료!')}",
-                            "tool_called": "save_work_log",
+                            "tool_called": save_name,
                             "tool_result": tool_result
                         }
                     return {
                         "response": f"❌ 저장 실패: {tool_result.get('error', '알 수 없는 오류')}",
-                        "tool_called": "save_work_log",
+                        "tool_called": save_name,
                         "tool_result": tool_result
                     }
                 

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import {
-  LayoutDashboard, ClipboardList, Upload, Link2, List, DollarSign,
+  LayoutDashboard, ClipboardList, Scissors, Upload, Link2, List, DollarSign,
   BarChart2, FileText, FileSpreadsheet, TrendingUp, CalendarDays,
   Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package,
   PlusCircle, Users, ScrollText, Settings, ChevronDown,
@@ -193,6 +193,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/', label: '대시보드', icon: <LayoutDashboard {...IC} />, adminOnly: true },
       { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} />, adminOnly: true },
+      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} />, adminOnly: true },
       { href: '/upload', label: '데이터 업로드', icon: <Upload {...IC} />, adminOnly: true },
       { href: '/mapping', label: '업체 매핑 관리', icon: <Link2 {...IC} />, adminOnly: true },
       { href: '/vendors', label: '매핑 리스트', icon: <List {...IC} />, adminOnly: true },
