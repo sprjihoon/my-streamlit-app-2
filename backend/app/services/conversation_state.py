@@ -6,7 +6,7 @@
 
 import time
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import sqlite3
 from pathlib import Path
@@ -82,6 +82,25 @@ class ConversationStateManager:
         cid = (channel_id or "").strip() or uid
         return uid, cid
     
+    @staticmethod
+    def _expires_ts(value) -> float:
+        """ISO와 unix를 같은 초 단위로 비교한다."""
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        if not text:
+            return 0.0
+        try:
+            return float(text)
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(text).timestamp()
+        except ValueError:
+            return 0.0
+
     def get_state(self, user_id: str, channel_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """방 단위(v2) pending 조회. channel_id가 없으면 user_id로 본다."""
         uid, cid = self._scope(user_id, channel_id)
@@ -89,12 +108,20 @@ class ConversationStateManager:
             con.row_factory = sqlite3.Row
             row = con.execute(
                 """
-                SELECT * FROM conversation_states_v2
-                WHERE user_id = ? AND channel_id = ? AND expires_at > datetime('now')
+                SELECT user_id, channel_id, pending_data, missing, last_question, created_at, expires_at
+                FROM conversation_states_v2
+                WHERE user_id = ? AND channel_id = ?
                 """,
                 (uid, cid),
             ).fetchone()
             if row is None:
+                return None
+            if self._expires_ts(row["expires_at"]) <= time.time():
+                con.execute(
+                    "DELETE FROM conversation_states_v2 WHERE user_id = ? AND channel_id = ?",
+                    (uid, cid),
+                )
+                con.commit()
                 return None
             return {
                 "user_id": row["user_id"],
@@ -124,7 +151,7 @@ class ConversationStateManager:
             missing: 누락된 필드 목록
             last_question: 마지막 질문
         """
-        expires_at = datetime.now() + timedelta(seconds=self.EXPIRE_SECONDS)
+        expires_at = int(time.time()) + int(self.EXPIRE_SECONDS)
         uid, cid = self._scope(user_id, channel_id)
         
         with sqlite3.connect(self.db_path) as con:
@@ -140,7 +167,7 @@ class ConversationStateManager:
                     json.dumps(pending_data, ensure_ascii=False),
                     json.dumps(missing, ensure_ascii=False),
                     last_question,
-                    expires_at.isoformat()
+                    expires_at,
                 )
             )
             con.commit()
@@ -162,12 +189,21 @@ class ConversationStateManager:
         Returns:
             삭제된 레코드 수
         """
+        now = time.time()
+        deleted = 0
         with sqlite3.connect(self.db_path) as con:
-            cursor = con.execute(
-                "DELETE FROM conversation_states_v2 WHERE expires_at < datetime('now')"
-            )
+            rows = con.execute(
+                "SELECT user_id, channel_id, expires_at FROM conversation_states_v2"
+            ).fetchall()
+            for uid, cid, exp in rows:
+                if self._expires_ts(exp) <= now:
+                    con.execute(
+                        "DELETE FROM conversation_states_v2 WHERE user_id = ? AND channel_id = ?",
+                        (uid, cid),
+                    )
+                    deleted += 1
             con.commit()
-            return cursor.rowcount
+        return deleted
     
     # ─────────────────────────────────────
     # 대화 이력 관리
