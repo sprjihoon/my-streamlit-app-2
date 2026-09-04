@@ -14,8 +14,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from backend.app.services.bot_tools import TOOLS, execute_tool, get_db_context_for_ai
+from backend.app.services.bot_tools import execute_tool, get_tools_for_mode
 from backend.app.services.conversation_state import get_conversation_manager
+from backend.app.services.bot_mode import MODE_IDLE, MODE_JOURNAL, MODE_QUERY, idle_guide
 from logic.db import get_connection
 
 # .env 파일 로드
@@ -26,239 +27,83 @@ load_dotenv()
 # 시스템 프롬프트 (단순화됨)
 # ═══════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """당신은 물류센터 작업일지 관리 봇입니다.
-사용자의 자연어 메시지를 이해하고, 적절한 도구(function)를 호출하거나 직접 대화합니다.
+JOURNAL_PROMPT = """당신은 물류센터 작업일지 입력 봇입니다. 지금은 일지모드입니다.
 
 ## 오늘 날짜
 {today} ({weekday})
 
-{db_context}
-
 ## 핵심 역할
-1. **작업일지 입력**: "틸리언 1톤하차 3만원" → save_work_log 호출
-2. **조회/검색**: "오늘 작업 보여줘" → search_work_logs 호출
-3. **통계**: "이번달 총 얼마?" → get_work_log_stats 호출
-4. **삭제**: "방금거 삭제", "삭제해줘" → delete_work_log 호출
-5. **수정**: "수정해줘" → update_work_log 호출
-6. **불완전 정보**: 필수 정보 누락 시 → ask_missing_info 호출
-7. **수선작업일지**: 구멍/스팀/바느질/세탁/열펜/잡사/보풀/넥라인/오염 등 → save_repair_log (save_work_log 금지)
-8. **일반 대화**: 도구 없이 직접 응답
+1. **작업일지 입력**: "틸리언 1톤하차 3만원" → save_work_log
+2. **여러 건**: save_multiple_work_logs
+3. **삭제**: "방금거 삭제" → delete_work_log
+4. **수정**: "수정해줘" → update_work_log
+5. **비고**: add_memo 또는 update_work_log
+6. **불완전 정보**: ask_missing_info / complete_pending_entry
+7. 수선·조회·연차 도구는 이 모드에 없습니다.
 
-## 🧵 수선 vs 물류 (중요)
-- "틸리언 하차 3만원", "입고", "양품화", "톤상차" → 기존 작업일지 save_work_log
-- "구멍 바느질", "스팀", "열펜제거", "부분세탁" → 수선. save_repair_log / lookup_repair_price
-- 수선 가격이 메시지에 있으면 그 가격으로 저장하고 "표기된 가격 X원으로 저장했습니다"
-- 수선 가격이 없으면 lookup_repair_price 후 확인
-- 이전 대화가 수선(entry_type=repair)이면 complete_pending_entry를 쓰되 물류 저장 금지
+## 금액 해석
+- 만=10000, 천=1000. 숫자+원은 가격.
+- 단가(unit_price)=1개당 금액. 수량(qty)=건수. 합계를 단가에 넣지 말 것.
 
-## 🚨🚨🚨 "취소" 처리 규칙 (최우선!) 🚨🚨🚨
-**이전 대화 맥락(pending_context)에 대기 중인 정보가 있을 때** "취소"라고 하면:
-- ❌ delete_work_log 호출 금지! (기존 작업일지 삭제됨)
-- ✅ cancel_pending_entry 호출! (대기 중인 입력만 취소)
+## 날짜
+- 말하지 않으면 오늘({today}). 날짜를 물어보지 마세요.
 
-**대기 중인 정보가 없을 때** "취소", "방금거 삭제"라고 하면:
-- ✅ delete_work_log 호출 (최근 저장된 작업일지 삭제)
+## 수량
+- 사용자가 말한 수량을 유지하세요. 가격 이력을 조회해도 qty를 1로 바꾸지 마세요.
+- qty가 있으면 lookup_price_from_history / ask_price_confirmation / complete_pending_entry에 그대로 전달하세요.
 
-### 예시
-- 이전: "틸리언 3톤상차" → 봇: "단가를 알려주세요"
-- 현재: "취소" → **cancel_pending_entry 호출** (대기 취소)
-- ❌ 절대로 delete_work_log 호출하면 안 됨!
+## 가격 없으면
+1) lookup_price_from_history  2) 있으면 ask_price_confirmation  3) 없으면 ask_missing_info
+가격이 이미 있으면 바로 save_work_log.
 
-## 금액 해석 규칙
-- 만 = 10000, 천 = 1000
-- "3만원" → 30000
-- "만원" → 10000
-- "5천원" → 5000
-- "90000원" → 90000 (숫자+원 형태도 가격!)
-- "18600원" → 18600
-- ⚠️ 숫자 뒤에 "원"이 붙으면 무조건 가격입니다! (예: 90000원, 5000원, 123456원)
+## 업체명
+- DB 등록 업체/별칭만. [대괄호] 안은 작성자 이름이지 업체가 아닙니다.
 
-## ⚠️ 단가·수량 해석 규칙 (매우 중요! 절대 위반 금지)
-- **단가(unit_price)** = **1개당 금액만** 넣는다. 합계·총액을 단가로 넣지 말 것!
-- **수량(qty)** = 건수/개수. "88개" → qty=88
-- **합계** = 단가 × 수량 (시스템이 자동 계산. 단가에 합계를 넣지 말 것!)
-- "개당 100원" / "1개에 100원" → **반드시 unit_price=100**. 8800이나 774400 같은 값은 단가가 아님!
-- **실제 오류 예시**: "로지킴 이중라벨 88개 개당 100원" → unit_price=**100**, qty=**88**, 합계=8,800원.  
-  → 잘못된 입력: unit_price=8800으로 넣으면 88×8800=774,400원으로 저장됨. **이렇게 하면 안 됨.**
-- "N개 개당 M원"이면 **항상 unit_price=M, qty=N**. unit_price에 M×N(합계)을 넣는 것은 금지.
-- "이중라벨 88개, 개당 100원" → work_type="이중라벨", qty=88, **unit_price=100** (합계 8,800원)
-- "50개 200원" → qty=50, unit_price=200 (합계 10,000원)
-
-## 날짜 해석 규칙
-- **날짜를 사용자가 말하지 않으면 → 오늘({today})로 저장. 날짜를 물어보지 마세요.**
-- "오늘" → {today}
-- "어제" → {yesterday}
-- "이번주" → 이번 주 월요일 ~ 오늘
-- "지난주" → 지난 주 월요일 ~ 일요일
-- "이번달" → 이번 달 1일 ~ 오늘
-- "5일 6일" → 이번 달 5일 ~ 6일
-
-## 응답 스타일
-- 친근하고 간결하게
-- 이모지 적절히 사용
-- 한국어로 응답
-
-## 불완전 정보 처리 (매우 중요!)
-작업일지 입력 시 **필수 정보 3개**: **업체명, 작업종류, 단가**
-- **날짜**: 필수 아님! 미입력 시 **오늘**로 자동 저장. ❌ 절대 물어보지 마세요!
-- **수량**: 필수 아님! 미입력 시 **1**로 자동 저장. ❌ 절대 물어보지 마세요!
-- **비고**: 필수 아님! 미입력 시 빈 값으로 저장.
-
-## 🚨🚨🚨 가격 있으면 바로 저장! (최우선 규칙!) 🚨🚨🚨
-**업체명 + 작업종류 + 가격이 모두 있으면** → **바로 save_work_log 호출!**
-- "로지킴 화물비용 대납 90000원" → save_work_log (가격 90000 있음!)
-- "틸리언 하차 3만원" → save_work_log (가격 30000 있음!)
-- ⚠️ 숫자+원 형태(90000원, 18600원)도 가격입니다! lookup_price_from_history 호출하지 마세요!
-
-## 가격(단가) 없을 때만 처리 순서
-**업체명 + 작업종류는 있는데 가격이 없는 경우** → 반드시 아래 순서대로!
-
-### 1단계: lookup_price_from_history 호출 (필수!)
-- "틸리언 하차" → lookup_price_from_history(vendor="틸리언", work_type="하차")
-- "틸리언 3톤상차" → lookup_price_from_history(vendor="틸리언", work_type="3톤상차")
-- "나블리 양품화 50개" → lookup_price_from_history(vendor="나블리", work_type="양품화")
-
-### 2단계: 결과에 따라 분기
-- **가격 발견됨** → ask_price_confirmation 호출 (확인 질문)
-- **가격 없음** → ask_missing_info 호출 (단가 질문)
-
-### ❌ 절대 하면 안 되는 것
-- 가격 없을 때 바로 ask_missing_info 호출 ← 이거 금지!
-- 반드시 lookup_price_from_history를 **먼저** 호출해야 함!
-
-### 예시 (올바른 처리)
-- "틸리언 3톤상차" (가격 없음)
-  → **1단계**: lookup_price_from_history(vendor="틸리언", work_type="3톤상차") 호출
-  → **2단계**: 가격 발견 시 ask_price_confirmation, 없으면 ask_missing_info
-
-- "나블리 양품화 50개" (가격 없음)
-  → **1단계**: lookup_price_from_history(vendor="나블리", work_type="양품화") 호출
-  → **2단계**: 가격 발견 시 ask_price_confirmation, 없으면 ask_missing_info
-
-### 다른 정보가 없는 경우
-- "3만원" (업체/작업 없음) → ask_missing_info (missing: ["vendor", "work_type"])
-- "하차 3만원" (업체 없음) → ask_missing_info (missing: ["vendor"])
-- "로지킴 3톤하차 박스당 1000원" → **바로 save_work_log 호출!** (모든 정보 있음)
-- "로지킴 화물비용 대납 1건 90000원" → **바로 save_work_log 호출!** (업체=로지킴, 작업=화물비용 대납, 수량=1, 단가=90000)
-
-⚠️ 업체명·작업종류·단가 모두 있으면 바로 save_work_log 호출. lookup_price_from_history 호출하지 말 것!
-⚠️ ask_missing_info의 missing 배열에는 vendor, work_type, unit_price만 넣을 수 있음. date, qty 넣으면 안 됨!
-
-## 🗓️ 연차 관련 기능
-사용자가 연차/휴가 관련 요청을 하면 아래 도구를 사용합니다.
-
-### 연차 조회
-- "내 연차 몇일 남았어?", "연차 현황", "휴가 남은 거" → check_leave 호출
-
-### 연차 신청
-- "연차 신청해줘", "7/1~7/3 연차", "다음주 월요일 반차" → apply_leave 호출
-- leave_type: "연차" (하루 이상), "반차(오전)" (오전), "반차(오후)" (오후)
-- 날짜는 YYYY-MM-DD 형식으로 변환
-- 사유는 선택사항, 없으면 생략
-- ⚠️ 날짜 없으면 물어봐야 함. 사유 없어도 신청 가능.
-
-### 연차 취소
-- "연차 취소", "#3 취소해줘" → cancel_leave 호출 (request_id 필요)
-- ID 모를 경우: check_leave로 목록 먼저 조회
-
-### 결재 (팀장/인사과장)
-- "결재 대기 있어?", "승인 대기 연차" → get_pending_approvals 호출
-- "승인 #5", "#5 승인해줘" → approve_leave(request_id=5) 호출
-- "반려 #5 사유", "#5 반려" → reject_leave(request_id=5, comment="사유") 호출
-
-### 연차 응답 스타일
-- 잔여 연차가 마이너스일 경우: 🔴 표시
-- 성공 시 간결하게 확인 메시지 + 잔여 연차 안내
-
-## ⚠️ 업체명 규칙 (매우 중요!)
-- 업체명은 DB에 등록된 업체만 사용 가능! (DB 컨텍스트의 "등록 업체" 목록 참고)
-- **[대괄호] 안의 이름은 작성자 이름**이지 업체명이 아닙니다!
-- 메시지 형식: "[작성자이름] 메시지내용" → [작성자이름]은 무시하고 메시지내용만 파싱
-- 예: "[장명찬] 싱가포르 발송 18600원" 
-  → 작성자: 장명찬 (업체 아님!)
-  → 메시지: "싱가포르 발송 18600원" (업체명 없음 → vendor를 물어봐야 함)
-- 예: "[김철수] 틸리언 하차 3만원"
-  → 작성자: 김철수 (업체 아님!)
-  → 메시지: "틸리언 하차 3만원" (업체: 틸리언)
-- 대괄호 안 이름을 절대로 vendor로 사용하지 마세요!
-
-## 이전 대화 맥락
+## 이전 대화
 {pending_context}
 
-## ⚠️ 불완전 정보 후속 처리 (매우 중요!)
-이전 대화에서 ask_missing_info로 정보를 물어본 상태라면:
-- 사용자가 **업체명만** 답하면 → complete_pending_entry 호출 (vendor만 전달)
-- 사용자가 **단가만** 답하면 → complete_pending_entry 호출 (unit_price만 전달)
-- 사용자가 **작업종류만** 답하면 → complete_pending_entry 호출 (work_type만 전달)
-- **절대로** save_work_log를 직접 호출하지 마세요! 이전 정보가 사라집니다!
-- 예: 이전에 "2박스 입고 1000원"을 물어봤고, 사용자가 "하이비오"라고 답하면
-  → complete_pending_entry(vendor="하이비오") 호출
-  → 시스템이 자동으로 qty=2, work_type=입고, unit_price=1000과 병합
+## 취소
+대기 입력이 있으면 cancel_pending_entry. 저장된 건 삭제와 구분.
 
-## ⚠️ 가격 확인 응답 처리 (매우 중요!)
-이전 대화에서 ask_price_confirmation으로 가격 확인을 물어본 상태라면:
-- 사용자가 **"네", "응", "맞아", "그래", "ㅇㅇ", "저장해"** 등으로 답하면 → complete_pending_entry 호출 (인자 없이!)
-- 사용자가 **다른 가격**을 말하면 → complete_pending_entry 호출 (unit_price만 전달)
-- 사용자가 **"아니", "취소", "다시"** 등으로 답하면 → 취소 메시지 응답
-- 예: 이전에 "틸리언 하차 30,000원으로 저장할까요?"를 물어봤고, 사용자가 "응"이라고 답하면
-  → complete_pending_entry() 호출 (인자 없이, 이미 모든 정보가 pending_data에 있음)
-- 예: 사용자가 "아니 2만원"이라고 답하면
-  → complete_pending_entry(unit_price=20000) 호출
-
-## 중요
-- 사용자가 작업일지 형식("업체명 작업 금액")으로 말하면 **반드시** save_work_log 도구를 호출하세요. 도구를 호출하지 않고 "저장완료"라고 말하지 마세요.
-- 정보가 부족하면 ask_missing_info 호출하여 물어보기
-- "취소", "삭제", "지워줘" 등은 delete_work_log (delete_recent=true)
-- "수정", "고쳐줘", "바꿔줘" 등은 update_work_log (update_recent=true)
-- **"도움말", "사용법", "사용방법", "어떻게 써", "뭐할수있어", "help"** → get_help 호출!
-- 조회/검색은 search_work_logs 또는 get_work_log_stats
-- 일반 대화나 인사는 도구 호출 없이 직접 응답
-
-## ⚠️ 업체 별칭으로 조회했을 때 응답 문구 (매우 중요!)
-- search_work_logs / get_work_log_stats 결과에 **vendor_query**(사용자가 말한 이름)와 **vendor_resolved**(DB 정식명)가 있으면, 별칭으로 조회한 것입니다.
-- 이때 **"OO의 작업일지는 없어요. 대신 △△에서 …"** 처럼 말하지 마세요. (OO와 △△는 같은 업체입니다!)
-- 반드시 **"OO(△△)으로 오늘 … 건 등록돼 있어요"** / **"OO(△△) 기준으로 …"** 처럼 한 업체로 이어서 말하세요.
-- 예: vendor_query="로지킴", vendor_resolved="팔로우미 코스메틱" → "로지킴(팔로우미 코스메틱)으로 오늘 이중라벨 88건, 8,800원 등록돼 있어요."
-
-## ⚠️ 비고 추가/수정 요청 인식 (매우 중요!)
-다음 표현은 **방금 입력한 작업일지의 비고(remark) 수정** 요청입니다:
-- "방금 입력 추가로 XXX" → 방금 저장한 건에 비고 추가
-- "추가로 XXX 입력해줘" → 방금 건에 비고로 XXX 추가
-- "비고에 XXX 추가" → 비고 수정
-- "메모 추가해줘 XXX" → 비고 수정
-- "방금거에 XXX 넣어줘" → 비고 수정
-
-이런 요청은 **새 작업일지 생성이 아님!** → update_work_log 호출 (update_recent=true, remark="XXX")
-
-예시:
-- "방금 입력 추가로 싱가포르 발송 추가로 입력해줘"
-  → 새 작업 아님! → update_work_log(update_recent=true, remark="싱가포르 발송")
-
-## ⚠️ 인보이스/청구서 질문 처리 (매우 중요!)
-- "1월 청구서", "청구금액", "인보이스" 관련 질문 → **반드시** get_invoice_stats 호출!
-- start_date와 end_date를 반드시 지정! (예: 1월 → start_date="2026-01-01", end_date="2026-01-31")
-- 절대로 DB 컨텍스트 데이터로 답변하지 마세요! 컨텍스트는 전체 누적이므로 틀린 답이 됩니다!
-
-## ⚠️ 대화 맥락 이해 (매우 중요!)
-- 금액만 언급하면서 "?", "잘못됐", "틀린", "이상해" 등이 포함되면 → 이전 답변에 대한 **의문/피드백**임
-- "3100만원? 잘못된 값같네" → 작업 입력이 아님! 이전 답변을 의심하는 것
-- "진짜?", "맞아?", "확실해?" → 확인 요청
-- 이런 경우 도구 호출 없이 "확인해볼게요" 또는 설명으로 응답
-
-## ⚠️ 대화 연속성 (매우 중요!)
-이전 대화 맥락을 파악하여 후속 질문을 이해하세요:
-- "1월 나블리 청구금액" 이후 "12월은?" → **12월 나블리 청구금액** 질문
-- "팔로우미 1월 통계" 이후 "2월은?" → **팔로우미 2월 통계** 질문
-- "틸리언 하차 3만원" 이후 "나블리도" → **나블리 하차 3만원** 입력
-- 짧은 질문이라도 이전 맥락에서 **업체명, 작업종류, 기간** 등을 유추하세요!
-- "12월은", "그럼 2월", "나블리는?" 같은 질문은 독립 질문이 아닌 후속 질문입니다.
-
-예시:
-- 이전: "1월 나블리 청구금액은 얼마" → 답변: "4,715,300원"
-- 현재: "12월은" → 이해해야 할 것: "12월 나블리 청구금액은 얼마"
-- 이전: "틸리언 이번달 작업 보여줘" → 답변: "..."
-- 현재: "나블리는?" → 이해해야 할 것: "나블리 이번달 작업 보여줘"
+응답은 짧고 한국어로.
 """
+
+QUERY_PROMPT = """당신은 물류·수선 전산 조회 봇입니다. 지금은 조회모드입니다.
+
+## 오늘 날짜
+{today} ({weekday})
+
+읽기 도구만 있습니다. 저장·수정·삭제를 하지 마세요.
+DB 값을 추측하지 말고 반드시 도구로 현재 DB를 조회하세요.
+환경변수, API 키, 비밀번호, private key는 조회하지 마세요.
+
+도구:
+- search_work_logs / get_work_log_stats / compare_periods : 작업일지
+- get_invoice_stats : 인보이스
+- lookup_vendors : 업체·별칭
+- lookup_rate_tables : 출고비·추가작업비·택배비·부자재
+- lookup_storage : 보관료
+- lookup_vendor_charges : 추가 청구
+- lookup_repair_catalog : 수선 작업·불량·기본비용
+
+기간 질문은 start_date/end_date를 넣으세요.
+짧게 한국어로 답하세요.
+
+{pending_context}
+"""
+
+IDLE_PROMPT = """당신은 작업일지봇입니다. 지금은 기본상태입니다.
+업무 도구가 없습니다. 저장하지 마세요.
+모드 선택만 안내하세요.
+
+""" + idle_guide() + """
+
+## 오늘 날짜
+{today} ({weekday})
+{pending_context}
+"""
+
+SYSTEM_PROMPT = JOURNAL_PROMPT
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -283,22 +128,41 @@ class AIParser:
         # 대화 상태 관리자
         self.conv_manager = get_conversation_manager()
     
-    def _get_system_prompt(self, pending_context: str = "") -> str:
-        """시스템 프롬프트 생성"""
+    def _get_system_prompt(self, pending_context: str = "", mode: str = MODE_JOURNAL) -> str:
         today = datetime.now()
         yesterday = today.replace(day=today.day - 1) if today.day > 1 else today
         weekdays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
-        
         if not pending_context:
             pending_context = "(이전 대화 맥락 없음)"
-        
-        return SYSTEM_PROMPT.format(
+        if mode == MODE_QUERY:
+            tmpl = QUERY_PROMPT
+        elif mode == MODE_IDLE:
+            tmpl = IDLE_PROMPT
+        else:
+            tmpl = JOURNAL_PROMPT
+        return tmpl.format(
             today=today.strftime("%Y-%m-%d"),
             yesterday=yesterday.strftime("%Y-%m-%d"),
             weekday=weekdays[today.weekday()],
-            db_context=get_db_context_for_ai(),
-            pending_context=pending_context
+            pending_context=pending_context,
         )
+
+    def _resolve_qty(self, message: str, tool_args: Dict[str, Any], pending_state: Optional[Dict]) -> Optional[int]:
+        from backend.app.services.repair_bot import extract_qty
+        if tool_args.get("qty"):
+            try:
+                n = int(tool_args["qty"])
+                return n if n > 0 else None
+            except (TypeError, ValueError):
+                pass
+        pending_qty = ((pending_state or {}).get("pending_data") or {}).get("qty")
+        if pending_qty:
+            try:
+                n = int(pending_qty)
+                return n if n > 0 else None
+            except (TypeError, ValueError):
+                pass
+        return extract_qty(message)
     
     def _format_pending_context(self, state: Dict) -> str:
         """대기 중인 상태를 프롬프트용 문자열로 변환"""
@@ -429,7 +293,8 @@ class AIParser:
         user_id: str,
         user_name: str = None,
         channel_id: str = None,
-        conversation_history: List[Dict] = None
+        conversation_history: List[Dict] = None,
+        mode: str = MODE_JOURNAL,
     ) -> Dict[str, Any]:
         """
         메시지를 처리하고 결과 반환 (Function Calling + 멀티턴 대화)
@@ -448,12 +313,17 @@ class AIParser:
                 "tool_result": "도구 실행 결과 또는 None"
             }
         """
-        # 대기 중인 대화 상태 확인
-        pending_state = self.conv_manager.get_state(user_id)
+        pending_state = self.conv_manager.get_state(user_id, channel_id)
         pending_context = self._format_pending_context(pending_state)
-        
-        # 확장된 도구 목록 (ask_missing_info, complete_pending_entry, ask_price_confirmation 추가)
-        extended_tools = TOOLS + [
+        if mode == MODE_IDLE:
+            return {
+                "response": idle_guide(),
+                "tool_called": None,
+                "tool_result": None,
+            }
+
+        mode_tools = get_tools_for_mode(mode)
+        orchestrate_tools = [
             {
                 "type": "function",
                 "function": {
@@ -475,7 +345,8 @@ class AIParser:
                             },
                             "question": {"type": "string", "description": "사용자에게 물어볼 질문 (날짜나 수량을 물어보면 안 됨!)"}
                         },
-                        "required": ["missing", "question"]
+                        "required": ["missing", "question"],
+                        "additionalProperties": False,
                     }
                 }
             },
@@ -497,7 +368,8 @@ class AIParser:
                             "product": {"type": "string", "description": "수선 제품명"},
                             "option": {"type": "string", "description": "수선 옵션"},
                             "barcode": {"type": "string", "description": "수선 바코드"}
-                        }
+                        },
+                        "additionalProperties": False,
                     }
                 }
             },
@@ -517,7 +389,8 @@ class AIParser:
                             "remark": {"type": "string", "description": "비고"},
                             "question": {"type": "string", "description": "사용자에게 확인할 질문. 예: '틸리언 하차 최근 단가가 30,000원이에요. 이 가격으로 저장할까요?'"}
                         },
-                        "required": ["vendor", "work_type", "unit_price", "question"]
+                        "required": ["vendor", "work_type", "unit_price", "question"],
+                        "additionalProperties": False,
                     }
                 }
             },
@@ -528,15 +401,20 @@ class AIParser:
                     "description": "대기 중인 작업일지 입력을 취소합니다. 이전 대화에서 ask_missing_info나 ask_price_confirmation으로 정보를 물어본 상태에서 사용자가 '취소'라고 하면 이 도구를 호출하세요. ⚠️ delete_work_log가 아닌 이 도구를 사용해야 합니다!",
                     "parameters": {
                         "type": "object",
-                        "properties": {}
+                        "properties": {},
+                        "additionalProperties": False,
                     }
                 }
             }
         ]
+        if mode == MODE_JOURNAL:
+            extended_tools = mode_tools + orchestrate_tools
+        else:
+            extended_tools = mode_tools
         
         # 메시지 구성
         messages = [
-            {"role": "system", "content": self._get_system_prompt(pending_context)}
+            {"role": "system", "content": self._get_system_prompt(pending_context, mode)}
         ]
         
         # 대화 이력 추가 (있으면)
@@ -580,7 +458,7 @@ class AIParser:
                         pending_data = pending_state.get("pending_data", {})
                         vendor = pending_data.get("vendor", "")
                         work_type = pending_data.get("work_type", "")
-                        self.conv_manager.clear_state(user_id)
+                        self.conv_manager.clear_state(user_id, channel_id)
                         
                         if vendor or work_type:
                             return {
@@ -589,7 +467,7 @@ class AIParser:
                                 "tool_result": {"cancelled": True, "pending_data": pending_data}
                             }
                     
-                    self.conv_manager.clear_state(user_id)
+                    self.conv_manager.clear_state(user_id, channel_id)
                     return {
                         "response": "🚫 취소되었어요.",
                         "tool_called": tool_name_first,
@@ -629,7 +507,7 @@ class AIParser:
                 # ─────────────────────────────────────
                 if tool_name_first == "lookup_price_from_history":
                     # 가격 조회 실행
-                    price_result = execute_tool("lookup_price_from_history", tool_args_first, user_id, user_name)
+                    price_result = execute_tool("lookup_price_from_history", tool_args_first, user_id, user_name, mode=mode)
                     
                     vendor = tool_args_first.get("vendor", "")
                     work_type = tool_args_first.get("work_type", "")
@@ -647,12 +525,9 @@ class AIParser:
                             "work_type": work_type,
                             "unit_price": found_price,
                         }
-                        
-                        # 수량 정보가 있으면 추가 (메시지에서 파싱된 경우)
-                        # GPT가 tool_args에 qty를 넣지 않으므로, 원본 메시지에서 추출 필요
-                        # 일단 기본값 1로 설정
-                        qty = 1
-                        pending_data["qty"] = qty
+                        qty = self._resolve_qty(message, tool_args_first, pending_state)
+                        if qty:
+                            pending_data["qty"] = qty
                         
                         # 확인 질문 생성
                         if exact_match:
@@ -686,6 +561,9 @@ class AIParser:
                             "vendor": vendor,
                             "work_type": work_type,
                         }
+                        qty = self._resolve_qty(message, tool_args_first, pending_state)
+                        if qty:
+                            pending_data["qty"] = qty
                         question = f"'{work_type}' 작업의 이전 가격 기록이 없어요. 단가를 알려주세요!"
                         
                         self.conv_manager.set_state(
@@ -745,7 +623,7 @@ class AIParser:
                             if key == "vendor":
                                 value = self._map_vendor_alias(value)
                             merged_data[key] = value
-                    self.conv_manager.clear_state(user_id)
+                    self.conv_manager.clear_state(user_id, channel_id)
                     if merged_data.get("entry_type") == "repair":
                         if merged_data.get("product") is None:
                             required = ["vendor", "work_type", "unit_price", "product"]
@@ -760,7 +638,7 @@ class AIParser:
                                 "tool_called": tool_name_first,
                                 "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
                             }
-                        tool_result = execute_tool("save_repair_log", merged_data, user_id, user_name)
+                        tool_result = execute_tool("save_repair_log", merged_data, user_id, user_name, mode=mode)
                         save_name = "save_repair_log"
                     else:
                         required = ["vendor", "work_type", "unit_price"]
@@ -773,7 +651,7 @@ class AIParser:
                                 "tool_called": tool_name_first,
                                 "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
                             }
-                        tool_result = execute_tool("save_work_log", merged_data, user_id, user_name)
+                        tool_result = execute_tool("save_work_log", merged_data, user_id, user_name, mode=mode)
                         save_name = "save_work_log"
                     if tool_result.get("success"):
                         return {
@@ -796,13 +674,13 @@ class AIParser:
                     targs = json.loads(tc.function.arguments)
                     if "vendor" in targs:
                         targs["vendor"] = self._map_vendor_alias(targs["vendor"])
-                    one_result = execute_tool(tname, targs, user_id, user_name)
+                    one_result = execute_tool(tname, targs, user_id, user_name, mode=mode)
                     tool_results_by_id.append((tc.id, tname, one_result))
                 
                 # 첫 번째가 save_work_log인 경우 상태/업체 검증 처리
                 first_id, first_name, first_result = tool_results_by_id[0]
                 if first_name in ("save_work_log", "save_multiple_work_logs") and first_result.get("success"):
-                    self.conv_manager.clear_state(user_id)
+                    self.conv_manager.clear_state(user_id, channel_id)
                     # 실제 저장이 완료된 경우에만 저장완료 메시지 반환 (2차 GPT 호출 없이)
                     return {
                         "response": f"✅ {first_result.get('message', '저장완료!')}",
@@ -916,7 +794,7 @@ class AIParser:
             action = pending_action.get("action")
             args = pending_action.get("args", {})
             
-            tool_result = execute_tool(action, args, user_id, user_name)
+            tool_result = execute_tool(action, args, user_id, user_name, mode=None)
             
             if tool_result.get("success"):
                 return {
