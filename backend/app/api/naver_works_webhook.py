@@ -78,6 +78,21 @@ async def _send_prefixed(nw_client, user_id: str, channel_id: str, text: str, ch
     await nw_client.send_text_message(channel_id, with_mode_prefix(text, mode), channel_type)
 
 
+EXCEL_PREFIX = "[엑셀업로드]"
+
+
+def _excel_text(body: str) -> str:
+    """엑셀은 모드와 무관하므로 [엑셀업로드]만 한 번 붙인다."""
+    text = (body or "").strip()
+    if text.startswith(EXCEL_PREFIX):
+        return text
+    return f"{EXCEL_PREFIX} {text}" if text else EXCEL_PREFIX
+
+
+async def _send_excel(nw_client, channel_id: str, text: str, channel_type: str):
+    await nw_client.send_text_message(channel_id, _excel_text(text), channel_type)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 메시지 처리 메인 로직
 # ═══════════════════════════════════════════════════════════════════
@@ -195,7 +210,7 @@ async def process_excel_upload(
     file_name: str,
     channel_type: str
 ):
-    """엑셀 파일 업로드 처리. 모드 무관 경로이므로 응답에 모드 접두어를 붙이지 않는다."""
+    """엑셀 파일 업로드 처리. 저장 경로는 기존과 같고 응답만 [엑셀업로드]를 붙인다."""
     import httpx
     
     add_debug_log("excel_upload_start", {"file_name": file_name})
@@ -203,7 +218,7 @@ async def process_excel_upload(
     try:
         nw_client = get_naver_works_client()
         
-        await nw_client.send_text_message(channel_id, f"📊 '{file_name}' 처리 중...", channel_type)
+        await _send_excel(nw_client, channel_id, f"📊 '{file_name}' 처리 중...", channel_type)
         
         # 파일 다운로드
         token = await nw_client._get_access_token()
@@ -212,10 +227,11 @@ async def process_excel_upload(
             response = await client.get(file_url, headers=headers)
             
             if response.status_code != 200:
-                await nw_client.send_text_message(
+                await _send_excel(
+                    nw_client,
                     channel_id,
                     f"❌ 파일 다운로드 실패 (상태: {response.status_code})",
-                    channel_type
+                    channel_type,
                 )
                 return
         
@@ -227,15 +243,17 @@ async def process_excel_upload(
         missing_cols = [c for c in required_cols if c not in df.columns]
         
         if missing_cols:
-            await nw_client.send_text_message(
+            await _send_excel(
+                nw_client,
                 channel_id,
                 f"❌ 필수 컬럼 누락: {', '.join(missing_cols)}",
-                channel_type
+                channel_type,
             )
             return
         
         # 데이터 처리
         saved_count = 0
+        failed_count = 0
         total_amount = 0
         user_name = await nw_client.get_user_name(user_id) if user_id else None
         
@@ -280,23 +298,33 @@ async def process_excel_upload(
                 if result.get("success"):
                     saved_count += 1
                     total_amount += 합계
+                else:
+                    failed_count += 1
             
             except Exception as e:
+                failed_count += 1
                 add_debug_log("excel_row_error", error=str(e))
         
-        # 결과 메시지
-        result_msg = f"📊 엑셀 업로드 완료\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        if saved_count == 0 and failed_count > 0:
+            status = "❌ 엑셀 업로드 전체 실패"
+        elif failed_count > 0:
+            status = "⚠️ 엑셀 업로드 일부 실패"
+        else:
+            status = "📊 엑셀 업로드 완료"
+        result_msg = f"{status}\n━━━━━━━━━━━━━━━━━━━━\n\n"
         result_msg += f"📎 파일: {file_name}\n"
         result_msg += f"✅ 저장: {saved_count}건\n"
+        if failed_count:
+            result_msg += f"❌ 실패: {failed_count}건\n"
         result_msg += f"💰 합계: {total_amount:,}원"
         
-        await nw_client.send_text_message(channel_id, result_msg, channel_type)
+        await _send_excel(nw_client, channel_id, result_msg, channel_type)
     
     except Exception as e:
         add_debug_log("excel_upload_error", error=str(e))
         try:
             nw_client = get_naver_works_client()
-            await nw_client.send_text_message(channel_id, f"❌ 엑셀 처리 오류: {str(e)}", channel_type)
+            await _send_excel(nw_client, channel_id, f"❌ 엑셀 처리 오류: {str(e)}", channel_type)
         except:
             pass
 
