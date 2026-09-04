@@ -336,7 +336,13 @@ def _collect_stale_photo_names(con, cutoff: str) -> tuple[set[str], int]:
         ).fetchall()
     except Exception:
         inbox = []
-    for fn, created in inbox:
+    try:
+        inbox_v2 = con.execute(
+            "SELECT filename, created_at FROM repair_photo_inbox_file_v2"
+        ).fetchall()
+    except Exception:
+        inbox_v2 = []
+    for fn, created in list(inbox) + list(inbox_v2):
         if not fn:
             continue
         if created and str(created)[:10] < cutoff:
@@ -367,6 +373,18 @@ def _clear_photo_refs(con, names: set[str]) -> int:
         con.execute(
             """DELETE FROM repair_photo_inbox
                WHERE user_id NOT IN (SELECT user_id FROM repair_photo_inbox_file)"""
+        )
+        con.execute(
+            f"DELETE FROM repair_photo_inbox_file_v2 WHERE filename IN ({placeholders})",
+            files,
+        )
+        con.execute(
+            """DELETE FROM repair_photo_inbox_v2
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM repair_photo_inbox_file_v2 f
+                   WHERE f.user_id = repair_photo_inbox_v2.user_id
+                     AND f.channel_id = repair_photo_inbox_v2.channel_id
+               )"""
         )
     except Exception:
         pass
