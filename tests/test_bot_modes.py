@@ -170,6 +170,34 @@ def main():
         test_8_invoice_shipping_same_as_baseline,
         test_prefix_and_commands,
     ]
+    from tests.test_bot_hardening import (
+        test_conversation_expiry_unix,
+        test_excel_prefix_policy_mode_independent,
+        test_execute_tool_missing_mode_rejects_write,
+        test_inbox_rooms_isolated,
+        test_journal_qty_five_survives_confirm_and_fill,
+        test_lookup_tools_are_bounded,
+        test_photos_not_downloaded_outside_repair,
+        test_query_direct_and_indirect_writes_unchanged,
+        test_repair_prefix_once,
+        test_trusted_excel_cannot_delete,
+        test_trusted_excel_upload_saves,
+        test_validate_tool_args_rejects_bad_types,
+    )
+    tests.extend([
+        test_execute_tool_missing_mode_rejects_write,
+        test_query_direct_and_indirect_writes_unchanged,
+        test_trusted_excel_upload_saves,
+        test_trusted_excel_cannot_delete,
+        test_validate_tool_args_rejects_bad_types,
+        test_conversation_expiry_unix,
+        test_journal_qty_five_survives_confirm_and_fill,
+        test_photos_not_downloaded_outside_repair,
+        test_repair_prefix_once,
+        test_excel_prefix_policy_mode_independent,
+        test_lookup_tools_are_bounded,
+        test_inbox_rooms_isolated,
+    ])
     failed = []
     for fn in tests:
         try:
