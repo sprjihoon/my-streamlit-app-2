@@ -1,0 +1,166 @@
+"""
+봇 모드 저장/명령 파서.
+업무 저장 로직과 분리된 오케스트레이션 계층.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from typing import Optional, Tuple
+
+from logic.db import get_connection
+
+MODE_IDLE = "idle"
+MODE_JOURNAL = "journal"
+MODE_REPAIR = "repair"
+MODE_QUERY = "query"
+
+MODE_LABELS = {
+    MODE_IDLE: "기본상태",
+    MODE_JOURNAL: "일지모드",
+    MODE_REPAIR: "수선모드",
+    MODE_QUERY: "조회모드",
+}
+
+_START_MAP = {
+    "일지모드시작": MODE_JOURNAL,
+    "수선모드시작": MODE_REPAIR,
+    "조회모드시작": MODE_QUERY,
+}
+
+_CMD_END = re.compile(r"^모드\s*종료$")
+_CMD_STATUS = re.compile(r"^현재\s*모드$")
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"\s+", "", (text or "").strip())
+
+
+def ensure_bot_mode_tables() -> None:
+    with get_connection() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bot_modes (
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'idle',
+                updated_at TIMESTAMP,
+                PRIMARY KEY (user_id, channel_id)
+            )
+            """
+        )
+        con.commit()
+
+
+def mode_key(user_id: str, channel_id: Optional[str]) -> Tuple[str, str]:
+    uid = (user_id or "").strip()
+    cid = (channel_id or "").strip() or uid
+    return uid, cid
+
+
+def get_mode(user_id: str, channel_id: Optional[str] = None) -> str:
+    ensure_bot_mode_tables()
+    uid, cid = mode_key(user_id, channel_id)
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT mode FROM bot_modes WHERE user_id = ? AND channel_id = ?",
+            (uid, cid),
+        ).fetchone()
+    mode = (row[0] if row else MODE_IDLE) or MODE_IDLE
+    return mode if mode in MODE_LABELS else MODE_IDLE
+
+
+def set_mode(user_id: str, channel_id: Optional[str], mode: str) -> str:
+    ensure_bot_mode_tables()
+    uid, cid = mode_key(user_id, channel_id)
+    resolved = mode if mode in MODE_LABELS else MODE_IDLE
+    with get_connection() as con:
+        con.execute(
+            """
+            INSERT INTO bot_modes (user_id, channel_id, mode, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, channel_id) DO UPDATE SET
+                mode = excluded.mode,
+                updated_at = excluded.updated_at
+            """,
+            (uid, cid, resolved, datetime.now().isoformat()),
+        )
+        con.commit()
+    return resolved
+
+
+def mode_label(mode: Optional[str] = None, user_id: str = "", channel_id: Optional[str] = None) -> str:
+    current = mode if mode in MODE_LABELS else get_mode(user_id, channel_id)
+    return MODE_LABELS[current]
+
+
+def with_mode_prefix(text: str, mode: Optional[str] = None, user_id: str = "", channel_id: Optional[str] = None) -> str:
+    body = (text or "").strip()
+    prefix = f"[{mode_label(mode, user_id, channel_id)}]"
+    if body.startswith(prefix):
+        return body
+    if not body:
+        return prefix
+    return f"{prefix} {body}"
+
+
+def parse_mode_command(text: str) -> Optional[dict]:
+    """GPT가 아니라 코드가 확정 처리하는 모드 명령."""
+    raw = (text or "").strip()
+    compact = _norm(raw)
+    if not compact:
+        return None
+    if compact in _START_MAP:
+        return {"action": "start", "mode": _START_MAP[compact]}
+    if _CMD_END.match(raw) or compact == "모드종료":
+        return {"action": "end"}
+    if _CMD_STATUS.match(raw) or compact == "현재모드":
+        return {"action": "status"}
+    return None
+
+
+def idle_guide() -> str:
+    return (
+        "사용할 모드를 선택해주세요.\n"
+        "• 일지모드 시작\n"
+        "• 수선모드 시작\n"
+        "• 조회모드 시작"
+    )
+
+
+def decide_bot_route(user_id: str, channel_id: Optional[str], text: str) -> str:
+    if parse_mode_command(text):
+        return "mode_command"
+    mode = get_mode(user_id, channel_id)
+    if mode == MODE_IDLE:
+        return "idle"
+    if mode == MODE_REPAIR:
+        return "repair"
+    if mode == MODE_QUERY:
+        return "query"
+    return "journal"
+
+
+def should_accept_repair_photo(user_id: str, channel_id: Optional[str]) -> bool:
+    return get_mode(user_id, channel_id) == MODE_REPAIR
+
+
+def apply_mode_command(user_id: str, channel_id: Optional[str], command: dict) -> str:
+    """모드 변경. 저장된 업무 데이터는 지우지 않는다."""
+    from backend.app.services.conversation_state import get_conversation_manager
+    from backend.app.services.repair_bot import clear_photo_inbox
+
+    uid, cid = mode_key(user_id, channel_id)
+    action = command.get("action")
+    if action == "start":
+        set_mode(uid, cid, command["mode"])
+        get_conversation_manager().clear_state(uid, cid)
+        clear_photo_inbox(uid, cid)
+        return f"{MODE_LABELS[command['mode']]}를 시작했어요."
+    if action == "end":
+        set_mode(uid, cid, MODE_IDLE)
+        get_conversation_manager().clear_state(uid, cid)
+        clear_photo_inbox(uid, cid)
+        return "모드를 종료했어요. " + idle_guide()
+    return f"지금은 {mode_label(user_id=uid, channel_id=cid)}입니다."

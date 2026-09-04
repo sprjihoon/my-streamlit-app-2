@@ -30,7 +30,7 @@ class ConversationStateManager:
         self._ensure_table()
     
     def _ensure_table(self):
-        """대화 상태 및 이력 테이블 생성"""
+        """대화 상태 및 이력 테이블 생성. 기존 PK는 유지하고 v2를 추가한다."""
         with sqlite3.connect(self.db_path) as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS conversation_states (
@@ -43,7 +43,6 @@ class ConversationStateManager:
                     expires_at TIMESTAMP
                 )
             """)
-            # 대화 이력 테이블
             con.execute("""
                 CREATE TABLE IF NOT EXISTS conversation_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,31 +53,49 @@ class ConversationStateManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_states_v2 (
+                    user_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    pending_data TEXT,
+                    missing TEXT,
+                    last_question TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    PRIMARY KEY (user_id, channel_id)
+                )
+            """)
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_history_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             con.commit()
+
+    def _scope(self, user_id: str, channel_id: Optional[str] = None) -> tuple[str, str]:
+        uid = (user_id or "").strip()
+        cid = (channel_id or "").strip() or uid
+        return uid, cid
     
-    def get_state(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        사용자의 대화 상태 조회
-        
-        Args:
-            user_id: 사용자 ID
-        
-        Returns:
-            대화 상태 딕셔너리 또는 None
-        """
+    def get_state(self, user_id: str, channel_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """방 단위(v2) pending 조회. channel_id가 없으면 user_id로 본다."""
+        uid, cid = self._scope(user_id, channel_id)
         with sqlite3.connect(self.db_path) as con:
             con.row_factory = sqlite3.Row
             row = con.execute(
                 """
-                SELECT * FROM conversation_states 
-                WHERE user_id = ? AND expires_at > datetime('now')
+                SELECT * FROM conversation_states_v2
+                WHERE user_id = ? AND channel_id = ? AND expires_at > datetime('now')
                 """,
-                (user_id,)
+                (uid, cid),
             ).fetchone()
-            
             if row is None:
                 return None
-            
             return {
                 "user_id": row["user_id"],
                 "channel_id": row["channel_id"],
@@ -108,17 +125,18 @@ class ConversationStateManager:
             last_question: 마지막 질문
         """
         expires_at = datetime.now() + timedelta(seconds=self.EXPIRE_SECONDS)
+        uid, cid = self._scope(user_id, channel_id)
         
         with sqlite3.connect(self.db_path) as con:
             con.execute(
                 """
-                INSERT OR REPLACE INTO conversation_states 
+                INSERT OR REPLACE INTO conversation_states_v2
                 (user_id, channel_id, pending_data, missing, last_question, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    user_id,
-                    channel_id,
+                    uid,
+                    cid,
                     json.dumps(pending_data, ensure_ascii=False),
                     json.dumps(missing, ensure_ascii=False),
                     last_question,
@@ -127,17 +145,13 @@ class ConversationStateManager:
             )
             con.commit()
     
-    def clear_state(self, user_id: str) -> None:
-        """
-        대화 상태 삭제
-        
-        Args:
-            user_id: 사용자 ID
-        """
+    def clear_state(self, user_id: str, channel_id: Optional[str] = None) -> None:
+        """해당 방의 pending만 삭제. 업무 테이블은 건드리지 않는다."""
+        uid, cid = self._scope(user_id, channel_id)
         with sqlite3.connect(self.db_path) as con:
             con.execute(
-                "DELETE FROM conversation_states WHERE user_id = ?",
-                (user_id,)
+                "DELETE FROM conversation_states_v2 WHERE user_id = ? AND channel_id = ?",
+                (uid, cid),
             )
             con.commit()
     
@@ -150,7 +164,7 @@ class ConversationStateManager:
         """
         with sqlite3.connect(self.db_path) as con:
             cursor = con.execute(
-                "DELETE FROM conversation_states WHERE expires_at < datetime('now')"
+                "DELETE FROM conversation_states_v2 WHERE expires_at < datetime('now')"
             )
             con.commit()
             return cursor.rowcount
@@ -169,55 +183,45 @@ class ConversationStateManager:
             role: 역할 (user/assistant)
             content: 메시지 내용
         """
+        uid, cid = self._scope(user_id, channel_id)
         with sqlite3.connect(self.db_path) as con:
             con.execute(
-                """INSERT INTO conversation_history (user_id, channel_id, role, content)
+                """INSERT INTO conversation_history_v2 (user_id, channel_id, role, content)
                    VALUES (?, ?, ?, ?)""",
-                (user_id, channel_id, role, content)
+                (uid, cid, role, content)
             )
-            
-            # 오래된 이력 정리 (최근 N개만 유지)
             con.execute(
-                """DELETE FROM conversation_history 
-                   WHERE user_id = ? AND id NOT IN (
-                       SELECT id FROM conversation_history 
-                       WHERE user_id = ? 
+                """DELETE FROM conversation_history_v2
+                   WHERE user_id = ? AND channel_id = ? AND id NOT IN (
+                       SELECT id FROM conversation_history_v2
+                       WHERE user_id = ? AND channel_id = ?
                        ORDER BY created_at DESC LIMIT ?
                    )""",
-                (user_id, user_id, self.MAX_HISTORY * 2)
+                (uid, cid, uid, cid, self.MAX_HISTORY * 2)
             )
             con.commit()
     
-    def get_history(self, user_id: str, limit: int = None) -> list:
-        """
-        사용자의 최근 대화 이력 조회
-        
-        Args:
-            user_id: 사용자 ID
-            limit: 최대 개수 (기본: MAX_HISTORY)
-        
-        Returns:
-            대화 이력 리스트 [{"role": "user/assistant", "content": "..."}]
-        """
+    def get_history(self, user_id: str, limit: int = None, channel_id: Optional[str] = None) -> list:
         if limit is None:
             limit = self.MAX_HISTORY
-            
+        uid, cid = self._scope(user_id, channel_id)
         with sqlite3.connect(self.db_path) as con:
             con.row_factory = sqlite3.Row
             rows = con.execute(
-                """SELECT role, content FROM conversation_history 
-                   WHERE user_id = ? 
+                """SELECT role, content FROM conversation_history_v2
+                   WHERE user_id = ? AND channel_id = ?
                    ORDER BY created_at DESC LIMIT ?""",
-                (user_id, limit)
+                (uid, cid, limit)
             ).fetchall()
-            
-            # 시간순으로 정렬 (오래된 것부터)
             return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
     
-    def clear_history(self, user_id: str) -> None:
-        """대화 이력 삭제"""
+    def clear_history(self, user_id: str, channel_id: Optional[str] = None) -> None:
+        uid, cid = self._scope(user_id, channel_id)
         with sqlite3.connect(self.db_path) as con:
-            con.execute("DELETE FROM conversation_history WHERE user_id = ?", (user_id,))
+            con.execute(
+                "DELETE FROM conversation_history_v2 WHERE user_id = ? AND channel_id = ?",
+                (uid, cid),
+            )
             con.commit()
 
 
