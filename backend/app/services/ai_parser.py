@@ -294,7 +294,8 @@ class AIParser:
         user_name: str = None,
         channel_id: str = None,
         conversation_history: List[Dict] = None,
-        mode: str = MODE_JOURNAL,
+        *,
+        mode: str = MODE_IDLE,
     ) -> Dict[str, Any]:
         """
         메시지를 처리하고 결과 반환 (Function Calling + 멀티턴 대화)
@@ -313,6 +314,8 @@ class AIParser:
                 "tool_result": "도구 실행 결과 또는 None"
             }
         """
+        if mode not in (MODE_IDLE, MODE_JOURNAL, MODE_QUERY):
+            mode = MODE_IDLE
         pending_state = self.conv_manager.get_state(user_id, channel_id)
         pending_context = self._format_pending_context(pending_state)
         if mode == MODE_IDLE:
@@ -624,35 +627,18 @@ class AIParser:
                                 value = self._map_vendor_alias(value)
                             merged_data[key] = value
                     self.conv_manager.clear_state(user_id, channel_id)
-                    if merged_data.get("entry_type") == "repair":
-                        if merged_data.get("product") is None:
-                            required = ["vendor", "work_type", "unit_price", "product"]
-                        else:
-                            required = ["vendor", "work_type", "unit_price"]
-                        still_missing = [f for f in required if not merged_data.get(f)]
-                        if still_missing:
-                            field_names = {"vendor": "업체명", "work_type": "작업", "unit_price": "비용", "product": "제품명"}
-                            missing_kr = [field_names.get(f, f) for f in still_missing]
-                            return {
-                                "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
-                                "tool_called": tool_name_first,
-                                "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
-                            }
-                        tool_result = execute_tool("save_repair_log", merged_data, user_id, user_name, mode=mode)
-                        save_name = "save_repair_log"
-                    else:
-                        required = ["vendor", "work_type", "unit_price"]
-                        still_missing = [f for f in required if not merged_data.get(f)]
-                        if still_missing:
-                            field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가"}
-                            missing_kr = [field_names[f] for f in still_missing]
-                            return {
-                                "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
-                                "tool_called": tool_name_first,
-                                "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
-                            }
-                        tool_result = execute_tool("save_work_log", merged_data, user_id, user_name, mode=mode)
-                        save_name = "save_work_log"
+                    required = ["vendor", "work_type", "unit_price"]
+                    still_missing = [f for f in required if not merged_data.get(f)]
+                    if still_missing:
+                        field_names = {"vendor": "업체명", "work_type": "작업종류", "unit_price": "단가"}
+                        missing_kr = [field_names[f] for f in still_missing]
+                        return {
+                            "response": f"❓ 아직 {', '.join(missing_kr)}이(가) 필요해요.",
+                            "tool_called": tool_name_first,
+                            "tool_result": {"merged_data": merged_data, "still_missing": still_missing}
+                        }
+                    tool_result = execute_tool("save_work_log", merged_data, user_id, user_name, mode=mode)
+                    save_name = "save_work_log"
                     if tool_result.get("success"):
                         return {
                             "response": f"✅ {tool_result.get('message', '저장완료!')}",
@@ -766,6 +752,7 @@ class AIParser:
         user_name: str = None,
         pending_action: Dict = None,
         mode: str = None,
+        channel_id: str = None,
     ) -> Dict[str, Any]:
         """
         확인이 필요한 작업 처리 (삭제 확인 등)
@@ -780,7 +767,9 @@ class AIParser:
             처리 결과
         """
         if not pending_action:
-            return await self.process_message(message, user_id, user_name, mode=mode or MODE_IDLE)
+            return await self.process_message(
+                message, user_id, user_name, channel_id=channel_id, mode=mode or MODE_IDLE
+            )
         
         # 확인 응답 해석
         message_lower = message.strip().lower()
@@ -822,7 +811,9 @@ class AIParser:
             }
         
         # 확인/취소가 아닌 경우 일반 처리
-        return await self.process_message(message, user_id, user_name)
+        return await self.process_message(
+            message, user_id, user_name, channel_id=channel_id, mode=mode or MODE_IDLE
+        )
     
     async def chat_response(
         self,
