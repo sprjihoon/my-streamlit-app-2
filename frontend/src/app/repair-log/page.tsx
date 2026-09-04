@@ -418,6 +418,8 @@ function LogFormModal({
     !!(initial?.불량명 && !defects.some((d) => d.불량명 === initial.불량명))
   );
   const [lookupHint, setLookupHint] = useState('');
+  const [lookupOk, setLookupOk] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
   const [priceHint, setPriceHint] = useState('');
   const [saving, setSaving] = useState(false);
   const [beforeFile, setBeforeFile] = useState<File | null>(null);
@@ -439,22 +441,39 @@ function LogFormModal({
     }
   }
 
-  async function onBarcodeBlur() {
-    const code = form.바코드.trim();
-    if (!code) return;
+  async function searchBarcode(raw?: string) {
+    const code = (raw ?? form.바코드).trim();
+    if (!code) {
+      setLookupOk(false);
+      setLookupHint('바코드를 입력한 뒤 검색하세요.');
+      return;
+    }
+    setLookingUp(true);
+    setLookupHint('검색 중...');
+    setLookupOk(false);
     try {
       const found = await lookupRepairBarcode(code);
       const vendorName = found.업체명 || form.업체명;
       setForm((f) => ({
         ...f,
+        바코드: found.바코드 || code,
         업체명: found.업체명 || f.업체명,
         제품명: found.제품명 || f.제품명,
         옵션: found.옵션 || f.옵션,
       }));
-      setLookupHint(`매칭됨: ${found.업체명} / ${found.제품명}${found.옵션 ? ` / ${found.옵션}` : ''}`);
+      const extra = [found.상품코드 && `코드 ${found.상품코드}`, found.로케이션 && `로케이션 ${found.로케이션}`]
+        .filter(Boolean)
+        .join(' · ');
+      setLookupOk(true);
+      setLookupHint(
+        `등록 정보 입력됨: ${found.업체명} / ${found.제품명}${found.옵션 ? ` / ${found.옵션}` : ''}${extra ? ` (${extra})` : ''}`
+      );
       if (form.작업) fillPrice(form.작업, vendorName);
     } catch {
+      setLookupOk(false);
       setLookupHint('미등록 바코드입니다. 업체명·제품명을 직접 입력하세요.');
+    } finally {
+      setLookingUp(false);
     }
   }
 
@@ -509,14 +528,33 @@ function LogFormModal({
           <input type="date" value={form.날짜} onChange={(e) => setForm({ ...form, 날짜: e.target.value })} style={inputStyle} />
         </Field>
         <Field label="바코드">
-          <input
-            value={form.바코드}
-            onChange={(e) => { setForm({ ...form, 바코드: e.target.value }); setLookupHint(''); }}
-            onBlur={onBarcodeBlur}
-            placeholder="입력 후 포커스를 빼면 자동 매칭"
-            style={inputStyle}
-          />
-          {lookupHint && <p style={{ fontSize: '0.8rem', color: lookupHint.startsWith('매칭') ? '#16a34a' : '#b45309', margin: '0.25rem 0 0' }}>{lookupHint}</p>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={form.바코드}
+              onChange={(e) => { setForm({ ...form, 바코드: e.target.value }); setLookupHint(''); setLookupOk(false); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  searchBarcode(e.currentTarget.value);
+                }
+              }}
+              placeholder="바코드 입력 후 검색"
+              style={inputStyle}
+            />
+            <button
+              type="button"
+              onClick={() => searchBarcode()}
+              disabled={lookingUp}
+              style={{ ...btn('#0f766e'), whiteSpace: 'nowrap', opacity: lookingUp ? 0.7 : 1 }}
+            >
+              {lookingUp ? '검색 중...' : '검색'}
+            </button>
+          </div>
+          {lookupHint && (
+            <p style={{ fontSize: '0.8rem', color: lookupOk ? '#16a34a' : '#b45309', margin: '0.25rem 0 0' }}>
+              {lookupHint}
+            </p>
+          )}
         </Field>
         <Field label="업체명">
           <input

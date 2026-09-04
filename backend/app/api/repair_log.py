@@ -157,10 +157,12 @@ def _strip_option(v: Optional[str]) -> Optional[str]:
 def _lookup_barcode(con, barcode: str) -> Optional[dict]:
     if not barcode:
         return None
+    code = barcode.strip()
     row = con.execute(
         """SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명
-           FROM repair_barcode WHERE 바코드 = ?""",
-        (barcode.strip(),),
+           FROM repair_barcode
+           WHERE 바코드 = ? OR UPPER(TRIM(바코드)) = UPPER(?)""",
+        (code, code),
     ).fetchone()
     if not row:
         return None
