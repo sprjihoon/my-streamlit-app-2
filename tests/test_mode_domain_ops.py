@@ -29,9 +29,7 @@ def _sent(uid, cid, text, user_name="장지훈"):
             await process_message(uid, cid, text, "group", user_name)
 
     asyncio.run(_run())
-    reply = "\n".join(str(c.args[1]) for c in nw.send_text_message.await_args_list)
-    print(f"\n[{get_mode(uid, cid)}] {text!r}\n{reply}\n")
-    return reply
+    return "\n".join(str(c.args[1]) for c in nw.send_text_message.await_args_list)
 
 
 def _insert_repair(**kwargs):
@@ -172,9 +170,6 @@ def test_3_repair_mode_updates_second_listed_id_only():
     confirm = _sent(uid, cid, "네")
     after_target = _repair_row(target_id)
     after_other = _repair_row(other_id)
-    print("s3 ids", {"listed": listed, "target": target_id, "first": first["id"], "second": second["id"]})
-    print("s3 db", {"before": before_target, "after": after_target, "other_before": before_other, "other_after": after_other})
-    print("s3 list", list_reply)
     assert after_target["cost"] == 2000
     assert after_other["cost"] == before_other["cost"]
     assert after_target["id"] == target_id
@@ -238,9 +233,6 @@ def test_6_journal_mode_updates_first_listed_qty_only():
     confirm = _sent(uid, cid, "네")
     after_target = _work_row(target_id)
     after_other = _work_row(other_id)
-    print("s6", {"listed": listed, "target": target_id, "older": older, "newer": newer})
-    print("s6 db", {"before": before_target, "after": after_target, "other": after_other})
-    print("s6 list", list_reply)
     assert after_target["qty"] == 5
     assert after_other["qty"] == before_other["qty"]
     assert after_target["price"] == before_target["price"]
@@ -260,8 +252,6 @@ def test_7_query_mode_rejects_same_update():
     mid = {rid: _repair_row(rid) for rid in listed}
     confirm = _sent(uid, cid, "네")
     after = {rid: _repair_row(rid) for rid in listed}
-    print("s7 replies", preview, confirm)
-    print("s7 db", {"before": before, "after": after})
     assert mid == before
     assert after == before
     assert after[target_id]["cost"] == 700 or after[target_id]["cost"] == before[target_id]["cost"]
@@ -281,9 +271,6 @@ def test_8_draft_survives_same_domain_query():
     state = mgr.get_state(uid, cid) or {}
     draft = state.get("pending_data") or {}
     listed = _listed_ids(uid, cid)
-    print("s8 reply", sent)
-    print("s8 draft", draft)
-    print("s8 listed", listed, "saved", saved["id"], saved_before)
     assert draft.get("vendor") == "기존초안"
     assert draft.get("qty") == 1
     assert (state.get("missing") or ["photos"])[0] == "photos" or "photos" in (state.get("missing") or [])
