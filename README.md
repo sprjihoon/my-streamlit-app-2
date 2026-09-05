@@ -45,6 +45,7 @@ my-streamlit-app/
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
 ├── railway.json            # Railway 백엔드 배포
+├── vercel.json             # 루트 FastAPI 오탐 빌드만 건너뜀
 └── requirements.txt
 ```
 
@@ -161,13 +162,13 @@ docker-compose up --build
 
 ## 🚂 운영 배포
 
-이 저장소의 공식 운영 대상은 아래 두 곳만 본다. GitHub 커밋 상태가 failure로 보여도, 옛 Vercel 프로젝트 `my-streamlit-app` 실패는 무시한다.
+공식 운영은 아래 두 곳만 본다. `origin/main` 푸시로 자동 배포된다. DB·사진·환경변수는 배포 시 수동으로 바꾸지 않는다.
 
-| 역할 | 프로젝트 | URL |
-|---|---|---|
-| 백엔드 | Railway `my-streamlit-app-2` | https://my-streamlit-app-2-production.up.railway.app |
-| 프론트엔드 | Vercel `my-streamlit-app-2` | Root Directory = `frontend` |
-| 사용하지 않음 | Vercel `my-streamlit-app` | 저장소 루트를 FastAPI로 오탐함. 루트 `vercel.json`의 ignoreCommand가 이 빌드를 건너뛴다 |
+| 역할 | 프로젝트 | 주소 | 비고 |
+|---|---|---|---|
+| 백엔드 | Railway `my-streamlit-app-2` | https://my-streamlit-app-2-production.up.railway.app | `railway.json` + `Dockerfile.backend`. 볼륨 `/app/data` |
+| 프론트엔드 | Vercel `my-streamlit-app-2` | https://tillion.io.kr | Root Directory = `frontend`. FastAPI가 아님 |
+| 사용하지 않음 | Vercel `my-streamlit-app` | — | 루트를 FastAPI로 오탐함. 빌드는 건너뛰고 Canceled가 정상 |
 
 헬스 체크:
 
@@ -176,9 +177,14 @@ curl -s https://my-streamlit-app-2-production.up.railway.app/health
 # {"status":"ok","version":"1.0.0"}
 ```
 
-Railway는 `railway.json` + `Dockerfile.backend`로 올린다. 데이터 볼륨은 `/app/data` (DB, 업로드). 배포 시 DB·사진·환경변수는 수동으로 건드리지 않는다.
+Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는다. 백엔드는 Railway에서만 올린다.
 
-공식 프론트는 Vercel 프로젝트 `my-streamlit-app-2`이고 Root Directory는 `frontend`다. 루트 `vercel.json`은 install/build를 넣지 않고, `next.config.js`가 없는 루트 빌드만 건너뛴다. FastAPI entrypoint를 Vercel에 넣지 않는다. 백엔드는 Railway다. 운영은 `origin/main` 푸시로 자동 배포한다.
+루트 `vercel.json`은 install/build 명령 없이 `ignoreCommand`만 둔다.
+
+- `frontend`처럼 `next.config.js`가 있으면 공식 프론트를 빌드한다.
+- 저장소 루트처럼 `next.config.js`가 없으면 옛 `my-streamlit-app` 빌드를 건너뛴다. `frontend/frontend` 경로로 설치하지 않는다.
+
+옛 프로젝트 Git 연결을 끊으면 GitHub에 예전 failure 배지가 남지 않는다.
 
 ---
 
