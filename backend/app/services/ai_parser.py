@@ -128,7 +128,7 @@ class AIParser:
         # 대화 상태 관리자
         self.conv_manager = get_conversation_manager()
     
-    def _get_system_prompt(self, pending_context: str = "", mode: str = MODE_JOURNAL) -> str:
+    def _get_system_prompt(self, pending_context: str = "", mode: str = MODE_IDLE) -> str:
         today = datetime.now()
         yesterday = today.replace(day=today.day - 1) if today.day > 1 else today
         weekdays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
@@ -136,10 +136,10 @@ class AIParser:
             pending_context = "(이전 대화 맥락 없음)"
         if mode == MODE_QUERY:
             tmpl = QUERY_PROMPT
-        elif mode == MODE_IDLE:
-            tmpl = IDLE_PROMPT
-        else:
+        elif mode == MODE_JOURNAL:
             tmpl = JOURNAL_PROMPT
+        else:
+            tmpl = IDLE_PROMPT
         return tmpl.format(
             today=today.strftime("%Y-%m-%d"),
             yesterday=yesterday.strftime("%Y-%m-%d"),
