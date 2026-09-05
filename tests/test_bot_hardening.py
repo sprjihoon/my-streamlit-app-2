@@ -401,3 +401,162 @@ def test_legacy_and_v2_inbox_sixty_day_cleanup():
         assert (uid, room_b) in metas
         assert kept_log is not None
         assert kept_log[0] == "kept-recent.jpg"
+
+
+def test_current_user_message_sent_to_gpt_once():
+    """빈 이력에서 현재 문장은 GPT messages와 DB에 각각 한 번만 들어간다."""
+    from types import SimpleNamespace
+
+    from backend.app.services.ai_parser import AIParser
+
+    uid, cid = _ids("dup-gpt")
+    other_cid = "hard-ch-dup-gpt-other"
+    current = "이번달 작업일지 몇 건이야?"
+    captured = {}
+
+    async def fake_create(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="조회 결과입니다.", tool_calls=None))]
+        )
+
+    parser = object.__new__(AIParser)
+    parser.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
+    parser.model = "gpt-test"
+    parser.conv_manager = get_conversation_manager()
+    parser._alias_cache = None
+    parser._alias_cache_time = None
+    parser._cache_ttl_seconds = 300
+
+    set_mode(uid, cid, MODE_QUERY)
+    nw = AsyncMock()
+    nw.send_text_message = AsyncMock()
+
+    async def _run():
+        from backend.app.api.naver_works_webhook import process_message
+        with patch(
+            "backend.app.api.naver_works_webhook.get_naver_works_client",
+            return_value=nw,
+        ), patch(
+            "backend.app.api.naver_works_webhook.get_ai_parser",
+            return_value=parser,
+        ):
+            await process_message(uid, cid, current, "group", "테스터")
+
+    asyncio.run(_run())
+
+    assert "messages" in captured
+    user_texts = [m["content"] for m in captured["messages"] if m.get("role") == "user"]
+    assert user_texts.count(f"[테스터] {current}") == 1
+    assert sum(1 for text in user_texts if current in text) == 1
+
+    hist = get_conversation_manager().get_history(uid, limit=20, channel_id=cid)
+    user_hist = [h["content"] for h in hist if h["role"] == "user"]
+    assert user_hist.count(f"[테스터] {current}") == 1
+    other = get_conversation_manager().get_history(uid, limit=20, channel_id=other_cid)
+    assert other == []
+
+
+def test_conversation_manager_uses_billing_db_env(tmp_path, monkeypatch):
+    db_path = tmp_path / "nested" / "conv-state.db"
+    monkeypatch.setenv("BILLING_DB", str(db_path))
+    monkeypatch.delenv("DATABASE_PATH", raising=False)
+    from backend.app.services.conversation_state import ConversationStateManager
+
+    mgr = ConversationStateManager()
+    assert mgr.db_path == str(db_path)
+    assert db_path.exists()
+
+
+def test_query_repair_catalog_does_not_create_tables():
+    with get_connection() as con:
+        before = {
+            r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "repair_work_type" not in before
+        assert "repair_defect" not in before
+        before_pragma = list(con.execute("PRAGMA table_list"))
+    result = execute_tool("lookup_repair_catalog", {}, "u", "t", mode=MODE_QUERY)
+    assert result.get("success") is True
+    assert result.get("work_types") == []
+    assert result.get("defects") == []
+    assert result.get("message")
+    with get_connection() as con:
+        after = {
+            r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        after_pragma = list(con.execute("PRAGMA table_list"))
+    assert after == before
+    assert after_pragma == before_pragma
+
+
+def test_search_and_invoice_limits_are_clamped():
+    from backend.app.services import bot_tools
+
+    with get_connection() as con:
+        for i in range(60):
+            con.execute(
+                "INSERT INTO work_log (날짜, 업체명, 분류, 단가, 수량, 합계, 작성자) VALUES (?,?,?,?,?,?,?)",
+                ("2026-09-01", "틸리언", "하차", 1000, 1, 1000, "t"),
+            )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invoices (
+                invoice_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vendor_id INTEGER,
+                period_from DATE,
+                period_to DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_amount REAL
+            )
+            """
+        )
+        for i in range(12):
+            con.execute(
+                "INSERT INTO vendors (vendor) VALUES (?)",
+                (f"업체{i}",),
+            )
+            vid = con.execute("SELECT vendor_id FROM vendors WHERE vendor = ?", (f"업체{i}",)).fetchone()[0]
+            con.execute(
+                "INSERT INTO invoices (vendor_id, period_from, period_to, total_amount) VALUES (?,?,?,?)",
+                (vid, "2026-09-01", "2026-09-30", 1000 + i),
+            )
+        con.commit()
+
+    huge = execute_tool("search_work_logs", {"limit": 999}, "u", "t", mode=MODE_QUERY)
+    assert huge.get("success") is True
+    assert huge["count"] == 50
+    bad = bot_tools._search_work_logs({"limit": "nope"}, "u", "t")
+    assert bad.get("success") is True
+    assert bad["count"] == 20
+    neg = bot_tools._search_work_logs({"limit": -8}, "u", "t")
+    assert neg.get("success") is True
+    assert neg["count"] == 1
+
+    inv = execute_tool("get_invoice_stats", {"top_n": 999}, "u", "t", mode=MODE_QUERY)
+    assert inv.get("success") is True
+    assert len(inv["by_vendor"]) <= 50
+    inv_default = bot_tools._get_invoice_stats({"top_n": "x"}, "u", "t")
+    assert inv_default.get("success") is True
+    assert len(inv_default["by_vendor"]) <= 10
+    assert bot_tools._clamp_limit("999") == 50
+    assert bot_tools._clamp_limit(None, default=10) == 10
+    assert bot_tools._clamp_limit(-3, default=10) == 1
+
+
+def test_system_prompt_defaults_to_idle():
+    from backend.app.services.ai_parser import AIParser, IDLE_PROMPT, JOURNAL_PROMPT
+
+    parser = object.__new__(AIParser)
+    prompt = parser._get_system_prompt()
+    assert "지금은 기본상태입니다" in prompt
+    assert "지금은 일지모드입니다" not in prompt
+    assert inspect.signature(AIParser._get_system_prompt).parameters["mode"].default == MODE_IDLE
+    journal = parser._get_system_prompt(mode=MODE_JOURNAL)
+    assert "지금은 일지모드입니다" in journal
+    assert IDLE_PROMPT.splitlines()[0] in prompt
+    assert JOURNAL_PROMPT.splitlines()[0] not in prompt
