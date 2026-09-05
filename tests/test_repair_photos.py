@@ -1,4 +1,4 @@
-"""수선 사진 정책: 바코드만 찾고, 전·후는 보낸 순서, 3장은 유지."""
+"""수선 사진 정책: 바코드만 찾고, 2장 이상 여러 장을 저장한다."""
 from __future__ import annotations
 
 import asyncio
@@ -167,22 +167,14 @@ def test_insert_keeps_barcode_image_column():
     assert row == ("bar-keep.jpg", "before-keep.jpg", "after-keep.jpg")
 
 
-def test_claim_uses_first_three_and_leaves_rest():
+def test_claim_takes_all_photos_when_ready():
     uid, cid = _ids("claim")
     rb.clear_photo_inbox(uid, cid)
     for i in range(5):
         rb._append_inbox_photo(uid, cid, "group", "n", f"P{i}".encode(), f"p{i}.jpg", ".jpg")
-    claimed = rb._claim_inbox_photos(uid, cid, 3)
+    claimed = rb._claim_inbox_photos(uid, cid, 2)
     assert claimed and claimed["ready"]
-    assert [p.data for p in claimed["photos"]] == [b"P0", b"P1", b"P2"]
-    assert rb._inbox_count(uid, cid) == 2
-    leftover = rb._claim_inbox_photos(uid, cid, 3)
-    assert leftover and not leftover["ready"]
-    assert leftover["count"] == 2
-    rb._append_inbox_photo(uid, cid, "group", "n", b"P5", "p5.jpg", ".jpg")
-    second = rb._claim_inbox_photos(uid, cid, 3)
-    assert second and second["ready"]
-    assert [p.data for p in second["photos"]] == [b"P3", b"P4", b"P5"]
+    assert [p.data for p in claimed["photos"]] == [b"P0", b"P1", b"P2", b"P3", b"P4"]
     assert rb._inbox_count(uid, cid) == 0
 
 
@@ -200,22 +192,46 @@ def test_read_error_keeps_readable_photos():
         ).fetchall()
     gone = Path(rb._inbox_dir()) / row[2][0]
     gone.unlink()
-    claimed = rb._claim_inbox_photos(uid, cid, 3)
+    claimed = rb._claim_inbox_photos(uid, cid, 2)
     assert claimed and not claimed["ready"]
     assert claimed.get("read_error") is True
     assert rb._inbox_count(uid, cid) == 2
 
 
-def test_overflow_does_not_mix_next_case():
-    uid, cid = _ids("overflow")
-    rb.clear_photo_inbox(uid, cid)
+def test_two_photos_are_enough():
+    uid, cid = _ids("two")
     asyncio.run(finalize_photo_set(
         user_id=uid,
         channel_id=cid,
         photos=[
-            BufferedPhoto(data=b"b", name="b.jpg"),
-            BufferedPhoto(data=b"1", name="1.jpg"),
-            BufferedPhoto(data=b"2", name="2.jpg"),
+            BufferedPhoto(data=b"bar-2", name="b.jpg"),
+            BufferedPhoto(data=b"p1-2", name="1.jpg"),
+        ],
+        classified={
+            "barcode": "ON56S152917",
+            "barcode_index": 0,
+            "before_index": 1,
+            "after_index": None,
+            "ambiguous": False,
+        },
+    ))
+    data = rb._get_pending(uid, cid)
+    assert data.get("barcode_image")
+    assert data.get("before_image")
+    assert not data.get("after_image")
+    assert not data.get("extra_images")
+
+
+def test_four_photos_keep_extras():
+    uid, cid = _ids("four")
+    asyncio.run(finalize_photo_set(
+        user_id=uid,
+        channel_id=cid,
+        photos=[
+            BufferedPhoto(data=b"bar-4", name="b.jpg"),
+            BufferedPhoto(data=b"p1-4", name="1.jpg"),
+            BufferedPhoto(data=b"p2-4", name="2.jpg"),
+            BufferedPhoto(data=b"p3-4", name="3.jpg"),
         ],
         classified={
             "barcode": "ON56S152917",
@@ -225,10 +241,52 @@ def test_overflow_does_not_mix_next_case():
             "ambiguous": False,
         },
     ))
-    for i in range(4):
-        rb._append_inbox_photo(uid, cid, "group", "n", f"X{i}".encode(), f"x{i}.jpg", ".jpg")
-    claimed = rb._claim_inbox_photos(uid, cid, 3)
-    assert [p.data for p in claimed["photos"]] == [b"X0", b"X1", b"X2"]
+    data = rb._get_pending(uid, cid)
+    extras = data.get("extra_images") or []
+    assert len(extras) == 1
+    root = Path(rb._inbox_dir())
+    assert (root / extras[0]).read_bytes() == b"p3-4"
+
+
+def test_insert_keeps_extra_images():
+    saved = insert_repair_log_record(
+        날짜="2026-09-05",
+        작업="단순바느질",
+        비용=1500,
+        업체명="로지킴",
+        제품명="릴리프T",
+        extra_images=["extra-a.jpg", "extra-b.jpg"],
+        작성자="테스터",
+        출처="bot",
+    )
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT extra_images FROM repair_work_log WHERE id = ?",
+            (saved["id"],),
+        ).fetchone()
+    assert "extra-a.jpg" in (row[0] or "")
+    assert "extra-b.jpg" in (row[0] or "")
+
+
+def test_late_photos_attach_to_current_case():
+    uid, cid = _ids("late")
+    rb.clear_photo_inbox(uid, cid)
+    asyncio.run(finalize_photo_set(
+        user_id=uid,
+        channel_id=cid,
+        photos=[
+            BufferedPhoto(data=b"b", name="b.jpg"),
+            BufferedPhoto(data=b"1", name="1.jpg"),
+        ],
+        classified={
+            "barcode": "ON56S152917",
+            "barcode_index": 0,
+            "before_index": 1,
+            "after_index": None,
+            "ambiguous": False,
+        },
+    ))
+    rb._append_inbox_photo(uid, cid, "group", "n", b"late", "late.jpg", ".jpg")
     rb._keep_overflow_off_next_case(uid, cid)
     assert rb._inbox_count(uid, cid) == 0
     data = rb._get_pending(uid, cid)

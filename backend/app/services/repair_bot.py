@@ -1,6 +1,6 @@
 """
 수선작업일지 봇 흐름
-사진 3장 버퍼(바코드 / 사진 1 / 사진 2) + 바코드 조회 + 작업/비용 확인.
+사진 2장 이상 버퍼(바코드 / 사진) + 바코드 조회 + 작업/비용 확인.
 기존 work_log Function Calling과 분리한다.
 """
 
@@ -35,14 +35,13 @@ logger = logging.getLogger(__name__)
 PHOTO_WAIT_SEC = 5.0
 PHOTO_EXTRA_WAIT_SEC = 2.5
 PHOTO_MAX_EXTRA_ROUNDS = 2
-PHOTO_SET_HINT = "바코드 / 사진 1 / 사진 2"
-PHOTO_SET_SIZE = 3
+PHOTO_SET_HINT = "바코드 / 사진"
+PHOTO_MIN_SIZE = 2
 VISION_TIMEOUT_SEC = 12.0
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
 EXPIRED_REPAIR_MSG = "작성하던 수선이 만료됐어요. 다시 시작해주세요."
-PHOTO_RETRY_MSG = "사진을 처리하지 못했어요. 바코드 / 사진 1 / 사진 2를 다시 보내주세요."
-PHOTO_OVERFLOW_MSG = "이미 3장을 받았어요. 추가 사진은 이번 수선에 넣지 않았어요."
-PHOTO_SAFE_ERROR = "사진을 받지 못했어요. 바코드 / 사진 1 / 사진 2를 다시 보내주세요."
+PHOTO_RETRY_MSG = "사진을 처리하지 못했어요. 바코드와 사진을 다시 보내주세요."
+PHOTO_SAFE_ERROR = "사진을 받지 못했어요. 바코드와 사진을 다시 보내주세요."
 
 REPAIR_SIGNALS = (
     "수선", "불량", "구멍", "열펜", "잡사", "세탁", "스팀", "바느질",
@@ -347,6 +346,7 @@ def _try_save(data: Dict[str, Any], user_name: Optional[str], price_stated: bool
         barcode_image=data.get("barcode_image"),
         before_image=data.get("before_image"),
         after_image=data.get("after_image"),
+        extra_images=data.get("extra_images"),
         price_stated=price_stated,
     )
     return result
@@ -638,13 +638,15 @@ async def handle_user_text(
         if found:
             data = _attach_master(data, found)
 
-    has_photos = bool(data.get("barcode_image") or data.get("before_image"))
+    has_photos = bool(
+        data.get("barcode_image") or data.get("before_image") or data.get("extra_images")
+    )
     can_save_without_photos = bool(
         data.get("vendor") and data.get("product") and data.get("work_type") and data.get("unit_price")
     )
     if not has_photos and not can_save_without_photos and not data.get("barcode"):
         if data.get("work_type") or data.get("defect"):
-            q = f"사진 3장({PHOTO_SET_HINT})을 한 번에 보내주세요."
+            q = f"사진 2장 이상({PHOTO_SET_HINT})을 보내주세요."
             _set_pending(user_id, channel_id, data, ["photos"], q)
             return q
 
@@ -857,24 +859,6 @@ def _try_append_inbox_photo(
                 """,
                 (uid, cid, event_key, now),
             )
-        meta = con.execute(
-            """
-            SELECT extra_rounds FROM repair_photo_inbox_v2
-            WHERE user_id = ? AND channel_id = ?
-            """,
-            (uid, cid),
-        ).fetchone()
-        count = con.execute(
-            """
-            SELECT COUNT(*) FROM repair_photo_inbox_file_v2
-            WHERE user_id = ? AND channel_id = ?
-            """,
-            (uid, cid),
-        ).fetchone()[0]
-        claimed = bool(meta and int(meta[0] or 0) < 0)
-        if claimed:
-            con.commit()
-            return int(count or 0), "overflow"
         con.commit()
     filename = save_image_bytes(data, ext)
     with get_connection() as con:
@@ -948,8 +932,8 @@ def _unlock_inbox(con, uid: str, cid: str, leftover: int, need: int) -> None:
     )
 
 
-def _claim_inbox_photos(user_id: str, channel_id: Optional[str] = None, need: int = 3) -> Optional[dict]:
-    """보낸 순서의 앞 3장만 가져온다. 나머지와 읽지 못한 장은 삭제하지 않는다."""
+def _claim_inbox_photos(user_id: str, channel_id: Optional[str] = None, need: int = 2) -> Optional[dict]:
+    """2장 이상이면 보낸 순서의 전부를 가져온다. 읽지 못한 장은 삭제하지 않는다."""
     uid, cid = _room_key(user_id, channel_id)
     ensure_inbox_v2_tables()
     folder = _inbox_dir()
@@ -999,7 +983,7 @@ def _claim_inbox_photos(user_id: str, channel_id: Optional[str] = None, need: in
         if claimed.rowcount != 1:
             con.commit()
             return None
-        taken = files[:need]
+        taken = files
         readable = []
         empty_ids = []
         for _id, filename, name, ext in taken:
@@ -1069,8 +1053,8 @@ def _claim_inbox_photos(user_id: str, channel_id: Optional[str] = None, need: in
 
 
 
-def _detach_short_overflow(user_id: str, channel_id: Optional[str] = None, need: int = 3) -> List[str]:
-    """완성된 3장 뒤에 남은 1~2장은 다음 건 inbox에 섞지 않는다. 파일은 유지한다."""
+def _detach_leftover_inbox(user_id: str, channel_id: Optional[str] = None) -> List[str]:
+    """처리 중 늦게 온 사진은 다음 건 inbox에 섞지 않는다. 파일은 유지한다."""
     uid, cid = _room_key(user_id, channel_id)
     ensure_inbox_v2_tables()
     kept: List[str] = []
@@ -1083,7 +1067,7 @@ def _detach_short_overflow(user_id: str, channel_id: Optional[str] = None, need:
             """,
             (uid, cid),
         ).fetchall()
-        if not files or len(files) >= need:
+        if not files:
             return []
         for _id, filename in files:
             if filename:
@@ -1098,7 +1082,7 @@ def _detach_short_overflow(user_id: str, channel_id: Optional[str] = None, need:
 
 
 def _keep_overflow_off_next_case(user_id: str, channel_id: str) -> None:
-    extras = _detach_short_overflow(user_id, channel_id)
+    extras = _detach_leftover_inbox(user_id, channel_id)
     if not extras:
         return
     data = _get_pending(user_id, channel_id)
@@ -1219,11 +1203,7 @@ async def receive_photo(
     logger.info("repair photo buffered user=%s channel=%s count=%s status=%s", user_id, channel_id, count, status)
     if status == "duplicate":
         return
-    if status == "overflow":
-        if send_fn:
-            await send_fn(channel_id, PHOTO_OVERFLOW_MSG, channel_type)
-        return
-    wait = 1.0 if count >= PHOTO_SET_SIZE else PHOTO_WAIT_SEC
+    wait = 1.0 if count >= PHOTO_MIN_SIZE else PHOTO_WAIT_SEC
     key = _task_key(user_id, channel_id)
     existing = _flush_tasks.get(key)
     if existing and not existing.done():
@@ -1271,7 +1251,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
         await _flush_later(uid, cid, remain, send_fn, depth + 1)
         return
 
-    if n < 3:
+    if n < PHOTO_MIN_SIZE:
         extra = int(meta[2] or 0)
         if extra < PHOTO_MAX_EXTRA_ROUNDS:
             _bump_inbox_wait(uid, cid)
@@ -1287,7 +1267,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
             )
         return
 
-    claimed = _claim_inbox_photos(uid, cid, PHOTO_SET_SIZE)
+    claimed = _claim_inbox_photos(uid, cid, PHOTO_MIN_SIZE)
     if not claimed or not claimed.get("ready"):
         if claimed and claimed.get("read_error"):
             if send_fn:
@@ -1297,7 +1277,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
                     claimed["channel_type"],
                 )
             return
-        if claimed and claimed.get("count", 0) < PHOTO_SET_SIZE:
+        if claimed and claimed.get("count", 0) < PHOTO_MIN_SIZE:
             await _flush_later(uid, cid, PHOTO_EXTRA_WAIT_SEC, send_fn, depth + 1)
         return
 
@@ -1307,7 +1287,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
         _release_inbox_claim(uid, cid)
 
     photos = [p for p in claimed["photos"] if p.data]
-    if len(photos) < PHOTO_SET_SIZE:
+    if len(photos) < PHOTO_MIN_SIZE:
         _release_inbox_claim(uid, cid)
         if send_fn:
             await send_fn(claimed["channel_id"], PHOTO_RETRY_MSG, claimed["channel_type"])
@@ -1337,12 +1317,10 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
     if send_fn and reply:
         await send_fn(claimed["channel_id"], reply, claimed["channel_type"])
     _keep_overflow_off_next_case(uid, claimed["channel_id"])
-    if _inbox_count(uid, cid) >= 3:
-        await _flush_inbox(uid, cid, send_fn, depth + 1)
 
 
 def _assign_saved_photos(data: Dict[str, Any], classified: dict, saved_names: List[Optional[str]]) -> None:
-    """바코드 장 + 나머지 두 장을 보낸 순서대로 보관한다. 전·후 내용은 보지 않는다."""
+    """바코드 장 + 나머지를 보낸 순서대로 보관한다. 전·후 내용은 보지 않는다."""
     bi = classified.get("barcode_index")
     if bi is not None and 0 <= bi < len(saved_names) and saved_names[bi]:
         data["barcode_image"] = saved_names[bi]
@@ -1352,6 +1330,13 @@ def _assign_saved_photos(data: Dict[str, Any], classified: dict, saved_names: Li
     after_i = classified.get("after_index")
     if after_i is not None and 0 <= after_i < len(saved_names) and saved_names[after_i]:
         data["after_image"] = saved_names[after_i]
+    used = {i for i in (bi, before_i, after_i) if i is not None}
+    extras = [
+        name for i, name in enumerate(saved_names)
+        if i not in used and name
+    ]
+    if extras:
+        data["extra_images"] = extras
 
 
 def _positional_photo_slots(photos: List[BufferedPhoto], classified: dict) -> dict:

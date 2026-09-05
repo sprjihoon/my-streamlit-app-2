@@ -156,7 +156,8 @@ def seed_isolated_schema(db_path: Path) -> None:
                 출처 TEXT,
                 barcode_image TEXT,
                 before_image TEXT,
-                after_image TEXT
+                after_image TEXT,
+                extra_images TEXT
             );
             CREATE TABLE IF NOT EXISTS shipping_zone (
                 [요금제] TEXT,

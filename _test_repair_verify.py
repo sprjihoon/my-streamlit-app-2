@@ -148,7 +148,7 @@ async def test_bot():
     uid = "verify-bot-1"
     get_conversation_manager().clear_state(uid)
     r1 = await handle_user_text(uid, uid, "구멍 바느질 1500원", "검증봇")
-    ok("글 먼저면 사진 요청", "사진 3장" in r1, r1)
+    ok("글 먼저면 사진 요청", "사진 2장" in r1, r1)
     dummy = b"\xff\xd8\xff\xd9"
     photos = [BufferedPhoto(data=dummy, name="a.jpg") for _ in range(3)]
     r2 = await finalize_photo_set(uid, uid, photos, "검증봇", classified={

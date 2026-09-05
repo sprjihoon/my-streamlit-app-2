@@ -12,7 +12,7 @@ from backend.app.services.bot_nlu import NluIntent, fallback_from_local_parsers
 from backend.app.services.conversation_state import get_conversation_manager
 from backend.app.services.repair_bot import (
     EXPIRED_REPAIR_MSG,
-    PHOTO_OVERFLOW_MSG,
+    PHOTO_MIN_SIZE,
     PHOTO_RETRY_MSG,
     BufferedPhoto,
     _claim_inbox_photos,
@@ -213,12 +213,9 @@ def test_d_four_photos_and_duplicate_event_do_not_leak():
     assert count == 4
     _try_append_inbox_photo(other_u, other_c, "group", "n", b"X", "x.jpg", ".jpg", event_key="evt-0")
     assert _inbox_count(other_u, other_c) == 1
-    claimed = _claim_inbox_photos(uid, cid, 3)
+    claimed = _claim_inbox_photos(uid, cid, 2)
     assert claimed and claimed["ready"]
-    assert _inbox_count(uid, cid) == 1
-    from backend.app.services.repair_bot import _keep_overflow_off_next_case
-
-    _keep_overflow_off_next_case(uid, cid)
+    assert len(claimed["photos"]) == 4
     assert _inbox_count(uid, cid) == 0
     assert _inbox_count(other_u, other_c) == 1
 
@@ -228,7 +225,7 @@ def test_e_classify_error_keeps_photos():
     _enter(uid, cid)
     for i in range(3):
         _try_append_inbox_photo(uid, cid, "group", "n", f"E{i}".encode(), f"e{i}.jpg", ".jpg")
-    claimed = _claim_inbox_photos(uid, cid, 3)
+    claimed = _claim_inbox_photos(uid, cid, 2)
     assert claimed and claimed["ready"]
     with patch(
         "backend.app.services.repair_bot._classify_photos_safe",
@@ -468,8 +465,8 @@ def test_idle_help_does_not_require_mode():
     assert get_mode(uid, cid) == MODE_IDLE
 
 
-def test_overflow_message_constant():
-    assert "3장" in PHOTO_OVERFLOW_MSG
+def test_min_photo_set_is_two():
+    assert PHOTO_MIN_SIZE == 2
 
 
 def test_real_artifacts_snapshot_unchanged_here():

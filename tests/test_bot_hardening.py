@@ -208,7 +208,7 @@ def test_photos_not_downloaded_outside_repair():
 
 
 def test_repair_prefix_once():
-    body = "사진 3장 받았어요. 바코드 / 사진 1 / 사진 2 포함해서 한 장 더 보내주세요."
+    body = "사진 1장 받았어요. 바코드 / 사진 포함해서 한 장 더 보내주세요."
     once = with_mode_prefix(body, MODE_REPAIR)
     twice = with_mode_prefix(once, MODE_REPAIR)
     assert once.count("[수선모드]") == 1

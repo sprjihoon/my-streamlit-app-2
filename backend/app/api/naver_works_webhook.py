@@ -430,7 +430,7 @@ async def process_image_upload(
             nw_client = get_naver_works_client()
             await _send_prefixed(
                 nw_client, user_id, channel_id,
-                "❌ 사진을 받지 못했어요. 같은 사진 3장을 다시 한 번에 보내주세요.",
+                "❌ 사진을 받지 못했어요. 바코드와 사진을 다시 보내주세요.",
                 channel_type,
             )
         except Exception:
@@ -541,7 +541,7 @@ async def naver_works_webhook(
                 background_tasks.add_task(
                     nw_client.send_text_message,
                     channel_id,
-                    f"📎 파일 수신: {file_name}\n\n📊 엑셀(.xlsx) 또는 수선 사진 3장을 보내주세요.",
+                    f"📎 파일 수신: {file_name}\n\n📊 엑셀(.xlsx) 또는 수선 사진 2장 이상을 보내주세요.",
                     channel_type
                 )
     

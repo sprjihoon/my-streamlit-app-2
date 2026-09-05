@@ -335,7 +335,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    {['날짜', '업체명', '제품명', '옵션', '바코드', '불량명', '작업', '수량', '비용', '작성자', '수정자', '수정시간', '전', '후', ''].map((h) => (
+                    {['날짜', '업체명', '제품명', '옵션', '바코드', '불량명', '작업', '수량', '비용', '작성자', '수정자', '수정시간', '사진', ''].map((h) => (
                       <th key={h} style={{ padding: '0.5rem', textAlign: h === '수량' || h === '비용' ? 'right' : 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
                     ))}
                   </tr>
@@ -355,8 +355,18 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
                       <td style={{ padding: '0.5rem' }}>{log.작성자 || '-'}</td>
                       <td style={{ padding: '0.5rem' }}>{log.수정자 || '-'}</td>
                       <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>{formatDateTime(log.수정시간)}</td>
-                      <td style={{ padding: '0.5rem' }}><PhotoThumb filename={log.before_image} label="전" onClick={setPreview} /></td>
-                      <td style={{ padding: '0.5rem' }}><PhotoThumb filename={log.after_image} label="후" onClick={setPreview} /></td>
+                      <td style={{ padding: '0.5rem' }}>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {[
+                            ['바코드', log.barcode_image],
+                            ['사진1', log.before_image],
+                            ['사진2', log.after_image],
+                            ...(log.extra_images || []).map((fn, i) => [`추가${i + 1}`, fn] as const),
+                          ].filter(([, fn]) => fn).map(([label, fn]) => (
+                            <PhotoThumb key={`${label}-${fn}`} filename={fn as string} label={label as string} onClick={setPreview} />
+                          ))}
+                        </div>
+                      </td>
                       <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
                         <button onClick={() => setEditing(log)} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>수정</button>
                         <button onClick={() => setDeletingId(log.id)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>삭제</button>
@@ -464,6 +474,7 @@ function LogFormModal({
   const [beforeFile, setBeforeFile] = useState<File | null>(null);
   const [afterFile, setAfterFile] = useState<File | null>(null);
   const [barcodeFile, setBarcodeFile] = useState<File | null>(null);
+  const [extraFiles, setExtraFiles] = useState<File[]>([]);
 
   async function fillPrice(work: string, vendorName: string, productName?: string) {
     if (!work.trim()) return;
@@ -549,8 +560,8 @@ function LogFormModal({
         id = created.id;
         onMessage({ type: 'success', text: '수선일지가 추가되었습니다.' });
       }
-      if (id && (beforeFile || afterFile || barcodeFile)) {
-        await uploadRepairPhotos(id, { before: beforeFile, after: afterFile, barcode: barcodeFile });
+      if (id && (beforeFile || afterFile || barcodeFile || extraFiles.length)) {
+        await uploadRepairPhotos(id, { before: beforeFile, after: afterFile, barcode: barcodeFile, extra: extraFiles });
       }
       onSaved();
     } catch (e) {
@@ -686,21 +697,35 @@ function LogFormModal({
           </Field>
         </div>
         <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, minWidth: 0 }}>
-          <Field label="수선 전">
-            <input type="file" accept="image/*" onChange={(e) => setBeforeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
-          </Field>
-          <Field label="수선 후">
-            <input type="file" accept="image/*" onChange={(e) => setAfterFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
-          </Field>
           <Field label="바코드 사진">
             <input type="file" accept="image/*" onChange={(e) => setBarcodeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
+          <Field label="사진 1">
+            <input type="file" accept="image/*" onChange={(e) => setBeforeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
+          </Field>
+          <Field label="사진 2">
+            <input type="file" accept="image/*" onChange={(e) => setAfterFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
+          </Field>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Field label="추가 사진 (여러 장)">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => setExtraFiles(Array.from(e.target.files || []))}
+              style={{ width: '100%', maxWidth: '100%' }}
+            />
+          </Field>
         </div>
         {initial && (
-          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}>
-            <PhotoThumb filename={initial.before_image} label="전" onClick={() => {}} />
-            <PhotoThumb filename={initial.after_image} label="후" onClick={() => {}} />
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <PhotoThumb filename={initial.barcode_image} label="바코드" onClick={() => {}} />
+            <PhotoThumb filename={initial.before_image} label="사진1" onClick={() => {}} />
+            <PhotoThumb filename={initial.after_image} label="사진2" onClick={() => {}} />
+            {(initial.extra_images || []).map((fn, i) => (
+              <PhotoThumb key={`${fn}-${i}`} filename={fn} label={`추가${i + 1}`} onClick={() => {}} />
+            ))}
           </div>
         )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>

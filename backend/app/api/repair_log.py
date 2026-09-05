@@ -7,11 +7,12 @@ backend/app/api/repair_log.py - 수선작업일지 API
 from __future__ import annotations
 
 import io
+import json
 import re
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Optional, List
 
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -127,6 +128,7 @@ def ensure_repair_tables():
             ("불량명", "TEXT"),
             ("수정자", "TEXT"),
             ("수정시간", "TIMESTAMP"),
+            ("extra_images", "TEXT"),
         ]:
             if col not in existing_cols:
                 con.execute(f"ALTER TABLE repair_work_log ADD COLUMN [{col}] {coltype}")
@@ -272,6 +274,25 @@ def _image_path(filename: Optional[str]) -> Optional[Path]:
     return path
 
 
+def parse_extra_images(raw: Any) -> List[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return [str(raw).strip()] if str(raw).strip() else []
+    if isinstance(parsed, list):
+        return [str(x).strip() for x in parsed if str(x).strip()]
+    return []
+
+
+def dump_extra_images(names: Optional[List[str]]) -> Optional[str]:
+    cleaned = [str(x).strip() for x in (names or []) if str(x).strip()]
+    return json.dumps(cleaned, ensure_ascii=False) if cleaned else None
+
+
 def _delete_image(filename: Optional[str]) -> bool:
     """서버 디스크의 수선 사진 파일을 실제로 삭제한다."""
     path = _image_path(filename)
@@ -293,18 +314,19 @@ def _collect_stale_photo_names(con, cutoff: str) -> tuple[set[str], int]:
     cutoff_ts = datetime.strptime(cutoff, "%Y-%m-%d").timestamp()
     names: set[str] = set()
     rows = con.execute(
-        """SELECT id, barcode_image, before_image, after_image
+        """SELECT id, barcode_image, before_image, after_image, extra_images
            FROM repair_work_log
            WHERE (날짜 < ? OR IFNULL(저장시간, '') < ?)
              AND (
                IFNULL(barcode_image, '') != ''
                OR IFNULL(before_image, '') != ''
                OR IFNULL(after_image, '') != ''
+               OR IFNULL(extra_images, '') != ''
              )""",
         (cutoff, cutoff),
     ).fetchall()
-    for _id, *fns in rows:
-        for fn in fns:
+    for _id, barcode_fn, before_fn, after_fn, extra_raw in rows:
+        for fn in (barcode_fn, before_fn, after_fn, *parse_extra_images(extra_raw)):
             if fn:
                 names.add(Path(str(fn)).name)
 
@@ -371,6 +393,17 @@ def _clear_photo_refs(con, names: set[str]) -> int:
             files,
         )
         cleared += cur.rowcount or 0
+    extra_rows = con.execute(
+        "SELECT id, extra_images FROM repair_work_log WHERE IFNULL(extra_images, '') != ''"
+    ).fetchall()
+    for log_id, raw in extra_rows:
+        kept = [fn for fn in parse_extra_images(raw) if Path(str(fn)).name not in names]
+        if kept != parse_extra_images(raw):
+            con.execute(
+                "UPDATE repair_work_log SET extra_images = ? WHERE id = ?",
+                (dump_extra_images(kept), log_id),
+            )
+            cleared += 1
     try:
         # legacy inbox cleanup: 구 user-PK 잔여 행만
         con.execute(
@@ -972,7 +1005,7 @@ async def list_logs(
         total = con.execute(f"SELECT COUNT(*) FROM repair_work_log {where}", params).fetchone()[0]
         rows = con.execute(
             f"""SELECT id, 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고,
-                       작성자, 저장시간, 출처, barcode_image, before_image, after_image, 수정자, 수정시간
+                       작성자, 저장시간, 출처, barcode_image, before_image, after_image, 수정자, 수정시간, extra_images
                 FROM repair_work_log {where}
                 ORDER BY COALESCE(저장시간, 날짜) DESC, id DESC
                 LIMIT ? OFFSET ?""",
@@ -1013,6 +1046,7 @@ async def list_logs(
             "after_image": r[16],
             "수정자": r[17],
             "수정시간": str(r[18]) if r[18] else None,
+            "extra_images": parse_extra_images(r[19]),
         })
     return {
         "logs": logs,
@@ -1038,6 +1072,7 @@ def insert_repair_log_record(
     barcode_image: Optional[str] = None,
     before_image: Optional[str] = None,
     after_image: Optional[str] = None,
+    extra_images: Optional[List[str]] = None,
     price_stated: bool = False,
 ) -> dict:
     """수선일지 한 건 저장. 봇/웹 공통."""
@@ -1073,12 +1108,12 @@ def insert_repair_log_record(
         cur = con.execute(
             """INSERT INTO repair_work_log
                (날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고, 작성자, 저장시간, 출처,
-                barcode_image, before_image, after_image)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                barcode_image, before_image, after_image, extra_images)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 날짜, vendor, product, option, barcode, defect, work,
                 qty, int(비용), _clean(비고), _clean(작성자), now, 출처,
-                barcode_image, before_image, after_image,
+                barcode_image, before_image, after_image, dump_extra_images(extra_images),
             ),
         )
         con.commit()
@@ -1178,11 +1213,12 @@ async def upload_photos(
     before: Optional[UploadFile] = File(None),
     after: Optional[UploadFile] = File(None),
     barcode: Optional[UploadFile] = File(None),
+    extra: List[UploadFile] = File(default=[]),
 ):
     ensure_repair_tables()
     with get_connection() as con:
         row = con.execute(
-            "SELECT before_image, after_image, barcode_image FROM repair_work_log WHERE id = ?",
+            "SELECT before_image, after_image, barcode_image, extra_images FROM repair_work_log WHERE id = ?",
             (log_id,),
         ).fetchone()
         if not row:
@@ -1202,6 +1238,18 @@ async def upload_photos(
                 updates.append(f"{col} = ?")
                 params.append(filename)
                 saved[col] = filename
+
+        extra_files = [f for f in (extra or []) if f and f.filename]
+        if extra_files:
+            extras = parse_extra_images(row[3])
+            added = []
+            for upload in extra_files:
+                filename = await _save_upload(upload)
+                extras.append(filename)
+                added.append(filename)
+            updates.append("extra_images = ?")
+            params.append(dump_extra_images(extras))
+            saved["extra_images"] = added
 
         if not updates:
             raise HTTPException(status_code=400, detail="업로드할 사진이 없습니다.")
@@ -1259,7 +1307,7 @@ async def delete_log(log_id: int):
     ensure_repair_tables()
     with get_connection() as con:
         row = con.execute(
-            """SELECT 날짜, 업체명, 작업, 비용, barcode_image, before_image, after_image
+            """SELECT 날짜, 업체명, 작업, 비용, barcode_image, before_image, after_image, extra_images
                FROM repair_work_log WHERE id = ?""",
             (log_id,),
         ).fetchone()
@@ -1268,7 +1316,7 @@ async def delete_log(log_id: int):
         con.execute("DELETE FROM repair_work_log WHERE id = ?", (log_id,))
         con.commit()
 
-    for fn in (row[4], row[5], row[6]):
+    for fn in (row[4], row[5], row[6], *parse_extra_images(row[7])):
         _delete_image(fn)
 
     add_log(

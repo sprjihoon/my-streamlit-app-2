@@ -81,7 +81,7 @@ def _seed_draft(uid: str, cid: str, **extra):
         channel_id=cid,
         pending_data=data,
         missing=["photos"],
-        last_question="사진 3장 보내주세요.",
+        last_question="사진 2장 보내주세요.",
     )
     return dict(data)
 
@@ -240,7 +240,7 @@ def test_no_record_does_not_guess():
 def test_plain_repair_text_still_asks_photos():
     uid, cid = _ids("photos")
     reply = asyncio.run(handle_user_text(uid, cid, "구멍 바느질 1500원", "테스터"))
-    assert "사진 3장" in reply
+    assert "사진 2장" in reply
 
 
 def test_defect_correction_keeps_other_fields():
@@ -292,7 +292,7 @@ def test_handle_user_text_applies_price_to_existing_draft():
     assert _last_q(uid, cid) == before_q
     assert _row(saved["id"]) == before_row
     assert _cost(saved["id"]) == 1500
-    assert "사진 3장" in reply
+    assert "사진 2장" in reply
     assert "2,000원" in reply
     assert "변경 전" not in reply
     assert "저장할까요" not in reply
@@ -372,7 +372,7 @@ def test_existing_photo_intake_and_repair_save_regression():
     uid, cid = _ids("regress")
     _enter_repair(uid, cid)
     reply = asyncio.run(handle_user_text(uid, cid, "구멍 바느질 1500원", "테스터"))
-    assert "사진 3장" in reply
+    assert "사진 2장" in reply
     with get_connection() as con:
         before_count = con.execute("SELECT COUNT(*) FROM repair_work_log").fetchone()[0]
     saved = _save_repair_entry(
@@ -409,7 +409,7 @@ def test_applied_yes_then_new_repair_text_starts_photos():
     assert _cost(saved["id"]) == 2000
     reply = asyncio.run(handle_user_text(uid, cid, "구멍 바느질 1500원", "테스터"))
     assert ALREADY not in reply
-    assert "사진 3장" in reply
+    assert "사진 2장" in reply
     assert _cost(saved["id"]) == 2000
 
 
@@ -431,7 +431,7 @@ def test_first_input_price_fix_keeps_photos_missing():
     uid, cid = _ids("first-price")
     _enter_repair(uid, cid)
     first = asyncio.run(handle_user_text(uid, cid, "구멍 바느질 1500원", "테스터"))
-    assert "사진 3장" in first
+    assert "사진 2장" in first
     before = _draft(uid, cid)
     assert before.get("unit_price") == 1500
     assert not before.get("vendor")
@@ -447,7 +447,7 @@ def test_first_input_price_fix_keeps_photos_missing():
     assert "photos" in _missing(uid, cid)
     assert not after.get("vendor")
     assert not after.get("product")
-    assert "사진 3장" in reply
+    assert "사진 2장" in reply
     assert "저장할까요" not in reply
     assert _log_count() == before_count
 
@@ -596,19 +596,19 @@ def test_work_name_sujeong_starts_new_repair_not_last_saved():
     assert "변경 전" not in reply
     assert ASK_FIELDS not in reply
     assert "수정할까요" not in reply
-    assert "사진 3장" in reply or "업체명" in reply or "제품명" in reply
+    assert "사진 2장" in reply or "업체명" in reply or "제품명" in reply
     assert _cost(saved["id"]) == 1500
     other = asyncio.run(handle_user_text(*_ids("size-mod"), "사이즈수정 1건 5000원", "테스터"))
     assert "변경 전" not in other
     assert "수정할까요" not in other
-    assert "사진 3장" in other or "업체명" in other or "제품명" in other
+    assert "사진 2장" in other or "업체명" in other or "제품명" in other
 
 
 def _assert_new_repair_reply(reply: str) -> None:
     assert "변경 전" not in reply
     assert ASK_FIELDS not in reply
     assert "수정할까요" not in reply
-    assert "사진 3장" in reply or "업체명" in reply or "제품명" in reply
+    assert "사진 2장" in reply or "업체명" in reply or "제품명" in reply
 
 
 def test_handle_user_text_work_names_are_new_repair():
