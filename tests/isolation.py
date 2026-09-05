@@ -186,6 +186,8 @@ def seed_isolated_schema(db_path: Path) -> None:
             VALUES ('틸리언', '틸리언', '표준', NULL);
             INSERT OR IGNORE INTO vendors (vendor, name, rate_type, active)
             VALUES ('팔로우미코스메틱', '팔로우미코스메틱', '표준', NULL);
+            INSERT INTO aliases (alias, file_type, vendor) VALUES ('틸', 'work_log', '틸리언');
+            INSERT INTO aliases (alias, file_type, vendor) VALUES ('팔로우미', 'work_log', '팔로우미코스메틱');
             """
         )
         con.commit()

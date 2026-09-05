@@ -1209,8 +1209,9 @@ def _delete_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
             ).fetchone()
         elif log_id:
             row = con.execute(
-                "SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자, 비고1 FROM work_log WHERE id = ?",
-                (log_id,)
+                """SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계, 작성자, 비고1
+                   FROM work_log WHERE id = ? AND works_user_id = ?""",
+                (log_id, user_id)
             ).fetchone()
         else:
             # 조건으로 찾기
@@ -1527,8 +1528,8 @@ def _update_work_log(args: Dict, user_id: str, user_name: str) -> Dict:
             ).fetchone()
         elif log_id:
             row = con.execute(
-                "SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계 FROM work_log WHERE id = ?",
-                (log_id,)
+                "SELECT id, 날짜, 업체명, 분류, 단가, 수량, 합계 FROM work_log WHERE id = ? AND works_user_id = ?",
+                (log_id, user_id)
             ).fetchone()
         else:
             # 조건으로 찾기
@@ -1748,6 +1749,14 @@ def _add_memo(args: Dict, user_id: str, user_name: str) -> Dict:
             ).fetchone()
             if row:
                 log_id = row[0]
+        else:
+            row = con.execute(
+                "SELECT id FROM work_log WHERE id = ? AND works_user_id = ?",
+                (log_id, user_id),
+            ).fetchone()
+            if not row:
+                return {"success": False, "error": "메모를 추가할 작업일지를 찾지 못했습니다."}
+            log_id = row[0]
         
         if not log_id:
             return {"success": False, "error": "메모를 추가할 작업일지를 찾지 못했습니다."}

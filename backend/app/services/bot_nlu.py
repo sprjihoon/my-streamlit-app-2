@@ -13,6 +13,7 @@ from backend.app.services.bot_intent import (
     ACTION_CANCEL,
     ACTION_CONFIRM,
     ACTION_CREATE,
+    ACTION_DELETE,
     ACTION_NONE,
     ACTION_PROVIDE_FIELD,
     ACTION_QUERY_CATALOG,
@@ -20,13 +21,17 @@ from backend.app.services.bot_intent import (
     ACTION_START_MODE,
     ACTION_UNKNOWN,
     ACTION_UPDATE,
-    ALLOWED_FIELDS,
+    AMOUNT_TYPES,
+    DOMAIN_JOURNAL,
     DOMAIN_REPAIR,
+    JOURNAL_ALLOWED_FIELDS,
     TARGET_DRAFT,
     TARGET_LAST_SAVED,
     TARGET_NONE,
+    TARGET_SELECTED_RECORD,
     BotIntent,
     allowed_fields_only,
+    journal_fields_only,
     parse_bot_intent,
 )
 from backend.app.services.bot_mode import (
@@ -54,6 +59,7 @@ ACTIONS = frozenset(
         "create",
         "provide_field",
         "update",
+        "delete",
         "confirm",
         "cancel",
         "show_help",
@@ -61,7 +67,7 @@ ACTIONS = frozenset(
         "unknown",
     )
 )
-TARGETS = frozenset(("draft", "last_saved", "none"))
+TARGETS = frozenset(("draft", "last_saved", "selected_record", "none"))
 MODE_FIELDS = frozenset(("journal", "repair", "query"))
 TOPIC_FIELDS = frozenset(("all", "journal", "repair", "query", "repair_work_prices"))
 SECRET_MARKERS = (
@@ -72,7 +78,10 @@ SECRET_MARKERS = (
     "billing.db",
     "-----begin",
 )
-SAFE_DRAFT_KEYS = ("vendor", "product", "option", "work_type", "defect", "qty", "unit_price", "remark")
+SAFE_DRAFT_KEYS = (
+    "vendor", "product", "option", "work_type", "defect", "qty",
+    "unit_price", "remark", "date", "total_amount", "amount_type",
+)
 RECENT_TURN_MAX = 4
 RECENT_TURN_CHARS = 160
 DOMAIN_TO_MODE = {
@@ -94,6 +103,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
         "action",
         "target",
         "fields",
+        "entries",
         "confidence",
         "needs_confirmation",
         "clarification",
@@ -107,6 +117,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "create",
                 "provide_field",
                 "update",
+                "delete",
                 "confirm",
                 "cancel",
                 "show_help",
@@ -114,7 +125,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "unknown",
             ],
         },
-        "target": {"type": "string", "enum": ["draft", "last_saved", "none"]},
+        "target": {"type": "string", "enum": ["draft", "last_saved", "selected_record", "none"]},
         "fields": {
             "type": "object",
             "additionalProperties": False,
@@ -129,6 +140,9 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "option",
                 "mode",
                 "topic",
+                "date",
+                "total_amount",
+                "amount_type",
             ],
             "properties": {
                 "unit_price": {"type": ["number", "null"]},
@@ -139,6 +153,14 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "vendor": {"type": ["string", "null"]},
                 "product": {"type": ["string", "null"]},
                 "option": {"type": ["string", "null"]},
+                "date": {"type": ["string", "null"]},
+                "total_amount": {"type": ["number", "null"]},
+                "amount_type": {
+                    "anyOf": [
+                        {"type": "string", "enum": ["unit", "total", "unknown"]},
+                        {"type": "null"},
+                    ]
+                },
                 "mode": {
                     "anyOf": [
                         {"type": "string", "enum": ["journal", "repair", "query"]},
@@ -153,6 +175,38 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                         },
                         {"type": "null"},
                     ]
+                },
+            },
+        },
+        "entries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "vendor",
+                    "work_type",
+                    "unit_price",
+                    "qty",
+                    "date",
+                    "remark",
+                    "total_amount",
+                    "amount_type",
+                ],
+                "properties": {
+                    "vendor": {"type": ["string", "null"]},
+                    "work_type": {"type": ["string", "null"]},
+                    "unit_price": {"type": ["number", "null"]},
+                    "qty": {"type": ["number", "null"]},
+                    "date": {"type": ["string", "null"]},
+                    "remark": {"type": ["string", "null"]},
+                    "total_amount": {"type": ["number", "null"]},
+                    "amount_type": {
+                        "anyOf": [
+                            {"type": "string", "enum": ["unit", "total", "unknown"]},
+                            {"type": "null"},
+                        ]
+                    },
                 },
             },
         },
@@ -182,8 +236,11 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 11. last_question·last_assistant_reply·recent_turns를 보고 후속 질문을 같은 주제로 연결하세요.
 12. show_help와 query_catalog는 읽기 전용입니다. 기본상태에서도 이 action을 고르세요.
 13. 한 문장에 업체·제품·옵션·작업·가격·수량이 있으면 있는 값만 fields에 모두 넣습니다.
-14. 자신이 없거나 대상이 섞이면 action=unknown 이고 clarification에 질문 하나만 넣습니다.
-15. 아래는 문장 사전이 아니라 의미 예시입니다. 같은 뜻의 다른 말도 같은 action으로 접으세요.
+14. 일지모드에서 여러 작업을 한 문장에 나열하면 entries에 항목별로 넣습니다.
+15. 금액이 개당이면 amount_type=unit, 총액이면 total, 불명확하면 unknown 입니다.
+16. 직전 저장 기록을 지우려면 action=delete, target=last_saved 입니다.
+17. 자신이 없거나 대상이 섞이면 action=unknown 이고 clarification에 질문 하나만 넣습니다.
+18. 아래는 문장 사전이 아니라 의미 예시입니다. 같은 뜻의 다른 말도 같은 action으로 접으세요.
 
 의미 예시:
 - 수선 업무를 시작함 → start_mode / repair
@@ -194,7 +251,9 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 - 직전 안내 뒤 가격만 이어서 물어봄 → query_catalog / topic=repair_work_prices
 - 지금 묻는 수량에 1을 답함 → provide_field / qty=1
 - 방금 저장이 끝난 기록을 고침 → update / last_saved
+- 방금 저장한 기록을 지움 → delete / last_saved
 - 가격을 2000원으로 바꿈 → unit_price=2000
+- 총액으로 말했음 → amount_type=total
 - 불량/작업을 다른 값으로 정정함 → 해당 field만 채움
 """
 
@@ -210,6 +269,7 @@ class NluIntent:
     clarification: Optional[str] = None
     source: str = "nlu"
     explicit_last_saved: bool = False
+    entries: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def nlu_disabled() -> bool:
@@ -258,7 +318,8 @@ def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> D
     missing = [] if expired else [str(x) for x in (state.get("missing") or []) if x]
     pending_step = missing[0] if missing else ""
     entry_type = pending.get("entry_type")
-    has_active_draft = (not expired) and entry_type == "repair"
+    journal_draft = entry_type == "journal"
+    has_active_draft = ((not expired) and entry_type == "repair") or journal_draft
     draft_fields: Dict[str, Any] = {}
     if has_active_draft:
         for key in SAFE_DRAFT_KEYS:
@@ -272,6 +333,13 @@ def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> D
         has_last_saved = get_last_saved_id(user_id, channel_id) is not None
     except Exception:
         has_last_saved = False
+    if not has_last_saved:
+        try:
+            from backend.app.services.journal_edit import get_last_saved_id as get_journal_last_saved_id
+
+            has_last_saved = get_journal_last_saved_id(user_id, channel_id) is not None
+        except Exception:
+            pass
     last_question = "" if expired else sanitize_last_reply(state.get("last_question") or "")
     return {
         "mode": mode,
@@ -327,18 +395,35 @@ def clean_nlu_fields(fields: Optional[Dict[str, Any]], *, action: str) -> Dict[s
             cleaned["topic"] = topic
     from backend.app.services.bot_intent import DRAFT_ALLOWED_FIELDS
 
-    for key in DRAFT_ALLOWED_FIELDS:
+    for key in DRAFT_ALLOWED_FIELDS | JOURNAL_ALLOWED_FIELDS:
         if key not in raw or raw[key] in (None, ""):
             continue
-        if key in ("unit_price", "qty"):
+        if key in ("unit_price", "qty", "total_amount"):
             number = _as_int(raw[key])
             if number is not None and number > 0:
                 cleaned[key] = number
+            continue
+        if key == "amount_type":
+            if raw[key] in AMOUNT_TYPES:
+                cleaned[key] = raw[key]
             continue
         text = str(raw[key]).strip()
         if text:
             cleaned[key] = text
     return cleaned
+
+
+def _clean_entries(raw_entries: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_entries, list):
+        return []
+    entries: List[Dict[str, Any]] = []
+    for item in raw_entries:
+        if not isinstance(item, dict):
+            continue
+        cleaned = journal_fields_only(clean_nlu_fields(item, action=ACTION_CREATE))
+        if cleaned:
+            entries.append(cleaned)
+    return entries
 
 
 def parse_nlu_payload(raw: Any) -> NluIntent:
@@ -355,6 +440,7 @@ def parse_nlu_payload(raw: Any) -> NluIntent:
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
     fields = clean_nlu_fields(raw.get("fields") if isinstance(raw.get("fields"), dict) else {}, action=action)
+    entries = _clean_entries(raw.get("entries"))
     clarification = raw.get("clarification")
     if clarification is not None:
         clarification = str(clarification).strip() or None
@@ -368,6 +454,7 @@ def parse_nlu_payload(raw: Any) -> NluIntent:
         needs_confirmation=needs,
         clarification=clarification,
         source="nlu",
+        entries=entries,
     )
 
 
@@ -403,6 +490,22 @@ def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
         intent.target = TARGET_NONE
         intent.fields = {}
         intent.needs_confirmation = False
+        return intent
+
+    if intent.action == ACTION_DELETE:
+        if has_draft and intent.target != TARGET_LAST_SAVED:
+            intent.action = ACTION_UNKNOWN
+            intent.target = TARGET_DRAFT
+            intent.needs_confirmation = False
+            intent.clarification = intent.clarification or (
+                "작성 중인 내용을 취소할까요, 아니면 직전 저장 기록을 지울까요?"
+            )
+            return intent
+        intent.target = TARGET_LAST_SAVED
+        intent.needs_confirmation = True
+        intent.explicit_last_saved = True
+        if not intent.domain or intent.domain == "none":
+            intent.domain = MODE_TO_DOMAIN.get(context.get("mode"), DOMAIN_JOURNAL)
         return intent
 
     if intent.confidence < LOW_CONFIDENCE and intent.action not in {
@@ -455,7 +558,9 @@ def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
         intent.needs_confirmation = True
         intent.explicit_last_saved = True
         if not intent.domain or intent.domain == "none":
-            intent.domain = DOMAIN_REPAIR
+            intent.domain = MODE_TO_DOMAIN.get(context.get("mode"), DOMAIN_REPAIR)
+    if intent.target == TARGET_SELECTED_RECORD and intent.action in (ACTION_UPDATE, ACTION_DELETE, ACTION_PROVIDE_FIELD):
+        intent.needs_confirmation = True
     return intent
 
 
@@ -465,6 +570,7 @@ def nlu_to_bot_intent(intent: Optional[NluIntent], raw: str = "") -> BotIntent:
     action = intent.action
     if action not in {
         ACTION_UPDATE,
+        ACTION_DELETE,
         ACTION_CONFIRM,
         ACTION_CANCEL,
         ACTION_PROVIDE_FIELD,
@@ -477,23 +583,30 @@ def nlu_to_bot_intent(intent: Optional[NluIntent], raw: str = "") -> BotIntent:
         action = ACTION_NONE
     from backend.app.services.bot_intent import draft_fields_only
 
-    target = intent.target if intent.target in {TARGET_DRAFT, TARGET_LAST_SAVED, TARGET_NONE} else TARGET_NONE
-    fields = (
-        allowed_fields_only(intent.fields)
-        if target == TARGET_LAST_SAVED
-        else draft_fields_only(intent.fields)
+    target = (
+        intent.target
+        if intent.target in {TARGET_DRAFT, TARGET_LAST_SAVED, TARGET_SELECTED_RECORD, TARGET_NONE}
+        else TARGET_NONE
     )
+    domain = intent.domain if intent.domain in DOMAINS else DOMAIN_REPAIR
+    if domain == DOMAIN_JOURNAL:
+        fields = journal_fields_only(intent.fields)
+    elif target == TARGET_LAST_SAVED:
+        fields = allowed_fields_only(intent.fields)
+    else:
+        fields = draft_fields_only(intent.fields)
     return BotIntent(
         action=action,
         target=target,
         fields=fields,
         raw=raw,
-        domain=intent.domain if intent.domain in DOMAINS else DOMAIN_REPAIR,
+        domain=domain,
         needs_confirmation=bool(intent.needs_confirmation),
-        missing_fields=[] if fields else (["fields"] if action == ACTION_UPDATE else []),
+        missing_fields=[] if fields else (["fields"] if action in (ACTION_UPDATE, ACTION_DELETE) else []),
         confidence=intent.confidence,
         explicit_last_saved=bool(intent.explicit_last_saved),
         clarification=intent.clarification,
+        entries=list(intent.entries or []),
     )
 
 
@@ -544,6 +657,45 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
             needs_confirmation=True,
             explicit_last_saved=bool(local.explicit_last_saved),
             source="fallback",
+        )
+
+    if context.get("mode") == MODE_JOURNAL:
+        from backend.app.services.journal_adapter import extract_journal_fields_local
+
+        jfields = extract_journal_fields_local(text)
+        if jfields and context.get("has_active_draft"):
+            return NluIntent(
+                domain=DOMAIN_JOURNAL,
+                action=ACTION_PROVIDE_FIELD,
+                target=TARGET_DRAFT,
+                fields=jfields,
+                confidence=0.85,
+                source="fallback",
+            )
+        if jfields.get("vendor") and jfields.get("work_type") and (
+            jfields.get("unit_price") or jfields.get("total_amount")
+        ):
+            return NluIntent(
+                domain=DOMAIN_JOURNAL,
+                action=ACTION_CREATE,
+                fields=jfields,
+                confidence=0.8,
+                source="fallback",
+            )
+        if jfields:
+            return NluIntent(
+                domain=DOMAIN_JOURNAL,
+                action=ACTION_CREATE,
+                fields=jfields,
+                confidence=0.55,
+                source="fallback",
+            )
+        return NluIntent(
+            domain=DOMAIN_JOURNAL,
+            action=ACTION_UNKNOWN,
+            confidence=0.0,
+            source="fallback",
+            clarification="업체, 작업, 단가를 다시 알려주세요.",
         )
 
     from backend.app.services.repair_bot import parse_repair_text

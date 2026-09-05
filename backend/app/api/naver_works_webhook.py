@@ -21,6 +21,7 @@ from backend.app.services import get_naver_works_client, get_ai_parser
 from backend.app.services.conversation_state import get_conversation_manager
 from backend.app.services.bot_mode import (
     MODE_IDLE,
+    MODE_JOURNAL,
     MODE_REPAIR,
     apply_mode_command,
     get_mode,
@@ -103,7 +104,8 @@ async def process_message(
     channel_id: str,
     text: str,
     channel_type: str = "group",
-    user_name: str = None
+    user_name: str = None,
+    event_id: str = None,
 ):
     """
     메시지 처리 메인 로직 (Function Calling + 멀티턴 대화 방식)
@@ -177,11 +179,32 @@ async def process_message(
             await _send_prefixed(nw_client, user_id, channel_id, "수선 처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
             return
 
+    if mode == MODE_JOURNAL:
+        try:
+            from backend.app.services.journal_bot import handle_user_text as handle_journal_text
+
+            reply = await handle_journal_text(
+                user_id, channel_id, text, user_name, nlu_intent=nlu, event_id=event_id,
+            )
+            add_debug_log("journal_text_handled", {"reply": (reply or "")[:200]})
+            if reply:
+                conv_manager.add_message(user_id, channel_id, "assistant", reply)
+                await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+            return
+        except Exception as e:
+            add_debug_log("journal_text_error", error=str(e))
+            await _send_prefixed(
+                nw_client, user_id, channel_id,
+                "일지 처리 중 문제가 났어요. 다시 시도해 주세요.",
+                channel_type,
+            )
+            return
+
     try:
         ai_parser = get_ai_parser()
     except Exception as e:
         add_debug_log("ai_parser_error", error=str(e))
-        await _send_prefixed(nw_client, user_id, channel_id, f"❌ AI 초기화 오류: {str(e)}", channel_type)
+        await _send_prefixed(nw_client, user_id, channel_id, "처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
         return
 
     try:
@@ -212,7 +235,7 @@ async def process_message(
         add_debug_log("process_error", error=f"{type(e).__name__}: {str(e)}")
         await _send_prefixed(
             nw_client, user_id, channel_id,
-            f"❌ 처리 중 오류: {str(e)}",
+            "처리 중 문제가 났어요. 다시 시도해 주세요.",
             channel_type,
         )
 
@@ -485,9 +508,10 @@ async def naver_works_webhook(
         if content_type == "text":
             text = content.get("text", "")
             if text:
+                event_id = str(payload.get("eventId") or payload.get("id") or "")
                 background_tasks.add_task(
                     process_message,
-                    user_id, channel_id, text, channel_type
+                    user_id, channel_id, text, channel_type, None, event_id,
                 )
         
         elif content_type in ("file", "image"):

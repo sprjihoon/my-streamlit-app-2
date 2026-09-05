@@ -37,9 +37,10 @@ def _default_conversation_db_path() -> str:
 class ConversationStateManager:
     """대화 상태 관리자 (SQLite 기반)"""
     
-    # 대화 상태 만료 시간 (5분). 수선 draft만 60분으로 분리한다.
+    # 대화 상태 만료 시간 (5분). 수선·일지 draft는 60분으로 분리한다.
     EXPIRE_SECONDS = 300
     REPAIR_DRAFT_EXPIRE_SECONDS = 3600
+    JOURNAL_DRAFT_EXPIRE_SECONDS = 3600
     # 대화 이력 최대 개수
     MAX_HISTORY = 10
     
@@ -140,7 +141,7 @@ class ConversationStateManager:
             pending = json.loads(row["pending_data"]) if row["pending_data"] else {}
             expired = self._expires_ts(row["expires_at"]) <= time.time()
             if expired:
-                if pending.get("entry_type") == "repair":
+                if pending.get("entry_type") in ("repair", "journal"):
                     return {
                         "user_id": row["user_id"],
                         "channel_id": row["channel_id"],
@@ -185,11 +186,14 @@ class ConversationStateManager:
             pending_data: 미완성 작업 데이터
             missing: 누락된 필드 목록
             last_question: 마지막 질문
-            expire_seconds: 생략 시 수선 draft는 60분, 그 외는 5분
+            expire_seconds: 생략 시 수선·일지 draft는 60분, 그 외는 5분
         """
         if expire_seconds is None:
-            if (pending_data or {}).get("entry_type") == "repair":
+            entry_type = (pending_data or {}).get("entry_type")
+            if entry_type == "repair":
                 expire_seconds = self.REPAIR_DRAFT_EXPIRE_SECONDS
+            elif entry_type == "journal":
+                expire_seconds = self.JOURNAL_DRAFT_EXPIRE_SECONDS
             else:
                 expire_seconds = self.EXPIRE_SECONDS
         expires_at = int(time.time()) + int(expire_seconds)

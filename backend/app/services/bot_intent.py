@@ -15,13 +15,16 @@ ACTION_CREATE = "create"
 ACTION_START_MODE = "start_mode"
 ACTION_SHOW_HELP = "show_help"
 ACTION_QUERY_CATALOG = "query_catalog"
+ACTION_DELETE = "delete"
 ACTION_UNKNOWN = "unknown"
 
 TARGET_NONE = "none"
 TARGET_LAST_SAVED = "last_saved"
 TARGET_DRAFT = "draft"
+TARGET_SELECTED_RECORD = "selected_record"
 
 DOMAIN_REPAIR = "repair"
+DOMAIN_JOURNAL = "journal"
 
 _SPACE = re.compile(r"\s+")
 _CHEON_RE = re.compile(r"(\d+(?:\.\d+)?)\s*천\s*원?")
@@ -63,6 +66,10 @@ ALLOWED_FIELDS = frozenset(
     ("unit_price", "qty", "defect", "work_type", "remark", "vendor", "product")
 )
 DRAFT_ALLOWED_FIELDS = ALLOWED_FIELDS | frozenset(("option",))
+JOURNAL_ALLOWED_FIELDS = frozenset(
+    ("vendor", "work_type", "unit_price", "qty", "date", "remark", "total_amount", "amount_type")
+)
+AMOUNT_TYPES = frozenset(("unit", "total", "unknown"))
 FIELD_KEYS = tuple(ALLOWED_FIELDS)
 
 
@@ -78,6 +85,7 @@ class BotIntent:
     confidence: Optional[float] = None
     explicit_last_saved: bool = False
     clarification: Optional[str] = None
+    entries: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _norm(text: str) -> str:
@@ -109,6 +117,19 @@ def allowed_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 def draft_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {k: v for k, v in (fields or {}).items() if k in DRAFT_ALLOWED_FIELDS and v not in (None, "")}
+
+
+def journal_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in (fields or {}).items():
+        if key not in JOURNAL_ALLOWED_FIELDS or value in (None, ""):
+            continue
+        if key == "amount_type":
+            if value in AMOUNT_TYPES:
+                out[key] = value
+            continue
+        out[key] = value
+    return out
 
 
 def rejected_field_names(fields: Optional[Dict[str, Any]]) -> List[str]:
