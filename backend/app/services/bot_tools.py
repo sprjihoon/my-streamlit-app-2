@@ -1355,7 +1355,7 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
         params.extend([int(args["price"] * 0.9), int(args["price"] * 1.1)])
     
     where_clause = " AND ".join(conditions) if conditions else "1=1"
-    limit = args.get("limit", 20)
+    limit = _clamp_limit(args.get("limit"))
     
     with get_connection() as con:
         rows = con.execute(
@@ -1891,7 +1891,7 @@ def _get_invoice_stats(args: Dict, user_id: str, user_name: str) -> Dict:
         params.append(f"%{args['vendor']}%")
     
     where_clause = " AND ".join(conditions) if conditions else "1=1"
-    top_n = args.get("top_n", 10)
+    top_n = _clamp_limit(args.get("top_n"), default=10, maximum=QUERY_MAX_LIMIT)
     
     try:
         with get_connection() as con:
@@ -2671,19 +2671,29 @@ def _lookup_vendor_charges_tool(args: Dict, user_id: str, user_name: str) -> Dic
 
 
 def _lookup_repair_catalog(args: Dict, user_id: str, user_name: str) -> Dict:
-    from backend.app.services import repair_catalog
+    """조회모드 전용. 카탈로그 테이블을 읽기만 하고 생성·시드하지 않는다."""
     limit = _clamp_limit(args.get("limit"))
     offset = _clamp_offset(args.get("offset"))
-    works = repair_catalog.list_work_types()
-    defects = repair_catalog.list_defects()
-    return {
+    with get_connection() as con:
+        works = _fetch_allowed(
+            con, "repair_work_type", ["작업명", "기본비용", "별칭"],
+            order_by="작업명", limit=limit, offset=offset,
+        )
+        defects = _fetch_allowed(
+            con, "repair_defect", ["불량명", "별칭"],
+            order_by="불량명", limit=limit, offset=offset,
+        )
+    result = {
         "success": True,
-        "work_types": works[offset:offset + limit],
-        "defects": defects[offset:offset + limit],
-        "truncated": (offset + limit) < max(len(works), len(defects)),
+        "work_types": works["rows"],
+        "defects": defects["rows"],
+        "truncated": bool(works.get("truncated") or defects.get("truncated")),
         "limit": limit,
         "offset": offset,
     }
+    if works.get("missing") or defects.get("missing"):
+        result["message"] = "수선 카탈로그 테이블이 없어 조회하지 않았습니다."
+    return result
 
 
 def get_db_context_for_ai() -> str:
