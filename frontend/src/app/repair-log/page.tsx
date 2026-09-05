@@ -465,10 +465,10 @@ function LogFormModal({
   const [afterFile, setAfterFile] = useState<File | null>(null);
   const [barcodeFile, setBarcodeFile] = useState<File | null>(null);
 
-  async function fillPrice(work: string, vendorName: string) {
+  async function fillPrice(work: string, vendorName: string, productName?: string) {
     if (!work.trim()) return;
     try {
-      const p = await getRepairCatalogPrice(work, vendorName || undefined);
+      const p = await getRepairCatalogPrice(work, vendorName || undefined, productName || form.제품명 || undefined);
       if (p.found && p.비용 != null) {
         setForm((f) => ({ ...f, 작업: p.작업명 || f.작업, 비용: p.비용 as number }));
         setPriceHint(p.message);
@@ -507,7 +507,7 @@ function LogFormModal({
       setLookupHint(
         `등록 정보 입력됨: ${found.업체명} / ${found.제품명}${found.옵션 ? ` / ${found.옵션}` : ''}${extra ? ` (${extra})` : ''}`
       );
-      if (form.작업) fillPrice(form.작업, vendorName);
+      if (form.작업) fillPrice(form.작업, vendorName, found.제품명 || form.제품명);
     } catch {
       setLookupOk(false);
       setLookupHint('미등록 바코드입니다. 업체명·제품명을 직접 입력하세요.');
@@ -599,12 +599,17 @@ function LogFormModal({
           <input
             value={form.업체명}
             onChange={(e) => setForm({ ...form, 업체명: e.target.value })}
-            onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명); }}
+            onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명, form.제품명); }}
             style={inputStyle}
           />
         </Field>
         <Field label="제품명">
-          <input value={form.제품명} onChange={(e) => setForm({ ...form, 제품명: e.target.value })} style={inputStyle} />
+          <input
+            value={form.제품명}
+            onChange={(e) => setForm({ ...form, 제품명: e.target.value })}
+            onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명, form.제품명); }}
+            style={inputStyle}
+          />
         </Field>
         <Field label="옵션">
           <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} placeholder="블랙" style={inputStyle} />
@@ -647,7 +652,7 @@ function LogFormModal({
               } else {
                 setCustomWork(false);
                 setForm({ ...form, 작업: e.target.value });
-                fillPrice(e.target.value, form.업체명);
+                fillPrice(e.target.value, form.업체명, form.제품명);
               }
             }}
             style={inputStyle}
@@ -660,7 +665,7 @@ function LogFormModal({
             <input
               value={form.작업}
               onChange={(e) => setForm({ ...form, 작업: e.target.value })}
-              onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명); }}
+              onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명, form.제품명); }}
               placeholder="새 작업명"
               style={{ ...inputStyle, marginTop: 6 }}
             />

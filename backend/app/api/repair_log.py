@@ -747,9 +747,13 @@ async def get_catalog():
 
 
 @router.get("/catalog/price")
-async def get_catalog_price(work_type: str, vendor: Optional[str] = None):
+async def get_catalog_price(
+    work_type: str,
+    vendor: Optional[str] = None,
+    product: Optional[str] = None,
+):
     ensure_repair_tables()
-    return repair_catalog.lookup_repair_price(vendor, work_type)
+    return repair_catalog.lookup_repair_price(vendor, work_type, product)
 
 
 @router.post("/catalog/work-types")

@@ -124,42 +124,82 @@ def resolve_defect(name: Optional[str]) -> Optional[Dict[str, Any]]:
     return best
 
 
-def lookup_repair_price(vendor: Optional[str], work_type: Optional[str]) -> Dict[str, Any]:
-    """업체+작업 최근 비용, 없으면 기본비용."""
+def _latest_log_price(
+    work_name: str,
+    vendor: Optional[str] = None,
+    product: Optional[str] = None,
+) -> Optional[Tuple[int, Optional[str]]]:
+    clauses = ["작업 = ?", "비용 IS NOT NULL", "비용 > 0"]
+    params: List[Any] = [work_name]
+    if vendor:
+        clauses.append("업체명 = ?")
+        params.append(vendor.strip())
+    if product:
+        clauses.append("제품명 = ?")
+        params.append(product.strip())
+    with get_connection() as con:
+        row = con.execute(
+            f"""SELECT 비용, 날짜 FROM repair_work_log
+                WHERE {' AND '.join(clauses)}
+                ORDER BY COALESCE(저장시간, 날짜) DESC, id DESC LIMIT 1""",
+            params,
+        ).fetchone()
+    if not row:
+        return None
+    return int(row[0]), row[1]
+
+
+def lookup_repair_price(
+    vendor: Optional[str],
+    work_type: Optional[str],
+    product: Optional[str] = None,
+) -> Dict[str, Any]:
+    """제품+작업 최근 비용, 없으면 업체+작업, 없으면 기본비용."""
     ensure_catalog_tables()
     resolved = resolve_work_type(work_type)
     work_name = resolved["작업명"] if resolved else (work_type or "").strip()
     default_price = resolved["기본비용"] if resolved else None
+    vendor_name = (vendor or "").strip() or None
+    product_name = (product or "").strip() or None
 
-    last_price = None
-    last_date = None
-    if vendor and work_name:
-        with get_connection() as con:
-            row = con.execute(
-                """SELECT 비용, 날짜 FROM repair_work_log
-                   WHERE 업체명 = ? AND 작업 = ? AND 비용 IS NOT NULL AND 비용 > 0
-                   ORDER BY COALESCE(저장시간, 날짜) DESC, id DESC LIMIT 1""",
-                (vendor.strip(), work_name),
-            ).fetchone()
-            if row:
-                last_price = int(row[0])
-                last_date = row[1]
+    hit = None
+    source = None
+    if work_name and product_name and vendor_name:
+        hit = _latest_log_price(work_name, vendor=vendor_name, product=product_name)
+        if hit:
+            source = "product_history"
+    if hit is None and work_name and product_name:
+        hit = _latest_log_price(work_name, product=product_name)
+        if hit:
+            source = "product_history"
+    if hit is None and work_name and vendor_name:
+        hit = _latest_log_price(work_name, vendor=vendor_name)
+        if hit:
+            source = "vendor_history"
 
-    if last_price:
+    if hit:
+        last_price, last_date = hit
+        if source == "product_history":
+            label = " / ".join(x for x in (vendor_name, product_name) if x)
+            message = f"{label} {work_name} 최근 비용은 {last_price:,}원이었습니다. 그대로 저장할까요?"
+        else:
+            message = f"{vendor_name} {work_name} 최근 비용은 {last_price:,}원이었습니다. 그대로 저장할까요?"
         return {
             "found": True,
-            "source": "vendor_history",
+            "source": source,
             "작업명": work_name,
+            "제품명": product_name,
             "비용": last_price,
             "기본비용": default_price,
             "날짜": last_date,
-            "message": f"{vendor} {work_name} 최근 비용은 {last_price:,}원이었습니다. 그대로 저장할까요?",
+            "message": message,
         }
     if default_price is not None:
         return {
             "found": True,
             "source": "default",
             "작업명": work_name,
+            "제품명": product_name,
             "비용": default_price,
             "기본비용": default_price,
             "날짜": None,
@@ -169,6 +209,7 @@ def lookup_repair_price(vendor: Optional[str], work_type: Optional[str]) -> Dict
         "found": False,
         "source": None,
         "작업명": work_name or work_type,
+        "제품명": product_name,
         "비용": None,
         "기본비용": None,
         "message": "등록된 비용이 없어요. 금액을 알려주세요.",
