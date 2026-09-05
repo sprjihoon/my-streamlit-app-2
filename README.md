@@ -45,7 +45,6 @@ my-streamlit-app/
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
 ├── railway.json            # Railway 백엔드 배포
-├── vercel.json             # 루트 Vercel이 frontend Next.js를 쓰게 함
 └── requirements.txt
 ```
 
@@ -179,7 +178,7 @@ curl -s https://my-streamlit-app-2-production.up.railway.app/health
 
 Railway는 `railway.json` + `Dockerfile.backend`로 올린다. 데이터 볼륨은 `/app/data` (DB, 업로드). 배포 시 DB·사진·환경변수는 수동으로 건드리지 않는다.
 
-루트 `vercel.json`은 옛 `my-streamlit-app` 프로젝트가 FastAPI로 빌드하지 않고 `frontend` Next.js를 쓰게 한다. 공식 프론트는 계속 Vercel 프로젝트 `my-streamlit-app-2`다. 운영은 `origin/main` 푸시로 Railway·Vercel이 자동 배포한다.
+공식 프론트는 Vercel 프로젝트 `my-streamlit-app-2`이고 Root Directory는 `frontend`다. 루트에 `vercel.json`을 두면 이 프로젝트가 `frontend/frontend`를 찾아 실패하므로 두지 않는다. 운영은 `origin/main` 푸시로 Railway·Vercel이 자동 배포한다.
 
 ---
 
