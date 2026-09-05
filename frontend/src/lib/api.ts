@@ -1173,9 +1173,10 @@ export async function getRepairCatalog() {
   return fetchApi<{ work_types: RepairWorkType[]; defects: RepairDefect[] }>('/repair-log/catalog');
 }
 
-export async function getRepairCatalogPrice(workType: string, vendor?: string) {
+export async function getRepairCatalogPrice(workType: string, vendor?: string, product?: string) {
   const q = new URLSearchParams({ work_type: workType });
   if (vendor) q.set('vendor', vendor);
+  if (product) q.set('product', product);
   return fetchApi<{
     found: boolean;
     source: string | null;

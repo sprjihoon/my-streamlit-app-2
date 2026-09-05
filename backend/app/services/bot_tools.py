@@ -544,12 +544,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "lookup_repair_price",
-            "description": "수선 업체+작업의 최근 비용 또는 기본비용을 조회합니다. 가격 없이 수선 작업만 왔을 때 사용.",
+            "description": "수선 제품+작업의 최근 비용, 없으면 업체+작업, 없으면 기본비용을 조회합니다. 가격 없이 수선 작업만 왔을 때 사용.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "vendor": {"type": "string"},
-                    "work_type": {"type": "string"}
+                    "work_type": {"type": "string"},
+                    "product": {"type": "string", "description": "제품명"}
                 },
                 "required": ["work_type"]
             }
@@ -2150,7 +2151,9 @@ def _save_repair_log(args: Dict, user_id: str, user_name: str) -> Dict:
 
 def _lookup_repair_price(args: Dict, user_id: str, user_name: str) -> Dict:
     from backend.app.services import repair_catalog
-    return repair_catalog.lookup_repair_price(args.get("vendor"), args.get("work_type"))
+    return repair_catalog.lookup_repair_price(
+        args.get("vendor"), args.get("work_type"), args.get("product"),
+    )
 
 
 def _lookup_repair_barcode_tool(args: Dict, user_id: str, user_name: str) -> Dict:

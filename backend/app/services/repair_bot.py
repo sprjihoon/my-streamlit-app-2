@@ -391,7 +391,9 @@ def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id
         )
 
     if not data.get("unit_price"):
-        price_info = repair_catalog.lookup_repair_price(data.get("vendor"), data.get("work_type"))
+        price_info = repair_catalog.lookup_repair_price(
+            data.get("vendor"), data.get("work_type"), data.get("product"),
+        )
         if price_info.get("found") and price_info.get("비용"):
             data["unit_price"] = price_info["비용"]
             data["work_type"] = price_info.get("작업명") or data["work_type"]
