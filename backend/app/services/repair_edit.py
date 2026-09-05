@@ -13,7 +13,9 @@ from backend.app.services.bot_intent import (
     TARGET_LAST_SAVED,
     BotIntent,
     allowed_fields_only,
+    draft_fields_only,
     parse_bot_intent,
+    rejected_draft_field_names,
     rejected_field_names,
 )
 from backend.app.services.conversation_state import get_conversation_manager
@@ -143,7 +145,7 @@ def _is_repair_mode(user_id: str, channel_id: Optional[str]) -> bool:
 
 def _get_repair_draft(user_id: str, channel_id: Optional[str]) -> Dict[str, Any]:
     state = get_conversation_manager().get_state(user_id, channel_id)
-    if not state:
+    if not state or state.get("expired"):
         return {}
     data = state.get("pending_data") or {}
     if data.get("entry_type") != ENTRY_DRAFT:
@@ -288,10 +290,16 @@ def _draft_change_summary(patch: Dict[str, Any]) -> str:
         bits.append(f"불량을 {patch['defect']}(으)로 바꿨어요.")
     if "work_type" in patch:
         bits.append(f"작업을 {patch['work_type']}(으)로 바꿨어요.")
+    if "vendor" in patch:
+        bits.append(f"업체를 {patch['vendor']}(으)로 바꿨어요.")
+    if "product" in patch:
+        bits.append(f"제품을 {patch['product']}(으)로 바꿨어요.")
+    if "option" in patch:
+        bits.append(f"옵션을 {patch['option']}(으)로 바꿨어요.")
     return " ".join(bits) or "작성 중인 내용을 바꿨어요."
 
 
-_HOLD_DRAFT_STEPS = frozenset(("photos", "barcode", "vendor", "product"))
+_HOLD_DRAFT_STEPS = frozenset(("photos", "barcode"))
 
 
 def _apply_fields_to_draft(
@@ -300,19 +308,32 @@ def _apply_fields_to_draft(
     draft: Dict[str, Any],
     fields: Dict[str, Any],
 ) -> Optional[str]:
-    """작성 중 draft에만 필드 정정을 넣고, 기존 missing·대기 단계를 유지한다."""
-    if rejected_field_names(fields):
+    """작성 중 draft에만 필드 정정을 넣고, 사진·바코드 대기는 유지한다."""
+    if rejected_draft_field_names(fields):
         return FIELD_BLOCKED
-    patch = allowed_fields_only(fields)
+    patch = draft_fields_only(fields)
     if not patch:
         return None
+    if "vendor" in patch:
+        from backend.app.api.repair_log import _resolve_vendor
+        from logic.db import get_connection
+
+        with get_connection() as con:
+            patch["vendor"] = _resolve_vendor(con, patch["vendor"])
     state = get_conversation_manager().get_state(user_id, channel_id) or {}
+    if state.get("expired"):
+        return None
     missing = list(state.get("missing") or [])
     last_q = state.get("last_question") or ""
     updated = {**draft, **patch, "entry_type": ENTRY_DRAFT}
     if "unit_price" in patch:
         updated["price_stated"] = True
-    if any(step in missing for step in _HOLD_DRAFT_STEPS):
+    for key in list(missing):
+        if key in patch and updated.get(key) not in (None, ""):
+            missing.remove(key)
+    hold_wait = any(step in missing for step in _HOLD_DRAFT_STEPS)
+    filled_current = any(key in patch for key in _HOLD_DRAFT_STEPS)
+    if hold_wait and not filled_current:
         get_conversation_manager().set_state(
             user_id=user_id,
             channel_id=channel_id or "",

@@ -37,8 +37,9 @@ def _default_conversation_db_path() -> str:
 class ConversationStateManager:
     """대화 상태 관리자 (SQLite 기반)"""
     
-    # 대화 상태 만료 시간 (5분)
+    # 대화 상태 만료 시간 (5분). 수선 draft만 60분으로 분리한다.
     EXPIRE_SECONDS = 300
+    REPAIR_DRAFT_EXPIRE_SECONDS = 3600
     # 대화 이력 최대 개수
     MAX_HISTORY = 10
     
@@ -136,7 +137,20 @@ class ConversationStateManager:
             ).fetchone()
             if row is None:
                 return None
-            if self._expires_ts(row["expires_at"]) <= time.time():
+            pending = json.loads(row["pending_data"]) if row["pending_data"] else {}
+            expired = self._expires_ts(row["expires_at"]) <= time.time()
+            if expired:
+                if pending.get("entry_type") == "repair":
+                    return {
+                        "user_id": row["user_id"],
+                        "channel_id": row["channel_id"],
+                        "pending_data": pending,
+                        "missing": json.loads(row["missing"]) if row["missing"] else [],
+                        "last_question": row["last_question"],
+                        "created_at": row["created_at"],
+                        "expires_at": row["expires_at"],
+                        "expired": True,
+                    }
                 con.execute(
                     "DELETE FROM conversation_states_v2 WHERE user_id = ? AND channel_id = ?",
                     (uid, cid),
@@ -146,7 +160,7 @@ class ConversationStateManager:
             return {
                 "user_id": row["user_id"],
                 "channel_id": row["channel_id"],
-                "pending_data": json.loads(row["pending_data"]) if row["pending_data"] else {},
+                "pending_data": pending,
                 "missing": json.loads(row["missing"]) if row["missing"] else [],
                 "last_question": row["last_question"],
                 "created_at": row["created_at"],
@@ -159,7 +173,8 @@ class ConversationStateManager:
         channel_id: str,
         pending_data: Dict[str, Any],
         missing: list,
-        last_question: str
+        last_question: str,
+        expire_seconds: Optional[int] = None,
     ) -> None:
         """
         대화 상태 저장
@@ -170,8 +185,14 @@ class ConversationStateManager:
             pending_data: 미완성 작업 데이터
             missing: 누락된 필드 목록
             last_question: 마지막 질문
+            expire_seconds: 생략 시 수선 draft는 60분, 그 외는 5분
         """
-        expires_at = int(time.time()) + int(self.EXPIRE_SECONDS)
+        if expire_seconds is None:
+            if (pending_data or {}).get("entry_type") == "repair":
+                expire_seconds = self.REPAIR_DRAFT_EXPIRE_SECONDS
+            else:
+                expire_seconds = self.EXPIRE_SECONDS
+        expires_at = int(time.time()) + int(expire_seconds)
         uid, cid = self._scope(user_id, channel_id)
         
         with sqlite3.connect(self.db_path) as con:

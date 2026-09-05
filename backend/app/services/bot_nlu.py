@@ -72,7 +72,9 @@ SECRET_MARKERS = (
     "billing.db",
     "-----begin",
 )
-SAFE_DRAFT_KEYS = ("vendor", "product", "work_type", "defect", "qty", "unit_price", "remark")
+SAFE_DRAFT_KEYS = ("vendor", "product", "option", "work_type", "defect", "qty", "unit_price", "remark")
+RECENT_TURN_MAX = 4
+RECENT_TURN_CHARS = 160
 DOMAIN_TO_MODE = {
     "journal": MODE_JOURNAL,
     "repair": MODE_REPAIR,
@@ -124,6 +126,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "remark",
                 "vendor",
                 "product",
+                "option",
                 "mode",
                 "topic",
             ],
@@ -135,6 +138,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "remark": {"type": ["string", "null"]},
                 "vendor": {"type": ["string", "null"]},
                 "product": {"type": ["string", "null"]},
+                "option": {"type": ["string", "null"]},
                 "mode": {
                     "anyOf": [
                         {"type": "string", "enum": ["journal", "repair", "query"]},
@@ -162,23 +166,24 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 사용자 문장을 허용된 JSON만으로 구조화하세요. DB 쓰기, SQL, 권한, 기록 ID 확정은 하지 마세요.
 환경변수, API 키, 비밀번호, 파일 경로, 전체 DB는 요청·응답에 넣지 마세요.
 
-입력 컨텍스트 키만 사용하세요: mode, pending_step, missing_fields, draft_fields, has_last_saved, last_assistant_reply, user_message.
+입력 컨텍스트 키만 사용하세요: mode, pending_step, missing_fields, draft_fields, has_last_saved, last_question, last_assistant_reply, recent_turns, user_message.
 
 규칙:
 1. action/target/fields/domain은 schema enum만 사용합니다.
 2. 작성 중 draft가 있으면 기본 target은 draft입니다.
 3. 저장이 끝난 직전 기록을 명시적으로 가리킬 때만 target=last_saved 입니다.
-4. last_saved 수정은 needs_confirmation=true 입니다.
+4. last_saved 수정은 needs_confirmation=true 입니다. option은 last_saved에 넣지 마세요.
 5. 모드를 시작하려는 의미면 action=start_mode 이고 fields.mode 또는 domain에 journal/repair/query를 넣습니다.
-6. 지금 물어본 칸에 값을 채우는 말이면 action=provide_field 입니다.
+6. 지금 물어본 칸에 값을 채우는 말이면 action=provide_field 입니다. 추출한 값만 fields에 넣으세요.
 7. 새 수선/일지를 시작하는 말이면 action=create 입니다.
 8. 확정은 confirm, 포기는 cancel 입니다.
 9. 봇이 무엇을 할 수 있는지 묻는 의미면 action=show_help, fields.topic=all 입니다. 모드를 고르라고 되묻지 마세요.
 10. 수선 작업 종류·가격 목록을 보려는 의미면 action=query_catalog, fields.topic=repair_work_prices 입니다.
-11. last_assistant_reply를 보고 후속 질문(가격, 그게 뭐야)을 같은 주제로 연결하세요.
+11. last_question·last_assistant_reply·recent_turns를 보고 후속 질문을 같은 주제로 연결하세요.
 12. show_help와 query_catalog는 읽기 전용입니다. 기본상태에서도 이 action을 고르세요.
-13. 자신이 없거나 대상이 섞이면 action=unknown 이고 clarification에 질문 하나만 넣습니다.
-14. 아래는 문장 사전이 아니라 의미 예시입니다. 같은 뜻의 다른 말도 같은 action으로 접으세요.
+13. 한 문장에 업체·제품·옵션·작업·가격·수량이 있으면 있는 값만 fields에 모두 넣습니다.
+14. 자신이 없거나 대상이 섞이면 action=unknown 이고 clarification에 질문 하나만 넣습니다.
+15. 아래는 문장 사전이 아니라 의미 예시입니다. 같은 뜻의 다른 말도 같은 action으로 접으세요.
 
 의미 예시:
 - 수선 업무를 시작함 → start_mode / repair
@@ -230,15 +235,30 @@ def last_assistant_reply(user_id: str, channel_id: Optional[str]) -> str:
     return ""
 
 
+def recent_turns(user_id: str, channel_id: Optional[str]) -> List[Dict[str, str]]:
+    history = get_conversation_manager().get_history(user_id, limit=RECENT_TURN_MAX, channel_id=channel_id)
+    turns: List[Dict[str, str]] = []
+    for item in history[-RECENT_TURN_MAX:]:
+        role = item.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        content = sanitize_last_reply(item.get("content") or "")[:RECENT_TURN_CHARS]
+        if not content:
+            continue
+        turns.append({"role": role, "content": content})
+    return turns
+
+
 def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> Dict[str, Any]:
     """GPT에 넣을 최소 컨텍스트. 비밀·파일경로·전체 DB는 넣지 않는다."""
     mode = get_mode(user_id, channel_id)
     state = get_conversation_manager().get_state(user_id, channel_id) or {}
-    pending = state.get("pending_data") or {}
-    missing = [str(x) for x in (state.get("missing") or []) if x]
+    expired = bool(state.get("expired"))
+    pending = {} if expired else (state.get("pending_data") or {})
+    missing = [] if expired else [str(x) for x in (state.get("missing") or []) if x]
     pending_step = missing[0] if missing else ""
     entry_type = pending.get("entry_type")
-    has_active_draft = entry_type == "repair"
+    has_active_draft = (not expired) and entry_type == "repair"
     draft_fields: Dict[str, Any] = {}
     if has_active_draft:
         for key in SAFE_DRAFT_KEYS:
@@ -252,6 +272,7 @@ def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> D
         has_last_saved = get_last_saved_id(user_id, channel_id) is not None
     except Exception:
         has_last_saved = False
+    last_question = "" if expired else sanitize_last_reply(state.get("last_question") or "")
     return {
         "mode": mode,
         "pending_step": pending_step,
@@ -259,7 +280,10 @@ def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> D
         "draft_fields": draft_fields,
         "has_last_saved": bool(has_last_saved),
         "has_active_draft": has_active_draft,
+        "expired_repair_draft": expired and (state.get("pending_data") or {}).get("entry_type") == "repair",
+        "last_question": last_question,
         "last_assistant_reply": last_assistant_reply(user_id, channel_id),
+        "recent_turns": recent_turns(user_id, channel_id),
         "user_message": (text or "").strip(),
     }
 
@@ -271,7 +295,9 @@ def gpt_payload(context: Dict[str, Any]) -> Dict[str, Any]:
         "missing_fields": list(context.get("missing_fields") or []),
         "draft_fields": dict(context.get("draft_fields") or {}),
         "has_last_saved": bool(context.get("has_last_saved")),
+        "last_question": context.get("last_question") or "",
         "last_assistant_reply": context.get("last_assistant_reply") or "",
+        "recent_turns": list(context.get("recent_turns") or []),
         "user_message": context.get("user_message") or "",
     }
 
@@ -299,7 +325,9 @@ def clean_nlu_fields(fields: Optional[Dict[str, Any]], *, action: str) -> Dict[s
         topic = raw.get("topic")
         if topic in TOPIC_FIELDS:
             cleaned["topic"] = topic
-    for key in ALLOWED_FIELDS:
+    from backend.app.services.bot_intent import DRAFT_ALLOWED_FIELDS
+
+    for key in DRAFT_ALLOWED_FIELDS:
         if key not in raw or raw[key] in (None, ""):
             continue
         if key in ("unit_price", "qty"):
@@ -447,8 +475,14 @@ def nlu_to_bot_intent(intent: Optional[NluIntent], raw: str = "") -> BotIntent:
         ACTION_UNKNOWN,
     }:
         action = ACTION_NONE
+    from backend.app.services.bot_intent import draft_fields_only
+
     target = intent.target if intent.target in {TARGET_DRAFT, TARGET_LAST_SAVED, TARGET_NONE} else TARGET_NONE
-    fields = allowed_fields_only(intent.fields)
+    fields = (
+        allowed_fields_only(intent.fields)
+        if target == TARGET_LAST_SAVED
+        else draft_fields_only(intent.fields)
+    )
     return BotIntent(
         action=action,
         target=target,

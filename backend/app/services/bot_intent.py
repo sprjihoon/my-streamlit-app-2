@@ -62,6 +62,7 @@ _VALUE_TO_CHANGE_RE = re.compile(
 ALLOWED_FIELDS = frozenset(
     ("unit_price", "qty", "defect", "work_type", "remark", "vendor", "product")
 )
+DRAFT_ALLOWED_FIELDS = ALLOWED_FIELDS | frozenset(("option",))
 FIELD_KEYS = tuple(ALLOWED_FIELDS)
 
 
@@ -106,8 +107,16 @@ def allowed_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {k: v for k, v in (fields or {}).items() if k in ALLOWED_FIELDS and v not in (None, "")}
 
 
+def draft_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    return {k: v for k, v in (fields or {}).items() if k in DRAFT_ALLOWED_FIELDS and v not in (None, "")}
+
+
 def rejected_field_names(fields: Optional[Dict[str, Any]]) -> List[str]:
     return [k for k in (fields or {}) if k not in ALLOWED_FIELDS]
+
+
+def rejected_draft_field_names(fields: Optional[Dict[str, Any]]) -> List[str]:
+    return [k for k in (fields or {}) if k not in DRAFT_ALLOWED_FIELDS]
 
 
 def extract_korean_amount(text: str) -> Optional[int]:

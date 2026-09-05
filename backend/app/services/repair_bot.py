@@ -36,7 +36,13 @@ PHOTO_WAIT_SEC = 5.0
 PHOTO_EXTRA_WAIT_SEC = 2.5
 PHOTO_MAX_EXTRA_ROUNDS = 2
 PHOTO_SET_HINT = "바코드 / 사진 1 / 사진 2"
+PHOTO_SET_SIZE = 3
+VISION_TIMEOUT_SEC = 12.0
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+EXPIRED_REPAIR_MSG = "작성하던 수선이 만료됐어요. 다시 시작해주세요."
+PHOTO_RETRY_MSG = "사진을 처리하지 못했어요. 바코드 / 사진 1 / 사진 2를 다시 보내주세요."
+PHOTO_OVERFLOW_MSG = "이미 3장을 받았어요. 추가 사진은 이번 수선에 넣지 않았어요."
+PHOTO_SAFE_ERROR = "사진을 받지 못했어요. 바코드 / 사진 1 / 사진 2를 다시 보내주세요."
 
 REPAIR_SIGNALS = (
     "수선", "불량", "구멍", "열펜", "잡사", "세탁", "스팀", "바느질",
@@ -113,7 +119,11 @@ def is_repair_text(text: str) -> bool:
 
 def pending_is_repair(user_id: str, channel_id: Optional[str] = None) -> bool:
     state = get_conversation_manager().get_state(user_id, channel_id)
-    if state and (state.get("pending_data") or {}).get("entry_type") == "repair":
+    if (
+        state
+        and not state.get("expired")
+        and (state.get("pending_data") or {}).get("entry_type") == "repair"
+    ):
         return True
     return _inbox_count(user_id, channel_id) > 0
 
@@ -187,9 +197,13 @@ def format_work_cost_list() -> str:
 def extract_qty(text: str) -> Optional[int]:
     if not text:
         return None
-    if re.search(r"한\s*건", text):
+    raw = text.strip()
+    compact = re.sub(r"\s+", "", raw)
+    if compact in {"하나", "한개", "한건"} or re.search(r"한\s*(?:건|개)", raw):
         return 1
-    m = re.search(r"(\d+)\s*(?:건|개|장|벌)", text)
+    if compact in {"둘", "두개", "두건", "2건", "2개"} or re.search(r"두\s*(?:건|개)", raw):
+        return 2
+    m = re.search(r"(\d+)\s*(?:건|개|장|벌)", raw)
     if m:
         n = int(m.group(1))
         return n if n > 0 else None
@@ -214,12 +228,23 @@ def parse_repair_text(text: str) -> Dict[str, Any]:
 
 def _get_pending(user_id: str, channel_id: Optional[str] = None) -> Dict[str, Any]:
     state = get_conversation_manager().get_state(user_id, channel_id)
-    if not state:
+    if not state or state.get("expired"):
         return {}
     data = state.get("pending_data") or {}
     if data.get("entry_type") != "repair":
         return {}
     return data
+
+
+def _consume_expired_repair(user_id: str, channel_id: Optional[str] = None) -> bool:
+    state = get_conversation_manager().get_state(user_id, channel_id)
+    if not state or not state.get("expired"):
+        return False
+    if (state.get("pending_data") or {}).get("entry_type") != "repair":
+        return False
+    clear_photo_inbox(user_id, channel_id)
+    _clear_pending(user_id, channel_id)
+    return True
 
 
 def _set_pending(user_id: str, channel_id: str, data: Dict[str, Any], missing: List[str], question: str) -> None:
@@ -346,6 +371,16 @@ def _save_repair_entry(
                 "remember_last_saved failed user=%s channel=%s record=%s",
                 user_id, channel_id, rid,
             )
+        if data.get("barcode") and data.get("vendor") and data.get("product"):
+            try:
+                upsert_repair_barcode_record(
+                    data["barcode"], data["vendor"], data["product"], data.get("option"), "bot"
+                )
+            except Exception:
+                logger.exception(
+                    "barcode map after save failed user=%s channel=%s record=%s",
+                    user_id, channel_id, rid,
+                )
     return saved
 
 
@@ -425,6 +460,8 @@ def _merge_nlu_fields(parsed: Dict[str, Any], fields: Optional[Dict[str, Any]]) 
         out["vendor"] = fields["vendor"]
     if fields.get("product"):
         out["product"] = fields["product"]
+    if fields.get("option"):
+        out["option"] = fields["option"]
     return out
 
 
@@ -438,6 +475,9 @@ async def handle_user_text(
     raw = (text or "").strip()
     from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_bot_intent, render_readonly_nlu
     from backend.app.services.repair_edit import handle_repair_edit
+
+    if _consume_expired_repair(user_id, channel_id):
+        return EXPIRED_REPAIR_MSG
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
     readonly = render_readonly_nlu(nlu)
@@ -476,9 +516,13 @@ async def handle_user_text(
     if nlu_action in ("provide_field", "create", "update") and nlu_target != "last_saved":
         parsed = _merge_nlu_fields(parsed, nlu_fields)
     vendor_mention = extract_vendor_mention(raw) or (parsed.get("vendor") if parsed.get("vendor") else None)
-    if vendor_mention and not data.get("vendor"):
+    if vendor_mention:
         with get_connection() as con:
             data["vendor"] = _resolve_vendor(con, vendor_mention)
+    if parsed.get("product"):
+        data["product"] = parsed["product"]
+    if parsed.get("option"):
+        data["option"] = parsed["option"]
 
     if data.get("awaiting_price_confirm"):
         prev_price = data.get("unit_price")
@@ -487,11 +531,6 @@ async def handle_user_text(
         if parsed.get("price") is not None:
             data["unit_price"] = parsed["price"]
             data["price_stated"] = True
-            if data.get("work_type"):
-                try:
-                    repair_catalog.upsert_work_type(data["work_type"], parsed["price"])
-                except Exception:
-                    pass
         if parsed.get("work"):
             data["work_type"] = parsed["work"]
         if parsed.get("defect"):
@@ -540,7 +579,7 @@ async def handle_user_text(
             "바코드로 안 보여요. ON56S152917처럼 숫자·영문을 입력해 주세요.",
         )
 
-    if "vendor" in missing and raw:
+    if "vendor" in missing and not data.get("vendor") and raw:
         if is_conversational_command(raw) and not vendor_mention:
             return _ask(user_id, channel_id, data, ["vendor"], "업체명만 알려주세요. 예: 로지킴")
         vendor_text = vendor_mention or raw.strip()
@@ -548,17 +587,16 @@ async def handle_user_text(
             data["vendor"] = _resolve_vendor(con, vendor_text)
         return continue_after_photos_or_text(data, user_id, channel_id)
 
-    if "product" in missing and raw:
+    if "vendor" in missing and data.get("vendor"):
+        return continue_after_photos_or_text(data, user_id, channel_id)
+
+    if "product" in missing and not data.get("product") and raw:
         if is_conversational_command(raw):
             return _ask(user_id, channel_id, data, ["product"], "제품명만 알려주세요.")
-        data["product"] = raw
-        if data.get("barcode") and data.get("vendor"):
-            try:
-                upsert_repair_barcode_record(
-                    data["barcode"], data["vendor"], data["product"], data.get("option"), "bot"
-                )
-            except Exception:
-                pass
+        data["product"] = parsed.get("product") or raw.strip()
+        return continue_after_photos_or_text(data, user_id, channel_id)
+
+    if "product" in missing and data.get("product"):
         return continue_after_photos_or_text(data, user_id, channel_id)
 
     if "unit_price" in missing and parsed.get("price") is not None:
@@ -584,8 +622,6 @@ async def handle_user_text(
             if leftover and leftover not in REPAIR_SIGNALS:
                 if not parsed.get("defect") or leftover != parsed.get("defect"):
                     data["work_type"] = leftover
-                    if parsed.get("price"):
-                        repair_catalog.upsert_work_type(leftover, parsed["price"])
 
     data = _merge_parsed(data, parsed)
     data = _infer_work(data)
@@ -662,6 +698,17 @@ def ensure_inbox_v2_tables() -> None:
                 name TEXT,
                 ext TEXT,
                 created_at TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repair_photo_event_v2 (
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                event_key TEXT NOT NULL,
+                created_at TEXT,
+                PRIMARY KEY (user_id, channel_id, event_key)
             )
             """
         )
@@ -752,6 +799,10 @@ def clear_photo_inbox(user_id: str, channel_id: Optional[str] = None) -> None:
             "DELETE FROM repair_photo_inbox_v2 WHERE user_id = ? AND channel_id = ?",
             (uid, cid),
         )
+        con.execute(
+            "DELETE FROM repair_photo_event_v2 WHERE user_id = ? AND channel_id = ?",
+            (uid, cid),
+        )
         con.commit()
     for row in rows:
         try:
@@ -763,7 +814,7 @@ def clear_photo_inbox(user_id: str, channel_id: Optional[str] = None) -> None:
         task.cancel()
 
 
-def _append_inbox_photo(
+def _try_append_inbox_photo(
     user_id: str,
     channel_id: str,
     channel_type: str,
@@ -771,13 +822,59 @@ def _append_inbox_photo(
     data: bytes,
     name: str,
     ext: str,
-) -> int:
+    event_key: Optional[str] = None,
+) -> tuple[int, str]:
     uid, cid = _room_key(user_id, channel_id)
     ensure_inbox_v2_tables()
     cleanup_stale_inbox_v2()
-    filename = save_image_bytes(data, ext)
     now = datetime.now().isoformat()
     flush_after = time.time() + PHOTO_WAIT_SEC
+    with get_connection() as con:
+        if event_key:
+            existed = con.execute(
+                """
+                SELECT 1 FROM repair_photo_event_v2
+                WHERE user_id = ? AND channel_id = ? AND event_key = ?
+                """,
+                (uid, cid, event_key),
+            ).fetchone()
+            if existed:
+                count = con.execute(
+                    """
+                    SELECT COUNT(*) FROM repair_photo_inbox_file_v2
+                    WHERE user_id = ? AND channel_id = ?
+                    """,
+                    (uid, cid),
+                ).fetchone()[0]
+                return int(count or 0), "duplicate"
+            con.execute(
+                """
+                INSERT OR IGNORE INTO repair_photo_event_v2
+                    (user_id, channel_id, event_key, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (uid, cid, event_key, now),
+            )
+        meta = con.execute(
+            """
+            SELECT extra_rounds FROM repair_photo_inbox_v2
+            WHERE user_id = ? AND channel_id = ?
+            """,
+            (uid, cid),
+        ).fetchone()
+        count = con.execute(
+            """
+            SELECT COUNT(*) FROM repair_photo_inbox_file_v2
+            WHERE user_id = ? AND channel_id = ?
+            """,
+            (uid, cid),
+        ).fetchone()[0]
+        claimed = bool(meta and int(meta[0] or 0) < 0)
+        if claimed:
+            con.commit()
+            return int(count or 0), "overflow"
+        con.commit()
+    filename = save_image_bytes(data, ext)
     with get_connection() as con:
         con.execute(
             """
@@ -787,7 +884,10 @@ def _append_inbox_photo(
             ON CONFLICT(user_id, channel_id) DO UPDATE SET
                 channel_type = excluded.channel_type,
                 user_name = COALESCE(excluded.user_name, repair_photo_inbox_v2.user_name),
-                extra_rounds = 0,
+                extra_rounds = CASE
+                    WHEN repair_photo_inbox_v2.extra_rounds < 0 THEN repair_photo_inbox_v2.extra_rounds
+                    ELSE 0
+                END,
                 flush_after = excluded.flush_after,
                 updated_at = excluded.updated_at
             """,
@@ -809,7 +909,23 @@ def _append_inbox_photo(
             (uid, cid),
         ).fetchone()[0]
         con.commit()
-    return int(count)
+    return int(count), "ok"
+
+
+def _append_inbox_photo(
+    user_id: str,
+    channel_id: str,
+    channel_type: str,
+    user_name: Optional[str],
+    data: bytes,
+    name: str,
+    ext: str,
+    event_key: Optional[str] = None,
+) -> int:
+    count, _status = _try_append_inbox_photo(
+        user_id, channel_id, channel_type, user_name, data, name, ext, event_key=event_key
+    )
+    return count
 
 
 def _unlock_inbox(con, uid: str, cid: str, leftover: int, need: int) -> None:
@@ -917,8 +1033,12 @@ def _claim_inbox_photos(user_id: str, channel_id: Optional[str] = None, need: in
                 "user_name": meta[2],
             }
         photos = []
+        file_ids = []
+        filenames = []
         for _id, filename, name, ext, data in readable:
             photos.append(BufferedPhoto(data=data, name=name or filename, ext=ext or ".jpg"))
+            file_ids.append(_id)
+            filenames.append(filename)
             try:
                 (folder / filename).unlink(missing_ok=True)
             except Exception:
@@ -941,7 +1061,10 @@ def _claim_inbox_photos(user_id: str, channel_id: Optional[str] = None, need: in
         "channel_type": meta[1],
         "user_name": meta[2],
         "photos": photos,
+        "file_ids": file_ids,
+        "filenames": filenames,
     }
+
 
 
 def _detach_short_overflow(user_id: str, channel_id: Optional[str] = None, need: int = 3) -> List[str]:
@@ -992,6 +1115,57 @@ def _keep_overflow_off_next_case(user_id: str, channel_id: str) -> None:
     )
 
 
+def _commit_inbox_claim(user_id: str, channel_id: Optional[str], file_ids: Optional[List[int]] = None) -> None:
+    uid, cid = _room_key(user_id, channel_id)
+    ensure_inbox_v2_tables()
+    folder = _inbox_dir()
+    with get_connection() as con:
+        rows = []
+        if file_ids:
+            for _id in file_ids:
+                row = con.execute(
+                    "SELECT filename FROM repair_photo_inbox_file_v2 WHERE id = ?",
+                    (_id,),
+                ).fetchone()
+                if row:
+                    rows.append(row[0])
+                con.execute("DELETE FROM repair_photo_inbox_file_v2 WHERE id = ?", (_id,))
+        leftover = con.execute(
+            """
+            SELECT COUNT(*) FROM repair_photo_inbox_file_v2
+            WHERE user_id = ? AND channel_id = ?
+            """,
+            (uid, cid),
+        ).fetchone()[0]
+        if int(leftover or 0) == 0:
+            con.execute(
+                "DELETE FROM repair_photo_event_v2 WHERE user_id = ? AND channel_id = ?",
+                (uid, cid),
+            )
+        con.commit()
+    for filename in rows:
+        try:
+            (folder / filename).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _release_inbox_claim(user_id: str, channel_id: Optional[str] = None) -> None:
+    uid, cid = _room_key(user_id, channel_id)
+    ensure_inbox_v2_tables()
+    with get_connection() as con:
+        con.execute(
+            """
+            UPDATE repair_photo_inbox_v2
+            SET extra_rounds = 0, flush_after = ?, updated_at = ?
+            WHERE user_id = ? AND channel_id = ? AND extra_rounds < 0
+            """,
+            (time.time() + PHOTO_EXTRA_WAIT_SEC, datetime.now().isoformat(), uid, cid),
+        )
+        con.commit()
+
+
+
 def _bump_inbox_wait(user_id: str, channel_id: Optional[str] = None) -> None:
     uid, cid = _room_key(user_id, channel_id)
     with get_connection() as con:
@@ -1027,6 +1201,7 @@ async def receive_photo(
     name: str,
     user_name: Optional[str] = None,
     send_fn=None,
+    event_key: Optional[str] = None,
 ) -> None:
     """사진을 해당 방 버퍼에 넣고 잠시 후 세트로 처리."""
     ext = ".jpg"
@@ -1035,11 +1210,18 @@ async def receive_photo(
         if lower.endswith(e):
             ext = e if e != ".jpeg" else ".jpg"
             break
-    count = _append_inbox_photo(
-        user_id, channel_id, channel_type, user_name, data, name or "photo.jpg", ext
+    count, status = _try_append_inbox_photo(
+        user_id, channel_id, channel_type, user_name, data, name or "photo.jpg", ext,
+        event_key=event_key,
     )
-    logger.info("repair photo buffered user=%s channel=%s count=%s", user_id, channel_id, count)
-    wait = 1.0 if count >= 3 else PHOTO_WAIT_SEC
+    logger.info("repair photo buffered user=%s channel=%s count=%s status=%s", user_id, channel_id, count, status)
+    if status == "duplicate":
+        return
+    if status == "overflow":
+        if send_fn:
+            await send_fn(channel_id, PHOTO_OVERFLOW_MSG, channel_type)
+        return
+    wait = 1.0 if count >= PHOTO_SET_SIZE else PHOTO_WAIT_SEC
     key = _task_key(user_id, channel_id)
     existing = _flush_tasks.get(key)
     if existing and not existing.done():
@@ -1103,7 +1285,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
             )
         return
 
-    claimed = _claim_inbox_photos(uid, cid, 3)
+    claimed = _claim_inbox_photos(uid, cid, PHOTO_SET_SIZE)
     if not claimed or not claimed.get("ready"):
         if claimed and claimed.get("read_error"):
             if send_fn:
@@ -1113,26 +1295,43 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
                     claimed["channel_type"],
                 )
             return
-        if claimed and claimed.get("count", 0) < 3:
+        if claimed and claimed.get("count", 0) < PHOTO_SET_SIZE:
             await _flush_later(uid, cid, PHOTO_EXTRA_WAIT_SEC, send_fn, depth + 1)
         return
 
+    from backend.app.services.bot_mode import MODE_REPAIR, get_mode
+
+    if get_mode(uid, cid) != MODE_REPAIR:
+        _release_inbox_claim(uid, cid)
+
     photos = [p for p in claimed["photos"] if p.data]
-    if len(photos) < 3:
+    if len(photos) < PHOTO_SET_SIZE:
+        _release_inbox_claim(uid, cid)
         if send_fn:
-            await send_fn(
-                claimed["channel_id"],
-                f"사진을 일부 읽지 못했어요. 모자란 장수만 이어서 보내주세요. ({PHOTO_SET_HINT})",
-                claimed["channel_type"],
-            )
+            await send_fn(claimed["channel_id"], PHOTO_RETRY_MSG, claimed["channel_type"])
         return
 
-    reply = await finalize_photo_set(
-        user_id=uid,
-        channel_id=claimed["channel_id"],
-        photos=photos,
-        user_name=claimed["user_name"],
-    )
+    try:
+        reply = await finalize_photo_set(
+            user_id=uid,
+            channel_id=claimed["channel_id"],
+            photos=photos,
+            user_name=claimed["user_name"],
+        )
+    except Exception:
+        logger.exception("finalize_photo_set failed user=%s channel=%s", uid, cid)
+        _release_inbox_claim(uid, cid)
+        if send_fn:
+            await send_fn(claimed["channel_id"], PHOTO_RETRY_MSG, claimed["channel_type"])
+        return
+
+    if not reply or get_mode(uid, claimed["channel_id"]) != MODE_REPAIR:
+        _release_inbox_claim(uid, cid)
+        return
+    if reply == PHOTO_RETRY_MSG:
+        _release_inbox_claim(uid, cid)
+    else:
+        _commit_inbox_claim(uid, cid, claimed.get("file_ids"))
     if send_fn and reply:
         await send_fn(claimed["channel_id"], reply, claimed["channel_type"])
     _keep_overflow_off_next_case(uid, claimed["channel_id"])
@@ -1153,6 +1352,28 @@ def _assign_saved_photos(data: Dict[str, Any], classified: dict, saved_names: Li
         data["after_image"] = saved_names[after_i]
 
 
+def _positional_photo_slots(photos: List[BufferedPhoto], classified: dict) -> dict:
+    """바코드 미인식 시 안내 순서(바코드 / 전 / 후)를 그대로 보존한다."""
+    out = dict(classified or {})
+    if out.get("barcode") and not out.get("ambiguous"):
+        return out
+    out["barcode_index"] = 0 if photos else None
+    out["before_index"] = 1 if len(photos) > 1 else None
+    out["after_index"] = 2 if len(photos) > 2 else None
+    return out
+
+
+async def _classify_photos_safe(photos: List[BufferedPhoto]) -> Optional[dict]:
+    try:
+        return await asyncio.wait_for(
+            classify_photos([p.data for p in photos]),
+            timeout=VISION_TIMEOUT_SEC,
+        )
+    except Exception:
+        logger.exception("photo classify failed")
+        return None
+
+
 async def finalize_photo_set(
     user_id: str,
     channel_id: str,
@@ -1161,7 +1382,11 @@ async def finalize_photo_set(
     classified: Optional[dict] = None,
 ) -> str:
     ensure_repair_tables()
-    classified = classified or await classify_photos([p.data for p in photos])
+    if classified is None:
+        classified = await _classify_photos_safe(photos)
+        if classified is None:
+            return PHOTO_RETRY_MSG
+    classified = _positional_photo_slots(photos, classified)
     saved_names: List[Optional[str]] = [
         save_image_bytes(p.data, p.ext) if p.data else None for p in photos
     ]

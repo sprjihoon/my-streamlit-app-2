@@ -174,7 +174,7 @@ async def process_message(
             return
         except Exception as e:
             add_debug_log("repair_text_error", error=str(e))
-            await _send_prefixed(nw_client, user_id, channel_id, f"❌ 수선 처리 오류: {e}", channel_type)
+            await _send_prefixed(nw_client, user_id, channel_id, "수선 처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
             return
 
     try:
@@ -350,6 +350,7 @@ async def process_image_upload(
     file_url: Optional[str],
     file_id: Optional[str],
     file_name: str,
+    event_id: Optional[str] = None,
 ):
     """수선용 사진 수신 → 수선모드에서만 수선 흐름으로 보낸다."""
     add_debug_log("repair_image_start", {"file_name": file_name, "has_url": bool(file_url), "file_id": file_id})
@@ -383,14 +384,13 @@ async def process_image_upload(
                 last_error = e
                 add_debug_log("repair_image_url_fail", {"error": str(e)})
         if data is None:
-            if last_error:
-                raise last_error
             await _send_prefixed(nw_client, user_id, channel_id, "사진을 받지 못했어요. 다시 보내주세요.", channel_type)
             return
 
         async def send_fn(ch_id, msg, ch_type="group"):
             await _send_prefixed(nw_client, user_id, ch_id, msg, ch_type)
 
+        event_key = ":".join(part for part in ((event_id or "").strip(), (file_id or "").strip()) if part) or None
         await receive_photo(
             user_id=user_id,
             channel_id=channel_id,
@@ -399,6 +399,7 @@ async def process_image_upload(
             name=file_name or "photo.jpg",
             user_name=user_name,
             send_fn=send_fn,
+            event_key=event_key,
         )
     except Exception as e:
         add_debug_log("repair_image_error", error=str(e))
@@ -501,9 +502,10 @@ async def naver_works_webhook(
             )
 
             if content_type == "image" or is_image_filename(file_name):
+                event_id = str(payload.get("eventId") or payload.get("id") or "")
                 background_tasks.add_task(
                     process_image_upload,
-                    user_id, channel_id, channel_type, file_url, file_id, file_name,
+                    user_id, channel_id, channel_type, file_url, file_id, file_name, event_id,
                 )
             elif file_name.endswith((".xlsx", ".xls")):
                 background_tasks.add_task(

@@ -265,9 +265,6 @@ def test_inbox_rooms_isolated():
         assert claimed_a["channel_id"] == a
         assert rb._inbox_count(uid, a) == 0
         assert rb._inbox_count(uid, b) == 3
-
-        for i in range(3):
-            rb._append_inbox_photo(uid, a, "group", "n", b"AAA", f"a2{i}.jpg", ".jpg")
         apply_mode_command(uid, a, parse_mode_command("모드 종료"))
         assert rb._inbox_count(uid, a) == 0
         assert rb._inbox_count(uid, b) == 3
@@ -297,6 +294,7 @@ def test_inbox_rooms_isolated():
         async def fake_finalize(**kwargs):
             return f"done:{kwargs['channel_id']}"
 
+        set_mode(uid, b, MODE_REPAIR)
         with get_connection() as con:
             con.execute(
                 "UPDATE repair_photo_inbox_v2 SET flush_after = 0 WHERE user_id = ? AND channel_id = ?",

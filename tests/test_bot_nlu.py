@@ -56,6 +56,7 @@ def _payload(**overrides):
             "remark": None,
             "vendor": None,
             "product": None,
+            "option": None,
             "mode": None,
             "topic": None,
         },
@@ -83,7 +84,9 @@ def _mock_chat(payload: dict):
             "missing_fields",
             "draft_fields",
             "has_last_saved",
+            "last_question",
             "last_assistant_reply",
+            "recent_turns",
             "user_message",
         }
         return json.dumps(payload, ensure_ascii=False)
