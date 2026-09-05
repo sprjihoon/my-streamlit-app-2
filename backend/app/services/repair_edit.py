@@ -276,22 +276,48 @@ def _confirm_message(record_id: int, before: Dict[str, Any], after: Dict[str, An
     )
 
 
+def _draft_change_summary(patch: Dict[str, Any]) -> str:
+    bits: List[str] = []
+    if "unit_price" in patch:
+        bits.append(f"금액을 {int(patch['unit_price']):,}원으로 바꿨어요.")
+    if "qty" in patch:
+        bits.append(f"건수를 {int(patch['qty'])}건으로 바꿨어요.")
+    if "defect" in patch:
+        bits.append(f"불량을 {patch['defect']}(으)로 바꿨어요.")
+    if "work_type" in patch:
+        bits.append(f"작업을 {patch['work_type']}(으)로 바꿨어요.")
+    return " ".join(bits) or "작성 중인 내용을 바꿨어요."
+
+
 def _apply_fields_to_draft(
     user_id: str,
     channel_id: str,
     draft: Dict[str, Any],
     fields: Dict[str, Any],
-) -> str:
-    """작성 중 draft에만 필드 정정을 넣고, last_saved DB는 건드리지 않는다."""
-    from backend.app.services.repair_bot import _confirm_cost_qty
-
+) -> Optional[str]:
+    """작성 중 draft에만 필드 정정을 넣고, 기존 missing·대기 단계를 유지한다."""
     if rejected_field_names(fields):
         return FIELD_BLOCKED
     patch = allowed_fields_only(fields)
-    updated = {**draft, **patch}
+    if not patch:
+        return None
+    state = get_conversation_manager().get_state(user_id, channel_id) or {}
+    missing = list(state.get("missing") or [])
+    last_q = state.get("last_question") or ""
+    updated = {**draft, **patch, "entry_type": ENTRY_DRAFT}
     if "unit_price" in patch:
         updated["price_stated"] = True
-    return _confirm_cost_qty(updated, user_id, channel_id)
+    get_conversation_manager().set_state(
+        user_id=user_id,
+        channel_id=channel_id or "",
+        pending_data=updated,
+        missing=missing,
+        last_question=last_q,
+    )
+    summary = _draft_change_summary(patch)
+    if last_q and last_q not in summary:
+        return f"{summary}\n{last_q}"
+    return summary
 
 
 def _start_or_ask(user_id: str, channel_id: str, user_name: Optional[str], fields: Dict[str, Any]) -> str:
@@ -359,8 +385,10 @@ def handle_repair_edit(
         if pending.get("applied"):
             if intent.action == ACTION_CONFIRM:
                 return ALREADY
-            if intent.action != ACTION_UPDATE:
-                return ALREADY
+            if intent.action == ACTION_UPDATE:
+                return _start_or_ask(user_id, channel_id, user_name, intent.fields)
+            _clear_update_pending(user_id, channel_id)
+            return None
         if intent.action == ACTION_CONFIRM:
             if pending.get("applied"):
                 return ALREADY

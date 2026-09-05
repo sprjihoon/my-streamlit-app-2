@@ -338,8 +338,14 @@ def _save_repair_entry(
     saved = _try_save(data, user_name, price_stated)
     rid = saved.get("id")
     if saved.get("success") and rid:
-        from backend.app.services.repair_edit import remember_last_saved
-        remember_last_saved(user_id, channel_id, int(rid))
+        try:
+            from backend.app.services.repair_edit import remember_last_saved
+            remember_last_saved(user_id, channel_id, int(rid))
+        except Exception:
+            logger.exception(
+                "remember_last_saved failed user=%s channel=%s record=%s",
+                user_id, channel_id, rid,
+            )
     return saved
 
 

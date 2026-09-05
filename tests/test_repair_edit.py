@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
 
 from backend.app.api.repair_log import insert_repair_log_record
 from backend.app.services.bot_intent import (
@@ -87,6 +88,21 @@ def _seed_draft(uid: str, cid: str, **extra):
 def _draft(uid: str, cid: str):
     state = get_conversation_manager().get_state(uid, cid) or {}
     return dict(state.get("pending_data") or {})
+
+
+def _missing(uid: str, cid: str):
+    state = get_conversation_manager().get_state(uid, cid) or {}
+    return list(state.get("missing") or [])
+
+
+def _last_q(uid: str, cid: str):
+    state = get_conversation_manager().get_state(uid, cid) or {}
+    return state.get("last_question") or ""
+
+
+def _log_count():
+    with get_connection() as con:
+        return con.execute("SELECT COUNT(*) FROM repair_work_log").fetchone()[0]
 
 
 def test_synonyms_map_to_update_last_saved():
@@ -244,18 +260,21 @@ def test_handle_user_text_applies_price_to_existing_draft():
     remember_last_saved(uid, cid, saved["id"])
     before_row = _row(saved["id"])
     _seed_draft(uid, cid, unit_price=1500, work_type="단순바느질", qty=1)
+    before_q = _last_q(uid, cid)
     reply = asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
     after = _draft(uid, cid)
     assert after.get("unit_price") == 2000
     assert after.get("work_type") == "단순바느질"
     assert after.get("qty") == 1
     assert after.get("entry_type") == "repair"
+    assert _missing(uid, cid) == ["photos"]
+    assert _last_q(uid, cid) == before_q
     assert _row(saved["id"]) == before_row
     assert _cost(saved["id"]) == 1500
-    assert "사진 3장" not in reply
+    assert "사진 3장" in reply
     assert "2,000원" in reply
     assert "변경 전" not in reply
-    assert "저장할까요" in reply or "맞아요" in reply or "몇 건" in reply
+    assert "저장할까요" not in reply
 
 
 def test_explicit_last_saved_blocked_while_draft_exists():
@@ -356,3 +375,105 @@ def test_existing_photo_intake_and_repair_save_regression():
         after_count = con.execute("SELECT COUNT(*) FROM repair_work_log").fetchone()[0]
     assert after_count == before_count + 1
     assert _cost(saved["id"]) == 1500
+
+
+def test_applied_yes_then_new_repair_text_starts_photos():
+    uid, cid = _ids("applied-new")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    done = asyncio.run(handle_user_text(uid, cid, "네", "테스터"))
+    assert "수정했어요" in done
+    assert _cost(saved["id"]) == 2000
+    reply = asyncio.run(handle_user_text(uid, cid, "구멍 바느질 1500원", "테스터"))
+    assert ALREADY not in reply
+    assert "사진 3장" in reply
+    assert _cost(saved["id"]) == 2000
+
+
+def test_applied_yes_then_yes_again_is_already():
+    uid, cid = _ids("applied-yes")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    asyncio.run(handle_user_text(uid, cid, "직전내용수정", "테스터"))
+    asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    asyncio.run(handle_user_text(uid, cid, "네", "테스터"))
+    assert _cost(saved["id"]) == 2000
+    again = asyncio.run(handle_user_text(uid, cid, "네", "테스터"))
+    assert ALREADY in again
+    assert _cost(saved["id"]) == 2000
+
+
+def test_first_input_price_fix_keeps_photos_missing():
+    uid, cid = _ids("first-price")
+    _enter_repair(uid, cid)
+    first = asyncio.run(handle_user_text(uid, cid, "구멍 바느질 1500원", "테스터"))
+    assert "사진 3장" in first
+    before = _draft(uid, cid)
+    assert before.get("unit_price") == 1500
+    assert not before.get("vendor")
+    assert not before.get("product")
+    assert "photos" in _missing(uid, cid)
+    before_count = _log_count()
+    reply = asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    after = _draft(uid, cid)
+    assert after.get("unit_price") == 2000
+    assert after.get("work_type") == before.get("work_type")
+    assert after.get("qty") == before.get("qty")
+    assert after.get("defect") == before.get("defect")
+    assert "photos" in _missing(uid, cid)
+    assert not after.get("vendor")
+    assert not after.get("product")
+    assert "사진 3장" in reply
+    assert "저장할까요" not in reply
+    assert _log_count() == before_count
+
+
+def test_second_price_edit_uses_current_db_before():
+    uid, cid = _ids("second-price")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    asyncio.run(handle_user_text(uid, cid, "네", "테스터"))
+    assert _cost(saved["id"]) == 2000
+    preview = asyncio.run(handle_user_text(uid, cid, "금액 3천원으로 바꿔", "테스터"))
+    assert "변경 전" in preview and "변경 후" in preview
+    assert "2,000원" in preview
+    assert "3,000원" in preview
+    before_line = preview.split("변경 후")[0]
+    assert "2,000원" in before_line
+    assert "1,500원" not in before_line
+    assert _cost(saved["id"]) == 2000
+
+
+def test_remember_last_saved_failure_keeps_save_success():
+    uid, cid = _ids("pointer-fail")
+    _enter_repair(uid, cid)
+    before_count = _log_count()
+    with patch(
+        "backend.app.services.repair_edit.remember_last_saved",
+        side_effect=RuntimeError("pointer fail"),
+    ):
+        saved = _save_repair_entry(
+            {
+                "vendor": "로지킴",
+                "product": "릴리프T",
+                "defect": "구멍",
+                "work_type": "단순바느질",
+                "qty": 1,
+                "unit_price": 1500,
+                "entry_type": "repair",
+            },
+            "테스터",
+            True,
+            uid,
+            cid,
+        )
+    assert saved.get("success")
+    assert saved.get("id")
+    assert _log_count() == before_count + 1
+    assert _cost(saved["id"]) == 1500
+    assert get_last_saved_id(uid, cid) is None
