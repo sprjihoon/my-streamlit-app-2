@@ -1,0 +1,350 @@
+"""수선 직전 기록 수정 adapter. insert/사진 판독 본체는 호출하지 않는다."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+from backend.app.services.bot_intent import (
+    ACTION_CANCEL,
+    ACTION_CONFIRM,
+    ACTION_UPDATE,
+    TARGET_LAST_SAVED,
+    parse_bot_intent,
+)
+from backend.app.services.conversation_state import get_conversation_manager
+from logic.db import get_connection
+
+ENTRY_UPDATE = "repair_update"
+ASK_FIELDS = "어떤 내용을 수정할까요?"
+NO_RECORD = "이 방에서 방금 저장한 수선일지가 없어요. 수정할 번호를 추측하지 않았어요."
+ALREADY = "이미 수정했어요. 같은 확인으로는 다시 저장하지 않아요."
+CANCELLED = "🚫 직전 수선일지 수정을 취소했어요."
+
+_FIELD_COL = {
+    "unit_price": "비용",
+    "qty": "수량",
+    "defect": "불량명",
+    "work_type": "작업",
+    "remark": "비고",
+    "vendor": "업체명",
+    "product": "제품명",
+}
+_COL_LABEL = {
+    "비용": "금액",
+    "수량": "건수",
+    "불량명": "불량",
+    "작업": "작업",
+    "비고": "비고",
+    "업체명": "업체",
+    "제품명": "제품",
+}
+
+
+def _room(user_id: str, channel_id: Optional[str]) -> Tuple[str, str]:
+    uid = (user_id or "").strip()
+    cid = (channel_id or "").strip() or uid
+    return uid, cid
+
+
+def ensure_last_saved_table() -> None:
+    with get_connection() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repair_last_saved_v2 (
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                repair_record_id INTEGER NOT NULL,
+                saved_at TIMESTAMP,
+                PRIMARY KEY (user_id, channel_id)
+            )
+            """
+        )
+        con.commit()
+
+
+def remember_last_saved(user_id: str, channel_id: Optional[str], repair_record_id: int) -> None:
+    ensure_last_saved_table()
+    uid, cid = _room(user_id, channel_id)
+    with get_connection() as con:
+        con.execute(
+            """
+            INSERT INTO repair_last_saved_v2 (user_id, channel_id, repair_record_id, saved_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, channel_id) DO UPDATE SET
+                repair_record_id = excluded.repair_record_id,
+                saved_at = excluded.saved_at
+            """,
+            (uid, cid, int(repair_record_id), datetime.now().isoformat()),
+        )
+        con.commit()
+
+
+def get_last_saved_id(user_id: str, channel_id: Optional[str]) -> Optional[int]:
+    ensure_last_saved_table()
+    uid, cid = _room(user_id, channel_id)
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT repair_record_id FROM repair_last_saved_v2
+            WHERE user_id = ? AND channel_id = ?
+            """,
+            (uid, cid),
+        ).fetchone()
+    return int(row[0]) if row else None
+
+
+def fetch_owned_repair(user_id: str, channel_id: Optional[str], record_id: int) -> Optional[Dict[str, Any]]:
+    """포인터와 id가 일치하는 이 방 기록만 반환. 다른 방·사용자 기록은 보지 않는다."""
+    from backend.app.api.repair_log import ensure_repair_tables
+
+    ensure_repair_tables()
+    ensure_last_saved_table()
+    uid, cid = _room(user_id, channel_id)
+    with get_connection() as con:
+        pointer = con.execute(
+            """
+            SELECT repair_record_id FROM repair_last_saved_v2
+            WHERE user_id = ? AND channel_id = ?
+            """,
+            (uid, cid),
+        ).fetchone()
+        if not pointer or int(pointer[0]) != int(record_id):
+            return None
+        row = con.execute(
+            """
+            SELECT id, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고
+            FROM repair_work_log WHERE id = ?
+            """,
+            (int(record_id),),
+        ).fetchone()
+    if not row:
+        return None
+    keys = ("id", "업체명", "제품명", "옵션", "바코드", "불량명", "작업", "수량", "비용", "비고")
+    return dict(zip(keys, row))
+
+
+def apply_owned_repair_fields(
+    user_id: str,
+    channel_id: Optional[str],
+    record_id: int,
+    fields: Dict[str, Any],
+    editor: Optional[str],
+) -> Dict[str, Any]:
+    owned = fetch_owned_repair(user_id, channel_id, record_id)
+    if not owned:
+        return {"success": False, "error": "owned_record_missing"}
+    updates: List[str] = []
+    params: List[Any] = []
+    for key, col in _FIELD_COL.items():
+        if key not in fields:
+            continue
+        updates.append(f"{col} = ?")
+        params.append(fields[key])
+    if not updates:
+        return {"success": False, "error": "no_fields"}
+    updates.append("수정자 = ?")
+    params.append(editor or "bot")
+    updates.append("수정시간 = ?")
+    params.append(datetime.now().isoformat())
+    uid, cid = _room(user_id, channel_id)
+    params.extend([int(record_id), uid, cid])
+    with get_connection() as con:
+        cur = con.execute(
+            f"""
+            UPDATE repair_work_log SET {", ".join(updates)}
+            WHERE id = ?
+              AND id = (
+                  SELECT repair_record_id FROM repair_last_saved_v2
+                  WHERE user_id = ? AND channel_id = ?
+              )
+            """,
+            params,
+        )
+        con.commit()
+        if cur.rowcount != 1:
+            return {"success": False, "error": "update_rejected"}
+    return {"success": True, "id": int(record_id)}
+
+
+def _row_to_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "unit_price": row.get("비용"),
+        "qty": row.get("수량"),
+        "defect": row.get("불량명"),
+        "work_type": row.get("작업"),
+        "remark": row.get("비고"),
+        "vendor": row.get("업체명"),
+        "product": row.get("제품명"),
+    }
+
+
+def _preview_line(fields: Dict[str, Any]) -> str:
+    vendor = fields.get("vendor") or "?"
+    product = fields.get("product") or "?"
+    defect = fields.get("defect") or "-"
+    work = fields.get("work_type") or "-"
+    qty = fields.get("qty") if fields.get("qty") is not None else "?"
+    price = fields.get("unit_price")
+    price_txt = f"{int(price):,}원" if price is not None else "-"
+    return f"{vendor} / {product} / {defect} / {work} / {qty}건 / {price_txt}"
+
+
+def _merge_fields(before: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(before)
+    for key in _FIELD_COL:
+        if key in patch and patch[key] not in (None, ""):
+            out[key] = patch[key]
+    return out
+
+
+def _get_update_pending(user_id: str, channel_id: Optional[str]) -> Dict[str, Any]:
+    state = get_conversation_manager().get_state(user_id, channel_id)
+    if not state:
+        return {}
+    data = state.get("pending_data") or {}
+    if data.get("entry_type") != ENTRY_UPDATE:
+        return {}
+    return data
+
+
+def _set_update_pending(
+    user_id: str,
+    channel_id: str,
+    data: Dict[str, Any],
+    missing: List[str],
+    question: str,
+) -> None:
+    data = {**data, "entry_type": ENTRY_UPDATE, "action": ACTION_UPDATE, "target": TARGET_LAST_SAVED}
+    get_conversation_manager().set_state(
+        user_id=user_id,
+        channel_id=channel_id or "",
+        pending_data=data,
+        missing=missing,
+        last_question=question,
+    )
+
+
+def _clear_update_pending(user_id: str, channel_id: Optional[str]) -> None:
+    get_conversation_manager().clear_state(user_id, channel_id)
+
+
+def _confirm_message(record_id: int, before: Dict[str, Any], after: Dict[str, Any]) -> str:
+    changed = [label for key, label in (
+        ("unit_price", "금액"),
+        ("qty", "건수"),
+        ("defect", "불량"),
+        ("work_type", "작업"),
+    ) if before.get(key) != after.get(key)]
+    focus = ", ".join(changed) if changed else "내용"
+    return (
+        f"직전 수선일지 #{record_id}를 이렇게 수정할까요?\n"
+        f"변경 전: {_preview_line(before)}\n"
+        f"변경 후: {_preview_line(after)}\n"
+        f"바뀌는 항목: {focus}\n"
+        f"맞으면 '네', 아니면 '취소'"
+    )
+
+
+def _start_or_ask(user_id: str, channel_id: str, user_name: Optional[str], fields: Dict[str, Any]) -> str:
+    record_id = get_last_saved_id(user_id, channel_id)
+    if record_id is None:
+        return NO_RECORD
+    row = fetch_owned_repair(user_id, channel_id, record_id)
+    if row is None:
+        return NO_RECORD
+    before = _row_to_fields(row)
+    data = {
+        "repair_record_id": record_id,
+        "before": before,
+        "after": before,
+        "fields": {},
+        "applied": False,
+        "user_name": user_name,
+    }
+    if not fields:
+        q = f"직전 수선일지 #{record_id}예요. {ASK_FIELDS}"
+        _set_update_pending(user_id, channel_id, data, ["fields"], q)
+        return q
+    after = _merge_fields(before, fields)
+    if after == before:
+        q = f"직전 수선일지 #{record_id}예요. 바뀐 값이 없어요. {ASK_FIELDS}"
+        _set_update_pending(user_id, channel_id, data, ["fields"], q)
+        return q
+    data["after"] = after
+    data["fields"] = fields
+    q = _confirm_message(record_id, before, after)
+    _set_update_pending(user_id, channel_id, data, ["confirm"], q)
+    return q
+
+
+def handle_repair_edit(
+    user_id: str,
+    channel_id: str,
+    text: str,
+    user_name: Optional[str] = None,
+) -> Optional[str]:
+    """수정 흐름이면 응답 문자열, 아니면 None (기존 수선 저장 경로로)."""
+    pending = _get_update_pending(user_id, channel_id)
+    intent = parse_bot_intent(text)
+
+    if pending:
+        if intent.action == ACTION_CANCEL:
+            _clear_update_pending(user_id, channel_id)
+            return CANCELLED
+        if pending.get("applied"):
+            if intent.action == ACTION_CONFIRM:
+                return ALREADY
+            if intent.action != ACTION_UPDATE:
+                return ALREADY
+        if intent.action == ACTION_CONFIRM:
+            if pending.get("applied"):
+                return ALREADY
+            record_id = pending.get("repair_record_id")
+            fields = pending.get("fields") or {}
+            if not record_id or not fields:
+                q = ASK_FIELDS
+                _set_update_pending(user_id, channel_id, pending, ["fields"], q)
+                return q
+            result = apply_owned_repair_fields(
+                user_id, channel_id, int(record_id), fields, user_name or pending.get("user_name"),
+            )
+            if not result.get("success"):
+                _clear_update_pending(user_id, channel_id)
+                return NO_RECORD
+            pending["applied"] = True
+            q = (
+                f"✅ 수선일지 #{record_id}를 수정했어요.\n"
+                f"{_preview_line(pending.get('after') or {})}"
+            )
+            _set_update_pending(user_id, channel_id, pending, [], q)
+            return q
+        if intent.fields or intent.action == ACTION_UPDATE:
+            before = pending.get("before") or {}
+            merged_patch = {**(pending.get("fields") or {}), **intent.fields}
+            after = _merge_fields(before, merged_patch)
+            pending["fields"] = merged_patch
+            pending["after"] = after
+            pending["applied"] = False
+            record_id = pending.get("repair_record_id")
+            if not record_id:
+                return NO_RECORD
+            if after == before:
+                q = f"직전 수선일지 #{record_id}예요. 바뀐 값이 없어요. {ASK_FIELDS}"
+                _set_update_pending(user_id, channel_id, pending, ["fields"], q)
+                return q
+            q = _confirm_message(int(record_id), before, after)
+            _set_update_pending(user_id, channel_id, pending, ["confirm"], q)
+            return q
+        q = pending.get("last_prompt") or ASK_FIELDS
+        if not pending.get("fields"):
+            return f"직전 수선일지 #{pending.get('repair_record_id')}예요. {ASK_FIELDS}"
+        return _confirm_message(
+            int(pending["repair_record_id"]),
+            pending.get("before") or {},
+            pending.get("after") or {},
+        )
+
+    if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED:
+        return _start_or_ask(user_id, channel_id, user_name, intent.fields)
+    return None
