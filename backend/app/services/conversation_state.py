@@ -4,12 +4,34 @@
 불완전한 작업 정보를 임시 저장하고 후속 메시지와 연결합니다.
 """
 
+import os
 import time
 from typing import Optional, Dict, Any
 from datetime import datetime
 import json
 import sqlite3
 from pathlib import Path
+
+
+def _default_conversation_db_path() -> str:
+    """logic.db 와 같은 우선순위: BILLING_DB → DATABASE_PATH → settings/앱 기본값."""
+    env_db = os.getenv("BILLING_DB") or os.getenv("DATABASE_PATH")
+    if env_db:
+        path = Path(env_db)
+    else:
+        try:
+            from backend.app.config import settings
+            path = Path(settings.DATABASE_PATH)
+        except Exception:
+            if os.path.exists("/app"):
+                path = Path("/app/data/billing.db")
+            else:
+                path = Path("billing.db")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return str(path)
 
 
 class ConversationStateManager:
@@ -22,10 +44,8 @@ class ConversationStateManager:
     
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            # 프로젝트 루트의 billing.db 사용
-            current_dir = Path(__file__).parent.parent.parent.parent
-            db_path = str(current_dir / "billing.db")
-        
+            db_path = _default_conversation_db_path()
+
         self.db_path = db_path
         self._ensure_table()
     
