@@ -28,6 +28,7 @@ from backend.app.services.bot_mode import (
     parse_mode_command,
     with_mode_prefix,
 )
+from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_mode_command
 from backend.app.services.repair_bot import (
     handle_user_text,
     is_image_filename,
@@ -137,6 +138,10 @@ async def process_message(
     conv_manager.add_message(user_id, channel_id, "user", user_msg_content)
 
     command = parse_mode_command(text)
+    nlu = None
+    if not command:
+        nlu = await interpret_or_fallback(user_id, channel_id, text)
+        command = nlu_to_mode_command(nlu)
     if command:
         reply = apply_mode_command(user_id, channel_id, command)
         conv_manager.add_message(user_id, channel_id, "assistant", reply)
@@ -145,14 +150,17 @@ async def process_message(
 
     mode = get_mode(user_id, channel_id)
     if mode == MODE_IDLE:
-        reply = idle_guide()
+        if nlu and nlu.action == "unknown" and nlu.clarification:
+            reply = nlu.clarification
+        else:
+            reply = idle_guide()
         conv_manager.add_message(user_id, channel_id, "assistant", reply)
         await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
         return
 
     if mode == MODE_REPAIR:
         try:
-            reply = await handle_user_text(user_id, channel_id, text, user_name)
+            reply = await handle_user_text(user_id, channel_id, text, user_name, nlu_intent=nlu)
             add_debug_log("repair_text_handled", {"reply": (reply or "")[:200]})
             if reply:
                 conv_manager.add_message(user_id, channel_id, "assistant", reply)
@@ -410,7 +418,7 @@ async def send_welcome_message(channel_id: str):
             "• 일지모드 시작\n"
             "• 수선모드 시작\n"
             "• 조회모드 시작\n"
-            "• 모드 종료 / 현재 모드"
+            "• 모드 종료 / 현재 모드 / 기능설명"
         )
         
         await nw_client.send_text_message(channel_id, welcome_msg, "group")

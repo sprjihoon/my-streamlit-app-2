@@ -8,8 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend.app.services.bot_intent import (
     ACTION_CANCEL,
     ACTION_CONFIRM,
+    ACTION_PROVIDE_FIELD,
     ACTION_UPDATE,
     TARGET_LAST_SAVED,
+    BotIntent,
     allowed_fields_only,
     parse_bot_intent,
     rejected_field_names,
@@ -369,16 +371,21 @@ def handle_repair_edit(
     channel_id: str,
     text: str,
     user_name: Optional[str] = None,
+    intent: Optional[BotIntent] = None,
 ) -> Optional[str]:
     """수정 흐름이면 응답 문자열, 아니면 None (기존 수선 저장 경로로)."""
     pending = _get_update_pending(user_id, channel_id)
-    intent = parse_bot_intent(text)
+    intent = intent or parse_bot_intent(text)
     draft = _get_repair_draft(user_id, channel_id)
+    field_patch = intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD) and bool(intent.fields)
 
     if draft and not pending:
         if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED and intent.explicit_last_saved:
             return DRAFT_BLOCKED
-        if intent.action == ACTION_UPDATE and intent.fields:
+        if field_patch:
+            qty_only = set(intent.fields) <= {"qty"}
+            if draft.get("awaiting_price_confirm") and qty_only and intent.action == ACTION_PROVIDE_FIELD:
+                return None
             return _apply_fields_to_draft(user_id, channel_id, draft, intent.fields)
         return None
 
@@ -392,7 +399,7 @@ def handle_repair_edit(
         if pending.get("applied"):
             if intent.action == ACTION_CONFIRM:
                 return ALREADY
-            if intent.action == ACTION_UPDATE:
+            if intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD):
                 return _start_or_ask(user_id, channel_id, user_name, intent.fields)
             _clear_update_pending(user_id, channel_id)
             return None
@@ -426,7 +433,7 @@ def handle_repair_edit(
             )
             _set_update_pending(user_id, channel_id, pending, [], q)
             return q
-        if intent.fields or intent.action == ACTION_UPDATE:
+        if intent.fields or intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD):
             if rejected_field_names(intent.fields) or rejected_field_names(pending.get("fields") or {}):
                 _clear_update_pending(user_id, channel_id)
                 return FIELD_BLOCKED
@@ -455,6 +462,6 @@ def handle_repair_edit(
             pending.get("after") or {},
         )
 
-    if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED:
+    if intent.target == TARGET_LAST_SAVED and intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD):
         return _start_or_ask(user_id, channel_id, user_name, intent.fields)
     return None

@@ -41,6 +41,7 @@ def isolated_runtime(tmp_path, monkeypatch):
 
     monkeypatch.setenv("BILLING_DB", str(db_path))
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("BOT_NLU_DISABLE", "1")
 
     import logic.db as logic_db
 

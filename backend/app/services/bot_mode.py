@@ -31,6 +31,7 @@ _START_MAP = {
 
 _CMD_END = re.compile(r"^모드\s*종료$")
 _CMD_STATUS = re.compile(r"^현재\s*모드$")
+_CMD_HELP = re.compile(r"^기능\s*설명$")
 
 
 def _norm(text: str) -> str:
@@ -117,6 +118,8 @@ def parse_mode_command(text: str) -> Optional[dict]:
         return {"action": "end"}
     if _CMD_STATUS.match(raw) or compact == "현재모드":
         return {"action": "status"}
+    if _CMD_HELP.match(raw) or compact == "기능설명":
+        return {"action": "help"}
     return None
 
 
@@ -125,7 +128,33 @@ def idle_guide() -> str:
         "사용할 모드를 선택해주세요.\n"
         "• 일지모드 시작\n"
         "• 수선모드 시작\n"
-        "• 조회모드 시작"
+        "• 조회모드 시작\n"
+        "• 기능설명"
+    )
+
+
+def mode_feature_guide() -> str:
+    return (
+        "모드별 기능 안내\n"
+        "\n"
+        "• 일지모드\n"
+        "  물류 작업일지를 말로 입력·수정·삭제합니다.\n"
+        "  예: 틸리언 하차 3만원 / 방금거 삭제 / 5만원으로 바꿔\n"
+        "  시작: 일지모드 시작\n"
+        "\n"
+        "• 수선모드\n"
+        "  수선일지를 사진과 말로 남깁니다. 바코드·수선 전·후 사진 3장.\n"
+        "  예: 구멍 바느질 1500원 / 직전내용수정 / 금액 2천원으로\n"
+        "  시작: 수선모드 시작\n"
+        "\n"
+        "• 조회모드\n"
+        "  작업·인보이스·업체·요금·보관·수선 목록을 조회만 합니다.\n"
+        "  저장·수정·삭제는 할 수 없습니다.\n"
+        "  예: 오늘 작업 보여줘 / 이번달 총 얼마\n"
+        "  시작: 조회모드 시작\n"
+        "\n"
+        "공통: 모드 종료 / 현재 모드 / 기능설명\n"
+        "엑셀 파일은 모드와 관계없이 작업일지 일괄 등록에 씁니다."
     )
 
 
@@ -163,4 +192,6 @@ def apply_mode_command(user_id: str, channel_id: Optional[str], command: dict) -
         get_conversation_manager().clear_state(uid, cid)
         clear_photo_inbox(uid, cid)
         return "모드를 종료했어요. " + idle_guide()
+    if action == "help":
+        return mode_feature_guide()
     return f"지금은 {mode_label(user_id=uid, channel_id=cid)}입니다."

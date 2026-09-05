@@ -9,6 +9,7 @@ from backend.app.services.bot_mode import (
     apply_mode_command,
     decide_bot_route,
     get_mode,
+    idle_guide,
     parse_mode_command,
     set_mode,
     should_accept_repair_photo,
@@ -154,6 +155,29 @@ def test_prefix_and_commands():
     assert parse_mode_command("조회모드 시작")["mode"] == MODE_QUERY
     assert parse_mode_command("모드 종료")["action"] == "end"
     assert parse_mode_command("현재 모드")["action"] == "status"
+    assert parse_mode_command("기능설명")["action"] == "help"
+    assert parse_mode_command("기능 설명")["action"] == "help"
     assert parse_mode_command("틸리언 하차") is None
     msg = with_mode_prefix("저장 완료", MODE_JOURNAL)
     assert msg.startswith("[일지모드]")
+
+
+def test_feature_guide_does_not_change_mode_or_pending():
+    uid, cid = _ids("help")
+    mgr = get_conversation_manager()
+    set_mode(uid, cid, MODE_JOURNAL)
+    mgr.set_state(uid, cid, {"vendor": "틸리언", "work_type": "하차", "qty": 3}, ["unit_price"], "단가?")
+    with get_connection() as con:
+        before = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+    assert decide_bot_route(uid, cid, "기능설명") == "mode_command"
+    reply = apply_mode_command(uid, cid, parse_mode_command("기능설명"))
+    assert get_mode(uid, cid) == MODE_JOURNAL
+    assert mgr.get_state(uid, cid) is not None
+    assert "일지모드" in reply
+    assert "수선모드" in reply
+    assert "조회모드" in reply
+    assert "조회만" in reply or "조회만 합니다" in reply
+    assert "기능설명" in idle_guide()
+    with get_connection() as con:
+        after = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+    assert after == before

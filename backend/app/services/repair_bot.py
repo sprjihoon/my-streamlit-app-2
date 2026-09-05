@@ -408,15 +408,40 @@ def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id
     return _confirm_cost_qty(data, user_id, channel_id)
 
 
+def _merge_nlu_fields(parsed: Dict[str, Any], fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    out = dict(parsed or {})
+    if not fields:
+        return out
+    if fields.get("unit_price") is not None:
+        out["price"] = int(fields["unit_price"])
+        out["price_stated"] = True
+    if fields.get("qty"):
+        out["qty"] = int(fields["qty"])
+    if fields.get("work_type"):
+        out["work"] = fields["work_type"]
+    if fields.get("defect"):
+        out["defect"] = fields["defect"]
+    if fields.get("vendor"):
+        out["vendor"] = fields["vendor"]
+    if fields.get("product"):
+        out["product"] = fields["product"]
+    return out
+
+
 async def handle_user_text(
     user_id: str,
     channel_id: str,
     text: str,
     user_name: Optional[str] = None,
+    nlu_intent=None,
 ) -> str:
     raw = (text or "").strip()
+    from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_bot_intent
     from backend.app.services.repair_edit import handle_repair_edit
-    edited = handle_repair_edit(user_id, channel_id, raw, user_name)
+
+    nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
+    intent = nlu_to_bot_intent(nlu, raw)
+    edited = handle_repair_edit(user_id, channel_id, raw, user_name, intent=intent)
     if edited is not None:
         return edited
 
@@ -424,7 +449,12 @@ async def handle_user_text(
     data.setdefault("user_name", user_name)
     missing = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
 
-    if CANCEL_RE.match(raw) and (data or _inbox_count(user_id, channel_id) > 0):
+    if (nlu and getattr(nlu, "action", None) == "unknown" and nlu.clarification
+            and not data and not missing and _inbox_count(user_id, channel_id) == 0):
+        return nlu.clarification
+
+    cancelled = bool(CANCEL_RE.match(raw) or (nlu and getattr(nlu, "action", None) == "cancel"))
+    if cancelled and (data or _inbox_count(user_id, channel_id) > 0):
         clear_photo_inbox(user_id, channel_id)
         _clear_pending(user_id, channel_id)
         return "🚫 수선 입력을 취소했어요."
@@ -437,7 +467,12 @@ async def handle_user_text(
         return listing
 
     parsed = parse_repair_text(raw)
-    vendor_mention = extract_vendor_mention(raw)
+    nlu_action = getattr(nlu, "action", None) if nlu else None
+    nlu_target = getattr(nlu, "target", None) if nlu else None
+    nlu_fields = getattr(nlu, "fields", None) if nlu else None
+    if nlu_action in ("provide_field", "create", "update") and nlu_target != "last_saved":
+        parsed = _merge_nlu_fields(parsed, nlu_fields)
+    vendor_mention = extract_vendor_mention(raw) or (parsed.get("vendor") if parsed.get("vendor") else None)
     if vendor_mention and not data.get("vendor"):
         with get_connection() as con:
             data["vendor"] = _resolve_vendor(con, vendor_mention)
@@ -459,7 +494,7 @@ async def handle_user_text(
         if parsed.get("defect"):
             data["defect"] = parsed["defect"]
             data = _infer_work(data)
-        if YES_RE.match(raw):
+        if YES_RE.match(raw) or nlu_action == "confirm":
             data["qty"] = data.get("qty") or 1
             saved = _save_repair_entry(
                 data, user_name or data.get("user_name"), bool(data.get("price_stated")),

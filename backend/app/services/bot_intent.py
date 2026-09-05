@@ -10,9 +10,14 @@ ACTION_NONE = "none"
 ACTION_UPDATE = "update"
 ACTION_CONFIRM = "confirm"
 ACTION_CANCEL = "cancel"
+ACTION_PROVIDE_FIELD = "provide_field"
+ACTION_CREATE = "create"
+ACTION_START_MODE = "start_mode"
+ACTION_UNKNOWN = "unknown"
 
 TARGET_NONE = "none"
 TARGET_LAST_SAVED = "last_saved"
+TARGET_DRAFT = "draft"
 
 DOMAIN_REPAIR = "repair"
 
@@ -69,6 +74,7 @@ class BotIntent:
     missing_fields: List[str] = field(default_factory=list)
     confidence: Optional[float] = None
     explicit_last_saved: bool = False
+    clarification: Optional[str] = None
 
 
 def _norm(text: str) -> str:
