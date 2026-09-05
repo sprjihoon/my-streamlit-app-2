@@ -152,16 +152,6 @@ def ensure_repair_tables():
                 created_at TEXT
             )
         """)
-        leftover = con.execute(
-            """SELECT id, barcode_image FROM repair_work_log
-               WHERE IFNULL(barcode_image, '') != ''"""
-        ).fetchall()
-        for log_id, fn in leftover:
-            _delete_image(fn)
-            con.execute(
-                "UPDATE repair_work_log SET barcode_image = NULL WHERE id = ?",
-                (log_id,),
-            )
         con.commit()
     repair_catalog.ensure_catalog_tables()
 
@@ -1075,11 +1065,6 @@ def insert_repair_log_record(
             vendor = _resolve_vendor(con, vendor)
         if not vendor or not product:
             raise ValueError("업체명과 제품명이 필요합니다. 바코드를 등록하거나 직접 입력하세요.")
-
-        # 바코드 숫자는 남기고, 인식에 쓴 바코드 사진은 보관하지 않는다.
-        if barcode_image:
-            _delete_image(barcode_image)
-            barcode_image = None
 
         cur = con.execute(
             """INSERT INTO repair_work_log

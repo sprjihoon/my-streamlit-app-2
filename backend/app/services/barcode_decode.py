@@ -55,7 +55,7 @@ async def decode_set_vision(photos: List[bytes]) -> List[Optional[Tuple[str, flo
     content: list = [{
         "type": "text",
         "text": (
-            "These photos may include a 1D Code128 barcode. "
+            "Find only 1D Code128 barcodes. Do not judge before/after repair state. "
             "The value is alphanumeric like ON56S152917, not only EAN digits. "
             "For each image in order, return the barcode text if readable. "
             "Reply JSON only: {\"results\":[{\"index\":0,\"barcode\":\"ON56S152917\",\"confidence\":0.9}]}. "
@@ -94,10 +94,19 @@ async def decode_set_vision(photos: List[bytes]) -> List[Optional[Tuple[str, flo
     return out
 
 
+def _assign_slots(n: int, barcode_index: Optional[int]) -> Tuple[Optional[int], Optional[int]]:
+    """바코드 장을 뺀 나머지를 보낸 순서대로 before/after에 넣는다. 내용은 보지 않는다."""
+    rest = [i for i in range(n) if i != barcode_index]
+    before_index = rest[0] if rest else None
+    after_index = rest[1] if len(rest) > 1 else None
+    return before_index, after_index
+
+
 async def classify_photos(photos: List[bytes]) -> dict:
     """
-    바코드가 읽히는 1장 + 나머지 보낸 순서대로 전/후.
-    반환: barcode, barcode_index, before_index, after_index, decoded[], ambiguous
+    AI는 바코드가 있는 장만 찾는다. 수선 전·후는 판별하지 않는다.
+    바코드를 찾으면 그 장을 빼고 나머지를 보낸 순서대로 before/after.
+    못 찾으면 안내 순서(바코드 / 사진 1 / 사진 2)로 0, 1, 2를 쓴다.
     """
     decoded: List[Optional[Tuple[str, float]]] = []
     need_vision = []
@@ -118,6 +127,7 @@ async def classify_photos(photos: List[bytes]) -> dict:
     ambiguous = False
     barcode = None
     barcode_index = None
+    order_fallback = False
     if len(hits) == 1:
         barcode_index, barcode, _ = hits[0]
     elif len(hits) >= 2:
@@ -128,9 +138,11 @@ async def classify_photos(photos: List[bytes]) -> dict:
             ambiguous = True
             barcode_index, barcode, _ = hits[0]
 
-    rest = [i for i in range(len(photos)) if i != barcode_index]
-    before_index = rest[0] if rest else None
-    after_index = rest[1] if len(rest) > 1 else None
+    if barcode_index is None and photos:
+        barcode_index = 0
+        order_fallback = True
+
+    before_index, after_index = _assign_slots(len(photos), barcode_index)
     return {
         "barcode": barcode,
         "barcode_index": barcode_index,
@@ -139,4 +151,5 @@ async def classify_photos(photos: List[bytes]) -> dict:
         "decoded": decoded,
         "ambiguous": ambiguous,
         "hit_count": len(hits),
+        "order_fallback": order_fallback,
     }
