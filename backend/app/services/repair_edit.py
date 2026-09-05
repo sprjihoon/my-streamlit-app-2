@@ -10,16 +10,25 @@ from backend.app.services.bot_intent import (
     ACTION_CONFIRM,
     ACTION_UPDATE,
     TARGET_LAST_SAVED,
+    allowed_fields_only,
     parse_bot_intent,
+    rejected_field_names,
 )
 from backend.app.services.conversation_state import get_conversation_manager
 from logic.db import get_connection
 
 ENTRY_UPDATE = "repair_update"
+ENTRY_DRAFT = "repair"
 ASK_FIELDS = "어떤 내용을 수정할까요?"
-NO_RECORD = "이 방에서 방금 저장한 수선일지가 없어요. 수정할 번호를 추측하지 않았어요."
+NO_RECORD = "직전 저장 기록을 찾을 수 없습니다."
 ALREADY = "이미 수정했어요. 같은 확인으로는 다시 저장하지 않아요."
 CANCELLED = "🚫 직전 수선일지 수정을 취소했어요."
+MODE_BLOCKED = "수선모드에서만 직전 저장 내용을 수정할 수 있어요."
+DRAFT_BLOCKED = (
+    "현재 작성 중인 수선이 있습니다. "
+    "먼저 현재 수선을 저장하거나 취소한 뒤 직전 저장 내용을 수정해주세요."
+)
+FIELD_BLOCKED = "허용되지 않은 수정 항목이 있어 반영하지 않았어요."
 
 _FIELD_COL = {
     "unit_price": "비용",
@@ -124,6 +133,22 @@ def fetch_owned_repair(user_id: str, channel_id: Optional[str], record_id: int) 
     return dict(zip(keys, row))
 
 
+def _is_repair_mode(user_id: str, channel_id: Optional[str]) -> bool:
+    from backend.app.services.bot_mode import MODE_REPAIR, get_mode
+
+    return get_mode(user_id, channel_id) == MODE_REPAIR
+
+
+def _get_repair_draft(user_id: str, channel_id: Optional[str]) -> Dict[str, Any]:
+    state = get_conversation_manager().get_state(user_id, channel_id)
+    if not state:
+        return {}
+    data = state.get("pending_data") or {}
+    if data.get("entry_type") != ENTRY_DRAFT:
+        return {}
+    return data
+
+
 def apply_owned_repair_fields(
     user_id: str,
     channel_id: Optional[str],
@@ -131,16 +156,21 @@ def apply_owned_repair_fields(
     fields: Dict[str, Any],
     editor: Optional[str],
 ) -> Dict[str, Any]:
+    if not _is_repair_mode(user_id, channel_id):
+        return {"success": False, "error": "mode_not_repair"}
+    if rejected_field_names(fields):
+        return {"success": False, "error": "field_not_allowed"}
     owned = fetch_owned_repair(user_id, channel_id, record_id)
     if not owned:
         return {"success": False, "error": "owned_record_missing"}
+    safe_fields = allowed_fields_only(fields)
     updates: List[str] = []
     params: List[Any] = []
     for key, col in _FIELD_COL.items():
-        if key not in fields:
+        if key not in safe_fields:
             continue
         updates.append(f"{col} = ?")
-        params.append(fields[key])
+        params.append(safe_fields[key])
     if not updates:
         return {"success": False, "error": "no_fields"}
     updates.append("수정자 = ?")
@@ -247,6 +277,11 @@ def _confirm_message(record_id: int, before: Dict[str, Any], after: Dict[str, An
 
 
 def _start_or_ask(user_id: str, channel_id: str, user_name: Optional[str], fields: Dict[str, Any]) -> str:
+    if not _is_repair_mode(user_id, channel_id):
+        return MODE_BLOCKED
+    if rejected_field_names(fields):
+        return FIELD_BLOCKED
+    fields = allowed_fields_only(fields)
     record_id = get_last_saved_id(user_id, channel_id)
     if record_id is None:
         return NO_RECORD
@@ -287,8 +322,17 @@ def handle_repair_edit(
     """수정 흐름이면 응답 문자열, 아니면 None (기존 수선 저장 경로로)."""
     pending = _get_update_pending(user_id, channel_id)
     intent = parse_bot_intent(text)
+    draft = _get_repair_draft(user_id, channel_id)
+
+    if draft and not pending:
+        if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED and intent.explicit_last_saved:
+            return DRAFT_BLOCKED
+        return None
 
     if pending:
+        if not _is_repair_mode(user_id, channel_id):
+            _clear_update_pending(user_id, channel_id)
+            return MODE_BLOCKED
         if intent.action == ACTION_CANCEL:
             _clear_update_pending(user_id, channel_id)
             return CANCELLED
@@ -302,6 +346,9 @@ def handle_repair_edit(
                 return ALREADY
             record_id = pending.get("repair_record_id")
             fields = pending.get("fields") or {}
+            if rejected_field_names(fields):
+                _clear_update_pending(user_id, channel_id)
+                return FIELD_BLOCKED
             if not record_id or not fields:
                 q = ASK_FIELDS
                 _set_update_pending(user_id, channel_id, pending, ["fields"], q)
@@ -310,7 +357,12 @@ def handle_repair_edit(
                 user_id, channel_id, int(record_id), fields, user_name or pending.get("user_name"),
             )
             if not result.get("success"):
+                err = result.get("error")
                 _clear_update_pending(user_id, channel_id)
+                if err == "mode_not_repair":
+                    return MODE_BLOCKED
+                if err == "field_not_allowed":
+                    return FIELD_BLOCKED
                 return NO_RECORD
             pending["applied"] = True
             q = (
@@ -320,8 +372,11 @@ def handle_repair_edit(
             _set_update_pending(user_id, channel_id, pending, [], q)
             return q
         if intent.fields or intent.action == ACTION_UPDATE:
+            if rejected_field_names(intent.fields) or rejected_field_names(pending.get("fields") or {}):
+                _clear_update_pending(user_id, channel_id)
+                return FIELD_BLOCKED
             before = pending.get("before") or {}
-            merged_patch = {**(pending.get("fields") or {}), **intent.fields}
+            merged_patch = allowed_fields_only({**(pending.get("fields") or {}), **intent.fields})
             after = _merge_fields(before, merged_patch)
             pending["fields"] = merged_patch
             pending["after"] = after

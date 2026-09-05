@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 ACTION_NONE = "none"
 ACTION_UPDATE = "update"
@@ -13,6 +13,8 @@ ACTION_CANCEL = "cancel"
 
 TARGET_NONE = "none"
 TARGET_LAST_SAVED = "last_saved"
+
+DOMAIN_REPAIR = "repair"
 
 _SPACE = re.compile(r"\s+")
 _CHEON_RE = re.compile(r"(\d+(?:\.\d+)?)\s*천\s*원?")
@@ -37,8 +39,13 @@ UPDATE_SYNONYMS = (
 UPDATE_VERBS = ("수정", "바꿔", "바꾸", "변경", "고쳐")
 LAST_SAVED_HINTS = ("직전", "방금", "아까", "저장한")
 CORRECTION_MARKERS = ("아니고", "말고")
+EXPLICIT_RECORD_MARKERS = ("저장한", "내용", "일지")
+EXPLICIT_VERBS = ("수정", "변경")
 
-FIELD_KEYS = ("unit_price", "qty", "defect", "work_type", "remark", "vendor", "product")
+ALLOWED_FIELDS = frozenset(
+    ("unit_price", "qty", "defect", "work_type", "remark", "vendor", "product")
+)
+FIELD_KEYS = tuple(ALLOWED_FIELDS)
 
 
 @dataclass
@@ -47,10 +54,23 @@ class BotIntent:
     target: str = TARGET_NONE
     fields: Dict[str, Any] = field(default_factory=dict)
     raw: str = ""
+    domain: str = DOMAIN_REPAIR
+    needs_confirmation: bool = False
+    missing_fields: List[str] = field(default_factory=list)
+    confidence: Optional[float] = None
+    explicit_last_saved: bool = False
 
 
 def _norm(text: str) -> str:
     return _SPACE.sub("", (text or "").strip())
+
+
+def allowed_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    return {k: v for k, v in (fields or {}).items() if k in ALLOWED_FIELDS and v not in (None, "")}
+
+
+def rejected_field_names(fields: Optional[Dict[str, Any]]) -> List[str]:
+    return [k for k in (fields or {}) if k not in ALLOWED_FIELDS]
 
 
 def extract_korean_amount(text: str) -> Optional[int]:
@@ -94,7 +114,7 @@ def extract_update_fields(text: str) -> Dict[str, Any]:
         leftover = re.sub(r"^\d+\s*", "", leftover).strip()
         if leftover and leftover not in UPDATE_VERBS:
             fields["defect"] = leftover
-    return {k: v for k, v in fields.items() if v not in (None, "")}
+    return allowed_fields_only(fields)
 
 
 def parse_bot_intent(text: str) -> BotIntent:
@@ -104,9 +124,9 @@ def parse_bot_intent(text: str) -> BotIntent:
     if not raw:
         return BotIntent(raw=raw)
     if YES_RE.match(raw):
-        return BotIntent(action=ACTION_CONFIRM, raw=raw)
+        return BotIntent(action=ACTION_CONFIRM, raw=raw, confidence=1.0)
     if CANCEL_RE.match(raw):
-        return BotIntent(action=ACTION_CANCEL, raw=raw)
+        return BotIntent(action=ACTION_CANCEL, raw=raw, confidence=1.0)
 
     norm = _norm(raw)
     fields = extract_update_fields(raw)
@@ -114,12 +134,30 @@ def parse_bot_intent(text: str) -> BotIntent:
     has_verb = any(v in norm for v in UPDATE_VERBS)
     has_last = any(h in norm for h in LAST_SAVED_HINTS)
     has_correction = any(m in raw for m in CORRECTION_MARKERS)
+    explicit = has_synonym or (
+        has_last
+        and any(v in norm for v in EXPLICIT_VERBS)
+        and any(m in norm for m in EXPLICIT_RECORD_MARKERS)
+    )
+    matched = (
+        explicit
+        or (has_last and bool(fields))
+        or (has_verb and has_last)
+        or (has_verb and bool(fields))
+        or (has_correction and bool(fields))
+    )
+    if not matched:
+        return BotIntent(fields=fields, raw=raw)
 
-    if has_synonym or (has_verb and has_last) or (has_verb and fields) or (has_correction and fields):
-        return BotIntent(
-            action=ACTION_UPDATE,
-            target=TARGET_LAST_SAVED,
-            fields=fields,
-            raw=raw,
-        )
-    return BotIntent(fields=fields, raw=raw)
+    missing = [] if fields else ["fields"]
+    return BotIntent(
+        action=ACTION_UPDATE,
+        target=TARGET_LAST_SAVED,
+        fields=fields,
+        raw=raw,
+        domain=DOMAIN_REPAIR,
+        needs_confirmation=True,
+        missing_fields=missing,
+        confidence=1.0,
+        explicit_last_saved=explicit,
+    )
