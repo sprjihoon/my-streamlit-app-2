@@ -327,6 +327,22 @@ def _try_save(data: Dict[str, Any], user_name: Optional[str], price_stated: bool
     return result
 
 
+def _save_repair_entry(
+    data: Dict[str, Any],
+    user_name: Optional[str],
+    price_stated: bool,
+    user_id: str,
+    channel_id: str,
+) -> Dict[str, Any]:
+    """기존 저장 본체를 호출한 뒤 이 방의 직전 기록 id만 기억한다."""
+    saved = _try_save(data, user_name, price_stated)
+    rid = saved.get("id")
+    if saved.get("success") and rid:
+        from backend.app.services.repair_edit import remember_last_saved
+        remember_last_saved(user_id, channel_id, int(rid))
+    return saved
+
+
 def _confirm_cost_qty(data: Dict[str, Any], user_id: str, channel_id: str) -> str:
     price = int(data.get("unit_price") or 0)
     label = _job_label(data)
@@ -379,7 +395,7 @@ def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id
 
     if data.get("qty") and data.get("price_stated") and data.get("awaiting_price_confirm") is not True:
         # 작업·금액·건수를 한 번에 말한 경우만 바로 저장
-        saved = _try_save(data, data.get("user_name"), True)
+        saved = _save_repair_entry(data, data.get("user_name"), True, user_id, channel_id)
         _clear_pending(user_id, channel_id)
         return f"✅ {saved['message']}"
 
@@ -393,6 +409,11 @@ async def handle_user_text(
     user_name: Optional[str] = None,
 ) -> str:
     raw = (text or "").strip()
+    from backend.app.services.repair_edit import handle_repair_edit
+    edited = handle_repair_edit(user_id, channel_id, raw, user_name)
+    if edited is not None:
+        return edited
+
     data = _get_pending(user_id, channel_id)
     data.setdefault("user_name", user_name)
     missing = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
@@ -434,11 +455,17 @@ async def handle_user_text(
             data = _infer_work(data)
         if YES_RE.match(raw):
             data["qty"] = data.get("qty") or 1
-            saved = _try_save(data, user_name or data.get("user_name"), bool(data.get("price_stated")))
+            saved = _save_repair_entry(
+                data, user_name or data.get("user_name"), bool(data.get("price_stated")),
+                user_id, channel_id,
+            )
             _clear_pending(user_id, channel_id)
             return f"✅ {saved['message']}"
         if data.get("qty") and data.get("unit_price"):
-            saved = _try_save(data, user_name or data.get("user_name"), bool(data.get("price_stated")))
+            saved = _save_repair_entry(
+                data, user_name or data.get("user_name"), bool(data.get("price_stated")),
+                user_id, channel_id,
+            )
             _clear_pending(user_id, channel_id)
             return f"✅ {saved['message']}"
         if parsed.get("price") is not None and parsed["price"] != prev_price:
@@ -1031,7 +1058,10 @@ def save_repair_from_tool(args: Dict[str, Any], user_id: str, user_name: str) ->
     data["option"] = data.get("option") or args.get("option")
     data["barcode"] = data.get("barcode") or args.get("barcode")
     try:
-        result = _try_save(data, user_name, bool(data.get("price_stated") or args.get("price_stated")))
+        result = _save_repair_entry(
+            data, user_name, bool(data.get("price_stated") or args.get("price_stated")),
+            user_id, channel_id or user_id,
+        )
         _clear_pending(user_id, channel_id)
         return result
     except ValueError as e:
