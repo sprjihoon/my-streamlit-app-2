@@ -436,10 +436,13 @@ async def handle_user_text(
     nlu_intent=None,
 ) -> str:
     raw = (text or "").strip()
-    from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_bot_intent
+    from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_bot_intent, render_readonly_nlu
     from backend.app.services.repair_edit import handle_repair_edit
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
+    readonly = render_readonly_nlu(nlu)
+    if readonly:
+        return readonly
     intent = nlu_to_bot_intent(nlu, raw)
     edited = handle_repair_edit(user_id, channel_id, raw, user_name, intent=intent)
     if edited is not None:

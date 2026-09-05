@@ -8,7 +8,15 @@ from unittest.mock import AsyncMock, patch
 
 from backend.app.api.naver_works_webhook import process_message
 from backend.app.services.bot_intent import ACTION_UPDATE, TARGET_LAST_SAVED
-from backend.app.services.bot_mode import MODE_IDLE, MODE_JOURNAL, MODE_QUERY, MODE_REPAIR, get_mode, set_mode
+from backend.app.services.bot_mode import (
+    MODE_IDLE,
+    MODE_JOURNAL,
+    MODE_QUERY,
+    MODE_REPAIR,
+    get_mode,
+    mode_feature_guide,
+    set_mode,
+)
 from backend.app.services.bot_nlu import (
     NluIntent,
     SYSTEM_PROMPT,
@@ -22,6 +30,7 @@ from backend.app.services.bot_nlu import (
     nlu_to_bot_intent,
     nlu_to_mode_command,
     parse_nlu_payload,
+    render_readonly_nlu,
 )
 from backend.app.services.conversation_state import get_conversation_manager
 from backend.app.services.repair_bot import handle_user_text
@@ -48,6 +57,7 @@ def _payload(**overrides):
             "vendor": None,
             "product": None,
             "mode": None,
+            "topic": None,
         },
         "confidence": 0.95,
         "needs_confirmation": False,
@@ -73,6 +83,7 @@ def _mock_chat(payload: dict):
             "missing_fields",
             "draft_fields",
             "has_last_saved",
+            "last_assistant_reply",
             "user_message",
         }
         return json.dumps(payload, ensure_ascii=False)
@@ -121,6 +132,7 @@ def test_context_omits_secrets_and_file_paths(monkeypatch):
     assert payload["pending_step"] == "photos"
     assert payload["draft_fields"]["vendor"] == "로지킴"
     assert payload["user_message"] == "가격 바꿔줘"
+    assert "last_assistant_reply" in payload
     assert "has_active_draft" not in payload
 
 
@@ -350,6 +362,122 @@ def test_fallback_parser_still_handles_exact_mode_command():
     intent = fallback_from_local_parsers("수선모드 시작", {})
     assert intent.action == "start_mode"
     assert nlu_to_mode_command(intent)["mode"] == MODE_REPAIR
+
+
+def _sent_text(uid: str, cid: str, text: str, payload: dict) -> str:
+    nw = AsyncMock()
+    nw.send_text_message = AsyncMock()
+
+    async def _run():
+        with patch(
+            "backend.app.api.naver_works_webhook.get_naver_works_client",
+            return_value=nw,
+        ), patch("backend.app.services.bot_nlu._complete_chat", _mock_chat(payload)):
+            await process_message(uid, cid, text, "group", "테스터")
+
+    asyncio.run(_run())
+    return "\n".join(str(call.args[1]) for call in nw.send_text_message.await_args_list)
+
+
+def test_idle_기능_shows_full_guide(monkeypatch):
+    monkeypatch.setenv("BOT_NLU_DISABLE", "0")
+    uid, cid = _ids("help-fn")
+    set_mode(uid, cid, MODE_IDLE)
+    sent = _sent_text(
+        uid, cid, "기능",
+        _payload(action="show_help", domain="none", fields={"topic": "all"}),
+    )
+    guide = mode_feature_guide()
+    assert "모드별 기능 안내" in sent
+    assert "일지모드" in sent and "수선모드" in sent and "조회모드" in sent
+    assert "사용할 모드를 선택해주세요." not in sent or guide in sent
+    assert get_mode(uid, cid) == MODE_IDLE
+
+
+def test_기능설명해줘_does_not_ask_again(monkeypatch):
+    monkeypatch.setenv("BOT_NLU_DISABLE", "0")
+    uid, cid = _ids("help-long")
+    set_mode(uid, cid, MODE_IDLE)
+    sent = _sent_text(
+        uid, cid, "기능설명해줘",
+        _payload(action="show_help", domain="none", fields={"topic": "all"}),
+    )
+    assert "모드별 기능 안내" in sent
+    assert "한 가지만 확인할게요" not in sent
+    assert "어떤 모드를 시작할까요" not in sent
+    assert get_mode(uid, cid) == MODE_IDLE
+
+
+def test_idle_repair_catalog_lists_prices(monkeypatch):
+    monkeypatch.setenv("BOT_NLU_DISABLE", "0")
+    from backend.app.services.repair_catalog import upsert_work_type
+
+    upsert_work_type("단순바느질", 1500)
+    uid, cid = _ids("cat-idle")
+    set_mode(uid, cid, MODE_IDLE)
+    before = _log_count()
+    sent = _sent_text(
+        uid, cid, "수선항목과 가격",
+        _payload(action="query_catalog", domain="repair", fields={"topic": "repair_work_prices"}),
+    )
+    assert "단순바느질" in sent
+    assert "1,500원" in sent
+    assert "사용할 모드를 선택해주세요." not in sent
+    assert get_mode(uid, cid) == MODE_IDLE
+    assert _log_count() == before
+
+
+def test_수선은_뭐가_돼_shows_price_list(monkeypatch):
+    monkeypatch.setenv("BOT_NLU_DISABLE", "0")
+    from backend.app.services.repair_catalog import upsert_work_type
+
+    upsert_work_type("부분세탁", 3000)
+    uid, cid = _ids("cat-what")
+    set_mode(uid, cid, MODE_IDLE)
+    sent = _sent_text(
+        uid, cid, "수선은 뭐가 돼?",
+        _payload(action="query_catalog", domain="repair", fields={"topic": "repair_work_prices"}),
+    )
+    assert "부분세탁" in sent
+    assert "3,000원" in sent
+
+
+def test_followup_price_uses_last_assistant_reply(monkeypatch):
+    monkeypatch.setenv("BOT_NLU_DISABLE", "0")
+    from backend.app.services.repair_catalog import upsert_work_type
+
+    upsert_work_type("열펜제거", 2000)
+    uid, cid = _ids("follow")
+    set_mode(uid, cid, MODE_IDLE)
+    previous = "수선모드에서는 작업 종류와 기본 가격을 확인할 수 있어요."
+    get_conversation_manager().add_message(uid, cid, "assistant", previous)
+    ctx = collect_nlu_context(uid, cid, "그럼 가격은?")
+    assert previous in ctx["last_assistant_reply"]
+    assert len(ctx["last_assistant_reply"]) <= 500
+    sent = _sent_text(
+        uid, cid, "그럼 가격은?",
+        _payload(action="query_catalog", domain="repair", fields={"topic": "repair_work_prices"}),
+    )
+    assert "열펜제거" in sent
+    assert "2,000원" in sent
+    assert render_readonly_nlu(
+        NluIntent(action="query_catalog", fields={"topic": "repair_work_prices"})
+    )
+
+
+def test_last_assistant_reply_strips_secrets_and_truncates():
+    uid, cid = _ids("secret-hist")
+    get_conversation_manager().add_message(
+        uid, cid, "assistant", "OPENAI_API_KEY=sk-secret-value " + ("가" * 600)
+    )
+    ctx = collect_nlu_context(uid, cid, "그건 얼마야?")
+    assert ctx["last_assistant_reply"] == ""
+    get_conversation_manager().clear_history(uid, cid)
+    get_conversation_manager().add_message(uid, cid, "assistant", "수선 가격 안내입니다. " + ("나" * 600))
+    ctx2 = collect_nlu_context(uid, cid, "그건 얼마야?")
+    assert "수선 가격" in ctx2["last_assistant_reply"]
+    assert len(ctx2["last_assistant_reply"]) <= 500
+    assert "sk-secret" not in ctx2["last_assistant_reply"]
 
 
 def _log_count():

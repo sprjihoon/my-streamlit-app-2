@@ -28,7 +28,7 @@ from backend.app.services.bot_mode import (
     parse_mode_command,
     with_mode_prefix,
 )
-from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_mode_command
+from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_mode_command, render_readonly_nlu
 from backend.app.services.repair_bot import (
     handle_user_text,
     is_image_filename,
@@ -146,6 +146,12 @@ async def process_message(
         reply = apply_mode_command(user_id, channel_id, command)
         conv_manager.add_message(user_id, channel_id, "assistant", reply)
         await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+        return
+
+    readonly = render_readonly_nlu(nlu)
+    if readonly:
+        conv_manager.add_message(user_id, channel_id, "assistant", readonly)
+        await _send_prefixed(nw_client, user_id, channel_id, readonly, channel_type)
         return
 
     mode = get_mode(user_id, channel_id)

@@ -13,6 +13,8 @@ ACTION_CANCEL = "cancel"
 ACTION_PROVIDE_FIELD = "provide_field"
 ACTION_CREATE = "create"
 ACTION_START_MODE = "start_mode"
+ACTION_SHOW_HELP = "show_help"
+ACTION_QUERY_CATALOG = "query_catalog"
 ACTION_UNKNOWN = "unknown"
 
 TARGET_NONE = "none"

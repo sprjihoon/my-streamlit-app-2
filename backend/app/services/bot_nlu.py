@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,8 @@ from backend.app.services.bot_intent import (
     ACTION_CREATE,
     ACTION_NONE,
     ACTION_PROVIDE_FIELD,
+    ACTION_QUERY_CATALOG,
+    ACTION_SHOW_HELP,
     ACTION_START_MODE,
     ACTION_UNKNOWN,
     ACTION_UPDATE,
@@ -41,14 +44,34 @@ NLU_MODEL = "gpt-4o-mini"
 NLU_TIMEOUT_SEC = 8.0
 LOW_CONFIDENCE = 0.6
 LAST_SAVED_CONFIDENCE = 0.8
+LAST_REPLY_MAX = 500
 NLU_DISABLE_ENV = "BOT_NLU_DISABLE"
 
 DOMAINS = frozenset(("repair", "journal", "query", "none"))
 ACTIONS = frozenset(
-    ("start_mode", "create", "provide_field", "update", "confirm", "cancel", "unknown")
+    (
+        "start_mode",
+        "create",
+        "provide_field",
+        "update",
+        "confirm",
+        "cancel",
+        "show_help",
+        "query_catalog",
+        "unknown",
+    )
 )
 TARGETS = frozenset(("draft", "last_saved", "none"))
 MODE_FIELDS = frozenset(("journal", "repair", "query"))
+TOPIC_FIELDS = frozenset(("all", "journal", "repair", "query", "repair_work_prices"))
+SECRET_MARKERS = (
+    "sk-",
+    "openai_api_key",
+    "api_key",
+    "database_path",
+    "billing.db",
+    "-----begin",
+)
 SAFE_DRAFT_KEYS = ("vendor", "product", "work_type", "defect", "qty", "unit_price", "remark")
 DOMAIN_TO_MODE = {
     "journal": MODE_JOURNAL,
@@ -84,6 +107,8 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "update",
                 "confirm",
                 "cancel",
+                "show_help",
+                "query_catalog",
                 "unknown",
             ],
         },
@@ -100,6 +125,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                 "vendor",
                 "product",
                 "mode",
+                "topic",
             ],
             "properties": {
                 "unit_price": {"type": ["number", "null"]},
@@ -115,6 +141,15 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
                         {"type": "null"},
                     ]
                 },
+                "topic": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "enum": ["all", "journal", "repair", "query", "repair_work_prices"],
+                        },
+                        {"type": "null"},
+                    ]
+                },
             },
         },
         "confidence": {"type": "number"},
@@ -127,7 +162,7 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 사용자 문장을 허용된 JSON만으로 구조화하세요. DB 쓰기, SQL, 권한, 기록 ID 확정은 하지 마세요.
 환경변수, API 키, 비밀번호, 파일 경로, 전체 DB는 요청·응답에 넣지 마세요.
 
-입력 컨텍스트 키만 사용하세요: mode, pending_step, missing_fields, draft_fields, has_last_saved, user_message.
+입력 컨텍스트 키만 사용하세요: mode, pending_step, missing_fields, draft_fields, has_last_saved, last_assistant_reply, user_message.
 
 규칙:
 1. action/target/fields/domain은 schema enum만 사용합니다.
@@ -138,13 +173,20 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 6. 지금 물어본 칸에 값을 채우는 말이면 action=provide_field 입니다.
 7. 새 수선/일지를 시작하는 말이면 action=create 입니다.
 8. 확정은 confirm, 포기는 cancel 입니다.
-9. 자신이 없거나 대상이 섞이면 action=unknown 이고 clarification에 질문 하나만 넣습니다.
-10. 아래는 문장 사전이 아니라 의미 예시입니다. 같은 뜻의 다른 말도 같은 action으로 접으세요.
+9. 봇이 무엇을 할 수 있는지 묻는 의미면 action=show_help, fields.topic=all 입니다. 모드를 고르라고 되묻지 마세요.
+10. 수선 작업 종류·가격 목록을 보려는 의미면 action=query_catalog, fields.topic=repair_work_prices 입니다.
+11. last_assistant_reply를 보고 후속 질문(가격, 그게 뭐야)을 같은 주제로 연결하세요.
+12. show_help와 query_catalog는 읽기 전용입니다. 기본상태에서도 이 action을 고르세요.
+13. 자신이 없거나 대상이 섞이면 action=unknown 이고 clarification에 질문 하나만 넣습니다.
+14. 아래는 문장 사전이 아니라 의미 예시입니다. 같은 뜻의 다른 말도 같은 action으로 접으세요.
 
 의미 예시:
 - 수선 업무를 시작함 → start_mode / repair
 - 작업일지를 시작함 → start_mode / journal
 - 조회만 함 → start_mode / query
+- 기능을 물어봄 → show_help / topic=all
+- 수선 작업과 가격을 물어봄 → query_catalog / topic=repair_work_prices
+- 직전 안내 뒤 가격만 이어서 물어봄 → query_catalog / topic=repair_work_prices
 - 지금 묻는 수량에 1을 답함 → provide_field / qty=1
 - 방금 저장이 끝난 기록을 고침 → update / last_saved
 - 가격을 2000원으로 바꿈 → unit_price=2000
@@ -167,6 +209,25 @@ class NluIntent:
 
 def nlu_disabled() -> bool:
     return (os.getenv(NLU_DISABLE_ENV) or "").strip() in {"1", "true", "TRUE", "yes"}
+
+
+def sanitize_last_reply(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    if any(marker in lowered or marker in raw for marker in SECRET_MARKERS):
+        return ""
+    cleaned = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s]{3,}", "", raw)
+    return cleaned.strip()[:LAST_REPLY_MAX]
+
+
+def last_assistant_reply(user_id: str, channel_id: Optional[str]) -> str:
+    history = get_conversation_manager().get_history(user_id, limit=8, channel_id=channel_id)
+    for item in reversed(history):
+        if item.get("role") == "assistant":
+            return sanitize_last_reply(item.get("content") or "")
+    return ""
 
 
 def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> Dict[str, Any]:
@@ -198,6 +259,7 @@ def collect_nlu_context(user_id: str, channel_id: Optional[str], text: str) -> D
         "draft_fields": draft_fields,
         "has_last_saved": bool(has_last_saved),
         "has_active_draft": has_active_draft,
+        "last_assistant_reply": last_assistant_reply(user_id, channel_id),
         "user_message": (text or "").strip(),
     }
 
@@ -209,6 +271,7 @@ def gpt_payload(context: Dict[str, Any]) -> Dict[str, Any]:
         "missing_fields": list(context.get("missing_fields") or []),
         "draft_fields": dict(context.get("draft_fields") or {}),
         "has_last_saved": bool(context.get("has_last_saved")),
+        "last_assistant_reply": context.get("last_assistant_reply") or "",
         "user_message": context.get("user_message") or "",
     }
 
@@ -232,6 +295,10 @@ def clean_nlu_fields(fields: Optional[Dict[str, Any]], *, action: str) -> Dict[s
         mode = raw.get("mode")
         if mode in MODE_FIELDS:
             cleaned["mode"] = mode
+    if action in (ACTION_SHOW_HELP, ACTION_QUERY_CATALOG):
+        topic = raw.get("topic")
+        if topic in TOPIC_FIELDS:
+            cleaned["topic"] = topic
     for key in ALLOWED_FIELDS:
         if key not in raw or raw[key] in (None, ""):
             continue
@@ -279,6 +346,19 @@ def parse_nlu_payload(raw: Any) -> NluIntent:
 def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
     """서버가 GPT 결과를 다시 검증한다. 쓰기는 여기서 하지 않는다."""
     has_draft = bool(context.get("has_active_draft"))
+    if intent.action == ACTION_SHOW_HELP:
+        intent.target = TARGET_NONE
+        intent.needs_confirmation = False
+        intent.fields = {"topic": intent.fields.get("topic") or "all"}
+        return intent
+    if intent.action == ACTION_QUERY_CATALOG:
+        topic = intent.fields.get("topic") or "repair_work_prices"
+        if topic not in TOPIC_FIELDS:
+            topic = "repair_work_prices"
+        intent.target = TARGET_NONE
+        intent.needs_confirmation = False
+        intent.fields = {"topic": topic}
+        return intent
     if intent.action == ACTION_START_MODE:
         mode = intent.fields.get("mode") or (intent.domain if intent.domain in MODE_FIELDS else None)
         if mode in MODE_FIELDS:
@@ -297,7 +377,11 @@ def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
         intent.needs_confirmation = False
         return intent
 
-    if intent.confidence < LOW_CONFIDENCE and intent.action != ACTION_UNKNOWN:
+    if intent.confidence < LOW_CONFIDENCE and intent.action not in {
+        ACTION_UNKNOWN,
+        ACTION_SHOW_HELP,
+        ACTION_QUERY_CATALOG,
+    }:
         intent.action = ACTION_UNKNOWN
         intent.target = TARGET_NONE
         intent.needs_confirmation = False
@@ -358,6 +442,8 @@ def nlu_to_bot_intent(intent: Optional[NluIntent], raw: str = "") -> BotIntent:
         ACTION_PROVIDE_FIELD,
         ACTION_CREATE,
         ACTION_START_MODE,
+        ACTION_SHOW_HELP,
+        ACTION_QUERY_CATALOG,
         ACTION_UNKNOWN,
     }:
         action = ACTION_NONE
@@ -391,6 +477,14 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
     """GPT 실패 시 기존 로컬 파서만 사용한다. 새 단어 정규식은 추가하지 않는다."""
     context = context or {}
     command = parse_mode_command(text)
+    if command and command.get("action") == "help":
+        return NluIntent(
+            action=ACTION_SHOW_HELP,
+            target=TARGET_NONE,
+            fields={"topic": "all"},
+            confidence=1.0,
+            source="fallback",
+        )
     if command and command.get("action") == "start":
         domain = MODE_TO_DOMAIN.get(command["mode"], "none")
         return NluIntent(
@@ -448,6 +542,26 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
             source="fallback",
         )
     return NluIntent(action=ACTION_UNKNOWN, confidence=0.0, source="fallback")
+
+
+def render_readonly_nlu(intent: Optional[NluIntent]) -> Optional[str]:
+    """도움말·카탈로그는 DB에 쓰지 않고 기존 안내 함수만 호출한다."""
+    if not intent:
+        return None
+    if intent.action == ACTION_SHOW_HELP:
+        from backend.app.services.bot_mode import mode_feature_guide
+
+        return mode_feature_guide()
+    if intent.action == ACTION_QUERY_CATALOG:
+        topic = (intent.fields or {}).get("topic") or "repair_work_prices"
+        if topic in {"repair_work_prices", "repair"}:
+            from backend.app.services.repair_bot import format_work_cost_list
+
+            return format_work_cost_list()
+        from backend.app.services.bot_mode import mode_feature_guide
+
+        return mode_feature_guide()
+    return None
 
 
 async def _complete_chat(messages: List[Dict[str, str]]) -> str:
