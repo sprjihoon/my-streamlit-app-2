@@ -369,38 +369,54 @@ def _fail_message(failures: List[Dict[str, Any]]) -> str:
     return " / ".join(parts) if parts else SAFE_ERROR
 
 
-def extract_journal_qty(text: str) -> Optional[int]:
+PRICE_MARK_RE = re.compile(r"원|천\s*원|만\s*원|단가")
+COMMAND_WORK = frozenset(
+    ("조회", "조회모드", "기능", "기능설명", "도움", "종료", "끝", "모드종료", "사용법", "오늘수선일지조회")
+)
+
+
+def extract_journal_qty(text: str, *, allow_bare_number: bool = True) -> Optional[int]:
     raw = (text or "").strip()
     if not raw:
         return None
+    if PRICE_MARK_RE.search(raw):
+        return None
     compact = re.sub(r"\s+", "", raw)
     for word, value in KOREAN_QTY.items():
-        if word in compact:
+        if compact == word or compact == f"{word}건" or compact == f"{word}개":
             return value
     m = QTY_DIGIT_RE.search(raw)
     if m:
         qty = int(m.group(1))
-        if qty > 0:
+        if qty > 0 and (allow_bare_number or re.search(r"(건|개|장|박스)", raw)):
             return qty
     return None
 
 
-def extract_journal_fields_local(text: str) -> Dict[str, Any]:
-    """확실한 로컬 파싱만. 명령 동의어 목록을 늘리지 않는다."""
+def extract_journal_fields_local(
+    text: str,
+    pending_step: str = "",
+    user_name: str = "",
+) -> Dict[str, Any]:
+    """확실한 로컬 파싱만. pending에 따라 숫자 의미를 나눈다."""
     raw = (text or "").strip()
     if not raw:
         return {}
     fields: Dict[str, Any] = {}
+    step = (pending_step or "").lower()
+    awaiting_price = step in {"unit_price", "단가", "awaiting_price"} or "price" in step
+    awaiting_qty = step in {"qty", "수량"} or step.endswith("qty")
     amount = extract_korean_amount(raw)
-    if amount is not None:
+    if amount is not None and not awaiting_qty:
         fields["unit_price"] = amount
         fields["amount_type"] = "total" if TOTAL_HINT_RE.search(raw) else "unit"
         if fields["amount_type"] == "total":
             fields["total_amount"] = amount
             fields.pop("unit_price", None)
-    qty = extract_journal_qty(raw)
-    if qty:
-        fields["qty"] = qty
+    if not awaiting_price:
+        qty = extract_journal_qty(raw, allow_bare_number=awaiting_qty or not amount)
+        if qty:
+            fields["qty"] = qty
     if "어제" in raw:
         fields["date"] = seoul_yesterday()
     elif "오늘" in raw:
@@ -427,8 +443,20 @@ def extract_journal_fields_local(text: str) -> Dict[str, Any]:
                 continue
             break
         work = leftover.strip(" ,./")
+        display = (user_name or "").replace(" ", "")
+        if display and (fields.get("vendor") or "").replace(" ", "") == display:
+            fields.pop("vendor", None)
         if work:
+            compact_work = work.replace(" ", "")
+            if compact_work in COMMAND_WORK or compact_work == display:
+                work = ""
+        if work and not awaiting_price and not awaiting_qty:
             fields["work_type"] = work
+    if display := (user_name or "").replace(" ", ""):
+        if (fields.get("vendor") or "").replace(" ", "") == display:
+            fields.pop("vendor", None)
+        if (fields.get("work_type") or "").replace(" ", "") == display:
+            fields.pop("work_type", None)
     return journal_fields_only(fields)
 
 

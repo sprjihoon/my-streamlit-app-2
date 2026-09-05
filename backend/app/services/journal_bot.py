@@ -483,7 +483,12 @@ async def handle_user_text(
         return MODE_BLOCKED
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
-    readonly = render_readonly_nlu(nlu)
+    from backend.app.services.bot_nlu import is_read_action
+    from backend.app.services.bot_query import looks_like_query_read, query_guard_reply
+
+    if is_read_action(nlu) or looks_like_query_read(raw):
+        return query_guard_reply("journal")
+    readonly = render_readonly_nlu(nlu, raw)
     if readonly:
         return readonly
     intent = nlu_to_bot_intent(nlu, raw)
@@ -566,6 +571,12 @@ async def handle_user_text(
             return _continue_create(user_id, channel_id, pending, user_name, event_id)
 
     if pending.get("step") == "awaiting_price":
+        if not fields.get("unit_price"):
+            from backend.app.services.journal_adapter import extract_journal_fields_local
+
+            local_price = extract_journal_fields_local(raw, pending_step="unit_price", user_name=user_name or "")
+            if local_price.get("unit_price"):
+                fields["unit_price"] = local_price["unit_price"]
         if fields.get("unit_price"):
             pending["unit_price"] = fields["unit_price"]
             pending["amount_type"] = "unit"

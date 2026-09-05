@@ -86,42 +86,108 @@ def _alias_list(raw: Optional[str]) -> List[str]:
     return [a.strip() for a in raw.split(",") if a.strip()]
 
 
-def resolve_work_type(name: Optional[str]) -> Optional[Dict[str, Any]]:
+def _boundary_hit(haystack: str, needle: str) -> bool:
+    if not needle or needle not in haystack:
+        return False
+    start = 0
+    while True:
+        idx = haystack.find(needle, start)
+        if idx < 0:
+            return False
+        left = haystack[idx - 1] if idx > 0 else ""
+        right = haystack[idx + len(needle)] if idx + len(needle) < len(haystack) else ""
+        left_ok = not left.isalpha() and not ("가" <= left <= "힣")
+        right_ok = not right.isalpha() and not ("가" <= right <= "힣")
+        if left_ok or right_ok or len(needle) >= 3:
+            if left_ok and right_ok:
+                return True
+            if len(needle) >= 4:
+                return True
+        start = idx + 1
+
+
+def rank_work_type_matches(name: Optional[str]) -> List[Dict[str, Any]]:
+    """canonical 정확 → alias 정확 → 가장 긴 경계 → 부분 포함. 동점이면 모두 반환."""
     if not name:
-        return None
+        return []
     ensure_catalog_tables()
-    q = name.strip()
-    nq = _norm(q)
+    nq = _norm(name)
     with get_connection() as con:
         rows = con.execute(
             "SELECT 작업명, 기본비용, 별칭 FROM repair_work_type"
         ).fetchall()
-    best = None
+    exact_canon = []
+    exact_alias = []
+    boundary = []
+    partial = []
     for 작업명, 기본비용, 별칭 in rows:
-        names = [작업명, *_alias_list(별칭)]
-        if any(_norm(n) == nq for n in names):
-            return {"작업명": 작업명, "기본비용": int(기본비용), "별칭": 별칭}
-        if any(nq in _norm(n) or _norm(n) in nq for n in names if _norm(n)):
-            best = {"작업명": 작업명, "기본비용": int(기본비용), "별칭": 별칭}
-    return best
+        aliases = _alias_list(별칭)
+        item = {"작업명": 작업명, "기본비용": int(기본비용), "별칭": 별칭}
+        if _norm(작업명) == nq:
+            exact_canon.append(item)
+            continue
+        if any(_norm(a) == nq for a in aliases):
+            exact_alias.append(item)
+            continue
+        names = [작업명, *aliases]
+        if any(_boundary_hit(nq, _norm(n)) for n in names if _norm(n)):
+            boundary.append((len(max((_norm(n) for n in names if _norm(n) and _norm(n) in nq), default="")), item))
+            continue
+        if any(_norm(n) and (_norm(n) in nq or nq in _norm(n)) for n in names):
+            partial.append((len(max((_norm(n) for n in names if _norm(n)), default="")), item))
+    if exact_canon:
+        return exact_canon
+    if exact_alias:
+        return exact_alias
+    if boundary:
+        best_len = max(score for score, _ in boundary)
+        winners = [item for score, item in boundary if score == best_len]
+        return winners
+    if partial:
+        best_len = max(score for score, _ in partial)
+        return [item for score, item in partial if score == best_len]
+    return []
+
+
+def resolve_work_type(name: Optional[str]) -> Optional[Dict[str, Any]]:
+    matches = rank_work_type_matches(name)
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def resolve_work_type_candidates(name: Optional[str]) -> List[Dict[str, Any]]:
+    return rank_work_type_matches(name)
 
 
 def resolve_defect(name: Optional[str]) -> Optional[Dict[str, Any]]:
     if not name:
         return None
     ensure_catalog_tables()
-    q = name.strip()
-    nq = _norm(q)
+    nq = _norm(name)
+    if nq in {"수선"}:
+        return None
     with get_connection() as con:
         rows = con.execute("SELECT 불량명, 별칭 FROM repair_defect").fetchall()
-    best = None
+    exact = []
+    partial = []
     for 불량명, 별칭 in rows:
         names = [불량명, *_alias_list(별칭)]
+        item = {"불량명": 불량명, "별칭": 별칭}
         if any(_norm(n) == nq for n in names):
-            return {"불량명": 불량명, "별칭": 별칭}
-        if any(nq in _norm(n) or _norm(n) in nq for n in names if _norm(n)):
-            best = {"불량명": 불량명, "별칭": 별칭}
-    return best
+            exact.append(item)
+            continue
+        if any(_norm(n) and _norm(n) != "수선" and (_norm(n) in nq or nq in _norm(n)) for n in names):
+            partial.append((len(max((_norm(n) for n in names if _norm(n)), default="")), item))
+    if exact:
+        return exact[0]
+    if len(partial) == 1:
+        return partial[0][1]
+    if partial:
+        best_len = max(score for score, _ in partial)
+        winners = [item for score, item in partial if score == best_len]
+        return winners[0] if len(winners) == 1 else None
+    return None
 
 
 def _latest_log_price(
@@ -156,7 +222,14 @@ def lookup_repair_price(
 ) -> Dict[str, Any]:
     """제품+작업 최근 비용, 없으면 업체+작업, 없으면 기본비용."""
     ensure_catalog_tables()
-    resolved = resolve_work_type(work_type)
+    candidates = resolve_work_type_candidates(work_type)
+    if len(candidates) > 1:
+        return {
+            "found": False,
+            "candidates": candidates,
+            "message": "여러 작업이 맞아요. " + ", ".join(c["작업명"] for c in candidates) + " 중에서 골라주세요.",
+        }
+    resolved = candidates[0] if candidates else None
     work_name = resolved["작업명"] if resolved else (work_type or "").strip()
     default_price = resolved["기본비용"] if resolved else None
     vendor_name = (vendor or "").strip() or None

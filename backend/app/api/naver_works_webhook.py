@@ -29,7 +29,13 @@ from backend.app.services.bot_mode import (
     parse_mode_command,
     with_mode_prefix,
 )
-from backend.app.services.bot_nlu import interpret_or_fallback, nlu_to_mode_command, render_readonly_nlu
+from backend.app.services.bot_nlu import (
+    collect_nlu_context,
+    interpret_or_fallback,
+    nlu_to_mode_command,
+    render_readonly_nlu,
+)
+from backend.app.services.bot_query import looks_like_query_read, render_query_read
 from backend.app.services.repair_bot import (
     handle_user_text,
     is_image_filename,
@@ -134,25 +140,33 @@ async def process_message(
             user_name = None
     
     conv_manager = get_conversation_manager()
-    user_msg_content = f"[{user_name}] {text}" if user_name else text
-    # GPT에는 현재 메시지 저장 전의 이력만 넘긴다. 현재 문장은 아래에서 한 번만 저장한다.
-    conversation_history = conv_manager.get_history(user_id, limit=6, channel_id=channel_id)
-    conv_manager.add_message(user_id, channel_id, "user", user_msg_content)
+    if event_id:
+        prior = conv_manager.get_webhook_event(event_id)
+        if prior is not None:
+            await _send_prefixed(nw_client, user_id, channel_id, prior or "이미 처리한 메시지입니다.", channel_type)
+            return
+    # NLU 컨텍스트는 현재 문장 저장 전에 읽는다. 이름은 metadata만.
+    nlu_context = collect_nlu_context(user_id, channel_id, text, user_name=user_name)
+    conv_manager.add_message(user_id, channel_id, "user", text)
 
     command = parse_mode_command(text)
     nlu = None
     if not command:
-        nlu = await interpret_or_fallback(user_id, channel_id, text)
+        nlu = await interpret_or_fallback(user_id, channel_id, text, context=nlu_context)
         command = nlu_to_mode_command(nlu)
+        if command and command.get("action") == "start" and looks_like_query_read(text):
+            command = None
     if command:
         reply = apply_mode_command(user_id, channel_id, command)
         conv_manager.add_message(user_id, channel_id, "assistant", reply)
+        conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
         await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
         return
 
-    readonly = render_readonly_nlu(nlu)
+    readonly = render_readonly_nlu(nlu, text)
     if readonly:
         conv_manager.add_message(user_id, channel_id, "assistant", readonly)
+        conv_manager.remember_webhook_event(event_id, user_id, channel_id, readonly)
         await _send_prefixed(nw_client, user_id, channel_id, readonly, channel_type)
         return
 
@@ -163,6 +177,7 @@ async def process_message(
         else:
             reply = idle_guide()
         conv_manager.add_message(user_id, channel_id, "assistant", reply)
+        conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
         await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
         return
 
@@ -172,6 +187,7 @@ async def process_message(
             add_debug_log("repair_text_handled", {"reply": (reply or "")[:200]})
             if reply:
                 conv_manager.add_message(user_id, channel_id, "assistant", reply)
+                conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
                 await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
             return
         except Exception as e:
@@ -189,6 +205,7 @@ async def process_message(
             add_debug_log("journal_text_handled", {"reply": (reply or "")[:200]})
             if reply:
                 conv_manager.add_message(user_id, channel_id, "assistant", reply)
+                conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
                 await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
             return
         except Exception as e:
@@ -201,41 +218,16 @@ async def process_message(
             return
 
     try:
-        ai_parser = get_ai_parser()
+        reply = render_query_read(nlu, text, user_id, channel_id, user_name)
+        add_debug_log("query_text_handled", {"reply": (reply or "")[:200]})
+        conv_manager.add_message(user_id, channel_id, "assistant", reply)
+        conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
+        await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
     except Exception as e:
-        add_debug_log("ai_parser_error", error=str(e))
-        await _send_prefixed(nw_client, user_id, channel_id, "처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
-        return
-
-    try:
-        result = await ai_parser.process_message(
-            message=text,
-            user_id=user_id,
-            user_name=user_name,
-            channel_id=channel_id,
-            conversation_history=conversation_history,
-            mode=mode,
-        )
-        
-        add_debug_log("process_result", {
-            "tool_called": result.get("tool_called"),
-            "response_length": len(result.get("response", "")),
-            "waiting_for_info": result.get("waiting_for_info", False)
-        })
-        
-        response = result.get("response", "")
-        
-        if response:
-            conv_manager.add_message(user_id, channel_id, "assistant", response)
-            await _send_prefixed(nw_client, user_id, channel_id, response, channel_type)
-        else:
-            await _send_prefixed(nw_client, user_id, channel_id, "🤖 응답을 생성하지 못했습니다.", channel_type)
-    
-    except Exception as e:
-        add_debug_log("process_error", error=f"{type(e).__name__}: {str(e)}")
+        add_debug_log("query_text_error", error=str(e))
         await _send_prefixed(
             nw_client, user_id, channel_id,
-            "처리 중 문제가 났어요. 다시 시도해 주세요.",
+            "조회 중 문제가 생겼어요. 조건을 바꿔 다시 요청해주세요.",
             channel_type,
         )
 

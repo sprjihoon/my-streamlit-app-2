@@ -1,0 +1,70 @@
+{"id": "01", "text": "수선", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "repair"}}
+{"id": "02", "text": "수선할래", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "repair"}}
+{"id": "03", "text": "수선모드 시작", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "repair"}}
+{"id": "04", "text": "수선할게", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "repair"}}
+{"id": "05", "text": "일지", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "journal"}}
+{"id": "06", "text": "작업일지", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "journal"}}
+{"id": "07", "text": "일지 작성할래", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "journal"}}
+{"id": "08", "text": "조회", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "query"}}
+{"id": "09", "text": "조회모드", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "query"}}
+{"id": "10", "text": "기록 좀 볼래", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "query"}}
+{"id": "11", "text": "현재 모드", "context": {"mode": "query"}, "expected": {"mode_action": "status"}}
+{"id": "12", "text": "종료", "context": {"mode": "repair"}, "expected": {"mode_action": "end"}}
+{"id": "13", "text": "끝", "context": {"mode": "journal"}, "expected": {"mode_action": "end"}}
+{"id": "14", "text": "모드 종료", "context": {"mode": "query"}, "expected": {"mode_action": "end"}}
+{"id": "15", "text": "기능", "context": {"mode": "idle"}, "expected": {"action": "help"}}
+{"id": "16", "text": "기능설명", "context": {"mode": "idle"}, "expected": {"action": "help"}}
+{"id": "17", "text": "뭐 할 수 있어?", "context": {"mode": "idle"}, "expected": {"action": "help"}}
+{"id": "18", "text": "사용법 알려줘", "context": {"mode": "idle"}, "expected": {"action": "help"}}
+{"id": "19", "text": "오늘 수선작업 몇건", "context": {"mode": "query"}, "expected": {"action": "count", "entity": "repair_log"}}
+{"id": "20", "text": "오늘 수선작업 몇 건이야", "context": {"mode": "query"}, "expected": {"action": "count", "entity": "repair_log"}}
+{"id": "21", "text": "오늘수선작업몇건", "context": {"mode": "query"}, "expected": {"action": "count", "entity": "repair_log"}}
+{"id": "22", "text": "오늘 수선 몇건임", "context": {"mode": "query"}, "expected": {"action": "count", "entity": "repair_log"}}
+{"id": "23", "text": "오늘 전체몇건", "context": {"mode": "query", "query_context": {"entity": "repair_log", "filters": {"relative_date": "today"}}}, "expected": {"action": "count", "entity": "repair_log"}}
+{"id": "24", "text": "오늘 전체는?", "context": {"mode": "query", "query_context": {"entity": "repair_log", "filters": {"relative_date": "today"}}}, "expected": {"action": "count"}}
+{"id": "25", "text": "오늘 수선작업한 업체", "context": {"mode": "query"}, "expected": {"action": "group", "entity": "repair_log"}}
+{"id": "26", "text": "오늘 수선 업체별로", "context": {"mode": "query"}, "expected": {"action": "group"}}
+{"id": "27", "text": "업체별로", "context": {"mode": "query", "query_context": {"entity": "repair_log", "filters": {"relative_date": "today"}}}, "expected": {"action": "group"}}
+{"id": "28", "text": "오늘 수선일지조회", "context": {"mode": "query"}, "expected": {"action": "list", "entity": "repair_log"}}
+{"id": "29", "text": "오늘 수선일지 조회", "context": {"mode": "query"}, "expected": {"action": "list", "entity": "repair_log"}}
+{"id": "30", "text": "오늘 수선일지 보여줘", "context": {"mode": "query"}, "expected": {"action": "list", "entity": "repair_log"}}
+{"id": "31", "text": "방금 저장된 수선항목", "context": {"mode": "query"}, "expected": {"action": "latest"}}
+{"id": "32", "text": "방금 저장한 수선항목", "context": {"mode": "query"}, "expected": {"action": "latest"}}
+{"id": "33", "text": "직전 수선일지", "context": {"mode": "query"}, "expected": {"action": "latest"}}
+{"id": "34", "text": "봉제 몇건?", "context": {"mode": "query"}, "expected": {"action": "count", "entity": "repair_log"}}
+{"id": "35", "text": "봉제몇건", "context": {"mode": "query"}, "expected": {"action": "count"}}
+{"id": "36", "text": "봉제 몇 건이에요", "context": {"mode": "query"}, "expected": {"action": "count"}}
+{"id": "37", "text": "어제 수선 몇건", "context": {"mode": "query"}, "expected": {"action": "count"}}
+{"id": "38", "text": "이번주 수선일지", "context": {"mode": "query"}, "expected": {"entity": "repair_log"}}
+{"id": "39", "text": "내가 오늘 수선 몇건", "context": {"mode": "query"}, "expected": {"action": "count"}}
+{"id": "40", "text": "내 작업 오늘 몇건", "context": {"mode": "query"}, "expected": {"action": "count"}}
+{"id": "41", "text": "부분세탁 얼마?", "context": {"mode": "query"}, "expected": {"action": "lookup_price"}}
+{"id": "42", "text": "부분세탁얼마야", "context": {"mode": "query"}, "expected": {"action": "lookup_price"}}
+{"id": "43", "text": "수선 비용 얼마야", "context": {"mode": "idle"}, "expected": {"action": "lookup_price"}}
+{"id": "44", "text": "1", "context": {"mode": "journal", "pending_step": "qty", "has_active_draft": true}, "expected": {"action": "provide_field", "fields": {"qty": 1}}}
+{"id": "45", "text": "하나", "context": {"mode": "journal", "pending_step": "qty", "has_active_draft": true}, "expected": {"action": "provide_field", "fields": {"qty": 1}}}
+{"id": "46", "text": "한 개", "context": {"mode": "repair", "pending_step": "qty", "has_active_draft": true}, "expected": {"action": "provide_field", "fields": {"qty": 1}}}
+{"id": "47", "text": "3천원", "context": {"mode": "journal", "pending_step": "unit_price", "has_active_draft": true}, "expected": {"action": "provide_field", "fields": {"unit_price": 3000}}}
+{"id": "48", "text": "3000", "context": {"mode": "journal", "pending_step": "awaiting_price", "has_active_draft": true}, "expected": {"action": "provide_field"}}
+{"id": "49", "text": "단가 500원", "context": {"mode": "journal", "pending_step": "unit_price", "has_active_draft": true}, "expected": {"action": "provide_field", "fields": {"unit_price": 500}}}
+{"id": "50", "text": "틸리언 스티커부착", "context": {"mode": "journal"}, "expected": {"action": "create", "fields": {"vendor": "틸리언"}}}
+{"id": "51", "text": "틸리언스티커부착", "context": {"mode": "journal"}, "expected": {"action": "create"}}
+{"id": "52", "text": "직전내용수정", "context": {"mode": "repair", "has_last_saved": true}, "expected": {"action": "update", "target": "last_saved"}}
+{"id": "53", "text": "방금 거 수정", "context": {"mode": "repair", "has_last_saved": true}, "expected": {"action": "update"}}
+{"id": "54", "text": "네", "context": {"mode": "repair"}, "expected": {"action": "confirm"}}
+{"id": "55", "text": "취소", "context": {"mode": "repair", "has_active_draft": true}, "expected": {"action": "cancel"}}
+{"id": "56", "text": "오늘 작업일지 보여줘", "context": {"mode": "query"}, "expected": {"entity": "work_log"}}
+{"id": "57", "text": "오늘 작업 몇건", "context": {"mode": "query"}, "expected": {"action": "count"}}
+{"id": "58", "text": "수선모드시작", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "repair"}}
+{"id": "59", "text": "일지모드 시작", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "journal"}}
+{"id": "60", "text": "조회모드시작", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "query"}}
+{"id": "61", "text": "기능설명해줘", "context": {"mode": "idle"}, "expected": {"action": "help"}}
+{"id": "62", "text": "사용법", "context": {"mode": "journal"}, "expected": {"action": "help"}}
+{"id": "63", "text": "오늘 수선작업한업체좀", "context": {"mode": "query"}, "expected": {"action": "group"}}
+{"id": "64", "text": "방금저장된수선항목", "context": {"mode": "query"}, "expected": {"action": "latest"}}
+{"id": "65", "text": "그거 4건으로", "context": {"mode": "repair", "has_last_saved": true}, "expected": {"action": "update"}}
+{"id": "66", "text": "금액 2천원으로 바꿔", "context": {"mode": "repair", "has_last_saved": true}, "expected": {"action": "update"}}
+{"id": "67", "text": "구멍 말고 지퍼야", "context": {"mode": "repair", "has_active_draft": true}, "expected": {"action": "provide_field"}}
+{"id": "68", "text": "조회할래", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "query"}}
+{"id": "69", "text": "일지쓸게", "context": {"mode": "idle"}, "expected": {"mode_action": "start", "requested_mode": "journal"}}
+{"id": "70", "text": "오늘 수선 기록 목록", "context": {"mode": "query"}, "expected": {"action": "list"}}

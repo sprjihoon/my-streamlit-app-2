@@ -17,6 +17,18 @@ ACTION_SHOW_HELP = "show_help"
 ACTION_QUERY_CATALOG = "query_catalog"
 ACTION_DELETE = "delete"
 ACTION_UNKNOWN = "unknown"
+ACTION_LIST = "list"
+ACTION_LATEST = "latest"
+ACTION_COUNT = "count"
+ACTION_STATS = "stats"
+ACTION_GROUP = "group"
+ACTION_LOOKUP_PRICE = "lookup_price"
+ACTION_HELP = "help"
+ACTION_CLARIFY = "clarify"
+
+READ_ACTIONS = frozenset(
+    (ACTION_LIST, ACTION_LATEST, ACTION_COUNT, ACTION_STATS, ACTION_GROUP, ACTION_LOOKUP_PRICE)
+)
 
 TARGET_NONE = "none"
 TARGET_LAST_SAVED = "last_saved"
@@ -48,9 +60,9 @@ UPDATE_SYNONYMS = (
 
 UPDATE_VERBS = ("수정", "바꿔", "바꾸", "변경", "고쳐")
 UPDATE_VERBS_FREE = ("바꿔", "변경", "고쳐")
-LAST_SAVED_HINTS = ("직전", "방금", "아까", "저장한")
+LAST_SAVED_HINTS = ("직전", "방금", "아까", "저장한", "저장된")
 CORRECTION_MARKERS = ("아니고", "말고")
-EXPLICIT_RECORD_MARKERS = ("저장한", "내용", "일지")
+EXPLICIT_RECORD_MARKERS = ("저장한", "저장된", "내용", "일지", "항목")
 EXPLICIT_VERBS = ("수정", "변경")
 FIELD_HINTS = ("금액", "가격", "단가", "건수", "수량", "불량", "작업", "업체", "제품", "비고")
 _MOD_COMMAND_RE = re.compile(
@@ -140,6 +152,18 @@ def rejected_draft_field_names(fields: Optional[Dict[str, Any]]) -> List[str]:
     return [k for k in (fields or {}) if k not in DRAFT_ALLOWED_FIELDS]
 
 
+def extract_bare_qty(text: str) -> Optional[int]:
+    compact = _norm(text)
+    compact = compact.replace("항목", "").replace("건수", "").replace("수량", "")
+    if compact in {"1", "하나", "한개", "한건", "한"}:
+        return 1
+    m = re.fullmatch(r"(\d+)(?:건|개|장|벌)?", compact)
+    if m:
+        qty = int(m.group(1))
+        return qty if qty > 0 else None
+    return None
+
+
 def extract_korean_amount(text: str) -> Optional[int]:
     """저장용 extract_price는 그대로 두고, 수정 intent만 천 단위를 보완한다."""
     from backend.app.services.repair_bot import extract_price
@@ -170,12 +194,17 @@ def extract_update_fields(text: str) -> Dict[str, Any]:
     if amount is not None:
         fields["unit_price"] = amount
     qty = parsed.get("qty") or extract_qty(focus)
+    if not qty:
+        qty = extract_bare_qty(focus)
     if qty:
         fields["qty"] = qty
+    work = parsed.get("work")
+    if work and _norm(str(work)) in {"항목", "수선항목"}:
+        work = None
+    if work:
+        fields["work_type"] = work
     if parsed.get("defect"):
         fields["defect"] = parsed["defect"]
-    if parsed.get("work"):
-        fields["work_type"] = parsed["work"]
     if corr and "defect" not in fields and "work_type" not in fields and amount is None and not qty:
         leftover = re.sub(r"(원|건|개|장|벌)$", "", focus).strip()
         leftover = re.sub(r"^\d+\s*", "", leftover).strip()

@@ -5,9 +5,12 @@ OpenAI Function Calling을 위한 도구(tools) 스키마와 실행 함수를 �
 """
 
 import json
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+
+logger = logging.getLogger(__name__)
 from logic.db import get_connection
 from backend.app.api.logs import add_log
 
@@ -166,7 +169,73 @@ TOOLS = [
                         "type": "integer",
                         "description": "최대 결과 수 (기본: 20)",
                         "default": 20
+                    },
+                    "worker": {
+                        "type": "string",
+                        "description": "작업자"
+                    },
+                    "remark": {
+                        "type": "string",
+                        "description": "비고"
                     }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_repair_logs",
+            "description": "조건에 맞는 수선일지를 검색합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string"},
+                    "product": {"type": "string"},
+                    "work_type": {"type": "string"},
+                    "defect": {"type": "string"},
+                    "worker": {"type": "string"},
+                    "barcode": {"type": "string"},
+                    "remark": {"type": "string"},
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                    "limit": {"type": "integer", "default": 20}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_repair_log_stats",
+            "description": "수선일지 건수·수량·금액을 집계합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string"},
+                    "product": {"type": "string"},
+                    "work_type": {"type": "string"},
+                    "defect": {"type": "string"},
+                    "worker": {"type": "string"},
+                    "barcode": {"type": "string"},
+                    "remark": {"type": "string"},
+                    "start_date": {"type": "string"},
+                    "end_date": {"type": "string"},
+                    "group_by": {"type": "string"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_work_price",
+            "description": "작업일지 단가 이력을 조회합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vendor": {"type": "string"},
+                    "work_type": {"type": "string"}
                 }
             }
         }
@@ -190,9 +259,12 @@ TOOLS = [
                     "vendor": {
                         "type": "string",
                         "description": "특정 업체만 조회"
-                    }
-                },
-                "required": ["start_date", "end_date"]
+                    },
+                    "work_type": {"type": "string"},
+                    "worker": {"type": "string"},
+                    "remark": {"type": "string"},
+                    "group_by": {"type": "string"}
+                }
             }
         }
     },
@@ -806,13 +878,10 @@ JOURNAL_TOOL_NAMES = {
 QUERY_TOOL_NAMES = {
     "search_work_logs",
     "get_work_log_stats",
-    "compare_periods",
-    "get_invoice_stats",
-    "lookup_vendors",
-    "lookup_rate_tables",
-    "lookup_storage",
-    "lookup_vendor_charges",
-    "lookup_repair_catalog",
+    "search_repair_logs",
+    "get_repair_log_stats",
+    "lookup_work_price",
+    "lookup_repair_price",
 }
 
 INACTIVE_TOOL_NAMES = {
@@ -824,7 +893,6 @@ INACTIVE_TOOL_NAMES = {
     "web_search",
     "get_help",
     "save_repair_log",
-    "lookup_repair_price",
     "lookup_repair_barcode",
     "check_leave",
     "apply_leave",
@@ -1007,6 +1075,9 @@ def execute_tool(
         "delete_work_log": _delete_work_log,
         "search_work_logs": _search_work_logs,
         "get_work_log_stats": _get_work_log_stats,
+        "search_repair_logs": _search_repair_logs,
+        "get_repair_log_stats": _get_repair_log_stats,
+        "lookup_work_price": _lookup_work_price,
         "compare_periods": _compare_periods,
         "update_work_log": _update_work_log,
         "bulk_update_work_logs": _bulk_update_work_logs,
@@ -1355,6 +1426,12 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
     if args.get("price"):
         conditions.append("합계 BETWEEN ? AND ?")
         params.extend([int(args["price"] * 0.9), int(args["price"] * 1.1)])
+    if args.get("worker"):
+        conditions.append("작성자 LIKE ?")
+        params.append(f"%{args['worker']}%")
+    if args.get("remark"):
+        conditions.append("비고1 LIKE ?")
+        params.append(f"%{args['remark']}%")
     
     where_clause = " AND ".join(conditions) if conditions else "1=1"
     limit = _clamp_limit(args.get("limit"))
@@ -1428,13 +1505,22 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
             vendor_conditions = " OR ".join(["업체명 LIKE ?" for _ in all_vendors])
             conditions.append(f"({vendor_conditions})")
             params.extend([f"%{v}%" for v in all_vendors])
+    if args.get("work_type"):
+        conditions.append("분류 LIKE ?")
+        params.append(f"%{args['work_type']}%")
+    if args.get("worker"):
+        conditions.append("작성자 LIKE ?")
+        params.append(f"%{args['worker']}%")
+    if args.get("remark"):
+        conditions.append("비고1 LIKE ?")
+        params.append(f"%{args['remark']}%")
     
     where_clause = " AND ".join(conditions) if conditions else "1=1"
     
     with get_connection() as con:
         # 총합
         total_row = con.execute(
-            f"SELECT COUNT(*), COALESCE(SUM(합계), 0) FROM work_log WHERE {where_clause}",
+            f"SELECT COUNT(*), COALESCE(SUM(수량), 0), COALESCE(SUM(합계), 0) FROM work_log WHERE {where_clause}",
             params
         ).fetchone()
         
@@ -1454,19 +1540,164 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
             params
         ).fetchall()
     
+    qty_sum = int(total_row[1] or 0)
+    amount_sum = int(total_row[2] or 0)
+    group_col = {"vendor": "업체명", "work_type": "분류", "worker": "작성자"}.get(str(args.get("group_by") or ""), "")
+    groups = []
+    if group_col:
+        with get_connection() as con:
+            grouped = con.execute(
+                f"""SELECT {group_col}, COUNT(*), COALESCE(SUM(수량),0), COALESCE(SUM(합계),0)
+                   FROM work_log WHERE {where_clause} AND {group_col} IS NOT NULL
+                   GROUP BY {group_col} ORDER BY COUNT(*) DESC LIMIT 50""",
+                params,
+            ).fetchall()
+        groups = [{"name": g[0], "count": g[1], "qty": g[2], "amount": g[3]} for g in grouped]
     result = {
         "success": True,
         "total_count": total_row[0] or 0,
-        "total_amount": total_row[1] or 0,
+        "count": total_row[0] or 0,
+        "qty": qty_sum,
+        "total": amount_sum,
+        "total_amount": amount_sum,
+        "groups": groups,
         "by_vendor": [{"vendor": v[0], "count": v[1], "amount": v[2]} for v in by_vendor],
         "by_work_type": [{"work_type": w[0], "count": w[1], "amount": w[2]} for w in by_work_type],
-        "message": f"통계: {total_row[0]}건, 총 {total_row[1]:,}원"
+        "message": f"통계: {total_row[0]}건, 총 {amount_sum:,}원"
     }
     if vendor_query:
         result["vendor_query"] = vendor_query
     if vendor_resolved:
         result["vendor_resolved"] = vendor_resolved
     return result
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_REPAIR_GROUP_COLS = {"vendor": "업체명", "work_type": "작업", "worker": "작성자", "product": "제품명"}
+
+
+def _safe_date(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    return text if _DATE_RE.match(text) else None
+
+
+def _search_repair_logs(args: Dict, user_id: str, user_name: str) -> Dict:
+    """저장된 수선일지 조회. SELECT allowlist만 사용한다."""
+    try:
+        conditions = ["1=1"]
+        params: List[Any] = []
+        mapping = {
+            "vendor": "업체명",
+            "product": "제품명",
+            "work_type": "작업",
+            "defect": "불량명",
+            "worker": "작성자",
+            "barcode": "바코드",
+            "remark": "비고",
+        }
+        for key, col in mapping.items():
+            value = (args.get(key) or "").strip()
+            if value:
+                conditions.append(f"{col} LIKE ?")
+                params.append(f"%{value}%")
+        start = _safe_date(args.get("start_date"))
+        end = _safe_date(args.get("end_date"))
+        if start:
+            conditions.append("날짜 >= ?")
+            params.append(start)
+        if end:
+            conditions.append("날짜 <= ?")
+            params.append(end)
+        limit = _clamp_limit(args.get("limit"))
+        with get_connection() as con:
+            rows = con.execute(
+                f"""SELECT id, 날짜, 업체명, 제품명, 작업, 수량, 비용, 저장시간, 작성자, 불량명, 바코드
+                    FROM repair_work_log
+                    WHERE {' AND '.join(conditions)}
+                    ORDER BY id DESC LIMIT ?""",
+                params + [limit],
+            ).fetchall()
+        out = []
+        for r in rows:
+            saved = str(r[7])[:10] if r[7] else (str(r[1])[:10] if r[1] else "-")
+            out.append({
+                "id": r[0],
+                "date": r[1] or saved,
+                "vendor": r[2],
+                "product": r[3],
+                "work_type": r[4],
+                "qty": r[5],
+                "unit_price": r[6],
+                "worker": r[8],
+                "defect": r[9],
+                "barcode": r[10],
+            })
+        return {"success": True, "count": len(out), "rows": out}
+    except Exception:
+        logger.exception("search_repair_logs_failed")
+        return {"success": False, "error": "조회 중 문제가 생겼어요."}
+
+
+def _get_repair_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
+    try:
+        conditions = ["1=1"]
+        params: List[Any] = []
+        mapping = {
+            "vendor": "업체명",
+            "product": "제품명",
+            "work_type": "작업",
+            "defect": "불량명",
+            "worker": "작성자",
+            "barcode": "바코드",
+            "remark": "비고",
+        }
+        for key, col in mapping.items():
+            value = (args.get(key) or "").strip()
+            if value:
+                conditions.append(f"{col} LIKE ?")
+                params.append(f"%{value}%")
+        start = _safe_date(args.get("start_date"))
+        end = _safe_date(args.get("end_date"))
+        if start:
+            conditions.append("날짜 >= ?")
+            params.append(start)
+        if end:
+            conditions.append("날짜 <= ?")
+            params.append(end)
+        where = " AND ".join(conditions)
+        with get_connection() as con:
+            row = con.execute(
+                f"""SELECT COUNT(*), COALESCE(SUM(수량),0), COALESCE(SUM(비용),0)
+                    FROM repair_work_log WHERE {where}""",
+                params,
+            ).fetchone()
+            group_col = _REPAIR_GROUP_COLS.get(str(args.get("group_by") or ""))
+            groups = []
+            if group_col:
+                grouped = con.execute(
+                    f"""SELECT {group_col}, COUNT(*), COALESCE(SUM(수량),0), COALESCE(SUM(비용),0)
+                        FROM repair_work_log WHERE {where} AND {group_col} IS NOT NULL
+                        GROUP BY {group_col} ORDER BY COUNT(*) DESC LIMIT 50""",
+                    params,
+                ).fetchall()
+                groups = [{"name": g[0], "count": g[1], "qty": g[2], "amount": g[3]} for g in grouped]
+        return {
+            "success": True,
+            "count": int(row[0] or 0),
+            "qty": int(row[1] or 0),
+            "total": int(row[2] or 0),
+            "groups": groups,
+        }
+    except Exception:
+        logger.exception("repair_log_stats_failed")
+        return {"success": False, "error": "조회 중 문제가 생겼어요."}
+
+
+def _lookup_work_price(args: Dict, user_id: str, user_name: str) -> Dict:
+    try:
+        return _lookup_price_from_history(args, user_id, user_name)
+    except Exception:
+        return {"success": False, "error": "조회 중 문제가 생겼어요."}
 
 
 def _compare_periods(args: Dict, user_id: str, user_name: str) -> Dict:

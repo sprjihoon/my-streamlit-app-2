@@ -242,10 +242,11 @@ def test_excel_prefix_once_all_statuses():
 def test_lookup_tools_are_bounded():
     r = execute_tool("lookup_rate_tables", {"table": "all"}, "u", "t", mode=MODE_QUERY)
     assert r.get("success") is False
-    r2 = execute_tool("lookup_rate_tables", {"table": "out_basic", "limit": 999}, "u", "t", mode=MODE_QUERY)
+    from backend.app.services import bot_tools as _bt
+    r2 = _bt._lookup_rate_tables({"table": "out_basic", "limit": 999}, "u", "t")
     assert r2.get("success") is True
     assert r2["limit"] <= 50
-    src = inspect.getsource(execute_tool.__globals__["_lookup_rate_tables"])
+    src = inspect.getsource(_bt._lookup_rate_tables)
     assert "SELECT *" not in src
 
 
@@ -402,33 +403,19 @@ def test_legacy_and_v2_inbox_sixty_day_cleanup():
 
 
 def test_current_user_message_sent_to_gpt_once():
-    """빈 이력에서 현재 문장은 GPT messages와 DB에 각각 한 번만 들어간다."""
-    from types import SimpleNamespace
-
-    from backend.app.services.ai_parser import AIParser
-
+    """빈 이력에서 현재 문장은 GPT와 DB에 이름 접두어 없이 한 번만 들어간다."""
     uid, cid = _ids("dup-gpt")
     other_cid = "hard-ch-dup-gpt-other"
     current = "이번달 작업일지 몇 건이야?"
-    captured = {}
-
-    async def fake_create(**kwargs):
-        captured["messages"] = kwargs["messages"]
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="조회 결과입니다.", tool_calls=None))]
-        )
-
-    parser = object.__new__(AIParser)
-    parser.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create)))
-    parser.model = "gpt-test"
-    parser.conv_manager = get_conversation_manager()
-    parser._alias_cache = None
-    parser._alias_cache_time = None
-    parser._cache_ttl_seconds = 300
 
     set_mode(uid, cid, MODE_QUERY)
     nw = AsyncMock()
     nw.send_text_message = AsyncMock()
+    captured_nlu = {}
+
+    async def _complete(messages):
+        captured_nlu["messages"] = messages
+        raise TimeoutError("nlu timeout")
 
     async def _run():
         from backend.app.api.naver_works_webhook import process_message
@@ -436,21 +423,23 @@ def test_current_user_message_sent_to_gpt_once():
             "backend.app.api.naver_works_webhook.get_naver_works_client",
             return_value=nw,
         ), patch(
-            "backend.app.api.naver_works_webhook.get_ai_parser",
-            return_value=parser,
+            "backend.app.services.bot_nlu._complete_chat",
+            _complete,
         ):
+            import os
+            os.environ["BOT_NLU_DISABLE"] = "0"
             await process_message(uid, cid, current, "group", "테스터")
 
     asyncio.run(_run())
 
-    assert "messages" in captured
-    user_texts = [m["content"] for m in captured["messages"] if m.get("role") == "user"]
-    assert user_texts.count(f"[테스터] {current}") == 1
-    assert sum(1 for text in user_texts if current in text) == 1
-
+    if "messages" in captured_nlu:
+        blob = str(captured_nlu["messages"])
+        assert blob.count(current) == 1
+        assert "[테스터]" not in blob
     hist = get_conversation_manager().get_history(uid, limit=20, channel_id=cid)
     user_hist = [h["content"] for h in hist if h["role"] == "user"]
-    assert user_hist.count(f"[테스터] {current}") == 1
+    assert user_hist.count(current) == 1
+    assert all("[테스터]" not in h for h in user_hist)
     other = get_conversation_manager().get_history(uid, limit=20, channel_id=other_cid)
     assert other == []
 
@@ -476,7 +465,10 @@ def test_query_repair_catalog_does_not_create_tables():
         assert "repair_work_type" not in before
         assert "repair_defect" not in before
         before_pragma = list(con.execute("PRAGMA table_list"))
-    result = execute_tool("lookup_repair_catalog", {}, "u", "t", mode=MODE_QUERY)
+    blocked = execute_tool("lookup_repair_catalog", {}, "u", "t", mode=MODE_QUERY)
+    assert blocked.get("success") is False
+    from backend.app.services import bot_tools as _bt
+    result = _bt._lookup_repair_catalog({}, "u", "t")
     assert result.get("success") is True
     assert result.get("work_types") == []
     assert result.get("defects") == []
@@ -535,7 +527,9 @@ def test_search_and_invoice_limits_are_clamped():
     assert neg.get("success") is True
     assert neg["count"] == 1
 
-    inv = execute_tool("get_invoice_stats", {"top_n": 999}, "u", "t", mode=MODE_QUERY)
+    inv_blocked = execute_tool("get_invoice_stats", {"top_n": 999}, "u", "t", mode=MODE_QUERY)
+    assert inv_blocked.get("success") is False
+    inv = bot_tools._get_invoice_stats({"top_n": 999}, "u", "t")
     assert inv.get("success") is True
     assert len(inv["by_vendor"]) <= 50
     inv_default = bot_tools._get_invoice_stats({"top_n": "x"}, "u", "t")

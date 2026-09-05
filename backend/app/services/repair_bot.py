@@ -209,6 +209,15 @@ def extract_qty(text: str) -> Optional[int]:
     return None
 
 
+def extract_waiting_qty(text: str) -> Optional[int]:
+    qty = extract_qty(text)
+    if qty:
+        return qty
+    from backend.app.services.bot_intent import extract_bare_qty
+
+    return extract_bare_qty(text)
+
+
 def parse_repair_text(text: str) -> Dict[str, Any]:
     price = extract_price(text)
     barcode = extract_barcode_token(text)
@@ -482,7 +491,12 @@ async def handle_user_text(
         return EXPIRED_REPAIR_MSG
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
-    readonly = render_readonly_nlu(nlu)
+    from backend.app.services.bot_nlu import is_read_action
+    from backend.app.services.bot_query import looks_like_query_read, query_guard_reply
+
+    if is_read_action(nlu) or looks_like_query_read(raw):
+        return query_guard_reply("repair")
+    readonly = render_readonly_nlu(nlu, raw)
     if readonly:
         return readonly
     intent = nlu_to_bot_intent(nlu, raw)
@@ -491,12 +505,12 @@ async def handle_user_text(
         return edited
 
     data = _get_pending(user_id, channel_id)
-    data.setdefault("user_name", user_name)
     missing = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
+    has_repair_draft = bool(data.get("entry_type") == "repair" or data.get("vendor") or data.get("work_type") or data.get("barcode"))
 
-    if (nlu and getattr(nlu, "action", None) == "unknown" and nlu.clarification
-            and not data and not missing and _inbox_count(user_id, channel_id) == 0):
-        return nlu.clarification
+    if nlu and getattr(nlu, "action", None) == "unknown" and not has_repair_draft and not missing and _inbox_count(user_id, channel_id) == 0:
+        return nlu.clarification or "한 가지만 확인할게요. 수선 작업이나 수량을 알려주세요."
+    data.setdefault("user_name", user_name)
 
     cancelled = bool(CANCEL_RE.match(raw) or (nlu and getattr(nlu, "action", None) == "cancel"))
     if cancelled and (data or _inbox_count(user_id, channel_id) > 0):
@@ -512,6 +526,11 @@ async def handle_user_text(
         return listing
 
     parsed = parse_repair_text(raw)
+    missing_now = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
+    if "qty" in missing_now or data.get("awaiting_price_confirm"):
+        waiting_qty = extract_waiting_qty(raw)
+        if waiting_qty and not parsed.get("qty"):
+            parsed["qty"] = waiting_qty
     nlu_action = getattr(nlu, "action", None) if nlu else None
     nlu_target = getattr(nlu, "target", None) if nlu else None
     nlu_fields = getattr(nlu, "fields", None) if nlu else None

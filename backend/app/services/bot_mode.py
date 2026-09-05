@@ -25,17 +25,51 @@ MODE_LABELS = {
 
 _START_MAP = {
     "일지모드시작": MODE_JOURNAL,
+    "일지시작": MODE_JOURNAL,
+    "일지": MODE_JOURNAL,
+    "작업일지": MODE_JOURNAL,
+    "일지작성할래": MODE_JOURNAL,
+    "일지쓸게": MODE_JOURNAL,
+    "일지모드": MODE_JOURNAL,
     "수선모드시작": MODE_REPAIR,
+    "수선시작": MODE_REPAIR,
+    "수선": MODE_REPAIR,
+    "수선모드": MODE_REPAIR,
+    "수선할래": MODE_REPAIR,
+    "수선할게": MODE_REPAIR,
     "조회모드시작": MODE_QUERY,
+    "조회시작": MODE_QUERY,
+    "조회": MODE_QUERY,
+    "조회모드": MODE_QUERY,
+    "조회할래": MODE_QUERY,
+    "조회할게": MODE_QUERY,
+    "기록좀볼래": MODE_QUERY,
 }
 
+_END_EXACT = frozenset(("모드종료", "종료", "끝"))
+_STATUS_EXACT = frozenset(("현재모드",))
+_HELP_EXACT = frozenset((
+    "기능설명",
+    "기능",
+    "사용법알려줘",
+    "사용법",
+    "뭐할수있어",
+    "뭐할수있어요",
+    "뭘할수있어",
+    "사용법알려주세요",
+))
+_HELP_PREFIXES = ("기능설명",)
 _CMD_END = re.compile(r"^모드\s*종료$")
 _CMD_STATUS = re.compile(r"^현재\s*모드$")
 _CMD_HELP = re.compile(r"^기능\s*설명$")
+_QUERY_CONTENT = re.compile(
+    r"(몇\s*건|몇건|보여|목록|조회|얼마|비용|가격|단가|업체별|전체|오늘|어제|이번)"
+)
 
 
 def _norm(text: str) -> str:
-    return re.sub(r"\s+", "", (text or "").strip())
+    compact = re.sub(r"\s+", "", (text or "").strip())
+    return re.sub(r"[?!.？！。,，]+$", "", compact)
 
 
 def ensure_bot_mode_tables() -> None:
@@ -106,19 +140,29 @@ def with_mode_prefix(text: str, mode: Optional[str] = None, user_id: str = "", c
     return f"{prefix} {body}"
 
 
+def looks_like_work_sentence(text: str) -> bool:
+    """모드 단어가 들어 있어도 업무 문장이면 모드 전환하지 않는다."""
+    compact = _norm(text)
+    if not compact or compact in _START_MAP or compact in _END_EXACT or compact in _HELP_EXACT:
+        return False
+    return bool(_QUERY_CONTENT.search(text or "")) or bool(_QUERY_CONTENT.search(compact))
+
+
 def parse_mode_command(text: str) -> Optional[dict]:
-    """GPT가 아니라 코드가 확정 처리하는 모드 명령."""
+    """짧고 명확한 모드 명령만 코드가 확정한다. 업무 문장의 단어 포함은 무시한다."""
     raw = (text or "").strip()
     compact = _norm(raw)
     if not compact:
         return None
     if compact in _START_MAP:
         return {"action": "start", "mode": _START_MAP[compact]}
-    if _CMD_END.match(raw) or compact == "모드종료":
+    if compact in _END_EXACT or _CMD_END.match(raw):
         return {"action": "end"}
-    if _CMD_STATUS.match(raw) or compact == "현재모드":
+    if compact in _STATUS_EXACT or _CMD_STATUS.match(raw):
         return {"action": "status"}
-    if _CMD_HELP.match(raw) or compact == "기능설명":
+    if compact in _HELP_EXACT or _CMD_HELP.match(raw) or any(
+        compact.startswith(prefix) and len(compact) <= len(prefix) + 4 for prefix in _HELP_PREFIXES
+    ):
         return {"action": "help"}
     return None
 
@@ -148,9 +192,12 @@ def mode_feature_guide() -> str:
         "  시작: 수선모드 시작\n"
         "\n"
         "• 조회모드\n"
-        "  작업·인보이스·업체·요금·보관·수선 목록을 조회만 합니다.\n"
-        "  저장·수정·삭제는 할 수 없습니다.\n"
-        "  예: 오늘 작업 보여줘 / 이번달 총 얼마\n"
+        "  작업일지 검색·목록·건수·수량·금액\n"
+        "  수선일지 검색·목록·건수·수량·금액\n"
+        "  업체·작업·작업자별 묶음\n"
+        "  작업 단가 이력, 수선 가격\n"
+        "  조회만 합니다. 조회모드는 저장·수정·삭제를 할 수 없습니다.\n"
+        "  예: 오늘 수선작업 몇 건 / 봉제 몇 건 / 방금 저장된 수선항목\n"
         "  시작: 조회모드 시작\n"
         "\n"
         "공통: 모드 종료 / 현재 모드 / 기능설명\n"
@@ -176,21 +223,29 @@ def should_accept_repair_photo(user_id: str, channel_id: Optional[str]) -> bool:
 
 
 def apply_mode_command(user_id: str, channel_id: Optional[str], command: dict) -> str:
-    """모드 변경. 저장된 업무 데이터는 지우지 않는다."""
+    """모드 변경. 저장 완료 데이터와 domain별 last_saved는 지우지 않는다."""
     from backend.app.services.conversation_state import get_conversation_manager
     from backend.app.services.repair_bot import clear_photo_inbox
 
     uid, cid = mode_key(user_id, channel_id)
     action = command.get("action")
+    mgr = get_conversation_manager()
     if action == "start":
         set_mode(uid, cid, command["mode"])
-        get_conversation_manager().clear_state(uid, cid)
+        mgr.clear_state(uid, cid)
+        mgr.clear_query_context(uid, cid)
         clear_photo_inbox(uid, cid)
         return f"{MODE_LABELS[command['mode']]}를 시작했어요."
     if action == "end":
+        current = get_mode(uid, cid)
+        state = mgr.get_state(uid, cid) or {}
+        had_draft = bool(state.get("pending_data")) and not state.get("expired")
         set_mode(uid, cid, MODE_IDLE)
-        get_conversation_manager().clear_state(uid, cid)
+        mgr.clear_state(uid, cid)
+        mgr.clear_query_context(uid, cid)
         clear_photo_inbox(uid, cid)
+        if current == MODE_IDLE and not had_draft:
+            return "이미 기본상태입니다. " + idle_guide()
         return "모드를 종료했어요. " + idle_guide()
     if action == "help":
         return mode_feature_guide()

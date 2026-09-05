@@ -5,12 +5,20 @@
 """
 
 import os
+import re
 import time
 from typing import Optional, Dict, Any
 from datetime import datetime
 import json
 import sqlite3
 from pathlib import Path
+
+_HISTORY_NAME_PREFIX = re.compile(r"^\[[^\]\n]{1,40}\]\s+")
+
+
+def strip_history_name_prefix(content: str) -> str:
+    """읽는 시점에만 [이름] 접두어를 제거한다. DB는 마이그레이션하지 않는다."""
+    return _HISTORY_NAME_PREFIX.sub("", content or "", count=1)
 
 
 def _default_conversation_db_path() -> str:
@@ -95,6 +103,24 @@ class ConversationStateManager:
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS bot_query_context (
+                    user_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TIMESTAMP,
+                    PRIMARY KEY (user_id, channel_id)
+                )
+            """)
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS bot_webhook_events (
+                    event_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    reply TEXT,
+                    created_at TIMESTAMP
                 )
             """)
             con.commit()
@@ -294,7 +320,83 @@ class ConversationStateManager:
                    ORDER BY created_at DESC LIMIT ?""",
                 (uid, cid, limit)
             ).fetchall()
-            return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+            out = []
+            for row in reversed(rows):
+                content = row["content"]
+                if row["role"] == "user":
+                    content = strip_history_name_prefix(content)
+                out.append({"role": row["role"], "content": content})
+            return out
+
+    def get_query_context(self, user_id: str, channel_id: Optional[str] = None) -> Dict[str, Any]:
+        uid, cid = self._scope(user_id, channel_id)
+        with sqlite3.connect(self.db_path) as con:
+            row = con.execute(
+                "SELECT payload FROM bot_query_context WHERE user_id = ? AND channel_id = ?",
+                (uid, cid),
+            ).fetchone()
+        if not row or not row[0]:
+            return {}
+        try:
+            data = json.loads(row[0])
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def set_query_context(self, user_id: str, channel_id: Optional[str], payload: Dict[str, Any]) -> None:
+        uid, cid = self._scope(user_id, channel_id)
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                """
+                INSERT INTO bot_query_context (user_id, channel_id, payload, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, channel_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (uid, cid, json.dumps(payload or {}, ensure_ascii=False), datetime.now().isoformat()),
+            )
+            con.commit()
+
+    def clear_query_context(self, user_id: str, channel_id: Optional[str] = None) -> None:
+        uid, cid = self._scope(user_id, channel_id)
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                "DELETE FROM bot_query_context WHERE user_id = ? AND channel_id = ?",
+                (uid, cid),
+            )
+            con.commit()
+
+    def get_webhook_event(self, event_id: Optional[str]) -> Optional[str]:
+        if not event_id:
+            return None
+        with sqlite3.connect(self.db_path) as con:
+            row = con.execute(
+                "SELECT reply FROM bot_webhook_events WHERE event_id = ?",
+                (str(event_id),),
+            ).fetchone()
+        return row[0] if row else None
+
+    def remember_webhook_event(
+        self,
+        event_id: Optional[str],
+        user_id: str,
+        channel_id: Optional[str],
+        reply: str,
+    ) -> None:
+        if not event_id:
+            return
+        uid, cid = self._scope(user_id, channel_id)
+        with sqlite3.connect(self.db_path) as con:
+            con.execute(
+                """
+                INSERT OR IGNORE INTO bot_webhook_events
+                (event_id, user_id, channel_id, reply, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (str(event_id), uid, cid, (reply or "")[:500], datetime.now().isoformat()),
+            )
+            con.commit()
     
     def clear_history(self, user_id: str, channel_id: Optional[str] = None) -> None:
         uid, cid = self._scope(user_id, channel_id)

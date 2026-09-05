@@ -88,10 +88,13 @@ def _mock_chat(payload: dict):
             "missing_fields",
             "draft_fields",
             "has_last_saved",
+            "has_repair_last_saved",
+            "has_journal_last_saved",
             "last_question",
             "last_assistant_reply",
             "recent_turns",
             "user_message",
+            "user_name",
         }
         return json.dumps(payload, ensure_ascii=False)
 
