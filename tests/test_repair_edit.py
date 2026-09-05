@@ -228,16 +228,34 @@ def test_draft_field_fix_does_not_touch_last_saved():
     _enter_repair(uid, cid)
     saved = _insert()
     remember_last_saved(uid, cid, saved["id"])
-    before_draft = _seed_draft(uid, cid)
-    edited = handle_repair_edit(uid, cid, "금액 2천원으로 바꿔", "테스터")
-    assert edited is None
+    _seed_draft(uid, cid)
     reply = asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
     assert "변경 전" not in reply
     assert DRAFT_BLOCKED not in reply
     assert _cost(saved["id"]) == 1500
     after = _draft(uid, cid)
     assert after.get("entry_type") == "repair"
-    assert after.get("unit_price") == before_draft["unit_price"]
+
+
+def test_handle_user_text_applies_price_to_existing_draft():
+    uid, cid = _ids("draft-e2e")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    before_row = _row(saved["id"])
+    _seed_draft(uid, cid, unit_price=1500, work_type="단순바느질", qty=1)
+    reply = asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    after = _draft(uid, cid)
+    assert after.get("unit_price") == 2000
+    assert after.get("work_type") == "단순바느질"
+    assert after.get("qty") == 1
+    assert after.get("entry_type") == "repair"
+    assert _row(saved["id"]) == before_row
+    assert _cost(saved["id"]) == 1500
+    assert "사진 3장" not in reply
+    assert "2,000원" in reply
+    assert "변경 전" not in reply
+    assert "저장할까요" in reply or "맞아요" in reply or "몇 건" in reply
 
 
 def test_explicit_last_saved_blocked_while_draft_exists():

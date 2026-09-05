@@ -276,6 +276,24 @@ def _confirm_message(record_id: int, before: Dict[str, Any], after: Dict[str, An
     )
 
 
+def _apply_fields_to_draft(
+    user_id: str,
+    channel_id: str,
+    draft: Dict[str, Any],
+    fields: Dict[str, Any],
+) -> str:
+    """작성 중 draft에만 필드 정정을 넣고, last_saved DB는 건드리지 않는다."""
+    from backend.app.services.repair_bot import _confirm_cost_qty
+
+    if rejected_field_names(fields):
+        return FIELD_BLOCKED
+    patch = allowed_fields_only(fields)
+    updated = {**draft, **patch}
+    if "unit_price" in patch:
+        updated["price_stated"] = True
+    return _confirm_cost_qty(updated, user_id, channel_id)
+
+
 def _start_or_ask(user_id: str, channel_id: str, user_name: Optional[str], fields: Dict[str, Any]) -> str:
     if not _is_repair_mode(user_id, channel_id):
         return MODE_BLOCKED
@@ -327,6 +345,8 @@ def handle_repair_edit(
     if draft and not pending:
         if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED and intent.explicit_last_saved:
             return DRAFT_BLOCKED
+        if intent.fields:
+            return _apply_fields_to_draft(user_id, channel_id, draft, intent.fields)
         return None
 
     if pending:
