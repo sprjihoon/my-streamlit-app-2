@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from backend.app.api.repair_log import insert_repair_log_record
 from backend.app.services.bot_intent import (
+    ACTION_NONE,
     ACTION_UPDATE,
     DOMAIN_REPAIR,
     TARGET_LAST_SAVED,
@@ -139,6 +140,13 @@ def test_missing_fields_when_last_saved_has_no_patch():
     assert intent.missing_fields == ["fields"]
     assert intent.needs_confirmation is True
     assert intent.confidence == 1.0
+
+
+def test_work_name_with_sujeong_is_not_last_saved_update():
+    for text in ("기장수정 5000원", "사이즈수정 1건 5000원"):
+        intent = parse_bot_intent(text)
+        assert intent.action == ACTION_NONE, text
+        assert intent.target != TARGET_LAST_SAVED, text
 
 
 def test_field_complements():
@@ -477,3 +485,107 @@ def test_remember_last_saved_failure_keeps_save_success():
     assert _log_count() == before_count + 1
     assert _cost(saved["id"]) == 1500
     assert get_last_saved_id(uid, cid) is None
+
+
+def test_plain_price_answer_follows_existing_draft_flow():
+    uid, cid = _ids("plain-price")
+    _enter_repair(uid, cid)
+    get_conversation_manager().set_state(
+        user_id=uid,
+        channel_id=cid,
+        pending_data={
+            "entry_type": "repair",
+            "vendor": "로지킴",
+            "product": "릴리프T",
+            "defect": "구멍",
+            "work_type": "단순바느질",
+        },
+        missing=["unit_price"],
+        last_question="금액이 얼마예요?",
+    )
+    assert handle_repair_edit(uid, cid, "1500원", "테스터") is None
+    reply = asyncio.run(handle_user_text(uid, cid, "1500원", "테스터"))
+    assert _draft(uid, cid).get("unit_price") == 1500
+    assert "변경 전" not in reply
+    assert "바꿨어요" not in reply
+    assert "몇 건" in reply or "저장할까요" in reply
+
+
+def test_plain_qty_answer_saves_during_price_confirm():
+    uid, cid = _ids("plain-qty")
+    _enter_repair(uid, cid)
+    before_count = _log_count()
+    get_conversation_manager().set_state(
+        user_id=uid,
+        channel_id=cid,
+        pending_data={
+            "entry_type": "repair",
+            "vendor": "로지킴",
+            "product": "릴리프T",
+            "defect": "구멍",
+            "work_type": "단순바느질",
+            "unit_price": 1500,
+            "price_stated": True,
+            "awaiting_price_confirm": True,
+            "user_name": "테스터",
+        },
+        missing=["qty"],
+        last_question="구멍 / 단순바느질 1,500원 맞아요? 몇 건이에요?",
+    )
+    assert handle_repair_edit(uid, cid, "1건", "테스터") is None
+    reply = asyncio.run(handle_user_text(uid, cid, "1건", "테스터"))
+    assert "변경 전" not in reply
+    assert "바꿨어요" not in reply
+    assert "✅" in reply
+    assert _log_count() == before_count + 1
+
+
+def test_awaiting_confirm_rebuilds_question_with_new_price():
+    uid, cid = _ids("rebuild-q")
+    _enter_repair(uid, cid)
+    get_conversation_manager().set_state(
+        user_id=uid,
+        channel_id=cid,
+        pending_data={
+            "entry_type": "repair",
+            "vendor": "로지킴",
+            "product": "릴리프T",
+            "defect": "구멍",
+            "work_type": "단순바느질",
+            "unit_price": 1500,
+            "qty": 1,
+            "price_stated": True,
+            "awaiting_price_confirm": True,
+        },
+        missing=["qty"],
+        last_question="구멍 / 단순바느질 1,500원 1건으로 저장할까요?",
+    )
+    before_count = _log_count()
+    reply = asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    after = _draft(uid, cid)
+    assert after.get("unit_price") == 2000
+    assert after.get("awaiting_price_confirm") is True
+    assert after.get("qty") == 1
+    assert "photos" not in _missing(uid, cid)
+    assert "2,000원" in reply
+    assert "1,500원" not in reply
+    assert "1,500원" not in _last_q(uid, cid)
+    assert "저장할까요" in reply
+    assert _log_count() == before_count
+
+
+def test_work_name_sujeong_starts_new_repair_not_last_saved():
+    uid, cid = _ids("gijang")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    reply = asyncio.run(handle_user_text(uid, cid, "기장수정 5000원", "테스터"))
+    assert "변경 전" not in reply
+    assert ASK_FIELDS not in reply
+    assert "수정할까요" not in reply
+    assert "사진 3장" in reply or "업체명" in reply or "제품명" in reply
+    assert _cost(saved["id"]) == 1500
+    other = asyncio.run(handle_user_text(*_ids("size-mod"), "사이즈수정 1건 5000원", "테스터"))
+    assert "변경 전" not in other
+    assert "수정할까요" not in other
+    assert "사진 3장" in other or "업체명" in other or "제품명" in other

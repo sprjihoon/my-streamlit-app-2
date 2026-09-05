@@ -289,6 +289,24 @@ def _draft_change_summary(patch: Dict[str, Any]) -> str:
     return " ".join(bits) or "작성 중인 내용을 바꿨어요."
 
 
+_KEEP_DRAFT_STEPS = frozenset(("photos", "barcode", "vendor", "product", "work_type"))
+
+
+def _next_draft_question(updated: Dict[str, Any], missing: List[str], last_q: str) -> str:
+    if any(step in missing for step in _KEEP_DRAFT_STEPS):
+        return last_q
+    if updated.get("awaiting_price_confirm") and updated.get("unit_price") is not None:
+        from backend.app.services.repair_bot import _job_label
+
+        price = int(updated.get("unit_price") or 0)
+        label = _job_label(updated)
+        qty = updated.get("qty")
+        if qty:
+            return f"{label} {price:,}원 {int(qty)}건으로 저장할까요?"
+        return f"{label} {price:,}원 맞아요? 몇 건이에요?"
+    return last_q
+
+
 def _apply_fields_to_draft(
     user_id: str,
     channel_id: str,
@@ -307,16 +325,17 @@ def _apply_fields_to_draft(
     updated = {**draft, **patch, "entry_type": ENTRY_DRAFT}
     if "unit_price" in patch:
         updated["price_stated"] = True
+    next_q = _next_draft_question(updated, missing, last_q)
     get_conversation_manager().set_state(
         user_id=user_id,
         channel_id=channel_id or "",
         pending_data=updated,
         missing=missing,
-        last_question=last_q,
+        last_question=next_q,
     )
     summary = _draft_change_summary(patch)
-    if last_q and last_q not in summary:
-        return f"{summary}\n{last_q}"
+    if next_q and next_q not in summary:
+        return f"{summary}\n{next_q}"
     return summary
 
 
@@ -371,7 +390,7 @@ def handle_repair_edit(
     if draft and not pending:
         if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED and intent.explicit_last_saved:
             return DRAFT_BLOCKED
-        if intent.fields:
+        if intent.action == ACTION_UPDATE and intent.fields:
             return _apply_fields_to_draft(user_id, channel_id, draft, intent.fields)
         return None
 

@@ -37,10 +37,15 @@ UPDATE_SYNONYMS = (
 )
 
 UPDATE_VERBS = ("수정", "바꿔", "바꾸", "변경", "고쳐")
+UPDATE_VERBS_FREE = ("바꿔", "바꾸", "변경", "고쳐")
 LAST_SAVED_HINTS = ("직전", "방금", "아까", "저장한")
 CORRECTION_MARKERS = ("아니고", "말고")
 EXPLICIT_RECORD_MARKERS = ("저장한", "내용", "일지")
 EXPLICIT_VERBS = ("수정", "변경")
+_MOD_COMMAND_RE = re.compile(
+    r"(?:내용|직전|방금|아까|일지|금액|가격|건수|거|것|으로|로|를|을|만|해)수정"
+    r"|(?:^|[^가-힣])수정"
+)
 
 ALLOWED_FIELDS = frozenset(
     ("unit_price", "qty", "defect", "work_type", "remark", "vendor", "product")
@@ -63,6 +68,13 @@ class BotIntent:
 
 def _norm(text: str) -> str:
     return _SPACE.sub("", (text or "").strip())
+
+
+def _has_update_verb(norm: str) -> bool:
+    """기장수정·사이즈수정처럼 작업명에 붙은 '수정'은 변경 동사로 보지 않는다."""
+    if any(v in norm for v in UPDATE_VERBS_FREE):
+        return True
+    return bool(_MOD_COMMAND_RE.search(norm))
 
 
 def allowed_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -131,7 +143,7 @@ def parse_bot_intent(text: str) -> BotIntent:
     norm = _norm(raw)
     fields = extract_update_fields(raw)
     has_synonym = any(s in norm for s in UPDATE_SYNONYMS)
-    has_verb = any(v in norm for v in UPDATE_VERBS)
+    has_verb = _has_update_verb(norm)
     has_last = any(h in norm for h in LAST_SAVED_HINTS)
     has_correction = any(m in raw for m in CORRECTION_MARKERS)
     explicit = has_synonym or (
