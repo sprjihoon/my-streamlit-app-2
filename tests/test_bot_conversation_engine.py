@@ -126,8 +126,8 @@ def test_s7_repair_mode_query_does_not_create_draft():
     mgr = get_conversation_manager()
     mgr.set_state(uid, cid, {"entry_type": "repair", "vendor": "기존", "qty": 1}, ["photos"], "사진?")
     sent = _sent(uid, cid, "오늘 수선작업한 업체")
-    assert "조회모드에서 확인할 수 있어요" in sent
-    assert "사진" not in sent or "유지" in sent
+    assert "조회모드에서 확인할 수 있어요" not in sent
+    assert "사진 2장" not in sent
     assert mgr.get_state(uid, cid)["pending_data"]["vendor"] == "기존"
     assert _repair_count() == before
     assert get_mode(uid, cid) == MODE_REPAIR
@@ -139,7 +139,7 @@ def test_s8_repair_mode_list_not_price_catalog():
     sent = _sent(uid, cid, "오늘 수선일지조회")
     assert "등록된 수선 작업 비용" not in sent
     assert "사진 2장" not in sent
-    assert "조회모드에서 확인할 수 있어요" in sent
+    assert "조회모드에서 확인할 수 있어요" not in sent
 
 
 def test_s9_journal_tilian_not_username():

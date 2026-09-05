@@ -73,6 +73,25 @@ _VALUE_TO_CHANGE_RE = re.compile(
     r"(?:\d+(?:\.\d+)?천원?|\d+(?:\.\d+)?만원?|(?:\d{1,3}(?:,\d{3})+|\d+)원|\d+(?:건|개|장|벌))"
     r"(?:으로|로)(?:바꿔|바꾸|변경|고쳐|수정)"
 )
+_ORDINAL_WORDS = {
+    "첫번째": 1, "첫번": 1, "첫번째거": 1, "첫번째꺼": 1,
+    "두번째": 2, "두번째거": 2, "두번째꺼": 2,
+    "세번째": 3, "세번째거": 3, "세번째꺼": 3,
+    "네번째": 4, "네번째거": 4,
+    "다섯번째": 5, "다섯번째거": 5,
+}
+_ORDINAL_RE = re.compile(r"(?<!\d)([1-5])\s*(?:번(?:째)?|번째)")
+
+
+def parse_result_index(text: str) -> Optional[int]:
+    compact = _norm(text)
+    for key, idx in _ORDINAL_WORDS.items():
+        if key in compact:
+            return idx
+    match = _ORDINAL_RE.search(text or "")
+    if match:
+        return int(match.group(1))
+    return None
 
 ALLOWED_FIELDS = frozenset(
     ("unit_price", "qty", "defect", "work_type", "remark", "vendor", "product")
@@ -250,14 +269,16 @@ def parse_bot_intent(text: str) -> BotIntent:
         return BotIntent(fields=fields, raw=raw)
 
     missing = [] if fields else ["fields"]
+    idx = parse_result_index(raw)
+    target = TARGET_SELECTED_RECORD if idx else TARGET_LAST_SAVED
     return BotIntent(
         action=ACTION_UPDATE,
-        target=TARGET_LAST_SAVED,
+        target=target,
         fields=fields,
         raw=raw,
         domain=DOMAIN_REPAIR,
         needs_confirmation=True,
         missing_fields=missing,
         confidence=1.0,
-        explicit_last_saved=explicit,
+        explicit_last_saved=explicit and idx is None,
     )

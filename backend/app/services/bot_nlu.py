@@ -697,6 +697,7 @@ def is_read_action(intent: Optional[NluIntent]) -> bool:
         return False
     if intent.action in {
         ACTION_LIST, ACTION_LATEST, ACTION_COUNT, ACTION_STATS, ACTION_GROUP,
+        ACTION_LOOKUP_PRICE,
     }:
         return True
     if intent.entity in {"work_log", "repair_log", "work_price", "repair_price"} and intent.action in {
@@ -736,7 +737,7 @@ def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
         intent.target = TARGET_NONE
         intent.fields = {}
         intent.needs_confirmation = False
-        intent.clarification = "조회모드에서는 저장·수정·삭제를 할 수 없어요."
+        intent.clarification = "조회모드는 읽기 전용이에요. 작업일지는 일지모드, 수선일지는 수선모드에서 수정할 수 있어요."
         intent.clarification_reason = intent.clarification
         return intent
 
@@ -762,6 +763,9 @@ def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
         intent.fields = {"topic": intent.fields.get("topic") or "all"}
         return intent
     if intent.action in {ACTION_QUERY_CATALOG, ACTION_LOOKUP_PRICE} and intent.entity in {"none", "repair_price"}:
+        work = intent.fields.get("work_type") or intent.filters.get("work_type")
+        if intent.action == ACTION_LOOKUP_PRICE and intent.entity == "repair_price" and work:
+            return intent
         topic = intent.fields.get("topic") or "repair_work_prices"
         if topic not in TOPIC_FIELDS:
             topic = "repair_work_prices"
@@ -848,7 +852,11 @@ def enforce_nlu_policy(intent: NluIntent, context: Dict[str, Any]) -> NluIntent:
         return intent
 
     if intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD, ACTION_CREATE):
-        if has_draft:
+        if intent.target == TARGET_SELECTED_RECORD:
+            intent.needs_confirmation = True
+            if intent.action == ACTION_PROVIDE_FIELD:
+                intent.action = ACTION_UPDATE
+        elif has_draft:
             if intent.target == TARGET_LAST_SAVED:
                 if intent.explicit_last_saved and intent.confidence >= LAST_SAVED_CONFIDENCE and intent.action == ACTION_UPDATE:
                     intent.needs_confirmation = True
@@ -928,7 +936,7 @@ def nlu_to_bot_intent(intent: Optional[NluIntent], raw: str = "") -> BotIntent:
     domain = intent.domain if intent.domain in DOMAINS else DOMAIN_REPAIR
     if domain == DOMAIN_JOURNAL:
         fields = journal_fields_only(intent.fields)
-    elif target == TARGET_LAST_SAVED:
+    elif target in {TARGET_LAST_SAVED, TARGET_SELECTED_RECORD}:
         fields = allowed_fields_only(intent.fields)
     else:
         fields = draft_fields_only(intent.fields)
@@ -996,21 +1004,12 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
 
     pending_step = str(context.get("pending_step") or "")
     compact = re.sub(r"\s+", "", text or "")
-    if looks_like_query_read(text) and not context.get("has_active_draft"):
+    if looks_like_query_read(text):
         from backend.app.services.bot_query import infer_query_fallback
 
         inferred = infer_query_fallback(text, context)
         inferred.source = "fallback"
         return enforce_nlu_policy(inferred, context)
-    if looks_like_query_read(text) and context.get("has_active_draft"):
-        return NluIntent(
-            action=ACTION_UNKNOWN,
-            domain=MODE_TO_DOMAIN.get(context.get("mode"), "none"),
-            confidence=0.4,
-            source="fallback",
-            clarification="조회모드에서 확인할 수 있어요. 현재 입력은 그대로 유지할까요?",
-            clarification_reason="조회모드에서 확인할 수 있어요. 현재 입력은 그대로 유지할까요?",
-        )
 
     if pending_step in {"qty", "수량"} or pending_step.endswith("qty"):
         qty = extract_bare_qty(text)
@@ -1049,12 +1048,35 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
     if local.action == ACTION_CANCEL:
         return NluIntent(action=ACTION_CANCEL, confidence=1.0, source="fallback")
     if local.action == ACTION_UPDATE:
+        from backend.app.services.bot_intent import parse_result_index
+
+        idx = parse_result_index(text)
+        if context.get("mode") == MODE_QUERY:
+            return enforce_nlu_policy(
+                NluIntent(action=ACTION_UPDATE, domain="query", fields=dict(local.fields or {}), confidence=0.9, source="fallback"),
+                context,
+            )
+        if idx is not None:
+            domain = MODE_TO_DOMAIN.get(context.get("mode"), local.domain or DOMAIN_REPAIR)
+            return enforce_nlu_policy(
+                NluIntent(
+                    domain=domain,
+                    entity="work_log" if domain == DOMAIN_JOURNAL else "repair_log",
+                    action=ACTION_UPDATE,
+                    target=TARGET_SELECTED_RECORD,
+                    fields={**dict(local.fields or {}), "index": idx},
+                    confidence=1.0,
+                    needs_confirmation=True,
+                    source="fallback",
+                ),
+                context,
+            )
         use_last = bool(local.explicit_last_saved) or (
             local.target == TARGET_LAST_SAVED and not context.get("has_active_draft")
         )
         return enforce_nlu_policy(
             NluIntent(
-                domain=local.domain or DOMAIN_REPAIR,
+                domain=MODE_TO_DOMAIN.get(context.get("mode"), local.domain or DOMAIN_REPAIR),
                 action=ACTION_UPDATE if use_last else ACTION_PROVIDE_FIELD,
                 target=TARGET_LAST_SAVED if use_last else TARGET_DRAFT,
                 fields=dict(local.fields or {}),

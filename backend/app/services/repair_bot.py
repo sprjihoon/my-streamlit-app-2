@@ -492,10 +492,16 @@ async def handle_user_text(
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
     from backend.app.services.bot_nlu import is_read_action
-    from backend.app.services.bot_query import looks_like_query_read, query_guard_reply
+    from backend.app.services.bot_query import handle_mode_read, looks_like_query_read, looks_like_write_request
 
-    if is_read_action(nlu) or looks_like_query_read(raw):
-        return query_guard_reply("repair")
+    nlu_action = getattr(nlu, "action", None) if nlu else None
+    nlu_target = getattr(nlu, "target", None) if nlu else None
+    if nlu_action in {"update", "delete", "confirm", "cancel"} or (
+        nlu_action == "provide_field" and nlu_target == "draft"
+    ):
+        pass
+    elif is_read_action(nlu) or (looks_like_query_read(raw) and not looks_like_write_request(raw)):
+        return handle_mode_read(nlu, raw, user_id, channel_id, user_name, "repair")
     readonly = render_readonly_nlu(nlu, raw)
     if readonly:
         return readonly

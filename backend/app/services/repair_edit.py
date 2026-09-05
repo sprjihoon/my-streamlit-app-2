@@ -107,6 +107,32 @@ def get_last_saved_id(user_id: str, channel_id: Optional[str]) -> Optional[int]:
     return int(row[0]) if row else None
 
 
+def fetch_repair_row(record_id: int) -> Optional[Dict[str, Any]]:
+    from backend.app.api.repair_log import ensure_repair_tables
+
+    ensure_repair_tables()
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT id, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고
+            FROM repair_work_log WHERE id = ?
+            """,
+            (int(record_id),),
+        ).fetchone()
+    if not row:
+        return None
+    keys = ("id", "업체명", "제품명", "옵션", "바코드", "불량명", "작업", "수량", "비용", "비고")
+    return dict(zip(keys, row))
+
+
+def is_allowed_repair_target(user_id: str, channel_id: Optional[str], record_id: int) -> bool:
+    if get_last_saved_id(user_id, channel_id) == int(record_id):
+        return True
+    from backend.app.services.bot_target import listed_record_ids
+
+    return int(record_id) in listed_record_ids(user_id, channel_id, "repair")
+
+
 def fetch_owned_repair(user_id: str, channel_id: Optional[str], record_id: int) -> Optional[Dict[str, Any]]:
     """포인터와 id가 일치하는 이 방 기록만 반환. 다른 방·사용자 기록은 보지 않는다."""
     from backend.app.api.repair_log import ensure_repair_tables
@@ -164,7 +190,9 @@ def apply_owned_repair_fields(
         return {"success": False, "error": "mode_not_repair"}
     if rejected_field_names(fields):
         return {"success": False, "error": "field_not_allowed"}
-    owned = fetch_owned_repair(user_id, channel_id, record_id)
+    if not is_allowed_repair_target(user_id, channel_id, record_id):
+        return {"success": False, "error": "owned_record_missing"}
+    owned = fetch_repair_row(record_id)
     if not owned:
         return {"success": False, "error": "owned_record_missing"}
     safe_fields = allowed_fields_only(fields)
@@ -181,17 +209,12 @@ def apply_owned_repair_fields(
     params.append(editor or "bot")
     updates.append("수정시간 = ?")
     params.append(datetime.now().isoformat())
-    uid, cid = _room(user_id, channel_id)
-    params.extend([int(record_id), uid, cid])
+    params.append(int(record_id))
     with get_connection() as con:
         cur = con.execute(
             f"""
             UPDATE repair_work_log SET {", ".join(updates)}
             WHERE id = ?
-              AND id = (
-                  SELECT repair_record_id FROM repair_last_saved_v2
-                  WHERE user_id = ? AND channel_id = ?
-              )
             """,
             params,
         )
@@ -350,16 +373,26 @@ def _apply_fields_to_draft(
     return continue_after_photos_or_text(updated, user_id, channel_id)
 
 
-def _start_or_ask(user_id: str, channel_id: str, user_name: Optional[str], fields: Dict[str, Any]) -> str:
+def _start_or_ask(
+    user_id: str,
+    channel_id: str,
+    user_name: Optional[str],
+    fields: Dict[str, Any],
+    record_id: Optional[int] = None,
+    held_draft: Optional[Dict[str, Any]] = None,
+) -> str:
     if not _is_repair_mode(user_id, channel_id):
         return MODE_BLOCKED
     if rejected_field_names(fields):
         return FIELD_BLOCKED
     fields = allowed_fields_only(fields)
-    record_id = get_last_saved_id(user_id, channel_id)
+    if record_id is None:
+        record_id = get_last_saved_id(user_id, channel_id)
     if record_id is None:
         return NO_RECORD
-    row = fetch_owned_repair(user_id, channel_id, record_id)
+    if not is_allowed_repair_target(user_id, channel_id, int(record_id)):
+        return NO_RECORD
+    row = fetch_repair_row(int(record_id))
     if row is None:
         return NO_RECORD
     before = _row_to_fields(row)
@@ -370,6 +403,7 @@ def _start_or_ask(user_id: str, channel_id: str, user_name: Optional[str], field
         "fields": {},
         "applied": False,
         "user_name": user_name,
+        "held_draft": held_draft,
     }
     if not fields:
         q = f"직전 수선일지 #{record_id}예요. {ASK_FIELDS}"
@@ -399,6 +433,23 @@ def handle_repair_edit(
     intent = intent or parse_bot_intent(text)
     draft = _get_repair_draft(user_id, channel_id)
     field_patch = intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD) and bool(intent.fields)
+    from backend.app.services.bot_intent import TARGET_SELECTED_RECORD, parse_result_index
+    from backend.app.services.bot_target import resolve_update_target
+
+    selected = intent.target == TARGET_SELECTED_RECORD or parse_result_index(text) is not None
+    if selected and not pending:
+        resolved = resolve_update_target(user_id, channel_id, "repair", text, nlu=intent)
+        if resolved.record_id:
+            held = None
+            if draft:
+                state = get_conversation_manager().get_state(user_id, channel_id) or {}
+                held = {
+                    "pending_data": dict(draft),
+                    "missing": list(state.get("missing") or []),
+                    "last_question": state.get("last_question") or "",
+                }
+            return _start_or_ask(user_id, channel_id, user_name, intent.fields, resolved.record_id, held)
+        return resolved.message or NO_RECORD
 
     if draft and not pending:
         if intent.action == ACTION_UPDATE and intent.target == TARGET_LAST_SAVED and intent.explicit_last_saved:
@@ -415,7 +466,16 @@ def handle_repair_edit(
             _clear_update_pending(user_id, channel_id)
             return MODE_BLOCKED
         if intent.action == ACTION_CANCEL:
+            held = pending.get("held_draft")
             _clear_update_pending(user_id, channel_id)
+            if held:
+                get_conversation_manager().set_state(
+                    user_id=user_id,
+                    channel_id=channel_id or "",
+                    pending_data=held.get("pending_data") or {},
+                    missing=held.get("missing") or [],
+                    last_question=held.get("last_question") or "",
+                )
             return CANCELLED
         if pending.get("applied"):
             if intent.action == ACTION_CONFIRM:
@@ -436,6 +496,9 @@ def handle_repair_edit(
                 q = ASK_FIELDS
                 _set_update_pending(user_id, channel_id, pending, ["fields"], q)
                 return q
+            if not is_allowed_repair_target(user_id, channel_id, int(record_id)):
+                _clear_update_pending(user_id, channel_id)
+                return NO_RECORD
             result = apply_owned_repair_fields(
                 user_id, channel_id, int(record_id), fields, user_name or pending.get("user_name"),
             )
@@ -452,6 +515,16 @@ def handle_repair_edit(
                 f"✅ 수선일지 #{record_id}를 수정했어요.\n"
                 f"{_preview_line(pending.get('after') or {})}"
             )
+            held = pending.get("held_draft")
+            if held:
+                get_conversation_manager().set_state(
+                    user_id=user_id,
+                    channel_id=channel_id or "",
+                    pending_data=held.get("pending_data") or {},
+                    missing=held.get("missing") or [],
+                    last_question=held.get("last_question") or "",
+                )
+                return q
             _set_update_pending(user_id, channel_id, pending, [], q)
             return q
         if intent.fields or intent.action in (ACTION_UPDATE, ACTION_PROVIDE_FIELD):

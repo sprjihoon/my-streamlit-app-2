@@ -228,7 +228,13 @@ def apply_owned_work_log_fields(
     if not _is_journal_mode(user_id, channel_id):
         return {"success": False, "error": "mode_not_journal"}
     pointer = get_last_saved_id(user_id, channel_id)
-    if pointer is None or int(pointer) != int(record_id):
+    from backend.app.services.bot_target import listed_record_ids
+
+    listed = listed_record_ids(user_id, channel_id, "journal")
+    if not (
+        (pointer is not None and int(pointer) == int(record_id))
+        or int(record_id) in listed
+    ):
         return {"success": False, "error": "pointer_mismatch"}
     owned = fetch_owned_work_log(user_id, record_id)
     if owned is None:

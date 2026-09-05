@@ -380,6 +380,62 @@ def _start_last_saved(
     return q
 
 
+def _start_selected(
+    user_id: str,
+    channel_id: Optional[str],
+    action: str,
+    fields: Dict[str, Any],
+    user_name: Optional[str],
+    record_id: int,
+) -> str:
+    if not _is_journal_mode(user_id, channel_id):
+        return MODE_BLOCKED
+    owned = fetch_owned_work_log(user_id, record_id)
+    if owned is None:
+        return NO_POINTER
+    before = row_to_fields(owned)
+    patch, err = validate_update_fields(fields)
+    if err:
+        return f"❌ {sanitize_user_error(err)}"
+    patch = patch or {}
+    if not patch:
+        q = f"작업일지 #{record_id}예요. 어떤 값을 바꿀까요?"
+        _set_pending(
+            user_id, channel_id,
+            {
+                "step": "awaiting_confirmation",
+                "pending_action": ACTION_UPDATE,
+                "target_id": record_id,
+                "target_source": "selected_record",
+                "before": before,
+                "after": before,
+                "fields": {},
+                "applied": False,
+                "user_name": user_name,
+            },
+            ["fields"], q,
+        )
+        return q
+    after = merge_record_fields(before, patch)
+    q = _preview_update(record_id, before, after)
+    _set_pending(
+        user_id, channel_id,
+        {
+            "step": "awaiting_confirmation",
+            "pending_action": ACTION_UPDATE,
+            "target_id": record_id,
+            "target_source": "selected_record",
+            "before": before,
+            "after": after,
+            "fields": patch,
+            "applied": False,
+            "user_name": user_name,
+        },
+        ["confirm"], q,
+    )
+    return q
+
+
 def _handle_confirm(
     user_id: str,
     channel_id: Optional[str],
@@ -405,7 +461,15 @@ def _handle_confirm(
     action = pending.get("pending_action")
     record_id = pending.get("target_id")
     pointer = get_last_saved_id(user_id, channel_id)
-    if not record_id or pointer is None or int(pointer) != int(record_id):
+    source = pending.get("target_source") or "last_saved"
+    from backend.app.services.bot_target import listed_record_ids
+
+    allowed = False
+    if record_id and source == "selected_record":
+        allowed = int(record_id) in listed_record_ids(user_id, channel_id, "journal")
+    elif record_id and pointer is not None and int(pointer) == int(record_id):
+        allowed = True
+    if not allowed:
         _clear_pending(user_id, channel_id)
         return NO_POINTER
     owned = fetch_owned_work_log(user_id, int(record_id))
@@ -484,10 +548,13 @@ async def handle_user_text(
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
     from backend.app.services.bot_nlu import is_read_action
-    from backend.app.services.bot_query import looks_like_query_read, query_guard_reply
+    from backend.app.services.bot_query import handle_mode_read, looks_like_query_read, looks_like_write_request
 
-    if is_read_action(nlu) or looks_like_query_read(raw):
-        return query_guard_reply("journal")
+    nlu_action = getattr(nlu, "action", None) if nlu else None
+    if nlu_action in {"update", "delete", "confirm", "cancel", "provide_field"}:
+        pass
+    elif is_read_action(nlu) or (looks_like_query_read(raw) and not looks_like_write_request(raw)):
+        return handle_mode_read(nlu, raw, user_id, channel_id, user_name, "journal")
     readonly = render_readonly_nlu(nlu, raw)
     if readonly:
         return readonly
@@ -599,7 +666,12 @@ async def handle_user_text(
         return _start_last_saved(user_id, channel_id, ACTION_DELETE, fields, user_name)
 
     if action == ACTION_UPDATE and target == TARGET_SELECTED_RECORD:
-        return _start_last_saved(user_id, channel_id, ACTION_UPDATE, fields, user_name)
+        from backend.app.services.bot_target import resolve_update_target
+
+        resolved = resolve_update_target(user_id, channel_id, "journal", raw, nlu)
+        if not resolved.record_id:
+            return resolved.message or NO_POINTER
+        return _start_selected(user_id, channel_id, ACTION_UPDATE, fields, user_name, int(resolved.record_id))
 
     if entries and len(entries) > 1 and action in (ACTION_CREATE, ACTION_PROVIDE_FIELD, ACTION_UNKNOWN):
         shared_date = fields.get("date")
