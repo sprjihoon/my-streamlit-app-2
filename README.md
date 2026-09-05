@@ -167,7 +167,7 @@ docker-compose up --build
 |---|---|---|
 | 백엔드 | Railway `my-streamlit-app-2` | https://my-streamlit-app-2-production.up.railway.app |
 | 프론트엔드 | Vercel `my-streamlit-app-2` | Root Directory = `frontend` |
-| 사용하지 않음 | Vercel `my-streamlit-app` | 루트에서 FastAPI로 오탐되어 매번 실패. Vercel 대시보드에서 Git 연결을 끊으면 GitHub failure 배지가 사라진다 |
+| 사용하지 않음 | Vercel `my-streamlit-app` | 저장소 루트를 FastAPI로 오탐함. 루트 `vercel.json`의 ignoreCommand가 이 빌드를 건너뛴다 |
 
 헬스 체크:
 
@@ -178,7 +178,7 @@ curl -s https://my-streamlit-app-2-production.up.railway.app/health
 
 Railway는 `railway.json` + `Dockerfile.backend`로 올린다. 데이터 볼륨은 `/app/data` (DB, 업로드). 배포 시 DB·사진·환경변수는 수동으로 건드리지 않는다.
 
-공식 프론트는 Vercel 프로젝트 `my-streamlit-app-2`이고 Root Directory는 `frontend`다. 루트에 `vercel.json`을 두면 이 프로젝트가 `frontend/frontend`를 찾아 실패하므로 두지 않는다. 운영은 `origin/main` 푸시로 Railway·Vercel이 자동 배포한다.
+공식 프론트는 Vercel 프로젝트 `my-streamlit-app-2`이고 Root Directory는 `frontend`다. 루트 `vercel.json`은 install/build를 넣지 않고, `next.config.js`가 없는 루트 빌드만 건너뛴다. FastAPI entrypoint를 Vercel에 넣지 않는다. 백엔드는 Railway다. 운영은 `origin/main` 푸시로 자동 배포한다.
 
 ---
 
