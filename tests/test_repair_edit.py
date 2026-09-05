@@ -143,10 +143,23 @@ def test_missing_fields_when_last_saved_has_no_patch():
 
 
 def test_work_name_with_sujeong_is_not_last_saved_update():
-    for text in ("기장수정 5000원", "사이즈수정 1건 5000원"):
+    for text in (
+        "기장수정 5000원",
+        "사이즈수정 1건 5000원",
+        "사이즈변경 5000원",
+        "지퍼 바꾸기 5000원",
+        "소매 고쳐 3000원",
+    ):
         intent = parse_bot_intent(text)
         assert intent.action == ACTION_NONE, text
         assert intent.target != TARGET_LAST_SAVED, text
+
+
+def test_explicit_change_phrases_still_update_last_saved():
+    for text in ("금액 2천원으로 바꿔", "2천원으로 변경", "1건 말고 3건", "방금 거 금액 2천원으로", "직전내용수정"):
+        intent = parse_bot_intent(text)
+        assert intent.action == ACTION_UPDATE, text
+        assert intent.target == TARGET_LAST_SAVED, text
 
 
 def test_field_complements():
@@ -589,3 +602,71 @@ def test_work_name_sujeong_starts_new_repair_not_last_saved():
     assert "변경 전" not in other
     assert "수정할까요" not in other
     assert "사진 3장" in other or "업체명" in other or "제품명" in other
+
+
+def _assert_new_repair_reply(reply: str) -> None:
+    assert "변경 전" not in reply
+    assert ASK_FIELDS not in reply
+    assert "수정할까요" not in reply
+    assert "사진 3장" in reply or "업체명" in reply or "제품명" in reply
+
+
+def test_handle_user_text_work_names_are_new_repair():
+    for i, text in enumerate(("기장수정 5000원", "사이즈변경 5000원", "지퍼 바꾸기 5000원", "소매 고쳐 3000원")):
+        uid, cid = _ids(f"new-work-{i}")
+        _enter_repair(uid, cid)
+        saved = _insert()
+        remember_last_saved(uid, cid, saved["id"])
+        reply = asyncio.run(handle_user_text(uid, cid, text, "테스터"))
+        _assert_new_repair_reply(reply)
+        assert _cost(saved["id"]) == 1500
+
+
+def test_handle_user_text_keeps_existing_last_saved_phrases():
+    cases = (
+        ("금액 2천원으로 바꿔", "2,000원"),
+        ("2천원으로 변경", "2,000원"),
+        ("1건 말고 3건", "3건"),
+        ("방금 거 금액 2천원으로", "2,000원"),
+    )
+    for i, (text, marker) in enumerate(cases):
+        uid, cid = _ids(f"keep-upd-{i}")
+        _enter_repair(uid, cid)
+        saved = _insert()
+        remember_last_saved(uid, cid, saved["id"])
+        reply = asyncio.run(handle_user_text(uid, cid, text, "테스터"))
+        assert "변경 전" in reply, text
+        assert marker in reply, text
+        assert _cost(saved["id"]) == 1500
+    uid, cid = _ids("keep-explicit")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    reply = asyncio.run(handle_user_text(uid, cid, "직전내용수정", "테스터"))
+    assert ASK_FIELDS in reply
+    assert _cost(saved["id"]) == 1500
+
+
+def test_draft_price_question_advances_after_explicit_change():
+    uid, cid = _ids("price-next")
+    _enter_repair(uid, cid)
+    get_conversation_manager().set_state(
+        user_id=uid,
+        channel_id=cid,
+        pending_data={
+            "entry_type": "repair",
+            "vendor": "로지킴",
+            "product": "릴리프T",
+            "defect": "구멍",
+            "work_type": "단순바느질",
+        },
+        missing=["unit_price"],
+        last_question="금액이 얼마예요?",
+    )
+    reply = asyncio.run(handle_user_text(uid, cid, "금액 2천원으로 바꿔", "테스터"))
+    assert _draft(uid, cid).get("unit_price") == 2000
+    assert "금액이 얼마예요?" not in reply
+    assert "금액이 얼마예요?" not in _last_q(uid, cid)
+    assert "몇 건" in reply or "저장할까요" in reply
+    assert "unit_price" not in _missing(uid, cid)
+    assert "변경 전" not in reply

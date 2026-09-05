@@ -37,14 +37,19 @@ UPDATE_SYNONYMS = (
 )
 
 UPDATE_VERBS = ("수정", "바꿔", "바꾸", "변경", "고쳐")
-UPDATE_VERBS_FREE = ("바꿔", "바꾸", "변경", "고쳐")
+UPDATE_VERBS_FREE = ("바꿔", "변경", "고쳐")
 LAST_SAVED_HINTS = ("직전", "방금", "아까", "저장한")
 CORRECTION_MARKERS = ("아니고", "말고")
 EXPLICIT_RECORD_MARKERS = ("저장한", "내용", "일지")
 EXPLICIT_VERBS = ("수정", "변경")
+FIELD_HINTS = ("금액", "가격", "단가", "건수", "수량", "불량", "작업", "업체", "제품", "비고")
 _MOD_COMMAND_RE = re.compile(
     r"(?:내용|직전|방금|아까|일지|금액|가격|건수|거|것|으로|로|를|을|만|해)수정"
     r"|(?:^|[^가-힣])수정"
+)
+_VALUE_TO_CHANGE_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?천원?|\d+(?:\.\d+)?만원?|(?:\d{1,3}(?:,\d{3})+|\d+)원|\d+(?:건|개|장|벌))"
+    r"(?:으로|로)(?:바꿔|바꾸|변경|고쳐|수정)"
 )
 
 ALLOWED_FIELDS = frozenset(
@@ -71,10 +76,22 @@ def _norm(text: str) -> str:
 
 
 def _has_update_verb(norm: str) -> bool:
-    """기장수정·사이즈수정처럼 작업명에 붙은 '수정'은 변경 동사로 보지 않는다."""
-    if any(v in norm for v in UPDATE_VERBS_FREE):
+    """작업명에 붙은 수정·변경·바꾸기는 변경 동사로 보지 않는다."""
+    if "바꾸기" in norm and "바꿔" not in norm:
+        has_free = any(v in norm for v in ("변경", "고쳐"))
+    else:
+        has_free = any(v in norm for v in UPDATE_VERBS_FREE) or ("바꾸" in norm)
+    if has_free:
         return True
     return bool(_MOD_COMMAND_RE.search(norm))
+
+
+def _has_named_field(norm: str) -> bool:
+    return any(h in norm for h in FIELD_HINTS)
+
+
+def _has_value_to_change(norm: str) -> bool:
+    return bool(_VALUE_TO_CHANGE_RE.search(norm))
 
 
 def allowed_fields_only(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -146,17 +163,21 @@ def parse_bot_intent(text: str) -> BotIntent:
     has_verb = _has_update_verb(norm)
     has_last = any(h in norm for h in LAST_SAVED_HINTS)
     has_correction = any(m in raw for m in CORRECTION_MARKERS)
+    has_field = _has_named_field(norm)
+    has_value_change = _has_value_to_change(norm)
     explicit = has_synonym or (
         has_last
         and any(v in norm for v in EXPLICIT_VERBS)
         and any(m in norm for m in EXPLICIT_RECORD_MARKERS)
     )
+    named_field_change = has_field and bool(fields) and (has_verb or has_value_change or "으로" in norm)
     matched = (
         explicit
         or (has_last and bool(fields))
         or (has_verb and has_last)
-        or (has_verb and bool(fields))
         or (has_correction and bool(fields))
+        or named_field_change
+        or has_value_change
     )
     if not matched:
         return BotIntent(fields=fields, raw=raw)
