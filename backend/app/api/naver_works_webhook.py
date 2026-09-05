@@ -132,6 +132,8 @@ async def process_message(
     
     conv_manager = get_conversation_manager()
     user_msg_content = f"[{user_name}] {text}" if user_name else text
+    # GPT에는 현재 메시지 저장 전의 이력만 넘긴다. 현재 문장은 아래에서 한 번만 저장한다.
+    conversation_history = conv_manager.get_history(user_id, limit=6, channel_id=channel_id)
     conv_manager.add_message(user_id, channel_id, "user", user_msg_content)
 
     command = parse_mode_command(text)
@@ -167,8 +169,6 @@ async def process_message(
         add_debug_log("ai_parser_error", error=str(e))
         await _send_prefixed(nw_client, user_id, channel_id, f"❌ AI 초기화 오류: {str(e)}", channel_type)
         return
-
-    conversation_history = conv_manager.get_history(user_id, limit=6, channel_id=channel_id)
 
     try:
         result = await ai_parser.process_message(
