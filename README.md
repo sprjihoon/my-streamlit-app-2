@@ -12,7 +12,7 @@ my-streamlit-app/
 │   └── app/
 │       ├── api/            # API 라우터
 │       ├── models/         # Pydantic 스키마
-│       ├── services/       # AI 파서, 네이버웍스 봇, 스케줄러
+│       ├── services/       # AI 파서, 봇 NLU, 네이버웍스, 스케줄러
 │       └── main.py
 ├── frontend/               # Next.js 14 App Router
 │   └── src/app/
@@ -44,7 +44,8 @@ my-streamlit-app/
 ├── docker-compose.yml
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
-├── railway.json            # Railway 배포 설정
+├── railway.json            # Railway 백엔드 배포
+├── vercel.json             # 루트 Vercel이 frontend Next.js를 쓰게 함
 └── requirements.txt
 ```
 
@@ -68,7 +69,7 @@ my-streamlit-app/
 - 엑셀 업로드 기반 청구서 자동 생성 및 PDF 출력
 
 ### 📝 작업일지 (Work Log)
-- **네이버웍스 봇 AI** (GPT Function Calling) 연동 자연어 입력
+- **네이버웍스 봇 AI** 연동 자연어 입력. 일지모드는 Function Calling, 공통 문장은 GPT-4o-mini NLU
 - "틸리언 하차 3만원" → 자동 파싱 & 저장
 - 이전 단가 자동 조회 및 확인, 멀티턴 대화 지원
 - 연차 신청/조회/승인 챗봇 연동
@@ -80,6 +81,7 @@ my-streamlit-app/
 - 웹 `/repair-log`: 수선일지 목록 + 바코드 등록 + 작업/불량 설정
 - 웹 수동 추가에서 바코드 검색 시 등록된 업체명·제품명·옵션을 자동 입력
 - **같은 작업일지Bot**이 물류 작업일지와 수선을 나눠 저장 (봇을 하나 더 만들지 않음)
+- 저장 직후 `방금 저장한 거 잘못됐어`처럼 말하면 미리보기 후 확인해야 수정됨
 - 봇 사진은 `fileId` → 302 Location에 Bearer를 다시 붙여 다운로드 (자동 리다이렉트 401 방지)
 - 상세 규칙은 아래 [수선작업일지 규칙](#-수선작업일지-규칙) 참고
 
@@ -104,8 +106,8 @@ my-streamlit-app/
 |---|---|
 | 프론트엔드 | Next.js 14 (App Router), TypeScript, TailwindCSS, Recharts |
 | 백엔드 | FastAPI, Python 3.12, SQLite |
-| AI | OpenAI GPT-4o / GPT-4o-mini (Function Calling, Vision) |
-| 봇 | 네이버웍스 Webhook Bot |
+| AI | OpenAI GPT-4o / GPT-4o-mini (NLU Structured Outputs, Function Calling, Vision) |
+| 봇 | 네이버웍스 Webhook Bot (일지/수선/조회 모드) |
 | 배포 | Railway 백엔드, Vercel 프론트엔드(`my-streamlit-app-2`) |
 
 ---
@@ -177,11 +179,27 @@ curl -s https://my-streamlit-app-2-production.up.railway.app/health
 
 Railway는 `railway.json` + `Dockerfile.backend`로 올린다. 데이터 볼륨은 `/app/data` (DB, 업로드). 배포 시 DB·사진·환경변수는 수동으로 건드리지 않는다.
 
-루트 `vercel.json`은 옛 `my-streamlit-app` 프로젝트가 FastAPI로 빌드하지 않고 `frontend` Next.js를 쓰게 한다. 공식 프론트는 계속 Vercel 프로젝트 `my-streamlit-app-2`다.
+루트 `vercel.json`은 옛 `my-streamlit-app` 프로젝트가 FastAPI로 빌드하지 않고 `frontend` Next.js를 쓰게 한다. 공식 프론트는 계속 Vercel 프로젝트 `my-streamlit-app-2`다. 운영은 `origin/main` 푸시로 Railway·Vercel이 자동 배포한다.
 
 ---
 
-## 📌 현재 개발 현황 (2026-09-04)
+## 🤖 봇 모드와 자연어
+
+정해진 단어를 외울 필요는 없다. `수선할래`, `일지 쓸게`, `하나`, `방금 저장한 거 잘못됐어`처럼 말하면 GPT-4o-mini가 현재 모드·작성 중 값·직전 저장 여부만 보고 의도를 구조화한다. GPT는 DB에 쓰지 않고, 기존 수선/일지 상태 머신이 실행한다. API 오류 시에는 기존 로컬 파서로 넘어간다.
+
+| 명령 | 동작 |
+|---|---|
+| 일지모드 시작 / 일지 쓸게 | 물류 작업일지 입력·수정·삭제 |
+| 수선모드 시작 / 수선할래 | 수선일지 + 사진 3장 |
+| 조회모드 시작 / 조회할게 | 조회만. 저장·수정·삭제 없음 |
+| 모드 종료 / 현재 모드 | 기본상태로 돌아가거나 현재 모드 안내 |
+| 기능설명 | 모드별 기능 안내 |
+
+직전 저장 수선 수정은 미리보기를 보여 주고 `네` 또는 `취소`를 받는다. 작성 중인 초안이 있으면 그 초안을 고치고, 저장이 끝난 기록을 명시할 때만 직전 저장을 건드린다.
+
+---
+
+## 📌 현재 개발 현황 (2026-09-05)
 
 | 기능 | 상태 |
 |---|---|
@@ -189,6 +207,8 @@ Railway는 `railway.json` + `Dockerfile.backend`로 올린다. 데이터 볼륨�
 | 영수증 AI Vision OCR | ✅ 완료 |
 | 인보이스 계산서 생성 | ✅ 완료 |
 | 작업일지 AI 봇 (네이버웍스) | ✅ 완료 |
+| 봇 GPT NLU (모드·수선 자연어) | ✅ 완료 |
+| 수선 직전 저장 수정 (미리보기 확인) | ✅ 완료 |
 | 수선작업일지 (웹 + 같은 봇) | ✅ 완료 |
 | 연차 관리 / 결재 워크플로우 | ✅ 완료 |
 | 연차 캘린더 뷰 | ✅ 완료 |
