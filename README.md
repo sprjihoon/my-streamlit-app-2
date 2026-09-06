@@ -128,6 +128,8 @@ cp env.example .env
 | 변수 | 설명 |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI API 키 (AI 파싱 기능 필수) |
+| `BOT_NLU_MODEL` | 봇 NLU 모델. 기본값 `gpt-5.6-luna` |
+| `BOT_NLU_REASONING_EFFORT` | NLU 추론 강도. 기본값 `low` |
 | `NAVER_WORKS_*` | 네이버웍스 봇 설정 |
 | `SECRET_KEY` | JWT 시크릿 키 |
 | `DATABASE_PATH` | SQLite DB 경로 |
@@ -166,7 +168,7 @@ docker-compose up --build
 
 ## 🚂 운영 배포
 
-공식 운영은 아래 두 곳만 본다. `origin/main` 푸시로 자동 배포된다. DB·사진·환경변수는 배포 시 수동으로 바꾸지 않는다.
+공식 운영은 아래 두 곳만 본다. `origin/main` 푸시로 자동 배포된다. DB·사진·`OPENAI_API_KEY`는 배포 시 수동으로 바꾸지 않는다. 봇 NLU는 `BOT_NLU_MODEL=gpt-5.6-luna`, `BOT_NLU_REASONING_EFFORT=low`를 사용한다.
 
 | 역할 | 프로젝트 | 주소 | 비고 |
 |---|---|---|---|
