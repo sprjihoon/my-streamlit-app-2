@@ -102,7 +102,7 @@ MODE_FIELDS = frozenset(("journal", "repair", "query"))
 TOPIC_FIELDS = frozenset(
     ("all", "journal", "repair", "query", "repair_work_prices", "last_saved", "repair_logs", "work_logs", "work_prices")
 )
-RELATIVE_DATES = frozenset(("today", "yesterday", "this_week", "this_month", "none"))
+RELATIVE_DATES = frozenset(("today", "yesterday", "this_week", "this_month", "last_month", "none"))
 SCOPES = frozenset(("all", "self", "named", "none"))
 GROUP_BYS = frozenset(("vendor", "work_type", "worker", "product", "none"))
 FILTER_KEYS = (
@@ -225,7 +225,7 @@ NLU_JSON_SCHEMA: Dict[str, Any] = {
             "properties": {
                 "relative_date": {
                     "anyOf": [
-                        {"type": "string", "enum": ["today", "yesterday", "this_week", "this_month", "none"]},
+                        {"type": "string", "enum": ["today", "yesterday", "this_week", "this_month", "last_month", "none"]},
                         {"type": "null"},
                     ]
                 },
@@ -301,6 +301,9 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 17. 금액이 개당이면 fields에 unit_price만, 수량은 pending이 수량일 때만 qty로 넣습니다.
 18. 자신이 없거나 대상이 섞이면 action=clarify 이고 clarification_reason에 질문 하나만 넣습니다.
 19. 조회모드에서 create/update/delete를 고르지 마세요.
+20. 이번달수선실적, 수선실적은 stats이고 기본 기간은 this_month입니다. 금액도 포함합니다.
+21. 탑N 업체명/업체별은 action=group, group_by=vendor, limit=N, sort=desc 입니다. 실적만 있으면 metric은 quantity입니다.
+22. 직전 조회가 있으면 업체명, 업체별로, 금액순, 수량순, 지난달은 후속 조회입니다. 새 입력이 아닙니다.
 
 의미 예시:
 - 수선 업무를 시작함 → mode_action=start / repair
@@ -432,6 +435,8 @@ def collect_nlu_context(
 
 
 def gpt_payload(context: Dict[str, Any]) -> Dict[str, Any]:
+    qc = context.get("query_context") or {}
+    filters = dict(qc.get("filters") or {})
     return {
         "mode": context.get("mode") or "idle",
         "pending_step": context.get("pending_step") or "",
@@ -445,6 +450,15 @@ def gpt_payload(context: Dict[str, Any]) -> Dict[str, Any]:
         "recent_turns": list(context.get("recent_turns") or []),
         "user_message": context.get("user_message") or "",
         "user_name": context.get("user_name") or "",
+        "query_context": {
+            "entity": qc.get("entity"),
+            "action": qc.get("action"),
+            "group_by": qc.get("group_by") or filters.get("group_by"),
+            "relative_date": filters.get("relative_date") or (qc.get("date_range") or {}).get("relative_date"),
+            "metric": qc.get("metric") or filters.get("metric"),
+            "sort": qc.get("sort") or filters.get("sort"),
+            "limit": qc.get("limit") or filters.get("limit"),
+        },
     }
 
 
@@ -1004,9 +1018,12 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
 
     pending_step = str(context.get("pending_step") or "")
     compact = re.sub(r"\s+", "", text or "")
-    if looks_like_query_read(text):
-        from backend.app.services.bot_query import infer_query_fallback
+    waiting_draft = bool(context.get("has_active_draft") and context.get("missing_fields"))
+    from backend.app.services.bot_query import infer_query_fallback, looks_like_query_followup
 
+    if looks_like_query_read(text) or (
+        not waiting_draft and looks_like_query_followup(text, context.get("query_context") or {})
+    ):
         inferred = infer_query_fallback(text, context)
         inferred.source = "fallback"
         return enforce_nlu_policy(inferred, context)

@@ -30,20 +30,90 @@ LAST_CUES = ("방금", "직전", "아까", "저장한", "저장된")
 CHANGE_CUES = ("수정", "변경", "바꿔", "고치", "고쳐", "아니고", "말고")
 COUNT_CUES = ("몇건", "몇 건", "몇개", "몇 개", "건수")
 GROUP_CUES = ("업체별", "작업별", "작업자별", "제품별")
-SELF_CUES = ("내가", "내작업", "내 작업", "나는", "난")
+SELF_CUES = ("내가", "내작업", "내 작업", "나는")
 ALL_SCOPE_CUES = ("전체", "전원", "모두")
 REPAIR_ENTITY_CUES = ("수선",)
 WORK_ENTITY_CUES = ("작업일지", "하차", "상차", "입고", "양품")
+FOLLOWUP_EXACT = frozenset({
+    "업체명", "업체별로", "업체별", "금액순", "수량순",
+    "지난달", "지난달은", "저번달", "저번달은",
+})
 QUERY_HINT_REPAIR = "수선일지는 수선모드나 조회모드에서 확인할 수 있어요."
 QUERY_HINT_JOURNAL = "작업일지는 일지모드나 조회모드에서 확인할 수 있어요."
 QUERY_WRITE_BLOCKED = "조회모드는 읽기 전용이에요. 작업일지는 일지모드, 수선일지는 수선모드에서 수정할 수 있어요."
 SAFE_QUERY_ERROR = "조회 중 문제가 생겼어요. 조건을 바꿔 다시 요청해주세요."
-GENERIC_WORK_TYPES = frozenset(("작업", "일지", "기록", "조회", "건", "몇건", "수선작업", "작업일지", "수선일지"))
+GENERIC_WORK_TYPES = frozenset(("작업", "일지", "기록", "조회", "건", "몇건", "수선작업", "작업일지", "수선일지", "업체명"))
 _SPACE = re.compile(r"\s+")
+_TOP_RE = re.compile(r"(?:탑|상위|top)(\d+)", re.I)
 
 
 def _compact(text: str) -> str:
     return _SPACE.sub("", (text or "").strip())
+
+
+def _cmd_compact(text: str) -> str:
+    from backend.app.services.bot_mode import _norm
+
+    return _norm(text)
+
+
+def _has_self_scope(text: str) -> bool:
+    compact = _compact(text)
+    if any(cue.replace(" ", "") in compact for cue in SELF_CUES):
+        return True
+    # "난"은 지난달·저번달 안에 들어 있으므로 문장 맨 앞만 인정한다.
+    return compact == "난" or compact.startswith("난")
+
+
+def parse_top_n(text: str) -> Optional[int]:
+    match = _TOP_RE.search(_compact(text))
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    if value < 1:
+        return None
+    return min(value, 50)
+
+
+def looks_like_query_followup(text: str, prev: Optional[Dict[str, Any]] = None) -> bool:
+    prev = prev or {}
+    if not prev.get("entity") and not prev.get("action"):
+        return False
+    if looks_like_write_request(text):
+        return False
+    compact = _cmd_compact(text)
+    if compact in FOLLOWUP_EXACT:
+        return True
+    if parse_top_n(text) and "업체" in compact:
+        return True
+    from backend.app.services.bot_intent import parse_result_index
+
+    if parse_result_index(text) is not None and "업체" in compact:
+        return True
+    return False
+
+
+def query_should_preempt_create(
+    text: str,
+    nlu,
+    user_id: str,
+    channel_id: Optional[str],
+    *,
+    waiting_draft: bool,
+) -> bool:
+    if looks_like_write_request(text):
+        return False
+    from backend.app.services.bot_nlu import is_read_action
+
+    if is_read_action(nlu) or looks_like_query_read(text):
+        return True
+    if waiting_draft:
+        return False
+    prev = get_conversation_manager().get_query_context(user_id, channel_id)
+    return looks_like_query_followup(text, prev)
 
 
 def looks_like_last_saved_update(text: str) -> bool:
@@ -74,7 +144,8 @@ def looks_like_repair_logs(text: str) -> bool:
     if any(c in compact for c in PRICE_CUES) and not any(c in compact for c in COUNT_CUES):
         return False
     return "수선" in compact and any(
-        c in compact for c in ("목록", "최근", "기록", "일지", "조회", "몇건", "몇개", "업체", "봉제")
+        c in compact
+        for c in ("목록", "최근", "기록", "일지", "조회", "몇건", "몇개", "업체", "봉제", "실적")
     )
 
 
@@ -105,8 +176,8 @@ def looks_like_work_logs(text: str) -> bool:
     compact = _compact(text)
     if looks_like_write_request(text) or "수선" in compact:
         return False
-    return "작업일지" in compact or (
-        "작업" in compact and any(c in compact for c in ("몇건", "몇개", "목록", "보여", "찾아", "조회"))
+    return "작업일지" in compact or "작업실적" in compact or (
+        "작업" in compact and any(c in compact for c in ("몇건", "몇개", "목록", "보여", "찾아", "조회", "실적"))
     )
 
 
@@ -123,13 +194,17 @@ def looks_like_specific_price_query(text: str) -> bool:
 
 def looks_like_query_read(text: str) -> bool:
     compact = _compact(text)
-    if compact in {"수선", "일지", "조회", "작업일지", "수선모드", "일지모드", "조회모드"}:
+    if _cmd_compact(text) in {"수선", "일지", "조회", "작업일지", "수선모드", "일지모드", "조회모드"}:
         return False
     if looks_like_write_request(text):
         return False
     if looks_like_last_saved_show(text) or looks_like_repair_logs(text) or looks_like_work_logs(text):
         return True
     if looks_like_specific_price_query(text):
+        return True
+    if "실적" in compact:
+        return True
+    if parse_top_n(text) and "업체" in compact:
         return True
     return any(
         c in compact
@@ -179,6 +254,119 @@ def _extract_vendor(text: str) -> Optional[str]:
     return hits[0]
 
 
+def _apply_query_cues(
+    text: str,
+    entity: str,
+    action: str,
+    filters: Dict[str, Any],
+    prev: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    prev = prev or {}
+    compact = _compact(text)
+    cmd = _cmd_compact(text)
+    out = dict(filters)
+    if prev.get("metric") and "metric" not in out:
+        out["metric"] = prev["metric"]
+    if prev.get("sort") and "sort" not in out:
+        out["sort"] = prev["sort"]
+    if prev.get("limit") and "limit" not in out:
+        out["limit"] = prev["limit"]
+    if prev.get("group_by") and "group_by" not in out:
+        out["group_by"] = prev["group_by"]
+
+    date_changed = False
+    if "이번달" in compact or "이달" in compact:
+        out["relative_date"] = "this_month"
+        date_changed = True
+    elif "지난달" in compact or "저번달" in compact:
+        out["relative_date"] = "last_month"
+        date_changed = True
+    elif "이번주" in compact:
+        out["relative_date"] = "this_week"
+        date_changed = True
+    elif "오늘" in compact:
+        out["relative_date"] = "today"
+        date_changed = True
+    elif "어제" in compact:
+        out["relative_date"] = "yesterday"
+        date_changed = True
+    elif "실적" in compact and not out.get("relative_date") and not out.get("start_date"):
+        out["relative_date"] = "this_month"
+        date_changed = True
+    if date_changed:
+        out.pop("start_date", None)
+        out.pop("end_date", None)
+        resolved_start, resolved_end = resolve_relative_range(out.get("relative_date"))
+        if resolved_start:
+            out["start_date"] = resolved_start
+        if resolved_end:
+            out["end_date"] = resolved_end
+        if cmd in {"지난달", "지난달은", "저번달", "저번달은", "이번달", "이달"}:
+            for key in ("vendor", "product", "work_type", "defect", "barcode"):
+                out.pop(key, None)
+
+    top_n = parse_top_n(text)
+    vendor_group = (
+        cmd in {"업체명", "업체별로", "업체별"}
+        or "업체별" in compact
+        or "작업한업체" in compact
+        or compact.endswith("업체명")
+        or (bool(top_n) and "업체" in compact)
+    )
+    if top_n:
+        out["limit"] = top_n
+        out["sort"] = "desc"
+        out["metric"] = out.get("metric") or "quantity"
+    if vendor_group:
+        action = ACTION_GROUP
+        out["group_by"] = "vendor"
+        out["metric"] = out.get("metric") or "quantity"
+        out["sort"] = out.get("sort") or "desc"
+    elif any(c in compact for c in GROUP_CUES):
+        action = ACTION_GROUP
+        if "작업자" in compact:
+            out["group_by"] = "worker"
+        elif "제품" in compact:
+            out["group_by"] = "product"
+        elif "작업" in compact:
+            out["group_by"] = "work_type"
+        else:
+            out["group_by"] = out.get("group_by") or "vendor"
+
+    if "금액순" in compact:
+        out["metric"] = "amount"
+        out["sort"] = "desc"
+        if prev.get("action") == ACTION_GROUP or out.get("group_by") or vendor_group:
+            action = ACTION_GROUP
+            out["group_by"] = out.get("group_by") or "vendor"
+    elif "수량순" in compact:
+        out["metric"] = "quantity"
+        out["sort"] = "desc"
+        if prev.get("action") == ACTION_GROUP or out.get("group_by") or vendor_group:
+            action = ACTION_GROUP
+            out["group_by"] = out.get("group_by") or "vendor"
+
+    has_group_cue = vendor_group or any(c in compact for c in GROUP_CUES) or "금액순" in compact or "수량순" in compact or bool(top_n)
+    if "실적" in compact and not has_group_cue and action not in {ACTION_LOOKUP_PRICE, ACTION_LATEST}:
+        action = ACTION_STATS
+        out["metric"] = out.get("metric") or "quantity"
+
+    from backend.app.services.bot_intent import parse_result_index
+
+    idx = parse_result_index(text)
+    names = prev.get("group_names") or []
+    if idx and names and "업체" in compact and not looks_like_write_request(text):
+        if 1 <= idx <= len(names):
+            out["vendor"] = names[idx - 1]
+            action = ACTION_LIST
+            out.pop("group_by", None)
+            out.pop("limit", None)
+
+    if looks_like_last_saved_show(text):
+        action = ACTION_LATEST
+    return entity, action, out
+
+
 def infer_query_fallback(text: str, context: Optional[Dict[str, Any]] = None) -> Any:
     from backend.app.services.bot_nlu import NluIntent
 
@@ -195,35 +383,25 @@ def infer_query_fallback(text: str, context: Optional[Dict[str, Any]] = None) ->
         entity = "work_log"
     if "수선" in compact:
         entity = "repair_log"
-    if "작업일지" in compact and "수선" not in compact:
+    if ("작업일지" in compact or "작업실적" in compact) and "수선" not in compact:
         entity = "work_log"
     filters: Dict[str, Any] = {}
     if prev.get("filters"):
         filters.update(prev["filters"])
-    if "오늘" in compact:
-        filters["relative_date"] = "today"
-    elif "어제" in compact:
-        filters["relative_date"] = "yesterday"
     if any(c in compact for c in ALL_SCOPE_CUES):
         filters["scope"] = "all"
         filters.pop("worker", None)
-    if any(c in compact for c in SELF_CUES):
+    if _has_self_scope(text):
         filters["scope"] = "self"
     if "봉제" in compact:
         filters["work_type"] = "봉제"
         entity = "repair_log"
-    vendor = _extract_vendor(text)
-    if vendor:
-        filters["vendor"] = vendor
-    action = ACTION_LIST
-    if looks_like_last_saved_show(text):
-        action = ACTION_LATEST
-    elif any(c in compact for c in GROUP_CUES) or compact.endswith("업체") or "업체별" in compact or "작업한업체" in compact:
-        action = ACTION_GROUP
-        filters["group_by"] = "vendor" if "업체" in compact else filters.get("group_by") or "vendor"
-    elif any(cue.replace(" ", "") in compact for cue in COUNT_CUES) or "몇건" in compact or "몇개" in compact:
-        action = ACTION_COUNT
-    elif looks_like_price_query(text):
+    if _cmd_compact(text) not in FOLLOWUP_EXACT:
+        vendor = _extract_vendor(text)
+        if vendor:
+            filters["vendor"] = vendor
+    action = prev.get("action") or ACTION_LIST
+    if looks_like_price_query(text):
         action = ACTION_LOOKUP_PRICE
         entity = "repair_price" if "수선" in compact or "세탁" in compact else "work_price"
         if entity == "repair_price":
@@ -232,6 +410,9 @@ def infer_query_fallback(text: str, context: Optional[Dict[str, Any]] = None) ->
             hit = resolve_work_type(text)
             if hit and hit.get("작업명"):
                 filters["work_type"] = hit["작업명"]
+    elif any(cue.replace(" ", "") in compact for cue in COUNT_CUES) or "몇건" in compact or "몇개" in compact:
+        action = ACTION_COUNT
+    entity, action, filters = _apply_query_cues(text, entity, action, filters, prev)
     domain = {
         "work_log": "journal",
         "work_price": "journal",
@@ -284,21 +465,18 @@ def _merge_filters(nlu, text: str, prev: Optional[Dict[str, Any]]) -> Tuple[str,
     for key in ("vendor", "product", "work_type", "defect", "barcode", "remark"):
         if fields.get(key) and key not in incoming:
             filters[key] = fields[key]
-    if "오늘" in compact:
-        filters["relative_date"] = "today"
-    elif "어제" in compact:
-        filters["relative_date"] = "yesterday"
     if any(c in compact for c in ALL_SCOPE_CUES):
         filters["scope"] = "all"
         filters.pop("worker", None)
-    elif any(c in compact for c in SELF_CUES):
+    elif _has_self_scope(text):
         filters["scope"] = "self"
     if "봉제" in compact:
         filters["work_type"] = filters.get("work_type") or "봉제"
         entity = "repair_log"
-    vendor = _extract_vendor(text)
-    if vendor:
-        filters["vendor"] = vendor
+    if _cmd_compact(text) not in FOLLOWUP_EXACT:
+        vendor = _extract_vendor(text)
+        if vendor:
+            filters["vendor"] = vendor
     if filters.get("work_type") in GENERIC_WORK_TYPES:
         filters.pop("work_type", None)
     if "수선" in compact:
@@ -309,11 +487,9 @@ def _merge_filters(nlu, text: str, prev: Optional[Dict[str, Any]]) -> Tuple[str,
     if looks_like_last_saved_show(text):
         action = ACTION_LATEST
         entity = "work_log" if "작업일지" in compact and "수선" not in compact else "repair_log"
-    if any(c in compact for c in GROUP_CUES) or "작업한업체" in compact:
-        action = ACTION_GROUP
-        filters["group_by"] = "vendor" if "업체" in compact else filters.get("group_by") or "vendor"
     elif "몇건" in compact or "몇개" in compact or "전체몇" in compact:
         action = ACTION_COUNT
+    entity, action, filters = _apply_query_cues(text, entity, action, filters, prev)
     if action == ACTION_QUERY_CATALOG and entity in {"work_log", "repair_log"}:
         action = ACTION_LIST
     if entity not in {"work_log", "repair_log", "work_price", "repair_price"}:
@@ -323,9 +499,9 @@ def _merge_filters(nlu, text: str, prev: Optional[Dict[str, Any]]) -> Tuple[str,
 
 def _date_bounds(filters: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
     start, end = resolve_relative_range(filters.get("relative_date"))
-    start = filters.get("start_date") or start
-    end = filters.get("end_date") or end
-    return start, end
+    if start or end:
+        return start, end
+    return filters.get("start_date"), filters.get("end_date")
 
 
 def _worker_args(filters: Dict[str, Any], user_name: Optional[str]) -> Optional[str]:
@@ -344,6 +520,12 @@ def _used_conditions(entity: str, filters: Dict[str, Any]) -> str:
         labels.append(f"오늘({seoul_today_str()})")
     elif rel == "yesterday":
         labels.append("어제")
+    elif rel == "this_week":
+        labels.append("이번 주")
+    elif rel == "this_month":
+        labels.append("이번 달")
+    elif rel == "last_month":
+        labels.append("지난달")
     elif filters.get("start_date") or filters.get("end_date"):
         labels.append(f"{filters.get('start_date') or ''}~{filters.get('end_date') or ''}".strip("~"))
     for key, title in (
@@ -423,6 +605,8 @@ def _tool_args(filters: Dict[str, Any], user_name: Optional[str]) -> Dict[str, A
         "end_date": end,
         "limit": filters.get("limit") or 20,
         "group_by": filters.get("group_by"),
+        "metric": filters.get("metric"),
+        "sort": filters.get("sort"),
         "include_amount": bool(filters.get("include_amount")),
     }
     return {k: v for k, v in args.items() if v not in (None, "", "none")}
@@ -442,20 +626,46 @@ def render_count(entity: str, result: Dict[str, Any], filters: Dict[str, Any], *
     return text
 
 
+def _period_prefix(filters: Dict[str, Any]) -> str:
+    rel = filters.get("relative_date")
+    return {
+        "today": "오늘 ",
+        "yesterday": "어제 ",
+        "this_week": "이번 주 ",
+        "this_month": "이번 달 ",
+        "last_month": "지난달 ",
+    }.get(rel or "", "")
+
+
 def render_group(entity: str, result: Dict[str, Any], filters: Dict[str, Any]) -> str:
     groups = result.get("groups") or []
     if not groups:
         return _empty(entity, filters)
     by = filters.get("group_by") or "vendor"
     title = {"vendor": "업체", "work_type": "작업", "worker": "작업자", "product": "제품"}.get(by, by)
-    label = "수선일지" if entity == "repair_log" else "작업일지"
-    when = "오늘 " if filters.get("relative_date") == "today" else ""
-    lines = [f"{when}{label}를 {title}별로 집계했습니다."]
-    for item in groups[:50]:
+    kind = "수선실적" if entity == "repair_log" else "작업실적"
+    period = _period_prefix(filters)
+    metric = filters.get("metric") or "quantity"
+    try:
+        limit = int(filters.get("limit") or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    ranked = bool(limit) and limit < 20
+    metric_label = "금액 기준" if metric == "amount" else "수량 기준"
+    if by == "vendor" and ranked:
+        header = f"{period}{kind} 상위 {title}입니다. ({metric_label})"
+    elif by == "vendor":
+        header = f"{period}{kind}을 업체별로 보여드릴게요."
+    else:
+        header = f"{period}{kind}을 {title}별로 보여드릴게요."
+    lines = [header]
+    shown = groups[: limit or 50]
+    for i, item in enumerate(shown, start=1):
         name = item.get("name") or "-"
         rows = int(item.get("count") or 0)
         qty = int(item.get("qty") or 0)
-        lines.append(f"• {name}: {rows}개 기록, 수량 {qty}건")
+        amount = int(item.get("amount") or 0)
+        lines.append(f"{i}. {name} — {rows}개 기록 / {qty}건 / {amount:,}원")
     return "\n".join(lines)
 
 
@@ -513,7 +723,17 @@ def render_price(entity: str, result: Dict[str, Any], filters: Dict[str, Any]) -
     return _empty(entity, filters)
 
 
-def _remember(user_id: str, channel_id: Optional[str], entity: str, action: str, filters: Dict[str, Any], summary: str, ids: List[int]) -> None:
+def _remember(
+    user_id: str,
+    channel_id: Optional[str],
+    entity: str,
+    action: str,
+    filters: Dict[str, Any],
+    summary: str,
+    ids: List[int],
+    group_names: Optional[List[str]] = None,
+) -> None:
+    start, end = _date_bounds(filters)
     get_conversation_manager().set_query_context(
         user_id,
         channel_id,
@@ -523,6 +743,15 @@ def _remember(user_id: str, channel_id: Optional[str], entity: str, action: str,
             "filters": filters,
             "scope": filters.get("scope") or "all",
             "group_by": filters.get("group_by"),
+            "metric": filters.get("metric") or "quantity",
+            "sort": filters.get("sort") or "desc",
+            "limit": filters.get("limit"),
+            "date_range": {
+                "relative_date": filters.get("relative_date"),
+                "start": start,
+                "end": end,
+            },
+            "group_names": list(group_names or [])[:50],
             "summary": summary[:300],
             "record_ids": ids[:20],
         },
@@ -544,7 +773,8 @@ def execute_query(
     if prev is None:
         prev = {}
     entity, action, filters = _merge_filters(nlu, text, {**prev, "mode": mode})
-    include_amount = any(k in _compact(text) for k in ("금액", "총액", "합계", "얼마"))
+    compact = _compact(text)
+    include_amount = any(k in compact for k in ("금액", "총액", "합계", "얼마", "실적")) or action == ACTION_STATS
     filters["include_amount"] = include_amount
     args = _tool_args(filters, user_name)
 
@@ -586,7 +816,8 @@ def execute_query(
         if not result.get("success"):
             return SAFE_QUERY_ERROR
         reply = render_group(entity, result, filters)
-        _remember(user_id, channel_id, entity, ACTION_GROUP, filters, reply, [])
+        names = [str(item.get("name")) for item in (result.get("groups") or []) if item.get("name")]
+        _remember(user_id, channel_id, entity, ACTION_GROUP, filters, reply, [], names)
         return reply
     if action in {ACTION_COUNT, ACTION_STATS}:
         result = _safe_tool(tool_stats, args, user_id)

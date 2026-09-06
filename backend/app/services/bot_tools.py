@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
 from logic.db import get_connection
@@ -221,7 +221,10 @@ TOOLS = [
                     "remark": {"type": "string"},
                     "start_date": {"type": "string"},
                     "end_date": {"type": "string"},
-                    "group_by": {"type": "string"}
+                    "group_by": {"type": "string"},
+                    "metric": {"type": "string"},
+                    "sort": {"type": "string"},
+                    "limit": {"type": "integer"}
                 }
             }
         }
@@ -263,7 +266,10 @@ TOOLS = [
                     "work_type": {"type": "string"},
                     "worker": {"type": "string"},
                     "remark": {"type": "string"},
-                    "group_by": {"type": "string"}
+                    "group_by": {"type": "string"},
+                    "metric": {"type": "string"},
+                    "sort": {"type": "string"},
+                    "limit": {"type": "integer"}
                 }
             }
         }
@@ -1466,6 +1472,22 @@ def _search_work_logs(args: Dict, user_id: str, user_name: str) -> Dict:
     return result
 
 
+def _stats_group_order(args: Dict, qty_col: str, amount_col: str) -> Tuple[str, str, int]:
+    qty_expr = {"수량": "COALESCE(SUM(수량),0)"}.get(qty_col, "COALESCE(SUM(수량),0)")
+    amount_expr = {
+        "합계": "COALESCE(SUM(합계),0)",
+        "비용": "COALESCE(SUM(비용),0)",
+    }.get(amount_col, "COALESCE(SUM(합계),0)")
+    metric = str(args.get("metric") or "quantity")
+    order_expr = amount_expr if metric == "amount" else qty_expr
+    sort_dir = "ASC" if str(args.get("sort") or "desc").lower() == "asc" else "DESC"
+    try:
+        limit = int(args.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    return order_expr, sort_dir, max(1, min(limit, 50))
+
+
 def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
     """작업일지 통계 (업체 별칭 지원)"""
     conditions = []
@@ -1545,12 +1567,13 @@ def _get_work_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
     group_col = {"vendor": "업체명", "work_type": "분류", "worker": "작성자"}.get(str(args.get("group_by") or ""), "")
     groups = []
     if group_col:
+        order_expr, sort_dir, group_limit = _stats_group_order(args, "수량", "합계")
         with get_connection() as con:
             grouped = con.execute(
                 f"""SELECT {group_col}, COUNT(*), COALESCE(SUM(수량),0), COALESCE(SUM(합계),0)
                    FROM work_log WHERE {where_clause} AND {group_col} IS NOT NULL
-                   GROUP BY {group_col} ORDER BY COUNT(*) DESC LIMIT 50""",
-                params,
+                   GROUP BY {group_col} ORDER BY {order_expr} {sort_dir} LIMIT ?""",
+                (*params, group_limit),
             ).fetchall()
         groups = [{"name": g[0], "count": g[1], "qty": g[2], "amount": g[3]} for g in grouped]
     result = {
@@ -1674,11 +1697,12 @@ def _get_repair_log_stats(args: Dict, user_id: str, user_name: str) -> Dict:
             group_col = _REPAIR_GROUP_COLS.get(str(args.get("group_by") or ""))
             groups = []
             if group_col:
+                order_expr, sort_dir, group_limit = _stats_group_order(args, "수량", "비용")
                 grouped = con.execute(
                     f"""SELECT {group_col}, COUNT(*), COALESCE(SUM(수량),0), COALESCE(SUM(비용),0)
                         FROM repair_work_log WHERE {where} AND {group_col} IS NOT NULL
-                        GROUP BY {group_col} ORDER BY COUNT(*) DESC LIMIT 50""",
-                    params,
+                        GROUP BY {group_col} ORDER BY {order_expr} {sort_dir} LIMIT ?""",
+                    (*params, group_limit),
                 ).fetchall()
                 groups = [{"name": g[0], "count": g[1], "qty": g[2], "amount": g[3]} for g in grouped]
         return {

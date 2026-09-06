@@ -67,9 +67,12 @@ _QUERY_CONTENT = re.compile(
 )
 
 
+_TRAIL_PUNCT = re.compile(r"[\s?!.？！。,，．․｡…·•~～、]+$")
+
+
 def _norm(text: str) -> str:
     compact = re.sub(r"\s+", "", (text or "").strip())
-    return re.sub(r"[?!.？！。,，]+$", "", compact)
+    return _TRAIL_PUNCT.sub("", compact)
 
 
 def ensure_bot_mode_tables() -> None:

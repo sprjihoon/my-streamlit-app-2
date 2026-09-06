@@ -491,16 +491,18 @@ async def handle_user_text(
         return EXPIRED_REPAIR_MSG
 
     nlu = nlu_intent if nlu_intent is not None else await interpret_or_fallback(user_id, channel_id, raw)
-    from backend.app.services.bot_nlu import is_read_action
-    from backend.app.services.bot_query import handle_mode_read, looks_like_query_read, looks_like_write_request
+    from backend.app.services.bot_query import handle_mode_read, query_should_preempt_create
 
     nlu_action = getattr(nlu, "action", None) if nlu else None
     nlu_target = getattr(nlu, "target", None) if nlu else None
-    if nlu_action in {"update", "delete", "confirm", "cancel"} or (
-        nlu_action == "provide_field" and nlu_target == "draft"
-    ):
+    early_state = get_conversation_manager().get_state(user_id, channel_id) or {}
+    early_pending = _get_pending(user_id, channel_id)
+    waiting_draft = bool(early_pending) and bool(early_state.get("missing") or [])
+    if nlu_action in {"update", "delete", "confirm", "cancel"}:
         pass
-    elif is_read_action(nlu) or (looks_like_query_read(raw) and not looks_like_write_request(raw)):
+    elif nlu_action == "provide_field" and nlu_target == "draft" and waiting_draft:
+        pass
+    elif query_should_preempt_create(raw, nlu, user_id, channel_id, waiting_draft=waiting_draft):
         return handle_mode_read(nlu, raw, user_id, channel_id, user_name, "repair")
     readonly = render_readonly_nlu(nlu, raw)
     if readonly:

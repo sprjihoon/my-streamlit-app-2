@@ -90,6 +90,14 @@ def this_month_range() -> Tuple[str, str]:
     return today.replace(day=1).isoformat(), today.isoformat()
 
 
+def last_month_range() -> Tuple[str, str]:
+    today = seoul_today()
+    first_this = today.replace(day=1)
+    last_prev = first_this - timedelta(days=1)
+    first_prev = last_prev.replace(day=1)
+    return first_prev.isoformat(), last_prev.isoformat()
+
+
 def resolve_relative_range(relative: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     key = (relative or "").strip().lower()
     if key in {"today", "오늘"}:
@@ -102,4 +110,6 @@ def resolve_relative_range(relative: Optional[str]) -> Tuple[Optional[str], Opti
         return this_week_range()
     if key in {"this_month", "이번달"}:
         return this_month_range()
+    if key in {"last_month", "지난달", "저번달"}:
+        return last_month_range()
     return None, None

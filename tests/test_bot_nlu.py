@@ -95,6 +95,7 @@ def _mock_chat(payload: dict):
             "recent_turns",
             "user_message",
             "user_name",
+            "query_context",
         }
         return json.dumps(payload, ensure_ascii=False)
 
