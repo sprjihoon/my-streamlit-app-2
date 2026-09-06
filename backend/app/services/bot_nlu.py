@@ -123,9 +123,27 @@ ACTIONS = NEW_ACTIONS | LEGACY_ACTIONS
 TARGETS = frozenset(("draft", "last_saved", "selected_record", "by_filter", "none"))
 DOMAINS = frozenset(("repair", "journal", "query", "none"))
 MODE_FIELDS = frozenset(("journal", "repair", "query"))
-TOPIC_FIELDS = frozenset(
-    ("all", "journal", "repair", "query", "repair_work_prices", "last_saved", "repair_logs", "work_logs", "work_prices")
-)
+TOPIC_FIELDS = frozenset((
+    "all",
+    "journal",
+    "journal_create",
+    "journal_query",
+    "journal_edit",
+    "repair",
+    "repair_create",
+    "repair_query",
+    "repair_edit",
+    "repair_price",
+    "query",
+    "followup",
+    "excel",
+    "mode",
+    "repair_work_prices",
+    "last_saved",
+    "repair_logs",
+    "work_logs",
+    "work_prices",
+))
 RELATIVE_DATES = frozenset(("today", "yesterday", "this_week", "this_month", "last_month", "none"))
 SCOPES = frozenset(("all", "self", "named", "none"))
 GROUP_BYS = frozenset(("vendor", "work_type", "worker", "product", "none"))
@@ -316,7 +334,7 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 8. 지금 물어본 칸에 값을 채우는 말이면 action=provide_field 입니다.
 9. 새 수선/일지를 시작하는 말이면 action=create 입니다.
 10. 확정은 confirm, 포기는 cancel 입니다.
-11. 기능을 물으면 action=help 입니다.
+11. 기능·입력방법·조회방법·수정방법을 물으면 action=help 입니다. 오늘 수선실적 알려줘처럼 실제 조회는 help가 아닙니다.
 12. 작업/수선 기록을 목록·건수·통계로 보면 list/count/stats/group 입니다. 가격표로 바꾸지 마세요.
 13. 방금 저장된 수선항목은 entity=repair_log, action=latest, target=last_saved 입니다.
 14. 오늘 수선작업한 업체는 entity=repair_log, action=group, group_by=vendor 입니다.
@@ -1248,9 +1266,10 @@ def render_readonly_nlu(intent: Optional[NluIntent], text: str = "") -> Optional
     if should_skip_readonly(text, intent):
         return None
     if intent.action == ACTION_SHOW_HELP:
-        from backend.app.services.bot_mode import mode_feature_guide
+        from backend.app.services.bot_help import render_help, resolve_help_topic
 
-        return mode_feature_guide()
+        topic = (intent.fields or {}).get("topic") or resolve_help_topic(text) or "all"
+        return render_help(topic)
     if intent.action == ACTION_QUERY_CATALOG and intent.entity in {"work_log", "repair_log"}:
         return None
     if intent.action == ACTION_QUERY_CATALOG:
@@ -1332,6 +1351,20 @@ async def interpret_or_fallback(
     context: Optional[Dict[str, Any]] = None,
 ) -> NluIntent:
     ctx = context or collect_nlu_context(user_id, channel_id, text)
+    from backend.app.services.bot_help import looks_like_help_request, resolve_help_topic
+
+    if looks_like_help_request(text):
+        topic = resolve_help_topic(text, mode=ctx.get("mode"))
+        return enforce_nlu_policy(
+            NluIntent(
+                action=ACTION_SHOW_HELP,
+                target=TARGET_NONE,
+                fields={"topic": topic},
+                confidence=1.0,
+                source="fallback",
+            ),
+            ctx,
+        )
     if nlu_disabled():
         _record_nlu_call(source="fallback", fallback=True, error="disabled")
         return fallback_from_local_parsers(text, ctx)

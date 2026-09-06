@@ -177,6 +177,11 @@ def test_feature_guide_does_not_change_mode_or_pending():
     assert "수선모드" in reply
     assert "조회모드" in reply
     assert "조회만" in reply or "조회만 합니다" in reply
+    assert "이번달 작업실적" in reply
+    assert "이번달 수선실적" in reply
+    assert "지난달" in reply
+    assert "사진 2장" in reply
+    assert "미리보기" in reply
     assert "기능설명" in idle_guide()
     with get_connection() as con:
         after = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
