@@ -44,6 +44,7 @@ def test_repair_input_questions_share_one_topic():
     guide = render_help("repair_create")
     assert "사진 2장" in guide
     assert "구멍 바느질" in guide
+    assert "비고" in guide
 
 
 def test_other_help_questions_collapse_to_topics():

@@ -346,6 +346,7 @@ SYSTEM_PROMPT = """당신은 물류·수선 업무봇의 의도 분류기입니�
 20. 이번달수선실적, 수선실적은 stats이고 기본 기간은 this_month입니다. 금액도 포함합니다.
 21. 탑N 업체명/업체별은 action=group, group_by=vendor, limit=N, sort=desc 입니다. 실적만 있으면 metric은 quantity입니다.
 22. 직전 조회가 있으면 업체명, 업체별로, 금액순, 수량순, 지난달은 후속 조회입니다. 새 입력이 아닙니다.
+23. 비고/메모는 선택 필드입니다. `비고에 급해`, `메모 급함`, `급건이라고 메모`는 fields.remark에 넣습니다. 비고만 말한 문장으로 새 수선을 시작하지 마세요. 작성 중이면 provide_field, 직전 저장을 가리키면 update/last_saved 입니다.
 
 의미 예시:
 - 수선 업무를 시작함 → mode_action=start / repair
@@ -1230,6 +1231,44 @@ def fallback_from_local_parsers(text: str, context: Optional[Dict[str, Any]] = N
         defect_name = defect.get("불량명") if isinstance(defect, dict) else defect
         if compact != "수선" and defect_name:
             fields["defect"] = defect_name
+    if parsed.get("remark"):
+        fields["remark"] = parsed["remark"]
+    core = {k: v for k, v in fields.items() if k != "remark"}
+    if fields.get("remark") and not core:
+        if context.get("has_active_draft"):
+            return enforce_nlu_policy(
+                NluIntent(
+                    domain=DOMAIN_REPAIR,
+                    action=ACTION_PROVIDE_FIELD,
+                    target=TARGET_DRAFT,
+                    fields=fields,
+                    confidence=1.0,
+                    source="fallback",
+                ),
+                context,
+            )
+        if context.get("has_repair_last_saved") or (
+            context.get("mode") == MODE_REPAIR and context.get("has_last_saved")
+        ):
+            return enforce_nlu_policy(
+                NluIntent(
+                    domain=DOMAIN_REPAIR,
+                    action=ACTION_UPDATE,
+                    target=TARGET_LAST_SAVED,
+                    fields=fields,
+                    confidence=1.0,
+                    needs_confirmation=True,
+                    source="fallback",
+                ),
+                context,
+            )
+        return NluIntent(
+            action=ACTION_UNKNOWN,
+            confidence=0.0,
+            source="fallback",
+            clarification="비고를 넣을 수선 항목이 없어요. 먼저 수선을 저장하거나 작성 중일 때 말해 주세요.",
+            clarification_reason="remark_without_target",
+        )
     if fields and context.get("has_active_draft"):
         return enforce_nlu_policy(
             NluIntent(

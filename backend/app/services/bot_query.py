@@ -584,10 +584,12 @@ def format_last_saved(user_id: str, channel_id: Optional[str], entity: str) -> s
     qty = row.get("수량") if row.get("수량") is not None else "?"
     price = row.get("비용")
     price_txt = f"{int(price):,}원" if price is not None else "-"
+    remark = (row.get("비고") or "").strip()
+    extra = f" / 비고 {remark}" if remark else ""
     return (
         f"방금 저장한 수선일지입니다.\n"
         f"#{row.get('id')} / {row.get('업체명') or '-'} / {row.get('제품명') or '-'}"
-        f" / {row.get('작업') or row.get('불량명') or '-'} / {qty}건 / {price_txt}"
+        f" / {row.get('작업') or row.get('불량명') or '-'} / {qty}건 / {price_txt}{extra}"
     )
 
 
@@ -679,10 +681,12 @@ def render_list(entity: str, result: Dict[str, Any], filters: Dict[str, Any]) ->
         rid = row.get("id")
         prefix = f"{i}. #{rid} / " if rid is not None else f"{i}. "
         if entity == "repair_log":
+            remark = (row.get("remark") or "").strip()
+            extra = f" / 비고 {remark}" if remark else ""
             lines.append(
                 f"{prefix}{row.get('date') or '-'} / {row.get('vendor') or '-'} / "
                 f"{row.get('product') or '-'} / {row.get('work_type') or '-'} / "
-                f"{row.get('qty') or 0}건 / {int(row.get('unit_price') or 0):,}원"
+                f"{row.get('qty') or 0}건 / {int(row.get('unit_price') or 0):,}원{extra}"
             )
         else:
             date = row.get("날짜") or row.get("date")

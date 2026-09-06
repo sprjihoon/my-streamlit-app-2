@@ -10,6 +10,7 @@ from backend.app.services.bot_intent import (
     ACTION_UPDATE,
     DOMAIN_REPAIR,
     TARGET_LAST_SAVED,
+    extract_remark,
     extract_update_fields,
     parse_bot_intent,
 )
@@ -670,3 +671,113 @@ def test_draft_price_question_advances_after_explicit_change():
     assert "몇 건" in reply or "저장할까요" in reply
     assert "unit_price" not in _missing(uid, cid)
     assert "변경 전" not in reply
+
+
+def _remark(record_id: int):
+    with get_connection() as con:
+        row = con.execute("SELECT 비고 FROM repair_work_log WHERE id = ?", (record_id,)).fetchone()
+    return row[0] if row else None
+
+
+def test_extract_remark_needs_marker():
+    assert extract_remark("비고에 급해") == "급해"
+    assert extract_remark("메모 남겨 급함") == "급함"
+    assert extract_remark("급건이라고 메모") == "급건"
+    assert extract_remark("구멍 바느질 1500원 비고 급해") == "급해"
+    assert extract_remark("방금꺼에 메모 추가해줘") is None
+    assert extract_remark("메모") is None
+    intent = parse_bot_intent("비고에 급해")
+    assert intent.action == ACTION_UPDATE
+    assert intent.target == TARGET_LAST_SAVED
+    assert intent.fields == {"remark": "급해"}
+    create = parse_bot_intent("구멍 바느질 1500원 비고 급해")
+    assert create.action == ACTION_NONE
+    assert create.fields.get("remark") == "급해"
+
+
+def test_create_keeps_optional_remark():
+    uid, cid = _ids("remark-create")
+    _enter_repair(uid, cid)
+    before = _log_count()
+    get_conversation_manager().set_state(
+        user_id=uid,
+        channel_id=cid,
+        pending_data={
+            "entry_type": "repair",
+            "vendor": "로지킴",
+            "product": "릴리프T",
+            "defect": "구멍",
+            "work_type": "단순바느질",
+            "qty": 1,
+            "unit_price": 1500,
+            "price_stated": True,
+            "user_name": "테스터",
+        },
+        missing=[],
+        last_question="",
+    )
+    reply = asyncio.run(handle_user_text(uid, cid, "비고에 급해", "테스터"))
+    assert "✅" in reply
+    assert "비고" in reply
+    assert _log_count() == before + 1
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT id, 비고 FROM repair_work_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert row[1] == "급해"
+
+
+def test_last_saved_remark_waits_for_confirm():
+    uid, cid = _ids("remark-upd")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    before = _log_count()
+    preview = asyncio.run(handle_user_text(uid, cid, "비고에 급해", "테스터"))
+    assert "변경 전" in preview
+    assert "비고 급해" in preview
+    assert _remark(saved["id"]) in (None, "")
+    assert _log_count() == before
+    done = asyncio.run(handle_user_text(uid, cid, "네", "테스터"))
+    assert "✅" in done
+    assert _remark(saved["id"]) == "급해"
+    assert _log_count() == before
+
+
+def test_draft_remark_does_not_touch_last_saved():
+    uid, cid = _ids("remark-draft")
+    _enter_repair(uid, cid)
+    saved = _insert()
+    remember_last_saved(uid, cid, saved["id"])
+    _seed_draft(uid, cid)
+    before = _log_count()
+    reply = asyncio.run(handle_user_text(uid, cid, "비고에 급해", "테스터"))
+    assert "변경 전" not in reply
+    assert _draft(uid, cid).get("remark") == "급해"
+    assert _remark(saved["id"]) in (None, "")
+    assert _log_count() == before
+
+
+def test_waiting_vendor_remark_is_not_vendor_name():
+    uid, cid = _ids("remark-vendor")
+    _enter_repair(uid, cid)
+    get_conversation_manager().set_state(
+        user_id=uid,
+        channel_id=cid,
+        pending_data={
+            "entry_type": "repair",
+            "barcode": "ON56S152917",
+            "user_name": "테스터",
+            "before_image": "before-keep.jpg",
+            "after_image": "after-keep.jpg",
+        },
+        missing=["vendor"],
+        last_question="등록 안 된 바코드예요 (ON56S152917). 업체명 알려주세요.",
+    )
+    before = _log_count()
+    reply = asyncio.run(handle_user_text(uid, cid, "비고에 급해", "테스터"))
+    draft = _draft(uid, cid)
+    assert draft.get("remark") == "급해"
+    assert draft.get("vendor") not in {"비고에 급해", "급해", "비고"}
+    assert "업체" in reply or "업체" in _last_q(uid, cid)
+    assert _log_count() == before

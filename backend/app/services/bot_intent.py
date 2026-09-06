@@ -64,7 +64,19 @@ LAST_SAVED_HINTS = ("직전", "방금", "아까", "저장한", "저장된")
 CORRECTION_MARKERS = ("아니고", "말고")
 EXPLICIT_RECORD_MARKERS = ("저장한", "저장된", "내용", "일지", "항목")
 EXPLICIT_VERBS = ("수정", "변경")
-FIELD_HINTS = ("금액", "가격", "단가", "건수", "수량", "불량", "작업", "업체", "제품", "비고")
+FIELD_HINTS = ("금액", "가격", "단가", "건수", "수량", "불량", "작업", "업체", "제품", "비고", "메모")
+_REMARK_LEAD_RE = re.compile(r"(?:비고|메모)\s*(?:에|은|는|를|을|:)?\s*")
+_REMARK_LEAD_VERB_RE = re.compile(
+    r"^(?:추가(?:해(?:요|줘|주세요)?)?|남겨(?:요|줘|주세요)?|넣(?:어(?:요|줘|주세요)?)?)\s*"
+)
+_REMARK_TRAIL_RE = re.compile(
+    r"(?:으로|로)?\s*(?:바꿔(?:요|줘|주세요)?|바꾸(?:세요)?|변경(?:해(?:요|줘|주세요)?)?|"
+    r"고쳐(?:요|줘|주세요)?|수정(?:해(?:요|줘|주세요)?)?|"
+    r"추가(?:해(?:요|줘|주세요)?)?|남겨(?:요|줘|주세요)?|넣(?:어(?:요|줘|주세요)?)?)\s*$"
+)
+_REMARK_SAID_RE = re.compile(r"(.+?)\s*(?:이라고|라고)\s*(?:메모|비고)\s*$")
+_REMARK_CLAUSE_RE = re.compile(r"(?:비고|메모)\s*(?:에|은|는|를|을|:)?\s*.+$")
+_CREATE_FIELD_KEYS = frozenset(("unit_price", "qty", "work_type", "defect", "vendor", "product"))
 _MOD_COMMAND_RE = re.compile(
     r"(?:내용|직전|방금|아까|일지|금액|가격|건수|거|것|으로|로|를|을|만|해)수정"
     r"|(?:^|[^가-힣])수정"
@@ -183,6 +195,35 @@ def extract_bare_qty(text: str) -> Optional[int]:
     return None
 
 
+def extract_remark(text: str) -> Optional[str]:
+    """비고/메모 표지가 있을 때만 값을 읽는다. 필수값이 아니다."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    said = _REMARK_SAID_RE.search(raw)
+    if said:
+        value = said.group(1).strip(" ,./")
+        return value[:200] if value else None
+    lead = _REMARK_LEAD_RE.search(raw)
+    if not lead:
+        return None
+    value = raw[lead.end():].strip()
+    value = _REMARK_LEAD_VERB_RE.sub("", value)
+    value = _REMARK_TRAIL_RE.sub("", value).strip(" ,./")
+    if not value:
+        return None
+    return value[:200]
+
+
+def strip_remark_clause(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    cleaned = _REMARK_SAID_RE.sub("", raw)
+    cleaned = _REMARK_CLAUSE_RE.sub("", cleaned)
+    return cleaned.strip(" ,./")
+
+
 def extract_korean_amount(text: str) -> Optional[int]:
     """저장용 extract_price는 그대로 두고, 수정 intent만 천 단위를 보완한다."""
     from backend.app.services.repair_bot import extract_price
@@ -227,8 +268,12 @@ def extract_update_fields(text: str) -> Dict[str, Any]:
     if corr and "defect" not in fields and "work_type" not in fields and amount is None and not qty:
         leftover = re.sub(r"(원|건|개|장|벌)$", "", focus).strip()
         leftover = re.sub(r"^\d+\s*", "", leftover).strip()
+        leftover = strip_remark_clause(leftover)
         if leftover and leftover not in UPDATE_VERBS:
             fields["defect"] = leftover
+    remark = parsed.get("remark") or extract_remark(focus) or extract_remark(raw)
+    if remark:
+        fields["remark"] = remark
     return allowed_fields_only(fields)
 
 
@@ -257,6 +302,7 @@ def parse_bot_intent(text: str) -> BotIntent:
         and any(m in norm for m in EXPLICIT_RECORD_MARKERS)
     )
     named_field_change = has_field and bool(fields) and (has_verb or has_value_change or "으로" in norm)
+    remark_only = "remark" in fields and not (set(fields) & _CREATE_FIELD_KEYS)
     matched = (
         explicit
         or (has_last and bool(fields))
@@ -264,6 +310,7 @@ def parse_bot_intent(text: str) -> BotIntent:
         or (has_correction and bool(fields))
         or named_field_change
         or has_value_change
+        or remark_only
     )
     if not matched:
         return BotIntent(fields=fields, raw=raw)

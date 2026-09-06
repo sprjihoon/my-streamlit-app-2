@@ -1634,7 +1634,7 @@ def _search_repair_logs(args: Dict, user_id: str, user_name: str) -> Dict:
         limit = _clamp_limit(args.get("limit"))
         with get_connection() as con:
             rows = con.execute(
-                f"""SELECT id, 날짜, 업체명, 제품명, 작업, 수량, 비용, 저장시간, 작성자, 불량명, 바코드
+                f"""SELECT id, 날짜, 업체명, 제품명, 작업, 수량, 비용, 저장시간, 작성자, 불량명, 바코드, 비고
                     FROM repair_work_log
                     WHERE {' AND '.join(conditions)}
                     ORDER BY id DESC LIMIT ?""",
@@ -1654,6 +1654,7 @@ def _search_repair_logs(args: Dict, user_id: str, user_name: str) -> Dict:
                 "worker": r[8],
                 "defect": r[9],
                 "barcode": r[10],
+                "remark": r[11],
             })
         return {"success": True, "count": len(out), "rows": out}
     except Exception:

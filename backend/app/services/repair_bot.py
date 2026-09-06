@@ -219,6 +219,8 @@ def extract_waiting_qty(text: str) -> Optional[int]:
 
 
 def parse_repair_text(text: str) -> Dict[str, Any]:
+    from backend.app.services.bot_intent import extract_remark
+
     price = extract_price(text)
     barcode = extract_barcode_token(text)
     qty = extract_qty(text)
@@ -231,6 +233,7 @@ def parse_repair_text(text: str) -> Dict[str, Any]:
         "qty": qty,
         "work": work["작업명"] if work else None,
         "defect": defect["불량명"] if defect else None,
+        "remark": extract_remark(text),
     }
 
 
@@ -290,6 +293,8 @@ def _merge_parsed(data: Dict[str, Any], parsed: Dict[str, Any]) -> Dict[str, Any
         out["price_stated"] = True
     if parsed.get("qty"):
         out["qty"] = parsed["qty"]
+    if parsed.get("remark"):
+        out["remark"] = parsed["remark"]
     return out
 
 
@@ -335,6 +340,9 @@ def _item_line(data: Dict[str, Any]) -> str:
     bits = [vendor, product]
     if option:
         bits.append(option)
+    remark = (data.get("remark") or "").strip()
+    if remark:
+        bits.append(f"비고 {remark}")
     return " / ".join(bits)
 
 
@@ -380,6 +388,9 @@ def _save_repair_entry(
                 "remember_last_saved failed user=%s channel=%s record=%s",
                 user_id, channel_id, rid,
             )
+        remark = (data.get("remark") or "").strip()
+        if remark and "비고" not in str(saved.get("message") or ""):
+            saved["message"] = f"{saved.get('message')} (비고: {remark})"
         if data.get("barcode") and data.get("vendor") and data.get("product"):
             try:
                 upsert_repair_barcode_record(
@@ -397,10 +408,12 @@ def _confirm_cost_qty(data: Dict[str, Any], user_id: str, channel_id: str) -> st
     price = int(data.get("unit_price") or 0)
     label = _job_label(data)
     qty = data.get("qty")
+    remark = (data.get("remark") or "").strip()
+    extra = f" (비고 {remark})" if remark else ""
     if qty:
-        q = f"{label} {price:,}원 {int(qty)}건으로 저장할까요?"
+        q = f"{label} {price:,}원 {int(qty)}건{extra}으로 저장할까요?"
     else:
-        q = f"{label} {price:,}원 맞아요? 몇 건이에요?"
+        q = f"{label} {price:,}원{extra} 맞아요? 몇 건이에요?"
     data["awaiting_price_confirm"] = True
     return _ask(user_id, channel_id, data, ["qty"], q)
 
@@ -473,6 +486,8 @@ def _merge_nlu_fields(parsed: Dict[str, Any], fields: Optional[Dict[str, Any]]) 
         out["product"] = fields["product"]
     if fields.get("option"):
         out["option"] = fields["option"]
+    if fields.get("remark"):
+        out["remark"] = fields["remark"]
     return out
 
 
@@ -552,6 +567,11 @@ async def handle_user_text(
         data["product"] = parsed["product"]
     if parsed.get("option"):
         data["option"] = parsed["option"]
+    if parsed.get("remark"):
+        data["remark"] = parsed["remark"]
+    remark_only = bool(parsed.get("remark")) and not any(
+        parsed.get(k) for k in ("price", "qty", "work", "defect", "barcode", "product", "vendor")
+    )
 
     if data.get("awaiting_price_confirm"):
         prev_price = data.get("unit_price")
@@ -565,6 +585,8 @@ async def handle_user_text(
         if parsed.get("defect"):
             data["defect"] = parsed["defect"]
             data = _infer_work(data)
+        if remark_only:
+            return _confirm_cost_qty(data, user_id, channel_id)
         if YES_RE.match(raw) or nlu_action == "confirm":
             data["qty"] = data.get("qty") or 1
             saved = _save_repair_entry(
@@ -585,6 +607,11 @@ async def handle_user_text(
         return _ask(user_id, channel_id, data, ["qty"], "몇 건인지 숫자로 알려주세요. 예: 1건")
 
     if "barcode" in missing and raw:
+        if remark_only:
+            return _ask(
+                user_id, channel_id, data, ["barcode"],
+                "바코드 숫자를 직접 입력해 주세요. 예: ON56S152917",
+            )
         token = extract_barcode_token(raw)
         compact = re.sub(r"[\s\-]", "", raw)
         if not token and is_manual_barcode(compact):
@@ -609,6 +636,8 @@ async def handle_user_text(
         )
 
     if "vendor" in missing and not data.get("vendor") and raw:
+        if remark_only and not vendor_mention:
+            return continue_after_photos_or_text(data, user_id, channel_id)
         if is_conversational_command(raw) and not vendor_mention:
             return _ask(user_id, channel_id, data, ["vendor"], "업체명만 알려주세요. 예: 로지킴")
         vendor_text = vendor_mention or raw.strip()
@@ -620,6 +649,8 @@ async def handle_user_text(
         return continue_after_photos_or_text(data, user_id, channel_id)
 
     if "product" in missing and not data.get("product") and raw:
+        if remark_only:
+            return continue_after_photos_or_text(data, user_id, channel_id)
         if is_conversational_command(raw):
             return _ask(user_id, channel_id, data, ["product"], "제품명만 알려주세요.")
         data["product"] = parsed.get("product") or raw.strip()
@@ -638,13 +669,16 @@ async def handle_user_text(
             data["work_type"] = parsed["work"]
         elif (
             raw
+            and not remark_only
             and not parsed.get("price")
             and not parsed.get("qty")
             and not YES_RE.match(raw)
             and not is_conversational_command(raw)
             and "vendor" not in missing
         ):
-            leftover = raw
+            from backend.app.services.bot_intent import strip_remark_clause
+
+            leftover = strip_remark_clause(raw)
             leftover = PRICE_RE.sub("", leftover).strip()
             leftover = QTY_RE.sub("", leftover).strip()
             leftover = leftover.replace("원", "").strip()

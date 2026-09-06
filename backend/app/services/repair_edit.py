@@ -244,7 +244,11 @@ def _preview_line(fields: Dict[str, Any]) -> str:
     qty = fields.get("qty") if fields.get("qty") is not None else "?"
     price = fields.get("unit_price")
     price_txt = f"{int(price):,}원" if price is not None else "-"
-    return f"{vendor} / {product} / {defect} / {work} / {qty}건 / {price_txt}"
+    remark = (fields.get("remark") or "").strip()
+    line = f"{vendor} / {product} / {defect} / {work} / {qty}건 / {price_txt}"
+    if remark:
+        line += f" / 비고 {remark}"
+    return line
 
 
 def _merge_fields(before: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,6 +296,7 @@ def _confirm_message(record_id: int, before: Dict[str, Any], after: Dict[str, An
         ("qty", "건수"),
         ("defect", "불량"),
         ("work_type", "작업"),
+        ("remark", "비고"),
     ) if before.get(key) != after.get(key)]
     focus = ", ".join(changed) if changed else "내용"
     return (
@@ -319,6 +324,8 @@ def _draft_change_summary(patch: Dict[str, Any]) -> str:
         bits.append(f"제품을 {patch['product']}(으)로 바꿨어요.")
     if "option" in patch:
         bits.append(f"옵션을 {patch['option']}(으)로 바꿨어요.")
+    if "remark" in patch:
+        bits.append(f"비고를 {patch['remark']}(으)로 넣었어요.")
     return " ".join(bits) or "작성 중인 내용을 바꿨어요."
 
 
