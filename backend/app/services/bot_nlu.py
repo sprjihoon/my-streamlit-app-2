@@ -55,8 +55,32 @@ from backend.app.services.conversation_state import get_conversation_manager, st
 
 logger = logging.getLogger(__name__)
 
-NLU_MODEL = (os.getenv("BOT_NLU_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
+DEFAULT_NLU_MODEL = "gpt-4o-mini"
+NLU_MODEL_ENV = "BOT_NLU_MODEL"
+NLU_MODEL_ENV_ALT = "NLU_MODEL"
+REASONING_EFFORT_ENV = "BOT_NLU_REASONING_EFFORT"
+DEFAULT_REASONING_EFFORT = "low"
+REASONING_EFFORTS = frozenset(("none", "low", "medium", "high", "xhigh", "max"))
 NLU_TIMEOUT_SEC = 8.0
+LAST_NLU_CALL: Dict[str, Any] = {}
+
+
+def nlu_model() -> str:
+    value = (os.getenv(NLU_MODEL_ENV) or os.getenv(NLU_MODEL_ENV_ALT) or DEFAULT_NLU_MODEL).strip()
+    return value or DEFAULT_NLU_MODEL
+
+
+def nlu_reasoning_effort() -> str:
+    value = (os.getenv(REASONING_EFFORT_ENV) or DEFAULT_REASONING_EFFORT).strip().lower()
+    return value if value in REASONING_EFFORTS else DEFAULT_REASONING_EFFORT
+
+
+def _supports_reasoning_effort(model: str) -> bool:
+    name = (model or "").strip().lower()
+    return name.startswith("gpt-5") or "luna" in name
+
+
+NLU_MODEL = nlu_model()
 LOW_CONFIDENCE = 0.6
 LAST_SAVED_CONFIDENCE = 0.8
 LAST_REPLY_MAX = 500
@@ -1244,17 +1268,24 @@ def render_readonly_nlu(intent: Optional[NluIntent], text: str = "") -> Optional
     return None
 
 
+def _record_nlu_call(**kwargs: Any) -> None:
+    LAST_NLU_CALL.clear()
+    LAST_NLU_CALL.update(kwargs)
+
+
 async def _complete_chat(messages: List[Dict[str, str]]) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("nlu_no_key")
+    import time
     from openai import AsyncOpenAI
 
+    model = nlu_model()
     client = AsyncOpenAI(api_key=api_key)
-    response = await client.chat.completions.create(
-        model=NLU_MODEL,
-        messages=messages,
-        response_format={
+    kwargs: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "response_format": {
             "type": "json_schema",
             "json_schema": {
                 "name": "bot_nlu_intent",
@@ -1262,7 +1293,22 @@ async def _complete_chat(messages: List[Dict[str, str]]) -> str:
                 "schema": NLU_JSON_SCHEMA,
             },
         },
-        timeout=NLU_TIMEOUT_SEC,
+        "timeout": NLU_TIMEOUT_SEC,
+    }
+    if _supports_reasoning_effort(model):
+        kwargs["reasoning_effort"] = nlu_reasoning_effort()
+    started = time.perf_counter()
+    response = await client.chat.completions.create(**kwargs)
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None) if usage else None
+    _record_nlu_call(
+        model=model,
+        latency_ms=(time.perf_counter() - started) * 1000,
+        prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0,
+        completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0,
+        reasoning_tokens=int(getattr(details, "reasoning_tokens", 0) or 0) if details else 0,
+        fallback=False,
+        source="nlu",
     )
     return (response.choices[0].message.content or "").strip()
 
@@ -1287,9 +1333,14 @@ async def interpret_or_fallback(
 ) -> NluIntent:
     ctx = context or collect_nlu_context(user_id, channel_id, text)
     if nlu_disabled():
+        _record_nlu_call(source="fallback", fallback=True, error="disabled")
         return fallback_from_local_parsers(text, ctx)
     try:
-        return await interpret_user_text(text, ctx)
+        intent = await interpret_user_text(text, ctx)
+        LAST_NLU_CALL.setdefault("source", "nlu")
+        LAST_NLU_CALL.setdefault("fallback", False)
+        return intent
     except Exception as exc:
         logger.warning("nlu_fallback reason=%s", type(exc).__name__)
+        _record_nlu_call(source="fallback", fallback=True, error=type(exc).__name__)
         return fallback_from_local_parsers(text, ctx)
