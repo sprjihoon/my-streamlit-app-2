@@ -55,7 +55,7 @@ from backend.app.services.conversation_state import get_conversation_manager, st
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_NLU_MODEL = "gpt-4o-mini"
+DEFAULT_NLU_MODEL = "gpt-5.6-luna"
 NLU_MODEL_ENV = "BOT_NLU_MODEL"
 NLU_MODEL_ENV_ALT = "NLU_MODEL"
 REASONING_EFFORT_ENV = "BOT_NLU_REASONING_EFFORT"

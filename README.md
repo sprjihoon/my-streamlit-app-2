@@ -69,7 +69,7 @@ my-streamlit-app/
 - 엑셀 업로드 기반 청구서 자동 생성 및 PDF 출력
 
 ### 📝 작업일지 (Work Log)
-- **네이버웍스 봇 AI** 연동. 일지모드는 수선모드와 같이 GPT-4o-mini Structured NLU + 서버 상태 머신
+- **네이버웍스 봇 AI** 연동. 일지모드는 수선모드와 같이 GPT-5.6 Luna Structured NLU(`reasoning_effort=low`) + 서버 상태 머신
 - "어제 틸 하차 다섯 개 건당 3만원, 야간"처럼 말하면 업체·작업·단가·수량·날짜·비고를 구조화해 저장
 - 같은 모드에서 이번 달 작업실적·업체별·탑N 조회와 목록 번호 수정도 가능
 - 누락값은 한 번에 묻고, 나눠 답해도 기존 draft와 병합. 저장 실패 후에도 작성 중 값은 유지
@@ -110,7 +110,7 @@ my-streamlit-app/
 |---|---|
 | 프론트엔드 | Next.js 14 (App Router), TypeScript, TailwindCSS, Recharts |
 | 백엔드 | FastAPI, Python 3.12, SQLite |
-| AI | OpenAI GPT-4o / GPT-4o-mini (NLU Structured Outputs, Function Calling, Vision) |
+| AI | OpenAI GPT-4o Vision, GPT-5.6 Luna NLU Structured Outputs, Function Calling |
 | 봇 | 네이버웍스 Webhook Bot (일지/수선/조회 모드) |
 | 배포 | Railway 백엔드, Vercel 프론트엔드(`my-streamlit-app-2`) |
 
@@ -194,7 +194,7 @@ Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는
 
 ## 🤖 봇 모드와 자연어
 
-정해진 단어를 외울 필요는 없다. `수선할래`, `일지 적을게`, `오늘 작업 넣자`, `하나`, `방금 저장한 거 잘못됐어`처럼 말하면 GPT-4o-mini가 현재 모드·작성 중 값·직전 저장 여부만 보고 의도를 구조화한다. GPT는 DB에 쓰지 않는다. 일지·수선은 각각 서버 상태 머신이 검증·확인·저장한다. 웹훅에서 NLU는 한 번만 호출하고, 일지모드는 그 결과를 `journal_bot`에 넘긴다. API 오류 시에는 확실한 로컬 파싱만 사용한다.
+정해진 단어를 외울 필요는 없다. `수선할래`, `일지 적을게`, `오늘 작업 넣자`, `하나`, `방금 저장한 거 잘못됐어`처럼 말하면 GPT-5.6 Luna가 현재 모드·작성 중 값·직전 저장 여부만 보고 의도를 구조화한다. GPT는 DB에 쓰지 않는다. 일지·수선은 각각 서버 상태 머신이 검증·확인·저장한다. 웹훅에서 NLU는 한 번만 호출하고, 일지모드는 그 결과를 `journal_bot`에 넘긴다. API 오류 시에는 확실한 로컬 파싱만 사용한다.
 
 짧은 모드 명령은 끝 문장부호를 무시한다. `수선`, `수선.`, `수선 .`은 모두 수선모드다. `오늘 수선실적 알려줘`처럼 업무 문장은 모드를 바꾸지 않는다.
 

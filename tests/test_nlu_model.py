@@ -27,9 +27,9 @@ def _repair_count():
         return int(con.execute("SELECT COUNT(*) FROM repair_work_log").fetchone()[0])
 
 
-def test_default_model_stays_4o_mini_until_luna_is_verified():
-    assert DEFAULT_NLU_MODEL == "gpt-4o-mini"
-    assert nlu_model() == "gpt-4o-mini"
+def test_default_model_is_luna_with_low_reasoning():
+    assert DEFAULT_NLU_MODEL == "gpt-5.6-luna"
+    assert nlu_model() == "gpt-5.6-luna"
     assert DEFAULT_REASONING_EFFORT == "low"
     assert nlu_reasoning_effort() == "low"
     assert NLU_TIMEOUT_SEC == 8.0
@@ -38,7 +38,7 @@ def test_default_model_stays_4o_mini_until_luna_is_verified():
 def test_model_env_prefers_bot_nlu_then_nlu_model(monkeypatch):
     monkeypatch.delenv("BOT_NLU_MODEL", raising=False)
     monkeypatch.delenv("NLU_MODEL", raising=False)
-    assert nlu_model() == "gpt-4o-mini"
+    assert nlu_model() == "gpt-5.6-luna"
     monkeypatch.setenv("NLU_MODEL", "gpt-5.6-luna")
     assert nlu_model() == "gpt-5.6-luna"
     monkeypatch.setenv("BOT_NLU_MODEL", "gpt-4o-mini")
