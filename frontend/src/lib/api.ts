@@ -1321,6 +1321,7 @@ export interface KpostPickupItem {
   pickup_date: string;
   goods_name: string;
   box_size: string;
+  box_quantity: number;
   notes: string;
   tracking_no: string;
   req_no: string;

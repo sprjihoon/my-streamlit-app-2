@@ -6,16 +6,13 @@ import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
-  cancelKpostPickup,
   createKpostPickup,
   deleteSavedRecipient,
   getKpostPickupMeta,
-  listKpostPickups,
   listSavedRecipients,
   previewKpostPickup,
   saveRecipient,
   type KpostPickupBoxSize,
-  type KpostPickupItem,
   type KpostPickupPayload,
   type KpostPickupPreview,
   type SavedRecipient,
@@ -79,21 +76,10 @@ export default function ReturnRequestPage() {
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
   const [preview, setPreview] = useState<KpostPickupPreview | null>(null);
-  const [items, setItems] = useState<KpostPickupItem[]>([]);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [recipientFilter, setRecipientFilter] = useState('');
   const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveLabel, setSaveLabel] = useState('');
 
-  const loadList = useCallback(
-    async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }) => {
-      const data = await listKpostPickups(auth, filters);
-      setItems(data.items || []);
-    },
-    []
-  );
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
@@ -115,14 +101,13 @@ export default function ReturnRequestPage() {
         if (meta.office_ser) setOfficeSer(meta.office_ser);
         setForm(emptyForm(meta.default_pickup_date));
         setSavedRecipients(recipients.items || []);
-        await loadList(stored);
       } catch (err) {
         setError(parseApiError(err));
       } finally {
         setLoading(false);
       }
     })();
-  }, [loadList]);
+  }, []);
 
   function openPostcode() {
     const run = () => {
@@ -175,42 +160,10 @@ export default function ReturnRequestPage() {
       }
       setPreview(null);
       setForm((prev) => emptyForm(prev.pickup_date));
-      await loadList(token);
     } catch (err) {
       setError(parseApiError(err));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleCancel(id: number, tracking: string) {
-    if (!window.confirm(`송장 ${tracking || id} 회수신청을 취소할까요?`)) return;
-    setError(null);
-    try {
-      const result = await cancelKpostPickup(token, id);
-      setSuccess(result.message || '회수신청을 취소했습니다.');
-      const filters = {
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        recipientName: recipientFilter || undefined,
-      };
-      await loadList(token, filters);
-    } catch (err) {
-      setError(parseApiError(err));
-    }
-  }
-
-  async function handleFilter() {
-    setError(null);
-    try {
-      const filters = {
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        recipientName: recipientFilter || undefined,
-      };
-      await loadList(token, filters);
-    } catch (err) {
-      setError(parseApiError(err));
     }
   }
 
@@ -518,82 +471,13 @@ export default function ReturnRequestPage() {
         </Card>
       )}
 
-      <Card title="최근 회수신청">
-        <div style={{ marginBottom: '1rem', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '0.5rem', alignItems: 'end' }}>
-          <label>
-            수거일 (시작)
-            <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </label>
-          <label>
-            수거일 (종료)
-            <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </label>
-          <label>
-            수취인
-            <input
-              style={inputStyle}
-              value={recipientFilter}
-              onChange={(e) => setRecipientFilter(e.target.value)}
-              placeholder="수취인 이름 검색"
-            />
-          </label>
-          <button type="button" className="btn btn-secondary" onClick={handleFilter}>
-            조회
-          </button>
-        </div>
-        {items.length === 0 ? (
-          <p className="text-muted">접수 내역이 없습니다.</p>
-        ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>송장</th>
-                  <th>수취인</th>
-                  <th>주소</th>
-                  <th>수거일</th>
-                  <th>상태</th>
-                  <th>작성</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      {item.tracking_no || '-'}
-                      {item.is_test ? ' (테스트)' : ''}
-                    </td>
-                    <td>
-                      {item.recipient_name}
-                      <div className="text-muted">{item.recipient_phone}</div>
-                    </td>
-                    <td>
-                      [{item.zipcode}] {item.addr1} {item.addr2}
-                    </td>
-                    <td>{item.pickup_date}</td>
-                    <td>{item.status === 'canceled' ? '취소' : item.treat_status_name || item.status}</td>
-                    <td>
-                      {item.created_by}
-                      <div className="text-muted">{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
-                    </td>
-                    <td>
-                      {item.status === 'requested' && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => handleCancel(item.id, item.tracking_no)}
-                        >
-                          취소
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <Card title="접수 내역 확인">
+        <p className="text-muted" style={{ marginBottom: '1rem' }}>
+          회수신청 접수 내역을 조회하고 관리하려면 접수목록 페이지를 이용하세요.
+        </p>
+        <a href="/kpost-pickup-list" className="btn btn-primary">
+          접수목록 보기
+        </a>
       </Card>
     </div>
   );
