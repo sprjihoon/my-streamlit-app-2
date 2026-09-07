@@ -89,6 +89,7 @@ def treat_status_label(code: str | None, fallback: str | None = None) -> str:
 
 
 PICKUP_BOX_SIZES = [
+    {"code": "MICRO", "label": "극소", "desc": "1kg · 45cm · microYn=Y", "weight": 1, "volume": 45},
     {"code": "DEFAULT", "label": "극소형", "desc": "2kg · 60cm", "weight": 2, "volume": 60},
     {"code": "SMALL", "label": "소형", "desc": "5kg · 80cm", "weight": 5, "volume": 80},
     {"code": "MEDIUM", "label": "중형", "desc": "10kg · 100cm", "weight": 10, "volume": 100},
@@ -472,7 +473,7 @@ def build_return_pickup_params(input_data: dict[str, Any]) -> dict[str, Any]:
         "weight": int(input_data.get("weight") or 2),
         "volume": int(input_data.get("volume") or 60),
         "qty": qty,
-        "microYn": "N",
+        "microYn": "Y" if input_data.get("micro") else "N",
         "delivMsg": input_data.get("deliv_msg") or None,
         "retVisitYmd": normalize_ret_visit_ymd(input_data["ret_visit_ymd"]),
         "testYn": input_data.get("test_yn") or "N",

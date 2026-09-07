@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -394,33 +394,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
     except ValueError as exc:
         raise _http_error(exc) from exc
 
-    since = (datetime.now(KST) - timedelta(minutes=30)).isoformat()
-    with get_connection() as con:
-        recent = con.execute(
-            """
-            SELECT id, tracking_no, req_no, res_no, res_date, price, post_office, is_test, order_no
-            FROM kpost_pickup_requests
-            WHERE recipient_phone = ? AND zipcode = ? AND addr1 = ? AND pickup_date = ?
-              AND status = 'requested' AND created_at >= ?
-            ORDER BY id DESC LIMIT 1
-            """,
-            (
-                validated["phone"],
-                validated["zipcode"],
-                validated["addr1"],
-                f"{validated['visit_ymd'][:4]}-{validated['visit_ymd'][4:6]}-{validated['visit_ymd'][6:8]}",
-                since,
-            ),
-        ).fetchone()
-        if recent and recent[1]:
-            return {
-                "success": True,
-                "duplicate_guard": True,
-                "id": recent[0],
-                "tracking_no": recent[1],
-                "is_test": bool(recent[7]),
-                "message": "같은 주소·날짜로 최근 접수한 건이 있어 기존 송장을 반환했습니다.",
-            }
+    # 중복 방지 로직 제거: 같은 주소·날짜라도 재접수 허용
 
     env = _env()
     order_no = format_pickup_order_no()
@@ -905,7 +879,8 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
     with get_connection() as con:
         row = con.execute(
             """
-            SELECT id, status, is_test, req_no, res_no, tracking_no, pickup_date, insert_snapshot
+            SELECT id, status, is_test, req_no, res_no, tracking_no, pickup_date, insert_snapshot,
+                   res_date, created_at
             FROM kpost_pickup_requests WHERE id = ?
             """,
             (pickup_id,),
@@ -915,26 +890,25 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
     if row[1] == "canceled":
         return {"success": True, "already": True, "message": "이미 취소된 접수입니다."}
     if not row[2]:
-        pickup_ymd = re.sub(r"\D", "", row[6] or "")[:8]
-        req_no = row[3] or ""
-        res_no = row[4] or ""
+        # reqYmd: res_date(우체국 접수일) → created_at(DB 생성일) → 오늘 순서로 사용
+        req_no  = row[3] or ""
+        res_no  = row[4] or ""
         regi_no = row[5] or ""
-        # req_no/res_no/regi_no 중 하나라도 없으면 우체국 취소 API 호출 불가 → DB만 처리
-        if req_no and res_no and regi_no and len(pickup_ymd) == 8:
+        req_ymd = resolve_cancel_req_ymd(row[8] or "", row[9] or "")  # res_date, created_at
+        if req_no and res_no and regi_no:
             snapshot = json.loads(row[7] or "{}")
             try:
                 cancel_order(
                     req_no=req_no,
                     res_no=res_no,
                     regi_no=regi_no,
-                    req_ymd=pickup_ymd,
+                    req_ymd=req_ymd,
                     insert_snapshot=snapshot,
                 )
             except Exception as exc:
                 msg = str(exc)
                 import logging as _logging
                 _logging.getLogger("epost").warning("[Cancel WARN] %s | regiNo=%s", msg, regi_no)
-                # 우체국에 예약 없음·필수값 누락 → DB만 취소 처리
                 if "ERR-123" in msg or "예약된 정보가 없" in msg or "필수값 누락" in msg:
                     pass
                 else:
