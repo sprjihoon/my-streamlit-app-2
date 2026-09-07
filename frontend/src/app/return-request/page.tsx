@@ -57,7 +57,7 @@ function emptyForm(defaultDate = ''): KpostPickupPayload {
     addr2: '',
     pickup_date: defaultDate,
     goods_name: '의류',
-    box_size: 'DEFAULT',
+    box_size: 'MICRO',
     box_quantity: 1,
     notes: '',
     test_mode: false,
