@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard, ClipboardList, Scissors, Upload, Link2, List, DollarSign,
   BarChart2, FileText, FileSpreadsheet, TrendingUp, CalendarDays,
-  Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package,
+  Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package, Truck,
   PlusCircle, Users, ScrollText, Settings, ChevronDown,
   User, LogOut, KeyRound, ShieldCheck,
 } from 'lucide-react';
@@ -218,6 +218,7 @@ const NAV_GROUPS = [
       { href: '/vendors', label: '매핑 리스트', icon: <List {...IC} />, adminOnly: true },
       { href: '/rates', label: '요금표 관리', icon: <DollarSign {...IC} />, adminOnly: true },
       { href: '/insights', label: '데이터 인사이트', icon: <TrendingUp {...IC} /> },
+      { href: '/kpost-pickup', label: '우체국 회수', icon: <Truck {...IC} /> },
     ],
   },
   {

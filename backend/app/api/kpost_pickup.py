@@ -1,0 +1,559 @@
+"""Infront 우체국 회수신청(반품소포) 접수 API."""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from backend.app.api.logs import add_log
+from backend.app.services.epost.client import (
+    EpostError,
+    cancel_order,
+    get_res_info,
+    has_epost_credentials,
+    insert_order,
+    is_ambiguous_insert_error,
+    mock_insert_order,
+)
+from backend.app.services.epost.fields import (
+    PICKUP_BOX_SIZES,
+    build_return_pickup_params,
+    default_ret_visit_iso,
+    format_pickup_order_no,
+    iso_today_kst,
+    normalize_addr1,
+    normalize_phone,
+    normalize_ret_visit_ymd,
+    normalize_zip,
+    require_phone,
+    resolve_box_spec,
+    resolve_cancel_req_ymd,
+    resolve_infront_center,
+    resolve_office_ser,
+    split_pickup_address,
+    validate_pickup_address_detail,
+)
+from logic.db import get_connection
+
+router = APIRouter(prefix="/kpost-pickup", tags=["kpost-pickup"])
+KST = ZoneInfo("Asia/Seoul")
+
+
+class PickupSubmitRequest(BaseModel):
+    recipient_name: str
+    recipient_phone: str
+    zipcode: str
+    addr1: str
+    addr2: str
+    pickup_date: str
+    goods_name: str = "해외배송 물품"
+    box_size: str = "DEFAULT"
+    notes: str = ""
+    confirm: bool = False
+    test_mode: bool = False
+
+
+def _env() -> dict[str, str]:
+    keys = (
+        "INFRONT_CENTER_ORD_NM",
+        "INFRONT_CENTER_NAME",
+        "INFRONT_CENTER_ZIPCODE",
+        "INFRONT_CENTER_ADDR1",
+        "INFRONT_CENTER_ADDR2",
+        "INFRONT_CENTER_PHONE",
+        "EPOST_CUSTOMER_ID",
+        "EPOST_APPROVAL_NO",
+        "EPOST_OFFICE_SER",
+    )
+    return {key: (os.getenv(key) or "").strip() for key in keys}
+
+
+def ensure_pickup_tables() -> None:
+    with get_connection() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS kpost_pickup_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vendor TEXT NOT NULL DEFAULT 'infront',
+                order_no TEXT NOT NULL,
+                recipient_name TEXT NOT NULL,
+                recipient_phone TEXT NOT NULL,
+                zipcode TEXT NOT NULL,
+                addr1 TEXT NOT NULL,
+                addr2 TEXT NOT NULL,
+                pickup_date TEXT NOT NULL,
+                goods_name TEXT,
+                box_size TEXT,
+                notes TEXT,
+                tracking_no TEXT,
+                req_no TEXT,
+                res_no TEXT,
+                res_date TEXT,
+                price TEXT,
+                post_office TEXT,
+                treat_status TEXT,
+                treat_status_name TEXT,
+                status TEXT NOT NULL DEFAULT 'requested',
+                is_test INTEGER NOT NULL DEFAULT 0,
+                insert_snapshot TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                canceled_at TEXT,
+                canceled_by TEXT
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kpost_pickup_created ON kpost_pickup_requests(created_at DESC)"
+        )
+        con.commit()
+
+
+def _get_user(token: str) -> dict[str, Any]:
+    with get_connection() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        row = con.execute(
+            """
+            SELECT u.user_id, u.nickname, u.department, u.is_admin
+            FROM sessions s JOIN users u USING(user_id)
+            WHERE s.token = ?
+            """,
+            (token,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    return {
+        "user_id": row[0],
+        "nickname": row[1] or "",
+        "department": row[2] or "",
+        "is_admin": bool(row[3]),
+    }
+
+
+def _http_error(exc: Exception, status: int = 400) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
+    if isinstance(exc, EpostError):
+        return HTTPException(status_code=502, detail=str(exc))
+    return HTTPException(status_code=status, detail=str(exc))
+
+
+def _build_validated(req: PickupSubmitRequest, *, live: bool) -> dict[str, Any]:
+    name = (req.recipient_name or "").strip()
+    if len(name) < 1:
+        raise ValueError("수취인 이름을 입력해주세요.")
+    zipcode = normalize_zip(req.zipcode) or extract_if_needed(req.addr1)
+    if len(zipcode) != 5:
+        raise ValueError("우편번호 5자리가 필요합니다. 주소 검색으로 다시 선택해주세요.")
+    addr1, addr2 = split_pickup_address(req.addr1, req.addr2)
+    detail_error = validate_pickup_address_detail(addr2)
+    if live and detail_error:
+        raise ValueError(detail_error)
+    if len(addr1) < 2:
+        raise ValueError("수거지 도로명 주소가 없습니다.")
+    center = resolve_infront_center(_env())
+    if live:
+        phone = require_phone(req.recipient_phone, "수거 연락처")
+        center_phone = require_phone(center.get("phone") or os.getenv("INFRONT_CENTER_PHONE"), "센터 연락처")
+    else:
+        phone = normalize_phone(req.recipient_phone) or "01000000000"
+        center_phone = center.get("phone") or "01000000000"
+    if live and zipcode == center["zip"] and normalize_addr1(addr1) == center["addr1"]:
+        raise ValueError("수거 주소는 물류센터 주소와 달라야 합니다. 고객 주소를 입력해주세요.")
+    spec = resolve_box_spec(req.box_size)
+    visit_ymd = normalize_ret_visit_ymd(req.pickup_date)
+    goods = (req.goods_name or "").strip() or "해외배송 물품"
+    notes = (req.notes or "").strip()
+    return {
+        "name": name,
+        "phone": phone,
+        "zipcode": zipcode,
+        "addr1": addr1,
+        "addr2": addr2,
+        "center": {**center, "phone": center_phone},
+        "spec": spec,
+        "visit_ymd": visit_ymd,
+        "goods": goods,
+        "notes": notes,
+    }
+
+
+def extract_if_needed(addr1: str) -> str:
+    from backend.app.services.epost.fields import extract_zip_from_address
+
+    return extract_zip_from_address(addr1)
+
+
+def _preview_payload(validated: dict[str, Any], is_test: bool) -> dict[str, Any]:
+    visit = validated["visit_ymd"]
+    return {
+        "vendor": "infront",
+        "recipient_name": validated["name"],
+        "recipient_phone": validated["phone"],
+        "zipcode": validated["zipcode"],
+        "addr1": validated["addr1"],
+        "addr2": validated["addr2"],
+        "pickup_date": f"{visit[:4]}-{visit[4:6]}-{visit[6:8]}",
+        "goods_name": validated["goods"],
+        "box_size": validated["spec"]["code"],
+        "box_label": f"{validated['spec']['label']} · {validated['spec']['weight']}kg · {validated['spec']['volume']}cm",
+        "notes": validated["notes"],
+        "center_name": validated["center"].get("display_name") or validated["center"]["ord_nm"],
+        "center_addr": f"{validated['center']['addr1']} {validated['center']['addr2']}".strip(),
+        "office_ser": resolve_office_ser(_env()),
+        "is_test": is_test,
+    }
+
+
+def _row_to_dict(row: Any) -> dict[str, Any]:
+    keys = [
+        "id",
+        "vendor",
+        "order_no",
+        "recipient_name",
+        "recipient_phone",
+        "zipcode",
+        "addr1",
+        "addr2",
+        "pickup_date",
+        "goods_name",
+        "box_size",
+        "notes",
+        "tracking_no",
+        "req_no",
+        "res_no",
+        "res_date",
+        "price",
+        "post_office",
+        "treat_status",
+        "treat_status_name",
+        "status",
+        "is_test",
+        "created_by",
+        "created_at",
+        "canceled_at",
+        "canceled_by",
+    ]
+    data = dict(zip(keys, row))
+    data["is_test"] = bool(data["is_test"])
+    return data
+
+
+@router.get("/meta")
+def pickup_meta(token: str):
+    _get_user(token)
+    ensure_pickup_tables()
+    live = has_epost_credentials()
+    return {
+        "vendor": "infront",
+        "default_pickup_date": default_ret_visit_iso(),
+        "today": iso_today_kst(),
+        "box_sizes": PICKUP_BOX_SIZES,
+        "live_ready": live,
+        "office_ser": resolve_office_ser(_env()),
+        "center": {
+            "name": resolve_infront_center(_env()).get("display_name") or "인프론트",
+            "addr": f"{resolve_infront_center(_env())['addr1']} {resolve_infront_center(_env())['addr2']}".strip(),
+        },
+    }
+
+
+@router.post("/preview")
+def preview_pickup(req: PickupSubmitRequest, token: str):
+    _get_user(token)
+    live = has_epost_credentials() and not req.test_mode
+    try:
+        validated = _build_validated(req, live=live)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+    return {"ok": True, "preview": _preview_payload(validated, is_test=not live)}
+
+
+@router.get("")
+def list_pickups(token: str, limit: int = 50):
+    _get_user(token)
+    ensure_pickup_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT id, vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
+                   pickup_date, goods_name, box_size, notes, tracking_no, req_no, res_no, res_date,
+                   price, post_office, treat_status, treat_status_name, status, is_test,
+                   created_by, created_at, canceled_at, canceled_by
+            FROM kpost_pickup_requests
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+    return {"items": [_row_to_dict(row) for row in rows]}
+
+
+@router.post("")
+def create_pickup(req: PickupSubmitRequest, token: str):
+    user = _get_user(token)
+    ensure_pickup_tables()
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="확인 후에만 접수할 수 있습니다. 미리보기를 확인한 뒤 접수를 눌러주세요.")
+
+    live = has_epost_credentials() and not req.test_mode
+    try:
+        validated = _build_validated(req, live=live)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+
+    since = (datetime.now(KST) - timedelta(minutes=30)).isoformat()
+    with get_connection() as con:
+        recent = con.execute(
+            """
+            SELECT id, tracking_no, req_no, res_no, res_date, price, post_office, is_test, order_no
+            FROM kpost_pickup_requests
+            WHERE recipient_phone = ? AND zipcode = ? AND addr1 = ? AND pickup_date = ?
+              AND status = 'requested' AND created_at >= ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (
+                validated["phone"],
+                validated["zipcode"],
+                validated["addr1"],
+                f"{validated['visit_ymd'][:4]}-{validated['visit_ymd'][4:6]}-{validated['visit_ymd'][6:8]}",
+                since,
+            ),
+        ).fetchone()
+        if recent and recent[1]:
+            return {
+                "success": True,
+                "duplicate_guard": True,
+                "id": recent[0],
+                "tracking_no": recent[1],
+                "is_test": bool(recent[7]),
+                "message": "같은 주소·날짜로 최근 접수한 건이 있어 기존 송장을 반환했습니다.",
+            }
+
+    env = _env()
+    order_no = format_pickup_order_no()
+    params = build_return_pickup_params(
+        {
+            "cust_no": env.get("EPOST_CUSTOMER_ID") or "TEST",
+            "appr_no": env.get("EPOST_APPROVAL_NO") or "0000000000",
+            "office_ser": resolve_office_ser(env),
+            "order_no": order_no,
+            "center": {
+                "ord_nm": validated["center"]["ord_nm"],
+                "zip": validated["center"]["zip"],
+                "addr1": validated["center"]["addr1"],
+                "addr2": validated["center"]["addr2"],
+                "phone": validated["center"]["phone"],
+            },
+            "pickup": {
+                "name": validated["name"],
+                "zip": validated["zipcode"],
+                "addr1": validated["addr1"],
+                "addr2": validated["addr2"],
+                "phone": validated["phone"],
+            },
+            "goods_nm": validated["goods"],
+            "weight": validated["spec"]["weight"],
+            "volume": validated["spec"]["volume"],
+            "deliv_msg": validated["notes"],
+            "ret_visit_ymd": validated["visit_ymd"],
+            "test_yn": "Y" if not live else "N",
+        }
+    )
+
+    if not live:
+        result = mock_insert_order()
+    else:
+        try:
+            result = insert_order({**params, "orderNo": order_no})
+        except Exception as first_err:
+            recovered = None
+            try:
+                recovered = get_res_info(order_no, validated["visit_ymd"])
+                if not (recovered.get("regiNo") or "").strip():
+                    recovered = None
+            except Exception:
+                recovered = None
+            if recovered and len(recovered.get("regiNo") or "") >= 10:
+                result = recovered
+            else:
+                hint = ""
+                msg = str(first_err)
+                if is_ambiguous_insert_error(first_err):
+                    hint = " 우체국에 이미 접수되었을 수 있습니다. 목록을 확인한 뒤 다시 누르지 마세요."
+                elif "recAddr2" in msg:
+                    hint = " 상세주소(동·호수·층)를 2글자 이상 입력했는지 확인해주세요."
+                elif "recAddr1" in msg or "recZip" in msg:
+                    hint = " 주소 검색으로 도로명 주소와 우편번호를 다시 선택해주세요."
+                raise HTTPException(status_code=502, detail=msg + hint)
+
+    snapshot = {k: v for k, v in params.items() if k != "testYn"}
+    pickup_iso = f"{validated['visit_ymd'][:4]}-{validated['visit_ymd'][4:6]}-{validated['visit_ymd'][6:8]}"
+    created_at = datetime.now(KST).isoformat(timespec="seconds")
+    with get_connection() as con:
+        cur = con.execute(
+            """
+            INSERT INTO kpost_pickup_requests (
+                vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
+                pickup_date, goods_name, box_size, notes, tracking_no, req_no, res_no, res_date,
+                price, post_office, treat_status, treat_status_name, status, is_test,
+                insert_snapshot, created_by, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                "infront",
+                order_no,
+                validated["name"],
+                validated["phone"],
+                validated["zipcode"],
+                validated["addr1"],
+                validated["addr2"],
+                pickup_iso,
+                validated["goods"],
+                validated["spec"]["code"],
+                validated["notes"],
+                result.get("regiNo") or "",
+                result.get("reqNo") or "",
+                result.get("resNo") or "",
+                result.get("resDate") or "",
+                result.get("price") or "0",
+                result.get("regiPoNm") or "",
+                "00" if live else "TEST",
+                "신청접수" if live else "테스트접수",
+                "requested",
+                0 if live else 1,
+                json.dumps(snapshot, ensure_ascii=False),
+                user["nickname"],
+                created_at,
+            ),
+        )
+        pickup_id = cur.lastrowid
+        con.commit()
+
+    add_log(
+        action_type="우체국회수접수",
+        target_type="kpost_pickup",
+        target_id=str(pickup_id),
+        target_name=result.get("regiNo") or order_no,
+        user_nickname=user["nickname"],
+        details=f"{validated['name']} / {pickup_iso}",
+    )
+    return {
+        "success": True,
+        "id": pickup_id,
+        "order_no": order_no,
+        "tracking_no": result.get("regiNo") or "",
+        "req_no": result.get("reqNo") or "",
+        "res_no": result.get("resNo") or "",
+        "price": result.get("price") or "0",
+        "post_office": result.get("regiPoNm") or "",
+        "pickup_date": pickup_iso,
+        "is_test": not live,
+        "preview": _preview_payload(validated, is_test=not live),
+    }
+
+
+@router.get("/{pickup_id}")
+def get_pickup(pickup_id: int, token: str, refresh: bool = False):
+    _get_user(token)
+    ensure_pickup_tables()
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT id, vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
+                   pickup_date, goods_name, box_size, notes, tracking_no, req_no, res_no, res_date,
+                   price, post_office, treat_status, treat_status_name, status, is_test,
+                   created_by, created_at, canceled_at, canceled_by
+            FROM kpost_pickup_requests WHERE id = ?
+            """,
+            (pickup_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="접수 내역을 찾을 수 없습니다.")
+    item = _row_to_dict(row)
+    if refresh and not item["is_test"] and item["status"] == "requested" and item["order_no"]:
+        req_ymd = resolve_cancel_req_ymd(item.get("res_date"), item.get("created_at"))
+        try:
+            info = get_res_info(item["order_no"], req_ymd)
+            item["treat_status"] = info.get("treatStusCd") or item["treat_status"]
+            item["treat_status_name"] = info.get("treatStusNm") or item["treat_status_name"]
+            if info.get("regiNo"):
+                item["tracking_no"] = info["regiNo"]
+            with get_connection() as con:
+                con.execute(
+                    """
+                    UPDATE kpost_pickup_requests
+                    SET treat_status=?, treat_status_name=?, tracking_no=?
+                    WHERE id=?
+                    """,
+                    (item["treat_status"], item["treat_status_name"], item["tracking_no"], pickup_id),
+                )
+                con.commit()
+        except Exception:
+            pass
+    return item
+
+
+@router.post("/{pickup_id}/cancel")
+def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
+    user = _get_user(token)
+    if not confirm:
+        raise HTTPException(status_code=400, detail="확인 후에만 취소할 수 있습니다.")
+    ensure_pickup_tables()
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT id, status, is_test, req_no, res_no, tracking_no, res_date, created_at, insert_snapshot
+            FROM kpost_pickup_requests WHERE id = ?
+            """,
+            (pickup_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="접수 내역을 찾을 수 없습니다.")
+    if row[1] == "canceled":
+        return {"success": True, "already": True, "message": "이미 취소된 접수입니다."}
+    if not row[2]:
+        snapshot = json.loads(row[8] or "{}")
+        try:
+            cancel_order(
+                req_no=row[3] or "",
+                res_no=row[4] or "",
+                regi_no=row[5] or "",
+                req_ymd=resolve_cancel_req_ymd(row[6], row[7]),
+                insert_snapshot=snapshot,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    canceled_at = datetime.now(KST).isoformat(timespec="seconds")
+    with get_connection() as con:
+        con.execute(
+            """
+            UPDATE kpost_pickup_requests
+            SET status='canceled', canceled_at=?, canceled_by=?, treat_status_name='취소'
+            WHERE id=?
+            """,
+            (canceled_at, user["nickname"], pickup_id),
+        )
+        con.commit()
+    add_log(
+        action_type="우체국회수취소",
+        target_type="kpost_pickup",
+        target_id=str(pickup_id),
+        target_name=row[5] or str(pickup_id),
+        user_nickname=user["nickname"],
+    )
+    return {"success": True, "id": pickup_id, "status": "canceled"}

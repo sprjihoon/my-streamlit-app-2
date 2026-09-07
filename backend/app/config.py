@@ -80,6 +80,21 @@ class Settings(BaseSettings):
     # OpenAI API 설정
     # ─────────────────────────────────────
     OPENAI_API_KEY: str = ""
+
+    # ─────────────────────────────────────
+    # 우체국 계약소포 (Infront 회수신청)
+    # ─────────────────────────────────────
+    EPOST_API_KEY: str = ""
+    EPOST_SECURITY_KEY: str = ""
+    EPOST_CUSTOMER_ID: str = ""
+    EPOST_APPROVAL_NO: str = ""
+    EPOST_OFFICE_SER: str = "260940699"
+    INFRONT_CENTER_ORD_NM: str = "인프론트"
+    INFRONT_CENTER_NAME: str = "인프론트"
+    INFRONT_CENTER_ZIPCODE: str = "41142"
+    INFRONT_CENTER_ADDR1: str = "대구광역시 동구 동촌로 1"
+    INFRONT_CENTER_ADDR2: str = "동대구우체국 2층 소포실"
+    INFRONT_CENTER_PHONE: str = ""
     
     @property
     def cors_origins_list(self) -> List[str]:

@@ -997,11 +997,33 @@ export async function getRepairLogs(params?: {
   );
 }
 
-export async function getRepairLogStats(params?: { period_from?: string; period_to?: string }) {
+function repairLogFilterQuery(params?: {
+  period_from?: string;
+  period_to?: string;
+  vendor?: string;
+  work_type?: string;
+  defect?: string;
+  author?: string;
+}) {
   const q = new URLSearchParams();
   if (params?.period_from) q.set('period_from', params.period_from);
   if (params?.period_to) q.set('period_to', params.period_to);
-  const qs = q.toString();
+  if (params?.vendor) q.set('vendor', params.vendor);
+  if (params?.work_type) q.set('work_type', params.work_type);
+  if (params?.defect) q.set('defect', params.defect);
+  if (params?.author) q.set('author', params.author);
+  return q;
+}
+
+export async function getRepairLogStats(params?: {
+  period_from?: string;
+  period_to?: string;
+  vendor?: string;
+  work_type?: string;
+  defect?: string;
+  author?: string;
+}) {
+  const qs = repairLogFilterQuery(params).toString();
   return fetchApi<RepairLogStats>(`/repair-log/stats${qs ? `?${qs}` : ''}`);
 }
 
@@ -1053,12 +1075,11 @@ export async function deleteRepairLog(id: number) {
 
 export async function uploadRepairPhotos(
   id: number,
-  files: { before?: File | null; after?: File | null; barcode?: File | null; extra?: File[] | null }
+  files: { before?: File | null; after?: File | null; extra?: File[] | null }
 ) {
   const form = new FormData();
   if (files.before) form.append('before', files.before);
   if (files.after) form.append('after', files.after);
-  if (files.barcode) form.append('barcode', files.barcode);
   for (const file of files.extra || []) {
     form.append('extra', file);
   }
@@ -1068,10 +1089,6 @@ export async function uploadRepairPhotos(
     throw new Error(err || `Upload Error: ${response.status}`);
   }
   return response.json() as Promise<{ success: boolean; message: string }>;
-}
-
-export function getRepairLogExportUrl(startDate: string, endDate: string) {
-  return `${API_BASE}/repair-log/export?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
 }
 
 export async function getOldRepairPhotos(days = 60) {
@@ -1265,5 +1282,125 @@ export async function getInvoiceMonthlyByVendor() {
 
 export async function getInvoiceAnalyticsSummary() {
   return fetchApi<InvoiceAnalyticsSummary>('/invoice-analytics/summary');
+}
+
+export interface KpostPickupBoxSize {
+  code: string;
+  label: string;
+  desc: string;
+  weight: number;
+  volume: number;
+}
+
+export interface KpostPickupItem {
+  id: number;
+  vendor: string;
+  order_no: string;
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  pickup_date: string;
+  goods_name: string;
+  box_size: string;
+  notes: string;
+  tracking_no: string;
+  req_no: string;
+  res_no: string;
+  res_date: string;
+  price: string;
+  post_office: string;
+  treat_status: string;
+  treat_status_name: string;
+  status: string;
+  is_test: boolean;
+  created_by: string;
+  created_at: string;
+  canceled_at: string | null;
+  canceled_by: string | null;
+}
+
+export interface KpostPickupPreview {
+  vendor: string;
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  pickup_date: string;
+  goods_name: string;
+  box_size: string;
+  box_label: string;
+  notes: string;
+  center_name: string;
+  center_addr: string;
+  office_ser?: string;
+  is_test: boolean;
+}
+
+export interface KpostPickupPayload {
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  pickup_date: string;
+  goods_name: string;
+  box_size: string;
+  notes: string;
+  confirm?: boolean;
+  test_mode?: boolean;
+}
+
+function pickupQuery(token: string, extra = '') {
+  return `?token=${encodeURIComponent(token)}${extra}`;
+}
+
+export async function getKpostPickupMeta(token: string) {
+  return fetchApi<{
+    vendor: string;
+    default_pickup_date: string;
+    today: string;
+    box_sizes: KpostPickupBoxSize[];
+    live_ready: boolean;
+    office_ser?: string;
+    center: { name: string; addr: string };
+  }>(`/kpost-pickup/meta${pickupQuery(token)}`);
+}
+
+export async function previewKpostPickup(token: string, payload: KpostPickupPayload) {
+  return fetchApi<{ ok: boolean; preview: KpostPickupPreview }>(
+    `/kpost-pickup/preview${pickupQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function listKpostPickups(token: string) {
+  return fetchApi<{ items: KpostPickupItem[] }>(`/kpost-pickup${pickupQuery(token)}`);
+}
+
+export async function createKpostPickup(token: string, payload: KpostPickupPayload) {
+  return fetchApi<{
+    success: boolean;
+    id: number;
+    tracking_no: string;
+    is_test: boolean;
+    duplicate_guard?: boolean;
+    message?: string;
+    pickup_date?: string;
+    post_office?: string;
+    price?: string;
+  }>(`/kpost-pickup${pickupQuery(token)}`, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, confirm: true }),
+  });
+}
+
+export async function cancelKpostPickup(token: string, id: number) {
+  return fetchApi<{ success: boolean; already?: boolean; message?: string }>(
+    `/kpost-pickup/${id}/cancel${pickupQuery(token, '&confirm=true')}`,
+    { method: 'POST' }
+  );
 }
 

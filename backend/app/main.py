@@ -28,6 +28,7 @@ from backend.app.api.leave import router as leave_router
 from backend.app.api.receipt import router as receipt_router
 from backend.app.api.certificates import router as certificates_router
 from backend.app.api.billing_invoice import router as billing_invoice_router, ensure_tables as ensure_billing_tables
+from backend.app.api.kpost_pickup import router as kpost_pickup_router, ensure_pickup_tables
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -74,6 +75,7 @@ app.include_router(leave_router)
 app.include_router(receipt_router)
 app.include_router(certificates_router)
 app.include_router(billing_invoice_router)
+app.include_router(kpost_pickup_router)
 
 
 # 루트 엔드포인트
@@ -101,6 +103,7 @@ async def startup_event():
     ensure_receipt_tables()
     ensure_repair_tables()
     ensure_billing_tables()
+    ensure_pickup_tables()
     # 스케줄러 시작 (평일 오전 10시 인사)
     from backend.app.services.scheduler import start_scheduler
     start_scheduler()
