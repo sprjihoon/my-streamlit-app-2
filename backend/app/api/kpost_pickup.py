@@ -421,6 +421,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             "goods_nm": validated["goods"],
             "weight": validated["spec"]["weight"],
             "volume": validated["spec"]["volume"],
+            "micro": validated["spec"].get("micro", False),
             "qty": validated["qty"],
             "deliv_msg": validated["notes"],
             "ret_visit_ymd": validated["visit_ymd"],

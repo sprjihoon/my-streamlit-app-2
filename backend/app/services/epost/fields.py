@@ -89,12 +89,12 @@ def treat_status_label(code: str | None, fallback: str | None = None) -> str:
 
 
 PICKUP_BOX_SIZES = [
-    {"code": "MICRO", "label": "극소", "desc": "1kg · 45cm · microYn=Y", "weight": 1, "volume": 45},
-    {"code": "DEFAULT", "label": "극소형", "desc": "2kg · 60cm", "weight": 2, "volume": 60},
-    {"code": "SMALL", "label": "소형", "desc": "5kg · 80cm", "weight": 5, "volume": 80},
-    {"code": "MEDIUM", "label": "중형", "desc": "10kg · 100cm", "weight": 10, "volume": 100},
-    {"code": "LARGE", "label": "대형", "desc": "20kg · 120cm", "weight": 20, "volume": 120},
-    {"code": "XL", "label": "특대형", "desc": "30kg · 160cm", "weight": 30, "volume": 160},
+    {"code": "MICRO", "label": "극소", "desc": "1kg · 45cm · microYn=Y", "weight": 1, "volume": 45, "micro": True},
+    {"code": "DEFAULT", "label": "극소형", "desc": "2kg · 60cm", "weight": 2, "volume": 60, "micro": False},
+    {"code": "SMALL", "label": "소형", "desc": "5kg · 80cm", "weight": 5, "volume": 80, "micro": False},
+    {"code": "MEDIUM", "label": "중형", "desc": "10kg · 100cm", "weight": 10, "volume": 100, "micro": False},
+    {"code": "LARGE", "label": "대형", "desc": "20kg · 120cm", "weight": 20, "volume": 120, "micro": False},
+    {"code": "XL", "label": "특대형", "desc": "30kg · 160cm", "weight": 30, "volume": 160, "micro": False},
 ]
 PICKUP_BOX_SIZE_MAP = {s["code"]: s for s in PICKUP_BOX_SIZES}
 
