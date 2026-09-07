@@ -54,6 +54,7 @@ class PickupSubmitRequest(BaseModel):
     pickup_date: str
     goods_name: str = "해외배송 물품"
     box_size: str = "DEFAULT"
+    box_quantity: int = 1
     notes: str = ""
     confirm: bool = False
     test_mode: bool = False
@@ -90,6 +91,7 @@ def ensure_pickup_tables() -> None:
                 pickup_date TEXT NOT NULL,
                 goods_name TEXT,
                 box_size TEXT,
+                box_quantity INTEGER NOT NULL DEFAULT 1,
                 notes TEXT,
                 tracking_no TEXT,
                 req_no TEXT,
@@ -178,6 +180,7 @@ def _build_validated(req: PickupSubmitRequest, *, live: bool) -> dict[str, Any]:
     visit_ymd = normalize_ret_visit_ymd(req.pickup_date)
     goods = (req.goods_name or "").strip() or "해외배송 물품"
     notes = (req.notes or "").strip()
+    qty = max(1, min(99, int(req.box_quantity or 1)))
     return {
         "name": name,
         "phone": phone,
@@ -188,6 +191,7 @@ def _build_validated(req: PickupSubmitRequest, *, live: bool) -> dict[str, Any]:
         "spec": spec,
         "visit_ymd": visit_ymd,
         "goods": goods,
+        "qty": qty,
         "notes": notes,
     }
 
@@ -210,7 +214,8 @@ def _preview_payload(validated: dict[str, Any], is_test: bool) -> dict[str, Any]
         "pickup_date": f"{visit[:4]}-{visit[4:6]}-{visit[6:8]}",
         "goods_name": validated["goods"],
         "box_size": validated["spec"]["code"],
-        "box_label": f"{validated['spec']['label']} · {validated['spec']['weight']}kg · {validated['spec']['volume']}cm",
+        "box_quantity": validated["qty"],
+        "box_label": f"{validated['spec']['label']} · {validated['spec']['weight']}kg · {validated['spec']['volume']}cm · {validated['qty']}개",
         "notes": validated["notes"],
         "center_name": validated["center"].get("display_name") or validated["center"]["ord_nm"],
         "center_addr": f"{validated['center']['addr1']} {validated['center']['addr2']}".strip(),
@@ -369,6 +374,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             "goods_nm": validated["goods"],
             "weight": validated["spec"]["weight"],
             "volume": validated["spec"]["volume"],
+            "qty": validated["qty"],
             "deliv_msg": validated["notes"],
             "ret_visit_ymd": validated["visit_ymd"],
             "test_yn": "Y" if not live else "N",
@@ -409,10 +415,10 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             """
             INSERT INTO kpost_pickup_requests (
                 vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
-                pickup_date, goods_name, box_size, notes, tracking_no, req_no, res_no, res_date,
+                pickup_date, goods_name, box_size, box_quantity, notes, tracking_no, req_no, res_no, res_date,
                 price, post_office, treat_status, treat_status_name, status, is_test,
                 insert_snapshot, created_by, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 "infront",
@@ -425,6 +431,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
                 pickup_iso,
                 validated["goods"],
                 validated["spec"]["code"],
+                validated["qty"],
                 validated["notes"],
                 result.get("regiNo") or "",
                 result.get("reqNo") or "",

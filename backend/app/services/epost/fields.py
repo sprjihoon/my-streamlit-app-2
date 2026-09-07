@@ -384,6 +384,11 @@ def build_return_pickup_params(input_data: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("수거지 도로명 주소(recAddr1)가 없습니다.")
     if len(addr2) < EPOST_PICKUP_DETAIL_MIN_LEN:
         raise ValueError("수거지 상세주소(recAddr2)가 없습니다. 동·호수·층을 2글자 이상 입력해주세요.")
+    qty = int(input_data.get("qty") or 1)
+    if qty < 1:
+        raise ValueError("박스 수량은 1개 이상이어야 합니다.")
+    if qty > 99:
+        raise ValueError("박스 수량은 99개 이하여야 합니다.")
     return {
         "custNo": input_data["cust_no"],
         "apprNo": input_data["appr_no"],
@@ -406,6 +411,7 @@ def build_return_pickup_params(input_data: dict[str, Any]) -> dict[str, Any]:
         "goodsNm": input_data.get("goods_nm") or "해외배송 물품",
         "weight": int(input_data.get("weight") or 2),
         "volume": int(input_data.get("volume") or 60),
+        "qty": qty,
         "microYn": "N",
         "delivMsg": input_data.get("deliv_msg") or None,
         "retVisitYmd": normalize_ret_visit_ymd(input_data["ret_visit_ymd"]),

@@ -57,6 +57,7 @@ function emptyForm(defaultDate = ''): KpostPickupPayload {
     pickup_date: defaultDate,
     goods_name: '해외배송 물품',
     box_size: 'DEFAULT',
+    box_quantity: 1,
     notes: '',
     test_mode: false,
   };
@@ -269,7 +270,7 @@ export default function ReturnRequestPage() {
               }}
             />
           </label>
-          <label style={{ gridColumn: '1 / -1' }}>
+          <label>
             박스 규격
             <select
               style={inputStyle}
@@ -285,6 +286,21 @@ export default function ReturnRequestPage() {
                 </option>
               ))}
             </select>
+          </label>
+          <label>
+            박스 수량
+            <input
+              type="number"
+              min="1"
+              max="99"
+              style={inputStyle}
+              value={form.box_quantity || 1}
+              onChange={(e) => {
+                setPreview(null);
+                const val = Math.max(1, Math.min(99, parseInt(e.target.value) || 1));
+                setForm((p) => ({ ...p, box_quantity: val }));
+              }}
+            />
           </label>
           <label style={{ gridColumn: '1 / -1' }}>
             수거 메모

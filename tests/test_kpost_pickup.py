@@ -63,6 +63,7 @@ def _req(**overrides) -> PickupSubmitRequest:
         "pickup_date": "2026-09-10",
         "goods_name": "의류",
         "box_size": "DEFAULT",
+        "box_quantity": 1,
         "notes": "문앞",
         "confirm": False,
         "test_mode": True,
@@ -120,6 +121,7 @@ def test_build_return_pickup_params_ord_center_rec_customer():
             "goods_nm": "의류",
             "weight": 2,
             "volume": 60,
+            "qty": 3,
             "ret_visit_ymd": "2026-09-10",
             "test_yn": "Y",
         }
@@ -130,6 +132,7 @@ def test_build_return_pickup_params_ord_center_rec_customer():
     assert params["ordZip"] == "41142"
     assert params["recZip"] == "06236"
     assert params["recAddr2"] == "201호"
+    assert params["qty"] == 3
     assert "recMob" not in params
     assert params["ordMob"] == "01027239490"
 
