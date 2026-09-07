@@ -113,6 +113,9 @@ my-streamlit-app/
 | 회수목록 수거송장번호 | 우체국이 `regiNo`를 준 뒤에만 DB 저장 |
 | 주소지 별칭 저장/자동입력 | `/return-request`, `/saved-recipients` |
 | **운영 접수 경로** | **Railway 싱가포르 → Vercel Seoul(ICN) 중계 → ship.epost.go.kr** |
+| 마이크로소포(`microYn=Y`) | ✅ MICRO 박스 선택 시 우체국 API에 `microYn=Y` 정상 전송 |
+| 송장조회 상태 정확도 | ✅ 수거일 미래 건 조회 생략 / 수거완료 오표시 자동 복원 / `집하` 단독 오탐 제거 |
+| 관리자 접수 삭제 | ✅ `DELETE /kpost-pickup/{id}` — 관리자만 완전 삭제 가능. 목록 삭제 버튼 |
 
 > Railway(싱가포르)에서 `ship.epost.go.kr` 직접 연결 불가(해외IP 차단). Vercel `/api/epost-relay` (Seoul ICN)를 경유해 우체국에 요청을 전달한다.  
 > 환경변수: Railway `EPOST_RELAY_URL=https://tillion.io.kr`, `EPOST_RELAY_SECRET=<secret>` / Vercel `EPOST_RELAY_SECRET=<same secret>`
@@ -122,15 +125,16 @@ my-streamlit-app/
 #### 화면
 
 - `/return-request`: 접수 폼. 다음 주소 검색, 별칭 자동입력, 박스·품명, **접수 버튼 1회로 바로 접수**
-- `/kpost-pickup-list`: 전체 목록, **수거송장번호**, 상태 새로고침, 취소
+- `/kpost-pickup-list`: 전체 목록, **수거송장번호**, 상태 새로고침, 취소, **관리자 삭제**
 - `/saved-recipients`: 별칭별 주소지 추가·수정·삭제
 
 주요 동작:
 - 저장된 별칭을 고르면 수취인·연락처·주소가 바로 채워짐
 - **해당 정보 저장하기**를 체크하면 별칭을 받고, 접수 성공 시 주소지를 같이 저장
-- 품명 기본값 의류, 박스 **기본 극소(1kg·45cm)** ~ 특대형, 수량 1~99
+- 품명 기본값 의류, 박스 **기본 극소(1kg·45cm)** ~ 특대형, 수량 1~99 (마이크로 극소 1kg·45cm 포함)
 - 같은 날짜·주소라도 재접수 허용 (중복 제한 없음)
 - 취소는 우체국 `GetResCancelCmd` POST, `reqYmd`는 **접수일(`res_date` → `created_at`)** 사용
+- **송장조회**: 수거일이 미래인 건은 조회 생략. 수거완료 오표시된 건은 신청접수로 자동 복원
 
 #### 우체국 계약·API 매핑
 
