@@ -29,6 +29,11 @@ from backend.app.services.epost.seed128 import seed128_encrypt
 EPOST_BASE_URL = "https://ship.epost.go.kr"
 EPOST_BASE_URLS = ("https://ship.epost.go.kr", "http://ship.epost.go.kr")
 EPOST_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/1.8.0_91)"
+
+# Vercel Seoul 중계 URL (싱가포르 → 우체국 직접 연결 불가 대응)
+# 예: https://tillion.io.kr  → /api/epost-relay 로 POST
+EPOST_RELAY_URL: str = os.getenv("EPOST_RELAY_URL", "").rstrip("/")
+EPOST_RELAY_SECRET: str = os.getenv("EPOST_RELAY_SECRET", "")
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -114,6 +119,41 @@ def _validate_return_pickup_plain(plain_text: str) -> None:
         raise EpostError("우체국 전송 오류: orderNo가 너무 깁니다.")
 
 
+def _call_epost_via_relay(
+    method: str,
+    url: str,
+    form_body: str,
+    timeout: float,
+) -> str:
+    """Vercel Seoul 중계를 경유해 우체국 API를 호출한다."""
+    relay_endpoint = f"{EPOST_RELAY_URL}/api/epost-relay"
+    try:
+        with httpx.Client(timeout=timeout + 5, follow_redirects=True) as client:
+            resp = client.post(
+                relay_endpoint,
+                json={"method": method, "url": url, "form_body": form_body},
+                headers={"x-relay-secret": EPOST_RELAY_SECRET},
+            )
+        if resp.status_code == 401:
+            raise EpostError("중계 인증 실패: EPOST_RELAY_SECRET을 확인하세요.")
+        if resp.status_code >= 400:
+            snippet = re.sub(r"\s+", " ", resp.text).strip()[:200]
+            raise EpostError(f"우체국 중계 오류(HTTP {resp.status_code}): {snippet}")
+        return resp.text
+    except EpostError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise EpostError(
+            f"우체국 API 응답 시간 초과({int(timeout)}초). 접수목록에서 송장 생성 여부를 확인한 뒤 다시 시도해주세요.",
+            maybe_booked=True,
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise EpostError(
+            f"우체국 API 서버에 연결하지 못했습니다. ({exc})",
+            maybe_booked=True,
+        ) from exc
+
+
 def call_epost(
     endpoint: str,
     params: dict[str, Any],
@@ -140,6 +180,29 @@ def call_epost(
         "Connection": "keep-alive",
         "Host": "ship.epost.go.kr",
     }
+
+    # ── Vercel Seoul 중계 경로 (EPOST_RELAY_URL 설정 시) ──────────────────
+    if EPOST_RELAY_URL and EPOST_RELAY_SECRET:
+        if is_insert:
+            body_dict: dict[str, str] = {"key": api_key, "regData": encrypted}
+            if test_yn == "Y":
+                body_dict["testYn"] = "Y"
+            form_body = urlencode(body_dict)
+            url = f"https://ship.epost.go.kr/{endpoint}"
+            xml = _call_epost_via_relay("POST", url, form_body, timeout)
+        else:
+            query_dict: dict[str, str] = {"key": api_key, "regData": encrypted}
+            if test_yn == "Y":
+                query_dict["testYn"] = "Y"
+            url = f"https://ship.epost.go.kr/{endpoint}?" + urlencode(query_dict)
+            xml = _call_epost_via_relay("GET", url, "", timeout)
+        if "<error>" in xml or "ERR-" in xml:
+            code = parse_xml(xml, "error_code") or "UNKNOWN"
+            msg = parse_xml(xml, "message") or xml[:200]
+            raise EpostError(_friendly_epost_error(code, msg))
+        return xml
+    # ────────────────────────────────────────────────────────────────────────
+
     last_error: Exception | None = None
     attempts = max(1, int(max_attempts))
     timed_out = False
