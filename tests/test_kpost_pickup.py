@@ -81,8 +81,12 @@ def _req(**overrides) -> PickupSubmitRequest:
     return PickupSubmitRequest(**data)
 
 
-def test_seed128_matches_infront_reference():
+def test_seed128_matches_rfc4269_and_infront_reference():
+    from backend.app.services.epost.seed128 import _seed_encrypt, _seed_round_key
+
     assert SS1[109] == 0x04040400
+    zero_ct = _seed_encrypt(bytes(range(16)), _seed_round_key(bytes(16))).hex()
+    assert zero_ct == "5ebac6e0054e166819aff1cc6d346cdb"
     assert (
         seed128_encrypt("custNo=0005085217&apprNo=7002080922&recNm=테스트", "testkey123456789")
         == "bc9b2a92bbaf266cda7e0a6c7e0f357d1635e1d35b725cc903f814452592c5ac6a8f447d5bec0fc22db4e2f221cd50111291f1c2ec9260b3418eec181d0cf3cb"

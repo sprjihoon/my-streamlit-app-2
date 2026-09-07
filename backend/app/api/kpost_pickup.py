@@ -475,7 +475,9 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             else:
                 hint = ""
                 msg = str(first_err)
-                if is_ambiguous_insert_error(first_err):
+                if "보안키" in msg or "고객번호" in msg:
+                    hint = ""
+                elif is_ambiguous_insert_error(first_err):
                     hint = " 우체국에 이미 접수되었을 수 있습니다. 목록을 확인한 뒤 다시 누르지 마세요."
                 elif "recAddr2" in msg:
                     hint = " 상세주소(동·호수·층)를 2글자 이상 입력했는지 확인해주세요."

@@ -38,7 +38,20 @@ class EpostError(RuntimeError):
 
 
 def env_value(key: str) -> str:
-    return (os.getenv(key) or "").strip()
+    return (os.getenv(key) or "").strip().strip('"').strip("'")
+
+
+def _friendly_epost_error(code: str, message: str) -> str:
+    text = f"{code}: {message}".strip()
+    blob = f"{code} {message}"
+    if "custNo" in blob or "custno" in blob.lower() or "고객번호" in blob:
+        if any(token in blob for token in ("ERR-111", "ERR-211", "누락", "없습니다")):
+            return (
+                "우체국이 접수 데이터(고객번호)를 읽지 못했습니다. "
+                "오픈API신청결과의 소포신청 '보안키보기' 값을 Railway EPOST_SECURITY_KEY에 다시 넣어주세요. "
+                f"({text})"
+            )
+    return f"EPost Error {text}"
 
 
 def has_epost_credentials() -> bool:
@@ -153,7 +166,7 @@ def call_epost(
             if "<error>" in xml or "ERR-" in xml:
                 code = parse_xml(xml, "error_code") or "UNKNOWN"
                 msg = parse_xml(xml, "message") or xml[:200]
-                raise EpostError(f"EPost Error {code}: {msg}")
+                raise EpostError(_friendly_epost_error(code, msg))
             return xml
         except EpostError:
             raise
@@ -194,7 +207,10 @@ def insert_order(params: dict[str, Any]) -> dict[str, str]:
             "microYn": "Y" if params.get("microYn") == "Y" else "N",
         }
     )
-    body.pop("testYn", None)
+    if test_yn == "Y":
+        body["testYn"] = "Y"
+    else:
+        body.pop("testYn", None)
     if not body.get("recZip") or len(str(body["recZip"])) != 5:
         raise EpostError("수취인 우편번호(recZip)가 없습니다.")
     if not body.get("recAddr1") or len(normalize_addr1(str(body["recAddr1"]))) < 2:
