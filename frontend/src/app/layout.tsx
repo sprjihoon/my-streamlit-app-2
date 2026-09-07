@@ -224,7 +224,7 @@ const NAV_GROUPS = [
     icon: <ClipboardList {...IC} />,
     items: [
       { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} /> },
-      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} />, allowDepartments: ['패션팀'] },
+      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} /> },
     ],
   },
   {
