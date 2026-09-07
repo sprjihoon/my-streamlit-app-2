@@ -190,13 +190,42 @@ docker-compose up --build
 
 ## 🚂 운영 배포
 
-공식 운영은 아래 두 곳만 본다. `origin/main` 푸시로 자동 배포된다. DB·사진·`OPENAI_API_KEY`는 배포 시 수동으로 바꾸지 않는다. 봇 NLU는 `BOT_NLU_MODEL=gpt-5.6-luna`, `BOT_NLU_REASONING_EFFORT=low`를 사용한다.
+### 배포 대상
+
+공식 운영은 아래 두 곳만 본다. **`origin/main` 브랜치 푸시로 자동 배포**된다. DB·사진·`OPENAI_API_KEY`는 배포 시 수동으로 바꾸지 않는다. 봇 NLU는 `BOT_NLU_MODEL=gpt-5.6-luna`, `BOT_NLU_REASONING_EFFORT=low`를 사용한다.
 
 | 역할 | 프로젝트 | 주소 | 비고 |
 |---|---|---|---|
 | 백엔드 | Railway `my-streamlit-app-2` | https://my-streamlit-app-2-production.up.railway.app | `railway.json` + `Dockerfile.backend`. 볼륨 `/app/data` |
 | 프론트엔드 | Vercel `my-streamlit-app-2` | https://tillion.io.kr | Root Directory = `frontend`. FastAPI가 아님 |
 | 사용하지 않음 | Vercel `my-streamlit-app` | — | 루트를 FastAPI로 오탐함. 빌드는 건너뛰고 Canceled가 정상 |
+
+### ⚠️ 배포 프로세스 (중요)
+
+**작업 플로우:**
+
+```bash
+# 1. feature 브랜치에서 작업
+git checkout feat/your-feature
+# ... 코드 수정 및 커밋 ...
+git add -A
+git commit -m "feat: your changes"
+git push origin feat/your-feature
+
+# 2. 배포하려면 반드시 main 브랜치로 푸시 (Vercel/Railway는 main만 배포)
+git push origin feat/your-feature:main
+
+# 또는 main 브랜치를 직접 업데이트
+git checkout main
+git merge feat/your-feature
+git push origin main
+```
+
+**주의:**
+- ⚠️ **feature 브랜치만 푸시하면 배포되지 않음** - Vercel과 Railway는 `main` 브랜치만 감시
+- ✅ 변경사항을 실서버에 반영하려면 **반드시 `main` 브랜치로 푸시**
+- 🔄 푸시 후 1-3분 내에 자동 배포 완료
+- 📱 배포 확인: https://tillion.io.kr (하드 리프레시: Ctrl+Shift+R)
 
 헬스 체크:
 
