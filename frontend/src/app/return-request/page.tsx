@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
@@ -10,6 +10,7 @@ import {
   getKpostPickupMeta,
   listSavedRecipients,
   previewKpostPickup,
+  saveRecipient,
   type KpostPickupBoxSize,
   type KpostPickupPayload,
   type KpostPickupPreview,
@@ -65,6 +66,35 @@ function emptyForm(defaultDate = ''): KpostPickupPayload {
   };
 }
 
+function applySavedRecipientToForm(
+  prev: KpostPickupPayload,
+  recipient: SavedRecipient,
+): KpostPickupPayload {
+  return {
+    ...prev,
+    recipient_name: recipient.recipient_name,
+    recipient_phone: recipient.recipient_phone,
+    zipcode: recipient.zipcode,
+    addr1: recipient.addr1,
+    addr2: recipient.addr2 || '',
+  };
+}
+
+function saveAliasError(
+  saveAddress: boolean,
+  alias: string,
+  existingLabels: string[],
+): string | null {
+  if (!saveAddress) return null;
+  const label = alias.trim();
+  if (!label) return '주소지를 저장하려면 별칭을 입력해주세요.';
+  if (label.length > 50) return '별칭은 50자 이하여야 합니다.';
+  if (existingLabels.includes(label)) {
+    return `'${label}' 별칭이 이미 있습니다. 다른 별칭을 입력해주세요.`;
+  }
+  return null;
+}
+
 export default function ReturnRequestPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -78,6 +108,9 @@ export default function ReturnRequestPage() {
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
   const [preview, setPreview] = useState<KpostPickupPreview | null>(null);
   const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
+  const [selectedSavedId, setSelectedSavedId] = useState('');
+  const [saveAddress, setSaveAddress] = useState(false);
+  const [addressAlias, setAddressAlias] = useState('');
 
 
   useEffect(() => {
@@ -108,12 +141,31 @@ export default function ReturnRequestPage() {
     })();
   }, []);
 
+  function applySavedById(id: string) {
+    if (!id) {
+      setSelectedSavedId('');
+      return;
+    }
+    const recipient = savedRecipients.find((item) => String(item.id) === id);
+    if (!recipient) return;
+    setPreview(null);
+    setSelectedSavedId(id);
+    setForm((prev) => applySavedRecipientToForm(prev, recipient));
+  }
+
+  function updateForm<K extends keyof KpostPickupPayload>(key: K, value: KpostPickupPayload[K]) {
+    setPreview(null);
+    setSelectedSavedId('');
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
   function openPostcode() {
     const run = () => {
       if (!window.daum?.Postcode) return;
       new window.daum.Postcode({
         oncomplete(data) {
           setPreview(null);
+          setSelectedSavedId('');
           setForm((prev) => ({
             ...prev,
             zipcode: data.zonecode,
@@ -135,6 +187,16 @@ export default function ReturnRequestPage() {
   async function handlePreview() {
     setError(null);
     setSuccess(null);
+    const aliasErr = saveAliasError(
+      saveAddress,
+      addressAlias,
+      savedRecipients.map((item) => item.label),
+    );
+    if (aliasErr) {
+      setPreview(null);
+      setError(aliasErr);
+      return;
+    }
     try {
       const data = await previewKpostPickup(token, form);
       setPreview(data.preview);
@@ -146,18 +208,49 @@ export default function ReturnRequestPage() {
 
   async function handleSubmit() {
     if (!preview) return;
+    const aliasErr = saveAliasError(
+      saveAddress,
+      addressAlias,
+      savedRecipients.map((item) => item.label),
+    );
+    if (aliasErr) {
+      setError(aliasErr);
+      return;
+    }
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
       const result = await createKpostPickup(token, form);
+      let extra = '';
+      if (saveAddress) {
+        const label = addressAlias.trim();
+        try {
+          await saveRecipient(token, {
+            label,
+            recipient_name: form.recipient_name,
+            recipient_phone: form.recipient_phone,
+            zipcode: form.zipcode,
+            addr1: form.addr1,
+            addr2: form.addr2,
+          });
+          extra = ` · 주소지 '${label}' 저장됨`;
+          const refreshed = await listSavedRecipients(token);
+          setSavedRecipients(refreshed.items || []);
+        } catch (err) {
+          extra = ` · 접수는 완료됐지만 주소지 저장 실패: ${parseApiError(err)}`;
+        }
+      }
       if (result.duplicate_guard) {
-        setSuccess(result.message || `기존 송장 ${result.tracking_no} 를 반환했습니다.`);
+        setSuccess((result.message || `기존 송장 ${result.tracking_no} 를 반환했습니다.`) + extra);
       } else {
         const mode = result.is_test ? '테스트 접수' : '우체국 접수';
-        setSuccess(`${mode} 완료. 송장 ${result.tracking_no}`);
+        setSuccess(`${mode} 완료. 송장 ${result.tracking_no}${extra}`);
       }
       setPreview(null);
+      setSelectedSavedId('');
+      setSaveAddress(false);
+      setAddressAlias('');
       setForm((prev) => emptyForm(prev.pickup_date));
     } catch (err) {
       setError(parseApiError(err));
@@ -184,59 +277,40 @@ export default function ReturnRequestPage() {
             ? `실접수 가능 · 공급지 ${officeSer} · 도착 ${centerLabel}`
             : `우체국 키가 없어 테스트 접수로 저장됩니다. 공급지 ${officeSer} · 도착 ${centerLabel}`}
         </p>
-        {savedRecipients.length > 0 && (
-          <div style={{ marginBottom: '1rem' }}>
-            <label className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'block' }}>
-              저장된 주소지 ({savedRecipients.length}개)
+        <div style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <label style={{ flex: '1 1 240px' }}>
+              저장된 주소지 별칭
+              <select
+                style={inputStyle}
+                value={selectedSavedId}
+                onChange={(e) => applySavedById(e.target.value)}
+                disabled={savedRecipients.length === 0}
+              >
+                <option value="">
+                  {savedRecipients.length === 0
+                    ? '저장된 주소지가 없습니다'
+                    : '별칭을 선택하면 접수정보가 자동입력됩니다'}
+                </option>
+                {savedRecipients.map((r) => (
+                  <option key={r.id} value={String(r.id)}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
             </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              {savedRecipients.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setPreview(null);
-                    setForm((prev) => ({
-                      ...prev,
-                      recipient_name: r.recipient_name,
-                      recipient_phone: r.recipient_phone,
-                      zipcode: r.zipcode,
-                      addr1: r.addr1,
-                      addr2: r.addr2,
-                    }));
-                  }}
-                  style={{ fontSize: '0.85rem', padding: '0.4rem 0.7rem' }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            <a href="/saved-recipients" className="btn btn-link" style={{ fontSize: '0.85rem', padding: '0.2rem' }}>
+            <a href="/saved-recipients" className="btn btn-secondary" style={{ fontSize: '0.85rem' }}>
               저장된 주소지 관리
             </a>
           </div>
-        )}
-        {savedRecipients.length === 0 && (
-          <div style={{ marginBottom: '1rem' }}>
-            <p className="text-muted" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-              자주 사용하는 주소지를 저장하고 빠르게 불러올 수 있습니다.
-            </p>
-            <a href="/saved-recipients" className="btn btn-secondary" style={{ fontSize: '0.9rem' }}>
-              저장된 주소지 추가
-            </a>
-          </div>
-        )}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <label>
             수취인 이름
             <input
               style={inputStyle}
               value={form.recipient_name}
-              onChange={(e) => {
-                setPreview(null);
-                setForm((p) => ({ ...p, recipient_name: e.target.value }));
-              }}
+              onChange={(e) => updateForm('recipient_name', e.target.value)}
             />
           </label>
           <label>
@@ -245,10 +319,7 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.recipient_phone}
               placeholder="01012345678"
-              onChange={(e) => {
-                setPreview(null);
-                setForm((p) => ({ ...p, recipient_phone: e.target.value }));
-              }}
+              onChange={(e) => updateForm('recipient_phone', e.target.value)}
             />
           </label>
           <div style={{ gridColumn: '1 / -1' }}>
@@ -272,10 +343,7 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.addr2}
               placeholder="예: 3층, 201호, 제3층"
-              onChange={(e) => {
-                setPreview(null);
-                setForm((p) => ({ ...p, addr2: e.target.value }));
-              }}
+              onChange={(e) => updateForm('addr2', e.target.value)}
             />
           </label>
           <label>
@@ -349,6 +417,44 @@ export default function ReturnRequestPage() {
               }}
             />
           </label>
+        </div>
+        <div
+          style={{
+            marginTop: '0.9rem',
+            padding: '0.85rem',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            background: 'var(--bg-secondary, #f8f9fa)',
+          }}
+        >
+          <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={saveAddress}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setSaveAddress(checked);
+                if (!checked) setAddressAlias('');
+                setPreview(null);
+              }}
+            />
+            해당 정보 저장하기
+          </label>
+          {saveAddress && (
+            <label style={{ display: 'block', marginTop: '0.7rem' }}>
+              주소지 별칭
+              <input
+                style={inputStyle}
+                value={addressAlias}
+                placeholder="예: 본사, 경기창고"
+                maxLength={50}
+                onChange={(e) => {
+                  setAddressAlias(e.target.value);
+                  setPreview(null);
+                }}
+              />
+            </label>
+          )}
         </div>
         {liveReady && (
           <label style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', alignItems: 'center' }}>

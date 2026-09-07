@@ -99,7 +99,7 @@ export default function SavedRecipientsPage() {
     setError(null);
     setSuccess(null);
     if (!form.label.trim()) {
-      setError('라벨을 입력해주세요.');
+      setError('별칭을 입력해주세요.');
       return;
     }
     if (!form.recipient_name.trim()) {
@@ -221,11 +221,11 @@ export default function SavedRecipientsPage() {
             <h4 style={{ marginBottom: '1rem' }}>{editingId ? '주소지 수정' : '새 주소지 추가'}</h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <label style={{ gridColumn: '1 / -1' }}>
-                라벨 (예: 본사, 경기창고)
+                별칭 (예: 본사, 경기창고)
                 <input
                   style={inputStyle}
                   value={form.label}
-                  placeholder="라벨 입력"
+                  placeholder="별칭 입력"
                   onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
                 />
               </label>

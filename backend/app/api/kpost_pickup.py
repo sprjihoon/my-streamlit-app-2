@@ -667,9 +667,12 @@ def update_saved_recipient(recipient_id: int, req: SavedRecipientRequest, token:
         )
         con.commit()
     add_log(
-        log_type="kpost_saved_recipient_update",
+        action_type="저장된주소지 수정",
+        target_type="saved_recipient",
+        target_id=str(recipient_id),
         target_name=label,
         user_nickname=user["nickname"],
+        details=f"{name} / {zipcode}",
     )
     return {"success": True, "id": recipient_id, "label": label}
 

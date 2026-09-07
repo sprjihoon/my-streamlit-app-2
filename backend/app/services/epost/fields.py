@@ -299,11 +299,18 @@ def resolve_office_ser(env: dict[str, str] | None = None) -> str:
     return raw or EPOST_OFFICE_SER
 
 
+def _spring_center_name(value: str | None) -> str:
+    name = (value or "").strip()
+    if not name or name == "인프론트":
+        return "스프링풀필먼트"
+    return name
+
+
 def resolve_infront_center(env: dict[str, str]) -> dict[str, str]:
     raw_addr1 = (env.get("INFRONT_CENTER_ADDR1") or EPOST_CENTER_DEFAULTS["addr1"]).strip()
-    display_name = (env.get("INFRONT_CENTER_NAME") or "").strip() or "스프링풀필먼트"
+    display_name = _spring_center_name(env.get("INFRONT_CENTER_NAME"))
     return {
-        "ord_nm": (env.get("INFRONT_CENTER_ORD_NM") or EPOST_CENTER_DEFAULTS["ord_nm"]).strip(),
+        "ord_nm": _spring_center_name(env.get("INFRONT_CENTER_ORD_NM") or EPOST_CENTER_DEFAULTS["ord_nm"]),
         "zip": re.sub(r"\D", "", env.get("INFRONT_CENTER_ZIPCODE") or EPOST_CENTER_DEFAULTS["zip"]),
         "addr1": sanitize_center_addr(raw_addr1, EPOST_CENTER_DEFAULTS["addr1"]),
         "addr2": sanitize_center_addr(

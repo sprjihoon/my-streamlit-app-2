@@ -102,11 +102,13 @@ my-streamlit-app/
 - 도착지: **스프링풀필먼트**(공급지코드 `260940699`, 동대구우체국 2층 소포실)
 - 수거지: 고객 주소 (다음 주소 검색 API 연동)
 - **3개의 페이지로 구성**:
-  - `/return-request`: 회수신청 접수 폼 (수취인 정보 입력, 저장된 주소지 빠른 선택, 박스 선택)
+  - `/return-request`: 회수신청 접수 폼 (수취인 정보 입력, 저장된 주소지 별칭 자동입력, 박스 선택)
   - `/kpost-pickup-list`: 접수목록 조회·관리 (필터, 취소)
   - `/saved-recipients`: 저장된 주소지 관리 (추가, 수정, 삭제)
 - 주요 기능:
-  - 저장된 주소지 관리 및 빠른 불러오기 (별칭으로 구분)
+  - 접수 정보에서 저장된 주소지 **별칭을 선택하면** 수취인·연락처·주소가 바로 자동입력됨
+  - 접수 정보 입력 중 **해당 정보 저장하기**를 체크하면 별칭을 입력하고, 접수 완료 시 주소지를 함께 저장
+  - 저장된 주소지 관리 페이지에서 별칭별 추가·수정·삭제
   - 품명 선택 (의류, 화장품, 악세사리, 기타 - 기본값: 의류)
   - 박스 규격 및 수량 설정 (극소형~특대형, 1~99개)
   - 날짜·수취인 필터로 회수신청 목록 조회
@@ -197,8 +199,8 @@ docker-compose up --build
 | 역할 | 프로젝트 | 주소 | 비고 |
 |---|---|---|---|
 | 백엔드 | Railway `my-streamlit-app-2` | https://my-streamlit-app-2-production.up.railway.app | `railway.json` + `Dockerfile.backend`. 볼륨 `/app/data` |
-| 프론트엔드 | Vercel `my-streamlit-app-2` | https://tillion.io.kr | Root Directory = `frontend`. FastAPI가 아님 |
-| 사용하지 않음 | Vercel `my-streamlit-app` | — | 루트를 FastAPI로 오탐함. 빌드는 건너뛰고 Canceled가 정상 |
+| 프론트엔드 | **Vercel `my-streamlit-app-2`만** | https://tillion.io.kr | Root Directory = `frontend`. FastAPI가 아님. 이 프로젝트에만 배포한다 |
+| 사용하지 않음 | Vercel `my-streamlit-app` | — | 루트를 FastAPI로 오탐함. 빌드는 건너뛰고 Canceled가 정상. 여기로 배포하지 않는다 |
 
 ### ⚠️ 배포 프로세스 (중요)
 

@@ -16,6 +16,7 @@ from backend.app.services.epost.fields import (
     normalize_pickup_addr2,
     normalize_ret_visit_ymd,
     require_phone,
+    resolve_infront_center,
     split_pickup_address,
 )
 from backend.app.services.epost.seed128 import SS1, seed128_encrypt
@@ -78,6 +79,17 @@ def test_seed128_matches_infront_reference():
         seed128_encrypt("custNo=0005085217&apprNo=7002080922&recNm=테스트", "testkey123456789")
         == "bc9b2a92bbaf266cda7e0a6c7e0f357d1635e1d35b725cc903f814452592c5ac6a8f447d5bec0fc22db4e2f221cd50111291f1c2ec9260b3418eec181d0cf3cb"
     )
+
+
+def test_resolve_center_ignores_legacy_infront_name():
+    center = resolve_infront_center(
+        {
+            "INFRONT_CENTER_NAME": "인프론트",
+            "INFRONT_CENTER_ORD_NM": "인프론트",
+        }
+    )
+    assert center["display_name"] == "스프링풀필먼트"
+    assert center["ord_nm"] == "스프링풀필먼트"
 
 
 def test_field_guards():

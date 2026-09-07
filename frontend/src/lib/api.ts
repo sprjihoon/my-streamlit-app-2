@@ -1412,20 +1412,32 @@ export async function listKpostPickups(
 }
 
 export async function createKpostPickup(token: string, payload: KpostPickupPayload) {
-  return fetchApi<{
-    success: boolean;
-    id: number;
-    tracking_no: string;
-    is_test: boolean;
-    duplicate_guard?: boolean;
-    message?: string;
-    pickup_date?: string;
-    post_office?: string;
-    price?: string;
-  }>(`/kpost-pickup${pickupQuery(token)}`, {
-    method: 'POST',
-    body: JSON.stringify({ ...payload, confirm: true }),
-  });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 90000);
+  try {
+    return await fetchApi<{
+      success: boolean;
+      id: number;
+      tracking_no: string;
+      is_test: boolean;
+      duplicate_guard?: boolean;
+      message?: string;
+      pickup_date?: string;
+      post_office?: string;
+      price?: string;
+    }>(`/kpost-pickup${pickupQuery(token)}`, {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, confirm: true }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('우체국 접수 응답이 90초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export async function cancelKpostPickup(token: string, id: number) {
