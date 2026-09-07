@@ -7,6 +7,7 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
   cancelKpostPickup,
+  deleteKpostPickup,
   listKpostPickups,
   refreshKpostPickupStatuses,
   type KpostPickupItem,
@@ -47,6 +48,7 @@ function canCancel(item: KpostPickupItem): boolean {
 
 export default function KpostPickupListPage() {
   const [token, setToken] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +77,8 @@ export default function KpostPickupListPage() {
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
     setToken(stored);
+    const adminFlag = localStorage.getItem('is_admin');
+    setIsAdmin(adminFlag === 'true' || adminFlag === '1');
     if (!stored) {
       setError('로그인이 필요합니다.');
       setLoading(false);
@@ -133,6 +137,18 @@ export default function KpostPickupListPage() {
     try {
       const result = await cancelKpostPickup(token, id);
       setSuccess(result.message || '회수신청을 취소했습니다.');
+      await loadList(token, currentFilters());
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleDelete(id: number, tracking: string) {
+    if (!window.confirm(`송장 ${tracking || id} 접수 내역을 DB에서 완전 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    setError(null);
+    try {
+      const result = await deleteKpostPickup(token, id);
+      setSuccess(`삭제 완료: ${result.tracking_no || id}`);
       await loadList(token, currentFilters());
     } catch (err) {
       setError(parseApiError(err));
@@ -230,7 +246,7 @@ export default function KpostPickupListPage() {
                         {item.created_by}
                         <div className="text-muted">{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
                       </td>
-                      <td>
+                      <td style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                         {canCancel(item) && (
                           <button
                             type="button"
@@ -238,6 +254,16 @@ export default function KpostPickupListPage() {
                             onClick={() => handleCancel(item.id, item.tracking_no)}
                           >
                             취소
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ color: '#dc2626' }}
+                            onClick={() => handleDelete(item.id, item.tracking_no)}
+                          >
+                            삭제
                           </button>
                         )}
                       </td>

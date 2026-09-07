@@ -381,10 +381,12 @@ def list_pickups(
 
 @router.post("")
 def create_pickup(req: PickupSubmitRequest, token: str):
+    import logging as _logging
+    _log = _logging.getLogger("epost")
     user = _get_user(token)
     ensure_pickup_tables()
     if not req.confirm:
-        raise HTTPException(status_code=400, detail="확인 후에만 접수할 수 있습니다. 미리보기를 확인한 뒤 접수를 눌러주세요.")
+        raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
 
     live = has_epost_credentials() and not req.test_mode
     try:
@@ -497,6 +499,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             status_code=502,
             detail="우체국이 수거송장번호를 반환하지 않았습니다. 접수가 완료되지 않았습니다.",
         )
+    _log.info("[InsertOrder OK] regiNo=%s reqNo=%s orderNo=%s user=%s", tracking, result.get("reqNo"), order_no, user.get("nickname"))
 
     snapshot = {k: v for k, v in params.items() if k != "testYn"}
     pickup_iso = f"{validated['visit_ymd'][:4]}-{validated['visit_ymd'][4:6]}-{validated['visit_ymd'][6:8]}"
@@ -865,6 +868,34 @@ def get_pickup(pickup_id: int, token: str, refresh: bool = False):
     return item
 
 
+@router.delete("/{pickup_id}")
+def delete_pickup(pickup_id: int, token: str):
+    """접수 내역을 DB에서 완전 삭제합니다 (관리자 전용)."""
+    user = _get_user(token)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자만 삭제할 수 있습니다.")
+    ensure_pickup_tables()
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT id, tracking_no, order_no, status FROM kpost_pickup_requests WHERE id = ?",
+            (pickup_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="접수 내역을 찾을 수 없습니다.")
+        tracking = row[1] or row[2] or str(pickup_id)
+        con.execute("DELETE FROM kpost_pickup_requests WHERE id = ?", (pickup_id,))
+        con.commit()
+    add_log(
+        action_type="우체국회수삭제",
+        target_type="kpost_pickup",
+        target_id=str(pickup_id),
+        target_name=tracking,
+        user_nickname=user["nickname"],
+        details=f"수동 삭제 (id={pickup_id})",
+    )
+    return {"success": True, "id": pickup_id, "tracking_no": tracking}
+
+
 @router.post("/{pickup_id}/cancel")
 def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
     user = _get_user(token)
@@ -885,24 +916,29 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
         return {"success": True, "already": True, "message": "이미 취소된 접수입니다."}
     if not row[2]:
         pickup_ymd = re.sub(r"\D", "", row[6] or "")[:8]
-        if len(pickup_ymd) != 8:
-            raise HTTPException(status_code=400, detail="수거 희망일 정보가 없어 취소할 수 없습니다.")
-        snapshot = json.loads(row[7] or "{}")
-        try:
-            cancel_order(
-                req_no=row[3] or "",
-                res_no=row[4] or "",
-                regi_no=row[5] or "",
-                req_ymd=pickup_ymd,
-                insert_snapshot=snapshot,
-            )
-        except Exception as exc:
-            msg = str(exc)
-            # 우체국에 해당 예약 정보가 없으면 (이미 취소됐거나 존재하지 않음) 그냥 통과
-            if "ERR-123" in msg or "예약된 정보가 없" in msg or "필수값 누락" in msg:
-                pass  # DB에서만 취소 처리
-            else:
-                raise HTTPException(status_code=502, detail=msg) from exc
+        req_no = row[3] or ""
+        res_no = row[4] or ""
+        regi_no = row[5] or ""
+        # req_no/res_no/regi_no 중 하나라도 없으면 우체국 취소 API 호출 불가 → DB만 처리
+        if req_no and res_no and regi_no and len(pickup_ymd) == 8:
+            snapshot = json.loads(row[7] or "{}")
+            try:
+                cancel_order(
+                    req_no=req_no,
+                    res_no=res_no,
+                    regi_no=regi_no,
+                    req_ymd=pickup_ymd,
+                    insert_snapshot=snapshot,
+                )
+            except Exception as exc:
+                msg = str(exc)
+                import logging as _logging
+                _logging.getLogger("epost").warning("[Cancel WARN] %s | regiNo=%s", msg, regi_no)
+                # 우체국에 예약 없음·필수값 누락 → DB만 취소 처리
+                if "ERR-123" in msg or "예약된 정보가 없" in msg or "필수값 누락" in msg:
+                    pass
+                else:
+                    raise HTTPException(status_code=502, detail=msg) from exc
     canceled_at = datetime.now(KST).isoformat(timespec="seconds")
     with get_connection() as con:
         con.execute(

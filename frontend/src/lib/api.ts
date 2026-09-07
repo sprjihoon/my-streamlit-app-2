@@ -1455,6 +1455,13 @@ export async function cancelKpostPickup(token: string, id: number) {
   );
 }
 
+export async function deleteKpostPickup(token: string, id: number) {
+  return fetchApi<{ success: boolean; id: number; tracking_no: string }>(
+    `/kpost-pickup/${id}${pickupQuery(token)}`,
+    { method: 'DELETE' }
+  );
+}
+
 export async function refreshKpostPickupStatuses(token: string) {
   return fetchApi<{
     success: boolean;
