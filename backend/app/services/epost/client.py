@@ -173,6 +173,8 @@ def call_epost(
         raise EpostError("EPOST_SECURITY_KEY 환경변수가 설정되지 않았습니다.")
 
     plain_text = build_epost_params(params, endpoint)
+    # InsertOrder와 GetResCancelCmd는 POST, 나머지(GetResInfo 등)는 GET
+    is_post = "InsertOrder" in endpoint or "GetResCancelCmd" in endpoint
     is_insert = "InsertOrder" in endpoint
     if is_insert and str(params.get("reqType")) == "2":
         _validate_return_pickup_plain(plain_text)
@@ -186,7 +188,7 @@ def call_epost(
 
     # ── Vercel Seoul 중계 경로 (EPOST_RELAY_URL 설정 시) ──────────────────
     if EPOST_RELAY_URL and EPOST_RELAY_SECRET:
-        if is_insert:
+        if is_post:
             body_dict: dict[str, str] = {"key": api_key, "regData": encrypted}
             if test_yn == "Y":
                 body_dict["testYn"] = "Y"
@@ -212,7 +214,7 @@ def call_epost(
     for attempt in range(1, attempts + 1):
         for base in EPOST_BASE_URLS:
             try:
-                if is_insert:
+                if is_post:
                     body = {"key": api_key, "regData": encrypted}
                     if test_yn == "Y":
                         body["testYn"] = "Y"
