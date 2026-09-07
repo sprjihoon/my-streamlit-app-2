@@ -14,10 +14,10 @@ from fastapi import HTTPException
 from backend.app.api.repair_log import (
     _log_photos,
     _log_where,
-    _query_repair_logs,
     export_logs,
     insert_repair_log_record,
 )
+from logic.db import get_connection
 from logic.repair_log_excel import create_repair_log_xlsx
 
 
@@ -77,7 +77,16 @@ def test_query_keeps_only_selected_vendor_and_period():
     _insert(날짜="2026-08-01", 업체명="로지킴", 제품명="지난달")
 
     where, params = _log_where("2026-09-01", "2026-09-30", "로지킴")
-    logs, total = _query_repair_logs(where, params)
+    
+    # Inline query since _query_repair_logs was removed
+    with get_connection() as con:
+        con.row_factory = lambda c, r: dict(zip([col[0] for col in c.description], r))
+        total = con.execute(f"SELECT COUNT(*) FROM repair_work_log {where}", params).fetchone()["COUNT(*)"]
+        logs = con.execute(
+            f"SELECT * FROM repair_work_log {where} ORDER BY 업체명, 날짜, id",
+            params,
+        ).fetchall()
+    
     assert total == 1
     assert logs[0]["업체명"] == "로지킴"
     assert logs[0]["제품명"] == "릴리프T"

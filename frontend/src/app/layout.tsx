@@ -211,20 +211,13 @@ const NAV_GROUPS = [
     icon: <LayoutDashboard {...IC} />,
     items: [
       { href: '/', label: '대시보드', icon: <LayoutDashboard {...IC} />, adminOnly: true },
+      { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} /> },
+      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} />, allowDepartments: ['패션팀'] },
       { href: '/upload', label: '데이터 업로드', icon: <Upload {...IC} />, adminOnly: true },
       { href: '/mapping', label: '업체 매핑 관리', icon: <Link2 {...IC} />, adminOnly: true },
       { href: '/vendors', label: '매핑 리스트', icon: <List {...IC} />, adminOnly: true },
       { href: '/rates', label: '요금표 관리', icon: <DollarSign {...IC} />, adminOnly: true },
       { href: '/insights', label: '데이터 인사이트', icon: <TrendingUp {...IC} /> },
-    ],
-  },
-  {
-    key: 'logs',
-    label: '일지',
-    icon: <ClipboardList {...IC} />,
-    items: [
-      { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} /> },
-      { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} /> },
     ],
   },
   {

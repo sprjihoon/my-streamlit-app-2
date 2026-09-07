@@ -105,7 +105,7 @@ def test_build_return_pickup_params_ord_center_rec_customer():
             "appr_no": "0000000000",
             "order_no": "SPB123",
             "center": {
-                "ord_nm": "인프론트",
+                "ord_nm": "스프링풀필먼트",
                 "zip": "41142",
                 "addr1": "대구광역시 동구 동촌로 1",
                 "addr2": "동대구우체국 2층 소포실",

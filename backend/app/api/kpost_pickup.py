@@ -308,7 +308,7 @@ def pickup_meta(token: str):
         "live_ready": live,
         "office_ser": resolve_office_ser(_env()),
         "center": {
-            "name": resolve_infront_center(_env()).get("display_name") or "인프론트",
+            "name": resolve_infront_center(_env()).get("display_name") or "스프링풀필먼트",
             "addr": f"{resolve_infront_center(_env())['addr1']} {resolve_infront_center(_env())['addr2']}".strip(),
         },
     }

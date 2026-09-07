@@ -72,7 +72,7 @@ export default function ReturnRequestPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [liveReady, setLiveReady] = useState(false);
-  const [centerLabel, setCenterLabel] = useState('스프링');
+  const [centerLabel, setCenterLabel] = useState('스프링풀필먼트 · 동대구우체국');
   const [officeSer, setOfficeSer] = useState('260940699');
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
@@ -187,7 +187,7 @@ export default function ReturnRequestPage() {
         {savedRecipients.length > 0 && (
           <div style={{ marginBottom: '1rem' }}>
             <label className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'block' }}>
-              저장된 주소지 빠른 선택 ({savedRecipients.length}개)
+              저장된 주소지 ({savedRecipients.length}개)
             </label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
               {savedRecipients.map((r) => (
@@ -212,8 +212,8 @@ export default function ReturnRequestPage() {
                 </button>
               ))}
             </div>
-            <a href="/saved-recipients" className="text-muted" style={{ fontSize: '0.85rem' }}>
-              주소지 관리 →
+            <a href="/saved-recipients" className="btn btn-link" style={{ fontSize: '0.85rem', padding: '0.2rem' }}>
+              저장된 주소지 관리
             </a>
           </div>
         )}
@@ -223,7 +223,7 @@ export default function ReturnRequestPage() {
               자주 사용하는 주소지를 저장하고 빠르게 불러올 수 있습니다.
             </p>
             <a href="/saved-recipients" className="btn btn-secondary" style={{ fontSize: '0.9rem' }}>
-              주소지 저장하기
+              저장된 주소지 추가
             </a>
           </div>
         )}
