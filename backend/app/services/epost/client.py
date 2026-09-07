@@ -126,6 +126,7 @@ def _call_epost_via_relay(
     timeout: float,
 ) -> str:
     """Vercel Seoul 중계를 경유해 우체국 API를 호출한다."""
+    import logging as _logging
     relay_endpoint = f"{EPOST_RELAY_URL}/api/epost-relay"
     try:
         with httpx.Client(timeout=timeout + 5, follow_redirects=True) as client:
@@ -139,7 +140,9 @@ def _call_epost_via_relay(
         if resp.status_code >= 400:
             snippet = re.sub(r"\s+", " ", resp.text).strip()[:200]
             raise EpostError(f"우체국 중계 오류(HTTP {resp.status_code}): {snippet}")
-        return resp.text
+        xml = resp.text
+        _logging.getLogger("epost").info("[relay response] %s", xml[:500])
+        return xml
     except EpostError:
         raise
     except httpx.TimeoutException as exc:

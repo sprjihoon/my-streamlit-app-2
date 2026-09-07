@@ -458,6 +458,11 @@ def create_pickup(req: PickupSubmitRequest, token: str):
         try:
             result = insert_order({**params, "orderNo": order_no})
         except Exception as first_err:
+            import logging as _logging
+            _logging.getLogger("epost").error(
+                "[InsertOrder ERR] %s | orderNo=%s | visit=%s",
+                first_err, order_no, validated.get("visit_ymd"),
+            )
             recovered = None
             if not is_ambiguous_insert_error(first_err):
                 try:
@@ -875,7 +880,12 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
                 insert_snapshot=snapshot,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            msg = str(exc)
+            # 우체국에 해당 예약 정보가 없으면 (이미 취소됐거나 존재하지 않음) 그냥 통과
+            if "ERR-123" in msg or "예약된 정보가 없" in msg or "필수값 누락" in msg:
+                pass  # DB에서만 취소 처리
+            else:
+                raise HTTPException(status_code=502, detail=msg) from exc
     canceled_at = datetime.now(KST).isoformat(timespec="seconds")
     with get_connection() as con:
         con.execute(
