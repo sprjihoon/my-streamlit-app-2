@@ -306,6 +306,22 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
+@router.get("/ping-epost")
+def ping_epost():
+    """싱가포르→우체국 연결 진단용 (임시)."""
+    import time
+    import httpx
+    results = {}
+    for url in ("https://ship.epost.go.kr", "http://ship.epost.go.kr"):
+        t = time.time()
+        try:
+            r = httpx.get(url, timeout=10.0, follow_redirects=True)
+            results[url] = {"status": r.status_code, "elapsed_s": round(time.time() - t, 2)}
+        except Exception as e:
+            results[url] = {"error": str(e), "elapsed_s": round(time.time() - t, 2)}
+    return results
+
+
 @router.get("/meta")
 def pickup_meta(token: str):
     _get_user(token)
