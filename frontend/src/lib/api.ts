@@ -1092,8 +1092,19 @@ export async function uploadRepairPhotos(
   return response.json() as Promise<{ success: boolean; message: string }>;
 }
 
-export function getRepairLogExportUrl(startDate: string, endDate: string) {
+export function getRepairLogExportUrl(
+  startDate: string,
+  endDate: string,
+  vendor?: string,
+  workType?: string,
+  defect?: string,
+  author?: string,
+) {
   const q = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  if (vendor) q.set('vendor', vendor);
+  if (workType) q.set('work_type', workType);
+  if (defect) q.set('defect', defect);
+  if (author) q.set('author', author);
   return `${API_BASE}/repair-log/export?${q.toString()}`;
 }
 
@@ -1336,6 +1347,7 @@ export interface KpostPickupPreview {
   addr2: string;
   pickup_date: string;
   goods_name: string;
+  box_quantity: number;
   box_size: string;
   box_label: string;
   notes: string;
@@ -1354,6 +1366,7 @@ export interface KpostPickupPayload {
   pickup_date: string;
   goods_name: string;
   box_size: string;
+  box_quantity?: number;
   notes: string;
   confirm?: boolean;
   test_mode?: boolean;

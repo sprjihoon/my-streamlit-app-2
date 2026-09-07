@@ -309,6 +309,48 @@ def _old_photo_cutoff(days: int = 60) -> str:
     return (datetime.now() - timedelta(days=max(1, days))).strftime("%Y-%m-%d")
 
 
+def _log_where(
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
+    vendor: Optional[str] = None,
+    work_type: Optional[str] = None,
+    defect: Optional[str] = None,
+    author: Optional[str] = None,
+) -> tuple[str, list]:
+    where = "WHERE 1=1"
+    params: list = []
+    if period_from:
+        where += " AND 날짜 >= ?"
+        params.append(period_from)
+    if period_to:
+        where += " AND 날짜 <= ?"
+        params.append(period_to)
+    if vendor:
+        where += " AND 업체명 = ?"
+        params.append(vendor)
+    if work_type:
+        where += " AND 작업 LIKE ?"
+        params.append(f"%{work_type}%")
+    if defect:
+        where += " AND 불량명 LIKE ?"
+        params.append(f"%{defect}%")
+    if author:
+        where += " AND 작성자 LIKE ?"
+        params.append(f"%{author}%")
+    return where, params
+
+
+def _log_photos(log: dict) -> list[tuple[str, Optional[Path]]]:
+    """보고용 작업 사진만. 바코드 사진은 포함하지 않는다."""
+    photos: list[tuple[str, Optional[Path]]] = [
+        ("사진1", _image_path(log.get("before_image"))),
+        ("사진2", _image_path(log.get("after_image"))),
+    ]
+    for i, fn in enumerate(log.get("extra_images") or [], start=1):
+        photos.append((f"추가{i}", _image_path(fn)))
+    return photos
+
+
 def _collect_stale_photo_names(con, cutoff: str) -> tuple[set[str], int]:
     """60일 지난 바코드/전후 사진 + 어디에도 안 묶인 서버 파일."""
     cutoff_ts = datetime.strptime(cutoff, "%Y-%m-%d").timestamp()
@@ -927,33 +969,49 @@ async def get_stats(
 async def export_logs(
     start_date: str = Query(...),
     end_date: str = Query(...),
+    vendor: Optional[str] = None,
+    work_type: Optional[str] = None,
+    defect: Optional[str] = None,
+    author: Optional[str] = None,
 ):
+    from logic.repair_log_excel import EXCEL_LOG_LIMIT, create_repair_log_xlsx
+
     ensure_repair_tables()
+    where, params = _log_where(start_date, end_date, vendor, work_type, defect, author)
+
     with get_connection() as con:
+        total = con.execute(f"SELECT COUNT(*) FROM repair_work_log {where}", params).fetchone()[0]
         rows = con.execute(
-            """SELECT 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고, 작성자, 출처, 저장시간, 수정자, 수정시간
-               FROM repair_work_log
-               WHERE 날짜 >= ? AND 날짜 <= ?
-               ORDER BY 날짜 DESC, id DESC""",
-            (start_date, end_date),
+            f"""SELECT id, 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고,
+                       작성자, 저장시간, 출처, barcode_image, before_image, after_image, 수정자, 수정시간, extra_images
+                FROM repair_work_log {where}
+                ORDER BY 업체명, 날짜, id""",
+            params,
         ).fetchall()
 
     if not rows:
-        raise HTTPException(status_code=404, detail="해당 기간에 수선일지가 없습니다.")
+        raise HTTPException(status_code=404, detail="해당 조건의 수선일지가 없습니다.")
 
-    df = pd.DataFrame(rows, columns=[
-        "날짜", "업체명", "제품명", "옵션", "바코드", "불량명", "작업", "수량", "비용", "비고", "작성자", "출처", "저장시간", "수정자", "수정시간",
-    ])
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="수선일지")
-        summary = (
-            df.groupby("업체명", dropna=False)
-            .agg(건수=("날짜", "count"), 합계=("비용", "sum"))
-            .reset_index()
+    if total > EXCEL_LOG_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"사진 포함 엑셀은 한 번에 {EXCEL_LOG_LIMIT}건까지입니다. 업체나 기간을 더 좁혀 주세요. (현재 {total}건)",
         )
-        summary.to_excel(writer, index=False, sheet_name="업체별 요약")
-    output.seek(0)
+
+    logs = []
+    for r in rows:
+        log = {
+            "id": r[0], "날짜": r[1], "업체명": r[2], "제품명": r[3], "옵션": r[4],
+            "바코드": r[5], "불량명": r[6], "작업": r[7], "수량": r[8], "비용": r[9],
+            "비고": r[10], "작성자": r[11], "저장시간": str(r[12]) if r[12] else None,
+            "출처": r[13], "barcode_image": r[14], "before_image": r[15],
+            "after_image": r[16], "수정자": r[17], "수정시간": str(r[18]) if r[18] else None,
+            "extra_images": parse_extra_images(r[19]),
+        }
+        log["photos"] = _log_photos(log)
+        logs.append(log)
+
+    output = io.BytesIO(create_repair_log_xlsx(logs))
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
