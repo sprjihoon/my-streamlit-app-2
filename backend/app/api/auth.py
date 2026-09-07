@@ -2,6 +2,7 @@
 backend/app/api/auth.py - 인증 및 사용자 관리 API
 내부 시스템용 간단한 인증
 """
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
@@ -536,4 +537,44 @@ async def change_password(request: ChangePasswordRequest, token: str):
         con.commit()
     
     return {"success": True, "message": "비밀번호가 변경되었습니다."}
+
+
+# ── 임시 테스트 엔드포인트 (배포 후 테스트 완료 시 삭제) ──────────────────────
+@router.post("/dev/test-setup")
+def dev_test_setup(secret: str):
+    """테스트 계정 생성 + 토큰 반환. SECRET_KEY로 보호."""
+    if secret != (os.getenv("SECRET_KEY") or ""):
+        raise HTTPException(status_code=403, detail="forbidden")
+    ensure_users_table()
+    uname = "__test_relay__"
+    pw = hash_password("Test1234!")
+    tok = secrets.token_hex(32)
+    with get_connection() as con:
+        con.execute("DELETE FROM users WHERE username=?", (uname,))
+        con.execute(
+            "INSERT INTO users (username,password_hash,nickname,is_admin) VALUES (?,?,?,0)",
+            (uname, pw, "테스트계정"),
+        )
+        uid = con.execute("SELECT user_id FROM users WHERE username=?", (uname,)).fetchone()[0]
+        con.execute(
+            "INSERT OR REPLACE INTO sessions (token, user_id) VALUES (?,?)",
+            (tok, uid),
+        )
+        con.commit()
+    return {"token": tok, "username": uname}
+
+
+@router.delete("/dev/test-cleanup")
+def dev_test_cleanup(secret: str):
+    """테스트 계정 삭제."""
+    if secret != (os.getenv("SECRET_KEY") or ""):
+        raise HTTPException(status_code=403, detail="forbidden")
+    with get_connection() as con:
+        row = con.execute("SELECT user_id FROM users WHERE username=?", ("__test_relay__",)).fetchone()
+        if row:
+            con.execute("DELETE FROM sessions WHERE user_id=?", (row[0],))
+            con.execute("DELETE FROM users WHERE user_id=?", (row[0],))
+            con.commit()
+    return {"deleted": True}
+# ─────────────────────────────────────────────────────────────────────────────
 
