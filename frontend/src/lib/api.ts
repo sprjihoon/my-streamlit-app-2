@@ -1466,6 +1466,17 @@ export async function saveRecipient(token: string, payload: SavedRecipientPayloa
   );
 }
 
+export async function updateSavedRecipient(token: string, id: number, payload: SavedRecipientPayload) {
+  return fetchApi<{ success: boolean; id: number; label: string }>(
+    `/kpost-pickup/saved-recipients/${id}${pickupQuery(token)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 export async function deleteSavedRecipient(token: string, id: number) {
   return fetchApi<{ success: boolean; id: number }>(
     `/kpost-pickup/saved-recipients/${id}${pickupQuery(token)}`,

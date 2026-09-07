@@ -227,6 +227,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/return-request', label: '회수신청', icon: <Truck {...IC} /> },
       { href: '/kpost-pickup-list', label: '접수목록', icon: <Truck {...IC} /> },
+      { href: '/saved-recipients', label: '저장된 주소지', icon: <Truck {...IC} /> },
     ],
   },
   {

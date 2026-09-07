@@ -7,11 +7,9 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
   createKpostPickup,
-  deleteSavedRecipient,
   getKpostPickupMeta,
   listSavedRecipients,
   previewKpostPickup,
-  saveRecipient,
   type KpostPickupBoxSize,
   type KpostPickupPayload,
   type KpostPickupPreview,
@@ -77,8 +75,6 @@ export default function ReturnRequestPage() {
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
   const [preview, setPreview] = useState<KpostPickupPreview | null>(null);
   const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [saveLabel, setSaveLabel] = useState('');
 
 
   useEffect(() => {
@@ -167,60 +163,6 @@ export default function ReturnRequestPage() {
     }
   }
 
-  function loadRecipient(recipient: SavedRecipient) {
-    setPreview(null);
-    setForm((prev) => ({
-      ...prev,
-      recipient_name: recipient.recipient_name,
-      recipient_phone: recipient.recipient_phone,
-      zipcode: recipient.zipcode,
-      addr1: recipient.addr1,
-      addr2: recipient.addr2,
-    }));
-  }
-
-  async function handleSaveRecipient() {
-    if (!saveLabel.trim()) {
-      setError('라벨을 입력해주세요.');
-      return;
-    }
-    if (!form.recipient_name.trim() || !form.recipient_phone.trim() || !form.zipcode.trim() || !form.addr1.trim()) {
-      setError('수취인 정보를 모두 입력해주세요.');
-      return;
-    }
-    setError(null);
-    try {
-      await saveRecipient(token, {
-        label: saveLabel.trim(),
-        recipient_name: form.recipient_name,
-        recipient_phone: form.recipient_phone,
-        zipcode: form.zipcode,
-        addr1: form.addr1,
-        addr2: form.addr2,
-      });
-      const recipients = await listSavedRecipients(token);
-      setSavedRecipients(recipients.items || []);
-      setSuccess(`'${saveLabel.trim()}' 수취인을 저장했습니다.`);
-      setShowSaveDialog(false);
-      setSaveLabel('');
-    } catch (err) {
-      setError(parseApiError(err));
-    }
-  }
-
-  async function handleDeleteRecipient(id: number, label: string) {
-    if (!window.confirm(`'${label}' 수취인을 삭제할까요?`)) return;
-    setError(null);
-    try {
-      await deleteSavedRecipient(token, id);
-      const recipients = await listSavedRecipients(token);
-      setSavedRecipients(recipients.items || []);
-      setSuccess(`'${label}' 수취인을 삭제했습니다.`);
-    } catch (err) {
-      setError(parseApiError(err));
-    }
-  }
-
   if (loading) return <Loading text="회수신청 로딩 중..." />;
 
   return (
@@ -239,55 +181,14 @@ export default function ReturnRequestPage() {
             ? `실접수 가능 · 공급지 ${officeSer} · 도착 ${centerLabel}`
             : `우체국 키가 없어 테스트 접수로 저장됩니다. 공급지 ${officeSer} · 도착 ${centerLabel}`}
         </p>
-        {savedRecipients.length > 0 && (
-          <div style={{ marginBottom: '1rem' }}>
-            <label className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'block' }}>
-              저장된 수취인 ({savedRecipients.length}개)
-            </label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {savedRecipients.map((r) => (
-                <div
-                  key={r.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    padding: '0.6rem',
-                    border: '1px solid var(--border)',
-                    borderRadius: '6px',
-                    backgroundColor: 'var(--bg-secondary)',
-                  }}
-                >
-                  <div style={{ flex: 1, fontSize: '0.9rem' }}>
-                    <strong>{r.label}</strong>
-                    <div className="text-muted" style={{ fontSize: '0.85rem' }}>
-                      {r.recipient_name} · {r.recipient_phone}
-                    </div>
-                    <div className="text-muted" style={{ fontSize: '0.85rem' }}>
-                      [{r.zipcode}] {r.addr1} {r.addr2}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => loadRecipient(r)}
-                    style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem', whiteSpace: 'nowrap' }}
-                  >
-                    불러오기
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => handleDeleteRecipient(r.id, r.label)}
-                    style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem', whiteSpace: 'nowrap' }}
-                  >
-                    삭제
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <div style={{ marginBottom: '1rem' }}>
+          <p className="text-muted" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+            자주 사용하는 주소지를 저장하고 빠르게 불러올 수 있습니다.
+          </p>
+          <a href="/saved-recipients" className="btn btn-secondary" style={{ fontSize: '0.9rem' }}>
+            저장된 주소지 관리 {savedRecipients.length > 0 && `(${savedRecipients.length}개)`}
+          </a>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <label>
             수취인 이름
@@ -419,50 +320,12 @@ export default function ReturnRequestPage() {
             테스트 접수 (우체국에 실제 신청하지 않음)
           </label>
         )}
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-secondary" onClick={handlePreview}>
-            미리보기
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowSaveDialog(true)}
-            disabled={!form.recipient_name.trim() || !form.zipcode.trim()}
-          >
-            수취인 저장
+        <div style={{ marginTop: '1rem' }}>
+          <button type="button" className="btn btn-primary" onClick={handlePreview} disabled={saving}>
+            {preview ? '다시 확인' : '접수 확인'}
           </button>
         </div>
       </Card>
-
-      {showSaveDialog && (
-        <Card title="수취인 저장">
-          <label>
-            라벨 (예: 홍길동 강남점)
-            <input
-              style={inputStyle}
-              value={saveLabel}
-              onChange={(e) => setSaveLabel(e.target.value)}
-              placeholder="수취인을 구분할 이름"
-              maxLength={50}
-            />
-          </label>
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
-            <button type="button" className="btn btn-primary" onClick={handleSaveRecipient}>
-              저장
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setShowSaveDialog(false);
-                setSaveLabel('');
-              }}
-            >
-              취소
-            </button>
-          </div>
-        </Card>
-      )}
 
       {preview && (
         <Card title="접수 확인">

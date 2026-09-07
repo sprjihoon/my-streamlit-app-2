@@ -607,6 +607,65 @@ def save_recipient(req: SavedRecipientRequest, token: str):
     }
 
 
+@router.put("/saved-recipients/{recipient_id}")
+def update_saved_recipient(recipient_id: int, req: SavedRecipientRequest, token: str):
+    user = _get_user(token)
+    ensure_pickup_tables()
+    label = (req.label or "").strip()
+    if len(label) < 1:
+        raise HTTPException(status_code=400, detail="라벨을 입력해주세요.")
+    if len(label) > 50:
+        raise HTTPException(status_code=400, detail="라벨은 50자 이하여야 합니다.")
+    name = (req.recipient_name or "").strip()
+    if len(name) < 1:
+        raise HTTPException(status_code=400, detail="수취인 이름을 입력해주세요.")
+    phone = normalize_phone(req.recipient_phone)
+    if len(phone) < 9:
+        raise HTTPException(status_code=400, detail="전화번호를 입력해주세요.")
+    zipcode = normalize_zip(req.zipcode)
+    if len(zipcode) != 5:
+        raise HTTPException(status_code=400, detail="우편번호 5자리가 필요합니다.")
+    addr1 = (req.addr1 or "").strip()
+    if len(addr1) < 2:
+        raise HTTPException(status_code=400, detail="주소를 입력해주세요.")
+    addr2 = (req.addr2 or "").strip()
+
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT id, user_id FROM saved_recipients WHERE id = ?",
+            (recipient_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="저장된 수취인을 찾을 수 없습니다.")
+        if row[1] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="다른 사용자의 수취인 정보는 수정할 수 없습니다.")
+
+        # Check if new label conflicts with existing (excluding current record)
+        existing = con.execute(
+            "SELECT id FROM saved_recipients WHERE user_id = ? AND label = ? AND id != ?",
+            (user["user_id"], label, recipient_id),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"'{label}' 라벨은 이미 사용 중입니다.")
+
+        con.execute(
+            """
+            UPDATE saved_recipients
+            SET label = ?, recipient_name = ?, recipient_phone = ?,
+                zipcode = ?, addr1 = ?, addr2 = ?
+            WHERE id = ?
+            """,
+            (label, name, phone, zipcode, addr1, addr2, recipient_id),
+        )
+        con.commit()
+    add_log(
+        log_type="kpost_saved_recipient_update",
+        target_name=label,
+        user_nickname=user["nickname"],
+    )
+    return {"success": True, "id": recipient_id, "label": label}
+
+
 @router.delete("/saved-recipients/{recipient_id}")
 def delete_saved_recipient(recipient_id: int, token: str):
     user = _get_user(token)
