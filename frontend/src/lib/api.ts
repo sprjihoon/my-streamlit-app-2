@@ -1075,11 +1075,12 @@ export async function deleteRepairLog(id: number) {
 
 export async function uploadRepairPhotos(
   id: number,
-  files: { before?: File | null; after?: File | null; extra?: File[] | null }
+  files: { before?: File | null; after?: File | null; barcode?: File | null; extra?: File[] | null }
 ) {
   const form = new FormData();
   if (files.before) form.append('before', files.before);
   if (files.after) form.append('after', files.after);
+  if (files.barcode) form.append('barcode', files.barcode);
   for (const file of files.extra || []) {
     form.append('extra', file);
   }
