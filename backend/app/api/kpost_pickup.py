@@ -123,6 +123,14 @@ def ensure_pickup_tables() -> None:
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_kpost_pickup_created ON kpost_pickup_requests(created_at DESC)"
         )
+        
+        # Migration: Add box_quantity column if it doesn't exist
+        try:
+            con.execute("SELECT box_quantity FROM kpost_pickup_requests LIMIT 1")
+        except Exception:
+            # Column doesn't exist, add it
+            con.execute("ALTER TABLE kpost_pickup_requests ADD COLUMN box_quantity INTEGER NOT NULL DEFAULT 1")
+        
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS saved_recipients (
