@@ -57,7 +57,7 @@ function emptyForm(defaultDate = ''): KpostPickupPayload {
     addr1: '',
     addr2: '',
     pickup_date: defaultDate,
-    goods_name: '해외배송 물품',
+    goods_name: '의류',
     box_size: 'DEFAULT',
     box_quantity: 1,
     notes: '',
@@ -72,7 +72,7 @@ export default function ReturnRequestPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [liveReady, setLiveReady] = useState(false);
-  const [centerLabel, setCenterLabel] = useState('스프링풀필먼트 · 동대구우체국');
+  const [centerLabel, setCenterLabel] = useState('스프링');
   const [officeSer, setOfficeSer] = useState('260940699');
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
@@ -184,14 +184,49 @@ export default function ReturnRequestPage() {
             ? `실접수 가능 · 공급지 ${officeSer} · 도착 ${centerLabel}`
             : `우체국 키가 없어 테스트 접수로 저장됩니다. 공급지 ${officeSer} · 도착 ${centerLabel}`}
         </p>
-        <div style={{ marginBottom: '1rem' }}>
-          <p className="text-muted" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-            자주 사용하는 주소지를 저장하고 빠르게 불러올 수 있습니다.
-          </p>
-          <a href="/saved-recipients" className="btn btn-secondary" style={{ fontSize: '0.9rem' }}>
-            저장된 주소지 관리 {savedRecipients.length > 0 && `(${savedRecipients.length}개)`}
-          </a>
-        </div>
+        {savedRecipients.length > 0 && (
+          <div style={{ marginBottom: '1rem' }}>
+            <label className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'block' }}>
+              저장된 주소지 빠른 선택 ({savedRecipients.length}개)
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              {savedRecipients.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setPreview(null);
+                    setForm((prev) => ({
+                      ...prev,
+                      recipient_name: r.recipient_name,
+                      recipient_phone: r.recipient_phone,
+                      zipcode: r.zipcode,
+                      addr1: r.addr1,
+                      addr2: r.addr2,
+                    }));
+                  }}
+                  style={{ fontSize: '0.85rem', padding: '0.4rem 0.7rem' }}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <a href="/saved-recipients" className="text-muted" style={{ fontSize: '0.85rem' }}>
+              주소지 관리 →
+            </a>
+          </div>
+        )}
+        {savedRecipients.length === 0 && (
+          <div style={{ marginBottom: '1rem' }}>
+            <p className="text-muted" style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+              자주 사용하는 주소지를 저장하고 빠르게 불러올 수 있습니다.
+            </p>
+            <a href="/saved-recipients" className="btn btn-secondary" style={{ fontSize: '0.9rem' }}>
+              주소지 저장하기
+            </a>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <label>
             수취인 이름
@@ -257,14 +292,19 @@ export default function ReturnRequestPage() {
           </label>
           <label>
             품명
-            <input
+            <select
               style={inputStyle}
               value={form.goods_name}
               onChange={(e) => {
                 setPreview(null);
                 setForm((p) => ({ ...p, goods_name: e.target.value }));
               }}
-            />
+            >
+              <option value="의류">의류</option>
+              <option value="화장품">화장품</option>
+              <option value="악세사리">악세사리</option>
+              <option value="기타">기타</option>
+            </select>
           </label>
           <label>
             박스 규격
