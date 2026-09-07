@@ -1,4 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "test ! -f next.config.js"
+  "ignoreCommand": "echo Skip: official frontend is only Vercel my-streamlit-app-2 with Root Directory=frontend && exit 0"
 }

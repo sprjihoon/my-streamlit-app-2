@@ -47,7 +47,8 @@ my-streamlit-app/
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
 ├── railway.json            # Railway 백엔드 배포
-├── vercel.json             # 루트 FastAPI 오탐 빌드만 건너뜀
+├── vercel.json             # 저장소 루트 Vercel 빌드는 항상 건너뜀
+├── frontend/vercel.json    # 공식 프로젝트(my-streamlit-app-2)만 빌드
 └── requirements.txt
 ```
 
@@ -199,8 +200,8 @@ docker-compose up --build
 | 역할 | 프로젝트 | 주소 | 비고 |
 |---|---|---|---|
 | 백엔드 | Railway `my-streamlit-app-2` | https://my-streamlit-app-2-production.up.railway.app | `railway.json` + `Dockerfile.backend`. 볼륨 `/app/data` |
-| 프론트엔드 | **Vercel `my-streamlit-app-2`만** | https://tillion.io.kr | Root Directory = `frontend`. FastAPI가 아님. 이 프로젝트에만 배포한다 |
-| 사용하지 않음 | Vercel `my-streamlit-app` | — | 루트를 FastAPI로 오탐함. 빌드는 건너뛰고 Canceled가 정상. 여기로 배포하지 않는다 |
+| 프론트엔드 | **Vercel `my-streamlit-app-2`만** | https://tillion.io.kr | Root Directory = `frontend`. FastAPI가 아님. **여기만 배포** |
+| 사용 금지 | Vercel `my-streamlit-app` | 배포하면 안 됨 | 옛 프로젝트. Git 연결을 끊어야 함 |
 
 ### ⚠️ 배포 프로세스 (중요)
 
@@ -238,12 +239,27 @@ curl -s https://my-streamlit-app-2-production.up.railway.app/health
 
 Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는다. 백엔드는 Railway에서만 올린다.
 
-루트 `vercel.json`은 install/build 명령 없이 `ignoreCommand`만 둔다.
+### 옛 Vercel `my-streamlit-app`에 배포하지 않기
 
-- `frontend`처럼 `next.config.js`가 있으면 공식 프론트를 빌드한다.
-- 저장소 루트처럼 `next.config.js`가 없으면 옛 `my-streamlit-app` 빌드를 건너뛴다. `frontend/frontend` 경로로 설치하지 않는다.
+같은 GitHub 저장소(`sprjihoon/my-streamlit-app-2`)에 Vercel 프로젝트가 두 개 붙어 있으면, `main` 푸시마다 옛 `my-streamlit-app`도 빌드를 시작한다. 공식 프론트는 `my-streamlit-app-2` → https://tillion.io.kr 만 사용한다.
 
-옛 프로젝트 Git 연결을 끊으면 GitHub에 예전 failure 배지가 남지 않는다.
+**대시보드에서 옛 프로젝트 Git 연결을 끊는다 (필수):**
+
+1. Vercel → 프로젝트 `my-streamlit-app` (뒤에 `-2`가 없는 것)
+2. Settings → Git
+3. **Disconnect** 로 `sprjihoon/my-streamlit-app-2` 연결을 해제
+4. 새 Vercel 프로젝트를 이 저장소로 만들지 않는다
+5. 배포 확인은 항상 https://tillion.io.kr 만 본다
+
+코드도 옛 프로젝트 빌드를 막는다.
+
+- 루트 `vercel.json`: 저장소 루트에서 시작된 Vercel 빌드는 항상 건너뛴다
+- `frontend/vercel.json`: `frontend/vercel-official-only.py`가 `my-streamlit-app-2` / `tillion.io.kr` 가 아니면 건너뛴다
+- 공식 프로젝트 Root Directory는 `frontend` 로 둔다. `frontend/frontend` 경로로 설치하지 않는다
+- 공식 프로젝트는 System Environment Variables 접근을 켠다. `VERCEL_PROJECT_PRODUCTION_URL`이 `tillion.io.kr`이면 빌드한다
+- 시스템 변수가 꺼져 있으면 공식 프로젝트에만 `ALLOW_VERCEL_FRONTEND_DEPLOY=1`을 넣는다. 옛 프로젝트에는 넣지 않는다
+
+옛 프로젝트 Git 연결을 끊으면 GitHub에 예전 failure 배지가 남지 않고, 빌드 슬롯도 공식 `my-streamlit-app-2`만 쓴다.
 
 ---
 

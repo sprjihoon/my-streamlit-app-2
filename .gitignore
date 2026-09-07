@@ -44,3 +44,7 @@ frontend/tsconfig.tsbuildinfo
 .vercel/
 *.patch
 .pytest_cache/
+
+.vercel
+.env*.local
+.env.vercel.production

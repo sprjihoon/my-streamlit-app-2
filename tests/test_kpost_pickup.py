@@ -6,10 +6,15 @@ from fastapi import HTTPException
 
 from backend.app.api.kpost_pickup import (
     PickupSubmitRequest,
+    SavedRecipientRequest,
     cancel_pickup,
     create_pickup,
+    delete_saved_recipient,
     list_pickups,
+    list_saved_recipients,
     preview_pickup,
+    save_recipient,
+    update_saved_recipient,
 )
 from backend.app.services.epost.fields import (
     build_return_pickup_params,
@@ -203,3 +208,75 @@ def test_missing_detail_rejected_when_live_like_validation(isolated_runtime, mon
     except HTTPException as exc:
         assert exc.status_code == 400
         assert "상세주소" in str(exc.detail)
+
+
+def _saved_req(**overrides) -> SavedRecipientRequest:
+    data = {
+        "label": "본사",
+        "recipient_name": "홍길동",
+        "recipient_phone": "010-1234-5678",
+        "zipcode": "06236",
+        "addr1": "서울특별시 강남구 테헤란로 123",
+        "addr2": "201호",
+    }
+    data.update(overrides)
+    return SavedRecipientRequest(**data)
+
+
+def test_saved_recipient_alias_crud_and_autofill_fields(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    saved = save_recipient(_saved_req(), token)
+    assert saved["success"] is True
+    assert saved["label"] == "본사"
+
+    listed = list_saved_recipients(token)
+    assert len(listed["items"]) == 1
+    item = listed["items"][0]
+    assert item["recipient_name"] == "홍길동"
+    assert item["recipient_phone"] == "01012345678"
+    assert item["zipcode"] == "06236"
+    assert item["addr1"].startswith("서울")
+    assert item["addr2"] == "201호"
+
+    try:
+        save_recipient(_saved_req(), token)
+        raise AssertionError("duplicate alias should fail")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "본사" in str(exc.detail)
+
+    updated = update_saved_recipient(item["id"], _saved_req(label="경기창고"), token)
+    assert updated["label"] == "경기창고"
+    assert list_saved_recipients(token)["items"][0]["label"] == "경기창고"
+
+    deleted = delete_saved_recipient(item["id"], token)
+    assert deleted["success"] is True
+    assert list_saved_recipients(token)["items"] == []
+
+
+def test_saved_recipient_isolated_by_user(isolated_runtime):
+    token_a = _seed_user(isolated_runtime["db"], token="tok-a")
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "INSERT INTO users (username, password_hash, nickname, is_admin, department) VALUES (?,?,?,?,?)",
+            ("other", "x", "다른담당", 0, "물류팀"),
+        )
+        con.execute("INSERT INTO sessions (token, user_id) VALUES (?, 2)", ("tok-b",))
+        con.commit()
+
+    save_recipient(_saved_req(label="A창고"), token_a)
+    assert list_saved_recipients("tok-b")["items"] == []
+    other = save_recipient(_saved_req(label="B창고"), "tok-b")
+    assert [row["label"] for row in list_saved_recipients(token_a)["items"]] == ["A창고"]
+
+    try:
+        update_saved_recipient(other["id"], _saved_req(label="침범"), token_a)
+        raise AssertionError("other user update should fail")
+    except HTTPException as exc:
+        assert exc.status_code == 403
+
+    try:
+        delete_saved_recipient(other["id"], token_a)
+        raise AssertionError("other user delete should fail")
+    except HTTPException as exc:
+        assert exc.status_code == 403
