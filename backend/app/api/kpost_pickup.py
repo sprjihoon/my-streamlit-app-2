@@ -60,6 +60,15 @@ class PickupSubmitRequest(BaseModel):
     test_mode: bool = False
 
 
+class SavedRecipientRequest(BaseModel):
+    label: str
+    recipient_name: str
+    recipient_phone: str
+    zipcode: str
+    addr1: str
+    addr2: str = ""
+
+
 def _env() -> dict[str, str]:
     keys = (
         "INFRONT_CENTER_ORD_NM",
@@ -707,14 +716,3 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
         user_nickname=user["nickname"],
     )
     return {"success": True, "id": pickup_id, "status": "canceled"}
-
-
-class SavedRecipientRequest(BaseModel):
-    label: str
-    recipient_name: str
-    recipient_phone: str
-    zipcode: str
-    addr1: str
-    addr2: str = ""
-
-
