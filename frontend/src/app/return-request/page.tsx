@@ -227,7 +227,7 @@ export default function ReturnRequestPage() {
     <div>
       <PageHeader
         title="회수신청"
-        subtitle="Infront 고객 수거지로 우체국 방문수거를 접수합니다. 도착지는 동대구우체국, 공급지는 스프링풀필먼트입니다."
+        subtitle="고객 수거지로 우체국 방문수거를 접수합니다. 도착지는 동대구우체국, 공급지는 스프링풀필먼트입니다."
       />
 
       {error && <Alert type="error">{error}</Alert>}
