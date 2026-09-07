@@ -209,16 +209,17 @@ def split_pickup_address(addr1: str | None, detail: str | None) -> tuple[str, st
 
 
 def validate_pickup_address_detail(detail: str | None) -> str | None:
+    """
+    상세주소 검증. 우체국은 실제로는 빈 값만 아니면 대부분 허용함.
+    너무 엄격한 검증은 오히려 정상 입력을 막을 수 있음.
+    """
     trimmed = (detail or "").strip()
     if not trimmed:
         return "상세주소(동·호수, 층)를 입력해주세요. 우체국 수거에 필요합니다."
-    if len(trimmed) < EPOST_PICKUP_DETAIL_MIN_LEN:
-        if re.fullmatch(r"\d", trimmed):
-            return f'"{trimmed}"만으로는 부족합니다. 예: {trimmed}층, 302호'
-        return "상세주소는 2글자 이상 입력해주세요. (예: 201호, 제3층)"
-    compact = re.sub(r"\s+", "", trimmed)
-    if re.fullmatch(r"\d+층", compact):
-        return f'"{trimmed}"만 입력하면 우체국 접수가 거절될 수 있습니다. 예: 제{compact}, 201호'
+    # 1글자만 있는 경우만 경고 (예: "3" 단독)
+    if len(trimmed) == 1 and trimmed.isdigit():
+        return f'"{trimmed}"만으로는 부족합니다. 예: {trimmed}층, 302호'
+    # 그 외에는 모두 허용 (2층, 3층, 201호, 제3층 등)
     return None
 
 

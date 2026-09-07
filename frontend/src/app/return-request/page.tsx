@@ -236,7 +236,7 @@ export default function ReturnRequestPage() {
             <input
               style={inputStyle}
               value={form.addr2}
-              placeholder="예: 201호, 제3층"
+              placeholder="예: 3층, 201호, 제3층"
               onChange={(e) => {
                 setPreview(null);
                 setForm((p) => ({ ...p, addr2: e.target.value }));
