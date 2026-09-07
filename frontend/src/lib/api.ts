@@ -1091,6 +1091,11 @@ export async function uploadRepairPhotos(
   return response.json() as Promise<{ success: boolean; message: string }>;
 }
 
+export function getRepairLogExportUrl(startDate: string, endDate: string) {
+  const q = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  return `${API_BASE}/repair-log/export?${q.toString()}`;
+}
+
 export async function getOldRepairPhotos(days = 60) {
   return fetchApi<{ cutoff: string; days: number; logs: number; files: number }>(
     `/repair-log/photos/old?days=${days}`
