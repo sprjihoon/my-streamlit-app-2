@@ -13,7 +13,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 const ALLOWED_HOST = 'ship.epost.go.kr';
-const RELAY_SECRET = process.env.EPOST_RELAY_SECRET ?? '';
+const RELAY_SECRET = (process.env.EPOST_RELAY_SECRET ?? '').trim();
 
 export async function POST(req: NextRequest) {
   // 인증

@@ -32,8 +32,8 @@ EPOST_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/1.8.0_91)"
 
 # Vercel Seoul 중계 URL (싱가포르 → 우체국 직접 연결 불가 대응)
 # 예: https://tillion.io.kr  → /api/epost-relay 로 POST
-EPOST_RELAY_URL: str = os.getenv("EPOST_RELAY_URL", "").rstrip("/")
-EPOST_RELAY_SECRET: str = os.getenv("EPOST_RELAY_SECRET", "")
+EPOST_RELAY_URL: str = os.getenv("EPOST_RELAY_URL", "").strip().rstrip("/")
+EPOST_RELAY_SECRET: str = os.getenv("EPOST_RELAY_SECRET", "").strip()
 KST = ZoneInfo("Asia/Seoul")
 
 
