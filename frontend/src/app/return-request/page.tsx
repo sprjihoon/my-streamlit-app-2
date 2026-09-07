@@ -241,20 +241,49 @@ export default function ReturnRequestPage() {
         </p>
         {savedRecipients.length > 0 && (
           <div style={{ marginBottom: '1rem' }}>
-            <label className="text-muted" style={{ fontSize: '0.85rem' }}>
-              저장된 수취인
+            <label className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem', display: 'block' }}>
+              저장된 수취인 ({savedRecipients.length}개)
             </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {savedRecipients.map((r) => (
-                <button
+                <div
                   key={r.id}
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => loadRecipient(r)}
-                  style={{ fontSize: '0.85rem', padding: '0.4rem 0.7rem' }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.6rem',
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    backgroundColor: 'var(--bg-secondary)',
+                  }}
                 >
-                  {r.label}
-                </button>
+                  <div style={{ flex: 1, fontSize: '0.9rem' }}>
+                    <strong>{r.label}</strong>
+                    <div className="text-muted" style={{ fontSize: '0.85rem' }}>
+                      {r.recipient_name} · {r.recipient_phone}
+                    </div>
+                    <div className="text-muted" style={{ fontSize: '0.85rem' }}>
+                      [{r.zipcode}] {r.addr1} {r.addr2}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => loadRecipient(r)}
+                    style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem', whiteSpace: 'nowrap' }}
+                  >
+                    불러오기
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleDeleteRecipient(r.id, r.label)}
+                    style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem', whiteSpace: 'nowrap' }}
+                  >
+                    삭제
+                  </button>
+                </div>
               ))}
             </div>
           </div>
