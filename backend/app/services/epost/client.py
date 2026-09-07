@@ -27,6 +27,7 @@ from backend.app.services.epost.fields import (
 from backend.app.services.epost.seed128 import seed128_encrypt
 
 EPOST_BASE_URL = "https://ship.epost.go.kr"
+EPOST_BASE_URLS = ("https://ship.epost.go.kr", "http://ship.epost.go.kr")
 EPOST_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/1.8.0_91)"
 KST = ZoneInfo("Asia/Seoul")
 
@@ -134,59 +135,64 @@ def call_epost(
         _validate_return_pickup_plain(plain_text)
 
     encrypted = seed128_encrypt(plain_text, security_key)
-    headers = {"User-Agent": EPOST_USER_AGENT}
+    headers = {
+        "User-Agent": EPOST_USER_AGENT,
+        "Connection": "keep-alive",
+        "Host": "ship.epost.go.kr",
+    }
     last_error: Exception | None = None
     attempts = max(1, int(max_attempts))
+    timed_out = False
     for attempt in range(1, attempts + 1):
-        try:
-            if is_insert:
-                body = {"key": api_key, "regData": encrypted}
-                if test_yn == "Y":
-                    body["testYn"] = "Y"
-                with httpx.Client(timeout=timeout) as client:
-                    resp = client.post(
-                        f"{EPOST_BASE_URL}/{endpoint}",
-                        content=urlencode(body),
-                        headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
-                    )
-            else:
-                query = {"key": api_key, "regData": encrypted}
-                if test_yn == "Y":
-                    query["testYn"] = "Y"
-                with httpx.Client(timeout=timeout) as client:
-                    resp = client.get(
-                        f"{EPOST_BASE_URL}/{endpoint}",
-                        params=query,
-                        headers=headers,
-                    )
-            if resp.status_code >= 400:
-                snippet = re.sub(r"\s+", " ", resp.text).strip()[:200]
-                raise EpostError(f"우체국 API 오류(HTTP {resp.status_code}): {snippet}")
-            xml = resp.text
-            if "<error>" in xml or "ERR-" in xml:
-                code = parse_xml(xml, "error_code") or "UNKNOWN"
-                msg = parse_xml(xml, "message") or xml[:200]
-                raise EpostError(_friendly_epost_error(code, msg))
-            return xml
-        except EpostError:
-            raise
-        except httpx.TimeoutException as exc:
-            last_error = exc
-            if attempt >= attempts:
-                raise EpostError(
-                    f"우체국 API 응답 시간 초과({int(timeout)}초). 접수목록에서 송장 생성 여부를 확인한 뒤 다시 시도해주세요.",
-                    maybe_booked=True,
-                )
-            time.sleep(0.4)
-        except httpx.HTTPError as exc:
-            last_error = exc
-            if attempt >= attempts:
-                raise EpostError(
-                    f"우체국 API 서버({EPOST_BASE_URL})에 연결하지 못했습니다. ({exc})",
-                    maybe_booked=True,
-                )
-            time.sleep(0.4)
-    raise EpostError(str(last_error or "우체국 API 호출 실패"), maybe_booked=True)
+        for base in EPOST_BASE_URLS:
+            try:
+                if is_insert:
+                    body = {"key": api_key, "regData": encrypted}
+                    if test_yn == "Y":
+                        body["testYn"] = "Y"
+                    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                        resp = client.post(
+                            f"{base}/{endpoint}",
+                            content=urlencode(body),
+                            headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
+                        )
+                else:
+                    query = {"key": api_key, "regData": encrypted}
+                    if test_yn == "Y":
+                        query["testYn"] = "Y"
+                    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                        resp = client.get(
+                            f"{base}/{endpoint}",
+                            params=query,
+                            headers=headers,
+                        )
+                if resp.status_code >= 400:
+                    snippet = re.sub(r"\s+", " ", resp.text).strip()[:200]
+                    raise EpostError(f"우체국 API 오류(HTTP {resp.status_code}): {snippet}")
+                xml = resp.text
+                if "<error>" in xml or "ERR-" in xml:
+                    code = parse_xml(xml, "error_code") or "UNKNOWN"
+                    msg = parse_xml(xml, "message") or xml[:200]
+                    raise EpostError(_friendly_epost_error(code, msg))
+                return xml
+            except EpostError:
+                raise
+            except httpx.TimeoutException as exc:
+                timed_out = True
+                last_error = exc
+            except httpx.HTTPError as exc:
+                last_error = exc
+        if attempt < attempts:
+            time.sleep(0.2)
+    if timed_out:
+        raise EpostError(
+            f"우체국 API 응답 시간 초과({int(timeout)}초). 접수목록에서 송장 생성 여부를 확인한 뒤 다시 시도해주세요.",
+            maybe_booked=True,
+        )
+    raise EpostError(
+        f"우체국 API 서버({EPOST_BASE_URL})에 연결하지 못했습니다. ({last_error})",
+        maybe_booked=True,
+    )
 
 
 def insert_order(params: dict[str, Any]) -> dict[str, str]:
@@ -222,7 +228,7 @@ def insert_order(params: dict[str, Any]) -> dict[str, str]:
         require_phone(str(body.get("ordMob") or ""), "센터 연락처(ordMob)")
         require_phone(str(body.get("recTel") or body.get("recMob") or ""), "수거 연락처(recTel)")
 
-    xml = call_epost("api.InsertOrder.jparcel", body, test_yn, timeout=15.0, max_attempts=2)
+    xml = call_epost("api.InsertOrder.jparcel", body, test_yn, timeout=8.0, max_attempts=1)
     result = {
         "reqNo": parse_xml(xml, "reqNo") or "",
         "resNo": parse_xml(xml, "resNo") or "",

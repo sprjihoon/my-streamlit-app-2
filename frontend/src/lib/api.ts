@@ -31,7 +31,7 @@ async function fetchApi<T>(
     });
   } catch (e) {
     const name = e instanceof Error ? e.name : '';
-    if (name === 'AbortError') {
+    if (name === 'AbortError' || (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError')) {
       throw e;
     }
     const msg = e instanceof Error ? e.message : String(e);
@@ -1417,7 +1417,7 @@ export async function listKpostPickups(
 
 export async function createKpostPickup(token: string, payload: KpostPickupPayload) {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 45000);
+  const timer = window.setTimeout(() => controller.abort(), 18000);
   try {
     return await fetchApi<{
       success: boolean;
@@ -1435,8 +1435,12 @@ export async function createKpostPickup(token: string, payload: KpostPickupPaylo
       signal: controller.signal,
     });
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error('우체국 접수 응답이 45초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.');
+    const name = err instanceof Error ? err.name : '';
+    const isAbort =
+      name === 'AbortError' ||
+      (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError');
+    if (isAbort) {
+      throw new Error('우체국 접수 응답이 18초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.');
     }
     throw err;
   } finally {

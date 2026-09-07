@@ -459,17 +459,18 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             result = insert_order({**params, "orderNo": order_no})
         except Exception as first_err:
             recovered = None
-            try:
-                recovered = get_res_info(
-                    order_no,
-                    validated["visit_ymd"],
-                    timeout=8.0,
-                    max_attempts=1,
-                )
-                if not (recovered.get("regiNo") or "").strip():
+            if not is_ambiguous_insert_error(first_err):
+                try:
+                    recovered = get_res_info(
+                        order_no,
+                        validated["visit_ymd"],
+                        timeout=3.0,
+                        max_attempts=1,
+                    )
+                    if not (recovered.get("regiNo") or "").strip():
+                        recovered = None
+                except Exception:
                     recovered = None
-            except Exception:
-                recovered = None
             if recovered and len(recovered.get("regiNo") or "") >= 10:
                 result = recovered
             else:
