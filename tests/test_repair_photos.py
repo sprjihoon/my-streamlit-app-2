@@ -74,14 +74,15 @@ def test_finalize_keeps_all_three_photos():
         },
     ))
     data = rb._get_pending(uid, cid)
-    assert data.get("barcode_image")
+    assert not data.get("barcode_image")
     assert data.get("before_image")
     assert data.get("after_image")
-    assert data["barcode_image"] != data["before_image"]
     assert data["before_image"] != data["after_image"]
     root = Path(rb._inbox_dir())
-    for key in ("barcode_image", "before_image", "after_image"):
-        assert (root / data[key]).is_file()
+    assert (root / data["before_image"]).read_bytes() == b"p1-bytes"
+    assert (root / data["after_image"]).read_bytes() == b"p2-bytes"
+    leftover = [p.name for p in root.iterdir() if p.is_file()]
+    assert not any((root / name).read_bytes() == b"bar-bytes" for name in leftover)
 
 
 def test_unread_barcode_keeps_first_three_in_send_order():
@@ -108,9 +109,10 @@ def test_unread_barcode_keeps_first_three_in_send_order():
     assert "직접 입력" in reply
     data = rb._get_pending(uid, cid)
     root = Path(rb._inbox_dir())
-    assert (root / data["barcode_image"]).read_bytes() == b"tmp-bar"
-    assert (root / data["before_image"]).read_bytes() == b"save-1"
-    assert (root / data["after_image"]).read_bytes() == b"save-2"
+    assert not data.get("barcode_image")
+    assert (root / data["before_image"]).read_bytes() == b"tmp-bar"
+    assert (root / data["after_image"]).read_bytes() == b"save-1"
+    assert (root / data["extra_images"][0]).read_bytes() == b"save-2"
 
 
 def test_manual_barcode_does_not_delete_photos():
@@ -133,13 +135,13 @@ def test_manual_barcode_does_not_delete_photos():
         },
     ))
     before = rb._get_pending(uid, cid)
-    names = [before["barcode_image"], before["before_image"], before["after_image"]]
+    names = [before["before_image"], before["after_image"], *(before.get("extra_images") or [])]
     asyncio.run(handle_user_text(uid, cid, "ON56S152917", "테스터"))
     after = rb._get_pending(uid, cid)
     assert after.get("barcode") == "ON56S152917"
-    assert after.get("barcode_image") == names[0]
-    assert after.get("before_image") == names[1]
-    assert after.get("after_image") == names[2]
+    assert not after.get("barcode_image")
+    assert after.get("before_image") == names[0]
+    assert after.get("after_image") == names[1]
     root = Path(rb._inbox_dir())
     for name in names:
         assert (root / name).is_file()
@@ -216,7 +218,7 @@ def test_two_photos_are_enough():
         },
     ))
     data = rb._get_pending(uid, cid)
-    assert data.get("barcode_image")
+    assert not data.get("barcode_image")
     assert data.get("before_image")
     assert not data.get("after_image")
     assert not data.get("extra_images")

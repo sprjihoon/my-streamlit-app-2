@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from backend.app.config import settings
 
 from backend.app.api.repair_log import (
+    _delete_image,
     _lookup_barcode,
     _resolve_vendor,
     ensure_repair_tables,
@@ -360,7 +361,7 @@ def _try_save(data: Dict[str, Any], user_name: Optional[str], price_stated: bool
         비고=data.get("remark"),
         작성자=user_name,
         출처="bot",
-        barcode_image=data.get("barcode_image"),
+        barcode_image=None,
         before_image=data.get("before_image"),
         after_image=data.get("after_image"),
         extra_images=data.get("extra_images"),
@@ -1381,23 +1382,22 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
 
 
 def _assign_saved_photos(data: Dict[str, Any], classified: dict, saved_names: List[Optional[str]]) -> None:
-    """바코드 장 + 나머지를 보낸 순서대로 보관한다. 전·후 내용은 보지 않는다."""
-    bi = classified.get("barcode_index")
-    if bi is not None and 0 <= bi < len(saved_names) and saved_names[bi]:
-        data["barcode_image"] = saved_names[bi]
-    before_i = classified.get("before_index")
-    if before_i is not None and 0 <= before_i < len(saved_names) and saved_names[before_i]:
-        data["before_image"] = saved_names[before_i]
-    after_i = classified.get("after_index")
-    if after_i is not None and 0 <= after_i < len(saved_names) and saved_names[after_i]:
-        data["after_image"] = saved_names[after_i]
-    used = {i for i in (bi, before_i, after_i) if i is not None}
-    extras = [
-        name for i, name in enumerate(saved_names)
-        if i not in used and name
-    ]
+    """바코드 장은 번호만 읽고 파일은 남기지 않는다. 나머지 사진을 보낸 순서로 보관한다."""
+    names = list(saved_names)
+    identified = bool(classified.get("barcode")) and not classified.get("ambiguous")
+    barcode_i = classified.get("barcode_index")
+    if identified and barcode_i is not None and 0 <= barcode_i < len(names) and names[barcode_i]:
+        _delete_image(names[barcode_i])
+        names[barcode_i] = None
+    data.pop("barcode_image", None)
+    work = [name for name in names if name]
+    data["before_image"] = work[0] if work else None
+    data["after_image"] = work[1] if len(work) > 1 else None
+    extras = work[2:]
     if extras:
         data["extra_images"] = extras
+    else:
+        data.pop("extra_images", None)
 
 
 def _positional_photo_slots(photos: List[BufferedPhoto], classified: dict) -> dict:

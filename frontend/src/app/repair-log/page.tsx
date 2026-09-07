@@ -11,7 +11,6 @@ import {
   updateRepairLog,
   deleteRepairLog,
   uploadRepairPhotos,
-  getRepairLogExportUrl,
   getOldRepairPhotos,
   purgeOldRepairPhotos,
   getRepairBarcodes,
@@ -35,6 +34,7 @@ import {
   RepairWorkType,
   RepairDefect,
 } from '@/lib/api';
+import { downloadRepairLogExcel } from '@/lib/repairLogExcel';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -178,6 +178,16 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
   const [editing, setEditing] = useState<RepairLog | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [purgingOld, setPurgingOld] = useState(false);
+  const [excelExporting, setExcelExporting] = useState(false);
+
+  const currentFilters = {
+    period_from: periodFrom,
+    period_to: periodTo,
+    vendor: vendor || undefined,
+    work_type: workType || undefined,
+    defect: defect || undefined,
+    author: author || undefined,
+  };
 
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -193,7 +203,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
           defect: defect || undefined,
           author: author || undefined, limit, offset,
         }),
-        getRepairLogStats({ period_from: periodFrom, period_to: periodTo }),
+        getRepairLogStats(currentFilters),
       ]);
       setLogs(list.logs);
       setTotalCount(list.total);
@@ -221,8 +231,8 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
     <>
       {stats && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-          <Card title="전체 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total.toLocaleString()}</p></Card>
-          <Card title="전체 금액"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a' }}>{stats.total_amount.toLocaleString()}원</p></Card>
+          <Card title="조회 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total.toLocaleString()}</p></Card>
+          <Card title="조회 금액"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a' }}>{stats.total_amount.toLocaleString()}원</p></Card>
           <Card title="오늘 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{stats.today.toLocaleString()}</p></Card>
         </div>
       )}
@@ -274,9 +284,27 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             setVendor(''); setWorkType(''); setDefect(''); setAuthor('');
             setCurrentPage(1);
           }} style={btn('#6b7280')}>초기화</button>
-          <a href={getRepairLogExportUrl(periodFrom, periodTo)} style={{ ...btn('#0f766e'), textDecoration: 'none' }}>
-            엑셀 다운로드
-          </a>
+          <button
+            onClick={async () => {
+              if (!periodFrom || !periodTo) {
+                onMessage({ type: 'error', text: '엑셀 보고를 위해 시작일과 종료일을 선택하세요.' });
+                return;
+              }
+              setExcelExporting(true);
+              try {
+                await downloadRepairLogExcel(currentFilters);
+                onMessage({ type: 'success', text: '사진 포함 엑셀 보고서를 저장했습니다.' });
+              } catch (e) {
+                onMessage({ type: 'error', text: e instanceof Error ? e.message : '엑셀 생성 실패' });
+              } finally {
+                setExcelExporting(false);
+              }
+            }}
+            disabled={excelExporting}
+            style={btn('#0f766e')}
+          >
+            {excelExporting ? '엑셀 만드는 중...' : '엑셀 다운로드 (사진 포함)'}
+          </button>
           <button
             onClick={async () => {
               try {
@@ -313,6 +341,9 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             </select>
           </div>
         </div>
+        <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0.6rem 0 0' }}>
+          엑셀은 현재 선택한 업체·기간 필터의 수선일지와 작업 사진을 담습니다. 바코드 사진은 넣지 않습니다.
+        </p>
       </Card>
 
       <div style={{ marginTop: '1rem' }}>
@@ -358,7 +389,6 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
                       <td style={{ padding: '0.5rem' }}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {[
-                            ['바코드', log.barcode_image],
                             ['사진1', log.before_image],
                             ['사진2', log.after_image],
                             ...(log.extra_images || []).map((fn, i) => [`추가${i + 1}`, fn] as const),
@@ -473,7 +503,6 @@ function LogFormModal({
   const [saving, setSaving] = useState(false);
   const [beforeFile, setBeforeFile] = useState<File | null>(null);
   const [afterFile, setAfterFile] = useState<File | null>(null);
-  const [barcodeFile, setBarcodeFile] = useState<File | null>(null);
   const [extraFiles, setExtraFiles] = useState<File[]>([]);
 
   async function fillPrice(work: string, vendorName: string, productName?: string) {
@@ -560,8 +589,8 @@ function LogFormModal({
         id = created.id;
         onMessage({ type: 'success', text: '수선일지가 추가되었습니다.' });
       }
-      if (id && (beforeFile || afterFile || barcodeFile || extraFiles.length)) {
-        await uploadRepairPhotos(id, { before: beforeFile, after: afterFile, barcode: barcodeFile, extra: extraFiles });
+      if (id && (beforeFile || afterFile || extraFiles.length)) {
+        await uploadRepairPhotos(id, { before: beforeFile, after: afterFile, extra: extraFiles });
       }
       onSaved();
     } catch (e) {
@@ -696,10 +725,7 @@ function LogFormModal({
             <input value={form.비고} onChange={(e) => setForm({ ...form, 비고: e.target.value })} style={inputStyle} />
           </Field>
         </div>
-        <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, minWidth: 0 }}>
-          <Field label="바코드 사진">
-            <input type="file" accept="image/*" onChange={(e) => setBarcodeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
-          </Field>
+        <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, minWidth: 0 }}>
           <Field label="사진 1">
             <input type="file" accept="image/*" onChange={(e) => setBeforeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
@@ -720,7 +746,6 @@ function LogFormModal({
         </div>
         {initial && (
           <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <PhotoThumb filename={initial.barcode_image} label="바코드" onClick={() => {}} />
             <PhotoThumb filename={initial.before_image} label="사진1" onClick={() => {}} />
             <PhotoThumb filename={initial.after_image} label="사진2" onClick={() => {}} />
             {(initial.extra_images || []).map((fn, i) => (

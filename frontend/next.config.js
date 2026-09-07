@@ -15,6 +15,19 @@ const nextConfig = {
   images: {
     unoptimized: true,  // 정적 export 시 필요
   },
+
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...(config.resolve.fallback || {}),
+      fs: false,
+      stream: false,
+    };
+    config.resolve.alias = {
+      ...(config.resolve.alias || {}),
+      canvas: false,
+    };
+    return config;
+  },
   
   // 개발환경 프록시 (CORS 우회용)
   async rewrites() {

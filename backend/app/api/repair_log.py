@@ -1228,7 +1228,6 @@ async def upload_photos(
         mapping = [
             ("before", before, "before_image", row[0]),
             ("after", after, "after_image", row[1]),
-            ("barcode", barcode, "barcode_image", row[2]),
         ]
         saved = {}
         for _, upload, col, old in mapping:

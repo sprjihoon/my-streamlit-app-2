@@ -180,16 +180,19 @@ def test_c_unrecognized_barcode_keeps_before_after():
     reply = asyncio.run(finalize_photo_set(uid, cid, photos, "테스터", classified=classified))
     assert "바코드" in reply
     draft = _draft(uid, cid)
-    assert draft.get("barcode_image")
+    assert not draft.get("barcode_image")
     assert draft.get("before_image")
     assert draft.get("after_image")
     before_name = draft["before_image"]
     after_name = draft["after_image"]
+    extras = list(draft.get("extra_images") or [])
     asyncio.run(handle_user_text(uid, cid, "ON56S152917", "테스터", nlu_intent=_nlu(fields={})))
     after = _draft(uid, cid)
     assert after.get("barcode") == "ON56S152917"
+    assert not after.get("barcode_image")
     assert after.get("before_image") == before_name
     assert after.get("after_image") == after_name
+    assert list(after.get("extra_images") or []) == extras
 
 
 def test_d_four_photos_and_duplicate_event_do_not_leak():
