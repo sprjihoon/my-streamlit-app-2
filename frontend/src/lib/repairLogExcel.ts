@@ -80,8 +80,13 @@ export async function downloadRepairLogExcel(params: {
     const photos = await Promise.all(names.map(fetchPhoto));
     photos.forEach((photo, photoIndex) => {
       if (!photo) return;
+      const bytes = new Uint8Array(photo.buffer);
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
       const imageId = wb.addImage({
-        buffer: new Uint8Array(photo.buffer),
+        base64: btoa(binary),
         extension: photo.extension,
       });
       ws.addImage(imageId, {
