@@ -192,7 +192,7 @@ export default function KpostPickupListPage() {
             <table>
               <thead>
                 <tr>
-                  <th>송장</th>
+                  <th>수거송장번호</th>
                   <th>수취인</th>
                   <th>주소</th>
                   <th>수거일</th>
@@ -209,7 +209,7 @@ export default function KpostPickupListPage() {
                   return (
                     <tr key={item.id}>
                       <td>
-                        {item.tracking_no || '-'}
+                        <strong>{item.tracking_no || '-'}</strong>
                         {item.is_test ? ' (테스트)' : ''}
                       </td>
                       <td>

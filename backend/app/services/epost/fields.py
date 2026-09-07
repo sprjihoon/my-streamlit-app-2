@@ -10,12 +10,14 @@ from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
 EPOST_PICKUP_DETAIL_MIN_LEN = 2
-EPOST_ORD_COMP_NM = "스프링풀필먼트"
-# 스프링풀필먼트 공급지코드 (발송지·회수도착지 동일, 동대구우체국)
-EPOST_OFFICE_SER = "260940699"
-# 옛 인프론트/인포커스 공급지. 이 코드로 보내면 우체국 화면의 인포커스 도착지에만 잡힌다.
-LEGACY_INFRONT_OFFICE_SER = "260537802"
-LEGACY_CENTER_NAME_MARKERS = ("인프론트", "인포커스", "infront", "infocus")
+EPOST_DISPLAY_CENTER_NM = "스프링풀필먼트"
+# 우체국 계약 회수도착지. 인프론트·모두의수선과 같은 공급지코드여야 InsertOrder가 즉시 regiNo를 준다.
+EPOST_OFFICE_SER = "260537802"
+EPOST_UNREGISTERED_OFFICE_SER = "260940699"
+# 계약 화면 표기(12바이트). 스프링풀필먼트는 24바라 잘리면 우체국이 송장을 안 준다.
+EPOST_CONTRACT_COMP_NM = "인포커스"
+EPOST_ORD_COMP_NM = EPOST_CONTRACT_COMP_NM
+LEGACY_CENTER_NAME_MARKERS = ("인프론트", "infront")
 EPOST_ORD_COMP_NM_MAX_BYTES = 12
 EPOST_ADDR_MAX_BYTES = 100
 EPOST_ORDER_NO_MAX_BYTES = 30
@@ -43,7 +45,7 @@ EPOST_PICKUP_KR_HOLIDAYS = {
 }
 
 EPOST_CENTER_DEFAULTS = {
-    "ord_nm": "스프링풀필먼트",
+    "ord_nm": EPOST_DISPLAY_CENTER_NM,
     "zip": "41142",
     "addr1": "대구광역시 동구 동촌로 1",
     "addr2": "동대구우체국 2층 소포실",
@@ -335,7 +337,7 @@ def sanitize_center_addr(addr: str, default: str) -> str:
 def resolve_office_ser(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
     raw = re.sub(r"\D", "", (source.get("EPOST_OFFICE_SER") or EPOST_OFFICE_SER).strip())
-    if not raw or raw == LEGACY_INFRONT_OFFICE_SER:
+    if not raw or raw == EPOST_UNREGISTERED_OFFICE_SER:
         return EPOST_OFFICE_SER
     return raw
 
@@ -349,7 +351,7 @@ def _is_legacy_center_name(value: str | None) -> bool:
 
 def _spring_center_name(value: str | None) -> str:
     if _is_legacy_center_name(value):
-        return "스프링풀필먼트"
+        return EPOST_DISPLAY_CENTER_NM
     return (value or "").strip()
 
 
@@ -452,8 +454,8 @@ def build_return_pickup_params(input_data: dict[str, Any]) -> dict[str, Any]:
         "reqType": "2",
         "officeSer": resolve_office_ser({"EPOST_OFFICE_SER": str(input_data.get("office_ser") or "")}),
         "orderNo": input_data["order_no"],
-        "ordCompNm": EPOST_ORD_COMP_NM,
-        "ordNm": truncate_utf8_bytes(EPOST_ORD_COMP_NM, 12),
+        "ordCompNm": EPOST_CONTRACT_COMP_NM,
+        "ordNm": truncate_utf8_bytes(EPOST_CONTRACT_COMP_NM, 12),
         "inqTelCn": center_phone,
         "ordZip": normalize_zip(center.get("zip")),
         "ordAddr1": normalize_addr1(center.get("addr1")),
@@ -492,21 +494,17 @@ def sanitize_insert_order_body(body: dict[str, Any]) -> dict[str, Any]:
         if cleaned.get("inqTelCn") not in (None, ""):
             cleaned["inqTelCn"] = require_phone(str(cleaned["inqTelCn"]), "문의전화(inqTelCn)")
     if str(cleaned.get("reqType", "")) == "2":
-        cleaned["ordCompNm"] = EPOST_ORD_COMP_NM
-        cleaned["ordNm"] = truncate_utf8_bytes(EPOST_ORD_COMP_NM, 12)
+        cleaned["ordCompNm"] = EPOST_CONTRACT_COMP_NM
+        cleaned["ordNm"] = truncate_utf8_bytes(EPOST_CONTRACT_COMP_NM, 12)
         cleaned["officeSer"] = resolve_office_ser(
             {"EPOST_OFFICE_SER": str(cleaned.get("officeSer") or "")}
         )
     if isinstance(cleaned.get("ordCompNm"), str):
-        name = sanitize_plain_field(cleaned["ordCompNm"])
-        if _is_legacy_center_name(name):
-            name = EPOST_ORD_COMP_NM
-        cleaned["ordCompNm"] = truncate_utf8_bytes(name, EPOST_ORD_COMP_NM_MAX_BYTES)
+        cleaned["ordCompNm"] = truncate_utf8_bytes(
+            sanitize_plain_field(cleaned["ordCompNm"]), EPOST_ORD_COMP_NM_MAX_BYTES
+        )
     if isinstance(cleaned.get("ordNm"), str):
-        name = sanitize_plain_field(cleaned["ordNm"])
-        if _is_legacy_center_name(name):
-            name = EPOST_ORD_COMP_NM
-        cleaned["ordNm"] = truncate_utf8_bytes(name, 40)
+        cleaned["ordNm"] = truncate_utf8_bytes(sanitize_plain_field(cleaned["ordNm"]), 40)
     if isinstance(cleaned.get("recNm"), str):
         cleaned["recNm"] = truncate_utf8_bytes(sanitize_plain_field(cleaned["recNm"]), 40)
     for key in ("ordAddr1", "ordAddr2", "recAddr1", "recAddr2"):

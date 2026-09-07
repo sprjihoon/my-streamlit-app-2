@@ -103,7 +103,7 @@ export default function ReturnRequestPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [liveReady, setLiveReady] = useState(false);
   const [centerLabel, setCenterLabel] = useState('스프링풀필먼트 · 동대구우체국');
-  const [officeSer, setOfficeSer] = useState('260940699');
+  const [officeSer, setOfficeSer] = useState('260537802');
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
   const [preview, setPreview] = useState<KpostPickupPreview | null>(null);

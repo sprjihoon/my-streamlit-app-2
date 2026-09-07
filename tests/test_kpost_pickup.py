@@ -157,7 +157,8 @@ def test_build_return_pickup_params_ord_center_rec_customer():
     )
     assert params["reqType"] == "2"
     assert params["payType"] == "2"
-    assert params["officeSer"] == "260940699"
+    assert params["officeSer"] == "260537802"
+    assert params["ordCompNm"] == "인포커스"
     assert params["ordZip"] == "41142"
     assert params["recZip"] == "06236"
     assert params["recAddr2"] == "201호"
@@ -166,12 +167,14 @@ def test_build_return_pickup_params_ord_center_rec_customer():
     assert params["ordMob"] == "01027239490"
 
 
-def test_office_ser_uses_spring_fulfillment_code(monkeypatch):
+def test_office_ser_uses_contract_infocus_code(monkeypatch):
     from backend.app.services.epost.fields import resolve_office_ser
 
-    assert resolve_office_ser({}) == "260940699"
+    assert resolve_office_ser({}) == "260537802"
     monkeypatch.setenv("EPOST_OFFICE_SER", "260940699")
-    assert resolve_office_ser() == "260940699"
+    assert resolve_office_ser() == "260537802"
+    monkeypatch.setenv("EPOST_OFFICE_SER", "260537802")
+    assert resolve_office_ser() == "260537802"
 
 
 def test_preview_does_not_write(isolated_runtime):
@@ -197,6 +200,8 @@ def test_create_requires_confirm_then_saves_mock(isolated_runtime):
     items = list_pickups(token)["items"]
     assert len(items) == 1
     assert items[0]["status"] == "requested"
+    assert items[0]["tracking_no"] == created["tracking_no"]
+    assert len(items[0]["tracking_no"]) >= 10
 
     again = create_pickup(_req(confirm=True), token)
     assert again.get("duplicate_guard") is True

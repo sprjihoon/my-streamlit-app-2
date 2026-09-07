@@ -483,6 +483,13 @@ def create_pickup(req: PickupSubmitRequest, token: str):
                     hint = " 주소 검색으로 도로명 주소와 우편번호를 다시 선택해주세요."
                 raise HTTPException(status_code=502, detail=msg + hint)
 
+    tracking = (result.get("regiNo") or "").strip()
+    if live and len(tracking) < 10:
+        raise HTTPException(
+            status_code=502,
+            detail="우체국이 수거송장번호를 반환하지 않았습니다. 접수가 완료되지 않았습니다.",
+        )
+
     snapshot = {k: v for k, v in params.items() if k != "testYn"}
     pickup_iso = f"{validated['visit_ymd'][:4]}-{validated['visit_ymd'][4:6]}-{validated['visit_ymd'][6:8]}"
     created_at = datetime.now(KST).isoformat(timespec="seconds")
@@ -497,7 +504,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                "infront",
+                "spring",
                 order_no,
                 validated["name"],
                 validated["phone"],
@@ -509,7 +516,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
                 validated["spec"]["code"],
                 validated["qty"],
                 validated["notes"],
-                result.get("regiNo") or "",
+                tracking,
                 result.get("reqNo") or "",
                 result.get("resNo") or "",
                 result.get("resDate") or "",
@@ -539,7 +546,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
         "success": True,
         "id": pickup_id,
         "order_no": order_no,
-        "tracking_no": result.get("regiNo") or "",
+        "tracking_no": tracking,
         "req_no": result.get("reqNo") or "",
         "res_no": result.get("resNo") or "",
         "price": result.get("price") or "0",

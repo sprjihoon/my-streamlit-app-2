@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     EPOST_SECURITY_KEY: str = ""
     EPOST_CUSTOMER_ID: str = ""
     EPOST_APPROVAL_NO: str = ""
-    EPOST_OFFICE_SER: str = "260940699"
+    EPOST_OFFICE_SER: str = "260537802"
     INFRONT_CENTER_ORD_NM: str = "스프링풀필먼트"
     INFRONT_CENTER_NAME: str = "스프링풀필먼트"
     INFRONT_CENTER_ZIPCODE: str = "41142"
