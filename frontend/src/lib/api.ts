@@ -30,6 +30,10 @@ async function fetchApi<T>(
       ...options,
     });
   } catch (e) {
+    const name = e instanceof Error ? e.name : '';
+    if (name === 'AbortError') {
+      throw e;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
       throw new Error(
@@ -1413,7 +1417,7 @@ export async function listKpostPickups(
 
 export async function createKpostPickup(token: string, payload: KpostPickupPayload) {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 90000);
+  const timer = window.setTimeout(() => controller.abort(), 45000);
   try {
     return await fetchApi<{
       success: boolean;
@@ -1431,8 +1435,8 @@ export async function createKpostPickup(token: string, payload: KpostPickupPaylo
       signal: controller.signal,
     });
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('우체국 접수 응답이 90초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.');
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('우체국 접수 응답이 45초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.');
     }
     throw err;
   } finally {
@@ -1445,6 +1449,16 @@ export async function cancelKpostPickup(token: string, id: number) {
     `/kpost-pickup/${id}/cancel${pickupQuery(token, '&confirm=true')}`,
     { method: 'POST' }
   );
+}
+
+export async function refreshKpostPickupStatuses(token: string) {
+  return fetchApi<{
+    success: boolean;
+    checked: number;
+    completed: number;
+    failed: number;
+    message?: string;
+  }>(`/kpost-pickup/refresh-status${pickupQuery(token)}`, { method: 'POST' });
 }
 
 export interface SavedRecipient {

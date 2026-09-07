@@ -13,6 +13,9 @@ EPOST_PICKUP_DETAIL_MIN_LEN = 2
 EPOST_ORD_COMP_NM = "스프링풀필먼트"
 # 스프링풀필먼트 공급지코드 (발송지·회수도착지 동일, 동대구우체국)
 EPOST_OFFICE_SER = "260940699"
+# 옛 인프론트/인포커스 공급지. 이 코드로 보내면 우체국 화면의 인포커스 도착지에만 잡힌다.
+LEGACY_INFRONT_OFFICE_SER = "260537802"
+LEGACY_CENTER_NAME_MARKERS = ("인프론트", "인포커스", "infront", "infocus")
 EPOST_ORD_COMP_NM_MAX_BYTES = 12
 EPOST_ADDR_MAX_BYTES = 100
 EPOST_ORDER_NO_MAX_BYTES = 30
@@ -45,6 +48,42 @@ EPOST_CENTER_DEFAULTS = {
     "addr1": "대구광역시 동구 동촌로 1",
     "addr2": "동대구우체국 2층 소포실",
 }
+
+TREAT_STATUS_LABELS = {
+    "00": "신청접수",
+    "01": "수거완료",
+    "02": "수거중",
+    "03": "배달완료",
+}
+
+
+def treat_status_code(code: str | None) -> str:
+    raw = (code or "").strip()
+    if raw.isdigit():
+        return raw.zfill(2)
+    return raw
+
+
+def treat_status_from_tracking_text(text: str | None) -> str | None:
+    blob = text or ""
+    if any(token in blob for token in ("배달완료", "배달 완료")):
+        return "03"
+    if any(token in blob for token in ("집하완료", "집하 완료", "수거완료", "수거 완료", "집하")):
+        return "01"
+    if any(token in blob for token in ("수거중", "배달준비", "발송")):
+        return "02"
+    return None
+
+
+def treat_status_label(code: str | None, fallback: str | None = None) -> str:
+    cd = treat_status_code(code)
+    if cd == "01" or (fallback or "").strip() == "집하완료":
+        return "수거완료"
+    if cd in TREAT_STATUS_LABELS:
+        return TREAT_STATUS_LABELS[cd]
+    name = (fallback or "").strip()
+    return name or "신청접수"
+
 
 PICKUP_BOX_SIZES = [
     {"code": "DEFAULT", "label": "극소형", "desc": "2kg · 60cm", "weight": 2, "volume": 60},
@@ -296,14 +335,22 @@ def sanitize_center_addr(addr: str, default: str) -> str:
 def resolve_office_ser(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
     raw = re.sub(r"\D", "", (source.get("EPOST_OFFICE_SER") or EPOST_OFFICE_SER).strip())
-    return raw or EPOST_OFFICE_SER
+    if not raw or raw == LEGACY_INFRONT_OFFICE_SER:
+        return EPOST_OFFICE_SER
+    return raw
+
+
+def _is_legacy_center_name(value: str | None) -> bool:
+    name = (value or "").strip().lower()
+    if not name:
+        return True
+    return any(marker.lower() in name for marker in LEGACY_CENTER_NAME_MARKERS)
 
 
 def _spring_center_name(value: str | None) -> str:
-    name = (value or "").strip()
-    if not name or name == "인프론트":
+    if _is_legacy_center_name(value):
         return "스프링풀필먼트"
-    return name
+    return (value or "").strip()
 
 
 def resolve_infront_center(env: dict[str, str]) -> dict[str, str]:
@@ -403,7 +450,7 @@ def build_return_pickup_params(input_data: dict[str, Any]) -> dict[str, Any]:
         "apprNo": input_data["appr_no"],
         "payType": "2",
         "reqType": "2",
-        "officeSer": input_data.get("office_ser") or resolve_office_ser(),
+        "officeSer": resolve_office_ser({"EPOST_OFFICE_SER": str(input_data.get("office_ser") or "")}),
         "orderNo": input_data["order_no"],
         "ordCompNm": EPOST_ORD_COMP_NM,
         "ordNm": truncate_utf8_bytes(EPOST_ORD_COMP_NM, 12),
@@ -444,12 +491,22 @@ def sanitize_insert_order_body(body: dict[str, Any]) -> dict[str, Any]:
             cleaned["recTel"] = require_phone(str(cleaned.get("recTel") or ""), "수취인 연락처(recTel)")
         if cleaned.get("inqTelCn") not in (None, ""):
             cleaned["inqTelCn"] = require_phone(str(cleaned["inqTelCn"]), "문의전화(inqTelCn)")
-    if isinstance(cleaned.get("ordCompNm"), str):
-        cleaned["ordCompNm"] = truncate_utf8_bytes(
-            sanitize_plain_field(cleaned["ordCompNm"]), EPOST_ORD_COMP_NM_MAX_BYTES
+    if str(cleaned.get("reqType", "")) == "2":
+        cleaned["ordCompNm"] = EPOST_ORD_COMP_NM
+        cleaned["ordNm"] = truncate_utf8_bytes(EPOST_ORD_COMP_NM, 12)
+        cleaned["officeSer"] = resolve_office_ser(
+            {"EPOST_OFFICE_SER": str(cleaned.get("officeSer") or "")}
         )
+    if isinstance(cleaned.get("ordCompNm"), str):
+        name = sanitize_plain_field(cleaned["ordCompNm"])
+        if _is_legacy_center_name(name):
+            name = EPOST_ORD_COMP_NM
+        cleaned["ordCompNm"] = truncate_utf8_bytes(name, EPOST_ORD_COMP_NM_MAX_BYTES)
     if isinstance(cleaned.get("ordNm"), str):
-        cleaned["ordNm"] = truncate_utf8_bytes(sanitize_plain_field(cleaned["ordNm"]), 40)
+        name = sanitize_plain_field(cleaned["ordNm"])
+        if _is_legacy_center_name(name):
+            name = EPOST_ORD_COMP_NM
+        cleaned["ordNm"] = truncate_utf8_bytes(name, 40)
     if isinstance(cleaned.get("recNm"), str):
         cleaned["recNm"] = truncate_utf8_bytes(sanitize_plain_field(cleaned["recNm"]), 40)
     for key in ("ordAddr1", "ordAddr2", "recAddr1", "recAddr2"):

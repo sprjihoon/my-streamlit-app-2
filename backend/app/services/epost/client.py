@@ -20,6 +20,8 @@ from backend.app.services.epost.fields import (
     require_phone,
     resolve_cancel_req_ymd,
     sanitize_insert_order_body,
+    treat_status_from_tracking_text,
+    treat_status_label,
 )
 from backend.app.services.epost.seed128 import seed128_encrypt
 
@@ -97,7 +99,14 @@ def _validate_return_pickup_plain(plain_text: str) -> None:
         raise EpostError("우체국 전송 오류: orderNo가 너무 깁니다.")
 
 
-def call_epost(endpoint: str, params: dict[str, Any], test_yn: str = "N") -> str:
+def call_epost(
+    endpoint: str,
+    params: dict[str, Any],
+    test_yn: str = "N",
+    *,
+    timeout: float = 15.0,
+    max_attempts: int = 2,
+) -> str:
     api_key = env_value("EPOST_API_KEY")
     security_key = env_value("EPOST_SECURITY_KEY")
     if not api_key:
@@ -113,13 +122,14 @@ def call_epost(endpoint: str, params: dict[str, Any], test_yn: str = "N") -> str
     encrypted = seed128_encrypt(plain_text, security_key)
     headers = {"User-Agent": EPOST_USER_AGENT}
     last_error: Exception | None = None
-    for attempt in range(1, 4):
+    attempts = max(1, int(max_attempts))
+    for attempt in range(1, attempts + 1):
         try:
             if is_insert:
                 body = {"key": api_key, "regData": encrypted}
                 if test_yn == "Y":
                     body["testYn"] = "Y"
-                with httpx.Client(timeout=30.0) as client:
+                with httpx.Client(timeout=timeout) as client:
                     resp = client.post(
                         f"{EPOST_BASE_URL}/{endpoint}",
                         content=urlencode(body),
@@ -129,7 +139,7 @@ def call_epost(endpoint: str, params: dict[str, Any], test_yn: str = "N") -> str
                 query = {"key": api_key, "regData": encrypted}
                 if test_yn == "Y":
                     query["testYn"] = "Y"
-                with httpx.Client(timeout=30.0) as client:
+                with httpx.Client(timeout=timeout) as client:
                     resp = client.get(
                         f"{EPOST_BASE_URL}/{endpoint}",
                         params=query,
@@ -148,17 +158,20 @@ def call_epost(endpoint: str, params: dict[str, Any], test_yn: str = "N") -> str
             raise
         except httpx.TimeoutException as exc:
             last_error = exc
-            if attempt >= 3:
-                raise EpostError("우체국 API 응답 시간 초과(30초). 잠시 후 다시 시도해주세요.", maybe_booked=True)
-            time.sleep(attempt)
+            if attempt >= attempts:
+                raise EpostError(
+                    f"우체국 API 응답 시간 초과({int(timeout)}초). 접수목록에서 송장 생성 여부를 확인한 뒤 다시 시도해주세요.",
+                    maybe_booked=True,
+                )
+            time.sleep(0.4)
         except httpx.HTTPError as exc:
             last_error = exc
-            if attempt >= 3:
+            if attempt >= attempts:
                 raise EpostError(
                     f"우체국 API 서버({EPOST_BASE_URL})에 연결하지 못했습니다. ({exc})",
                     maybe_booked=True,
                 )
-            time.sleep(attempt)
+            time.sleep(0.4)
     raise EpostError(str(last_error or "우체국 API 호출 실패"), maybe_booked=True)
 
 
@@ -192,7 +205,7 @@ def insert_order(params: dict[str, Any]) -> dict[str, str]:
         require_phone(str(body.get("ordMob") or ""), "센터 연락처(ordMob)")
         require_phone(str(body.get("recTel") or body.get("recMob") or ""), "수거 연락처(recTel)")
 
-    xml = call_epost("api.InsertOrder.jparcel", body, test_yn)
+    xml = call_epost("api.InsertOrder.jparcel", body, test_yn, timeout=15.0, max_attempts=2)
     result = {
         "reqNo": parse_xml(xml, "reqNo") or "",
         "resNo": parse_xml(xml, "resNo") or "",
@@ -207,7 +220,15 @@ def insert_order(params: dict[str, Any]) -> dict[str, str]:
     return result
 
 
-def get_res_info(order_no: str, req_ymd: str, req_type: str = "2", cust_no: str | None = None) -> dict[str, str]:
+def get_res_info(
+    order_no: str,
+    req_ymd: str,
+    req_type: str = "2",
+    cust_no: str | None = None,
+    *,
+    timeout: float = 12.0,
+    max_attempts: int = 2,
+) -> dict[str, str]:
     xml = call_epost(
         "api.GetResInfo.jparcel",
         {
@@ -216,9 +237,10 @@ def get_res_info(order_no: str, req_ymd: str, req_type: str = "2", cust_no: str 
             "orderNo": order_no,
             "reqYmd": req_ymd,
         },
+        timeout=timeout,
+        max_attempts=max_attempts,
     )
     treat = parse_xml(xml, "treatStusCd") or "00"
-    names = {"00": "신청접수", "01": "집하완료", "02": "수거중", "03": "배달완료"}
     return {
         "reqNo": parse_xml(xml, "reqNo") or "",
         "resNo": parse_xml(xml, "resNo") or "",
@@ -228,8 +250,109 @@ def get_res_info(order_no: str, req_ymd: str, req_type: str = "2", cust_no: str 
         "price": parse_xml(xml, "price") or "0",
         "vTelNo": parse_xml(xml, "vTelNo") or "",
         "treatStusCd": treat,
-        "treatStusNm": names.get(treat, treat),
+        "treatStusNm": treat_status_label(treat),
     }
+
+
+EPOST_TRACE_URL = "https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm"
+TRACKER_DELIVERY_URL = "https://apis.tracker.delivery/graphql"
+TRACKER_STATUS_TO_TREAT = {
+    "AT_PICKUP": "01",
+    "IN_TRANSIT": "02",
+    "OUT_FOR_DELIVERY": "02",
+    "DELIVERED": "03",
+}
+
+
+def lookup_req_ymds(*values: str | None) -> list[str]:
+    ymds: list[str] = []
+    for raw in values:
+        ymd = re.sub(r"\D", "", raw or "")[:8]
+        if len(ymd) == 8 and ymd not in ymds:
+            ymds.append(ymd)
+    return ymds
+
+
+def get_res_info_with_dates(order_no: str, req_ymds: list[str]) -> dict[str, str]:
+    last_error: Exception | None = None
+    for req_ymd in req_ymds:
+        try:
+            info = get_res_info(order_no, req_ymd)
+            if info.get("regiNo") or info.get("treatStusCd") not in {"", "00"}:
+                return info
+            if info:
+                return info
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise EpostError("우체국 접수조회(GetResInfo)에 사용할 날짜가 없습니다.")
+
+
+def _track_via_tracker_delivery(regi_no: str) -> dict[str, str] | None:
+    client_id = env_value("TRACKER_DELIVERY_CLIENT_ID")
+    client_secret = env_value("TRACKER_DELIVERY_CLIENT_SECRET")
+    if not (client_id and client_secret):
+        return None
+    query = """
+      query TrackParcel($carrierId: ID!, $trackingNumber: String!) {
+        track(carrierId: $carrierId, trackingNumber: $trackingNumber) {
+          lastEvent { status { code name } description }
+        }
+      }
+    """
+    with httpx.Client(timeout=15.0) as client:
+        resp = client.post(
+            TRACKER_DELIVERY_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"TRACKQL-API-KEY {client_id}:{client_secret}",
+            },
+            json={
+                "query": query,
+                "variables": {"carrierId": "kr.epost", "trackingNumber": regi_no},
+            },
+        )
+    if resp.status_code >= 400:
+        return None
+    payload = resp.json()
+    last = ((payload.get("data") or {}).get("track") or {}).get("lastEvent") or {}
+    code = ((last.get("status") or {}).get("code") or "").strip()
+    treat = TRACKER_STATUS_TO_TREAT.get(code)
+    if not treat:
+        return None
+    return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
+
+
+def _track_via_epost_trace(regi_no: str) -> dict[str, str] | None:
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "ko-KR,ko;q=0.9",
+    }
+    with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+        resp = client.get(
+            EPOST_TRACE_URL,
+            params={"sid1": regi_no, "displayHeader": "N"},
+            headers=headers,
+        )
+    if resp.status_code >= 400:
+        return None
+    html = resp.text
+    treat = treat_status_from_tracking_text(html)
+    if not treat:
+        return None
+    return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
+
+
+def track_regi_no(regi_no: str) -> dict[str, str]:
+    tracking_no = re.sub(r"\D", "", regi_no or "")
+    if len(tracking_no) < 10:
+        raise EpostError("송장번호가 없어 종적조회를 할 수 없습니다.")
+    tracked = _track_via_tracker_delivery(tracking_no) or _track_via_epost_trace(tracking_no)
+    if not tracked:
+        raise EpostError(f"송장 {tracking_no} 조회 결과가 없습니다.")
+    return tracked
 
 
 def cancel_order(

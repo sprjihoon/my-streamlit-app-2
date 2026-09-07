@@ -13,6 +13,7 @@ from backend.app.api.kpost_pickup import (
     list_pickups,
     list_saved_recipients,
     preview_pickup,
+    refresh_pickup_statuses,
     save_recipient,
     update_saved_recipient,
 )
@@ -23,6 +24,8 @@ from backend.app.services.epost.fields import (
     require_phone,
     resolve_infront_center,
     split_pickup_address,
+    treat_status_from_tracking_text,
+    treat_status_label,
 )
 from backend.app.services.epost.seed128 import SS1, seed128_encrypt
 
@@ -84,6 +87,15 @@ def test_seed128_matches_infront_reference():
         seed128_encrypt("custNo=0005085217&apprNo=7002080922&recNm=테스트", "testkey123456789")
         == "bc9b2a92bbaf266cda7e0a6c7e0f357d1635e1d35b725cc903f814452592c5ac6a8f447d5bec0fc22db4e2f221cd50111291f1c2ec9260b3418eec181d0cf3cb"
     )
+
+
+def test_treat_status_label_maps_picked_up_to_completed():
+    assert treat_status_label("01") == "수거완료"
+    assert treat_status_label("00") == "신청접수"
+    assert treat_status_label("1", "집하완료") == "수거완료"
+    assert treat_status_label("", "집하완료") == "수거완료"
+    assert treat_status_from_tracking_text("집하완료 동대구우체국") == "01"
+    assert treat_status_from_tracking_text("배달완료") == "03"
 
 
 def test_resolve_center_ignores_legacy_infront_name():
@@ -193,6 +205,61 @@ def test_create_requires_confirm_then_saves_mock(isolated_runtime):
     canceled = cancel_pickup(items[0]["id"], token, confirm=True)
     assert canceled["success"] is True
     assert list_pickups(token)["items"][0]["status"] == "canceled"
+    assert list_pickups(token)["items"][0]["treat_status_name"] == "취소"
+
+
+def test_refresh_status_marks_pickup_complete(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    created = create_pickup(_req(confirm=True), token)
+    pickup_id = created["id"]
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='00', treat_status_name='신청접수' WHERE id=?",
+            (pickup_id,),
+        )
+        con.commit()
+
+    monkeypatch.setattr(
+        "backend.app.api.kpost_pickup.get_res_info_with_dates",
+        lambda order_no, req_ymds: {
+            "treatStusCd": "01",
+            "treatStusNm": "수거완료",
+            "regiNo": "7111111111111",
+        },
+    )
+    result = refresh_pickup_statuses(token)
+    assert result["completed"] == 1
+    item = list_pickups(token)["items"][0]
+    assert item["treat_status_name"] == "수거완료"
+    assert item["tracking_no"] == "7111111111111"
+
+
+def test_refresh_status_uses_public_tracking_when_getresinfo_stays_requested(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    created = create_pickup(_req(confirm=True), token)
+    pickup_id = created["id"]
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            """
+            UPDATE kpost_pickup_requests
+            SET is_test=0, treat_status='00', treat_status_name='신청접수', tracking_no='7222222222222'
+            WHERE id=?
+            """,
+            (pickup_id,),
+        )
+        con.commit()
+
+    monkeypatch.setattr(
+        "backend.app.api.kpost_pickup.get_res_info_with_dates",
+        lambda order_no, req_ymds: {"treatStusCd": "00", "treatStusNm": "신청접수", "regiNo": "7222222222222"},
+    )
+    monkeypatch.setattr(
+        "backend.app.api.kpost_pickup.track_regi_no",
+        lambda regi_no: {"treatStusCd": "01", "treatStusNm": "수거완료", "regiNo": regi_no},
+    )
+    result = refresh_pickup_statuses(token)
+    assert result["completed"] == 1
+    assert list_pickups(token)["items"][0]["treat_status_name"] == "수거완료"
 
 
 def test_missing_detail_rejected_when_live_like_validation(isolated_runtime, monkeypatch):

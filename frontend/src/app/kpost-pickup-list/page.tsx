@@ -8,6 +8,7 @@ import PageHeader from '@/components/PageHeader';
 import {
   cancelKpostPickup,
   listKpostPickups,
+  refreshKpostPickupStatuses,
   type KpostPickupItem,
 } from '@/lib/api';
 
@@ -34,9 +35,20 @@ function parseApiError(err: unknown): string {
   return String(err);
 }
 
+function statusLabel(item: KpostPickupItem): string {
+  if (item.status === 'canceled') return '취소';
+  if (item.treat_status === '01' || item.treat_status_name === '집하완료') return '수거완료';
+  return item.treat_status_name || item.status || '신청접수';
+}
+
+function canCancel(item: KpostPickupItem): boolean {
+  return item.status === 'requested' && item.treat_status !== '01' && item.treat_status !== '03';
+}
+
 export default function KpostPickupListPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [items, setItems] = useState<KpostPickupItem[]>([]);
@@ -51,6 +63,14 @@ export default function KpostPickupListPage() {
     },
     []
   );
+
+  function currentFilters() {
+    return {
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      recipientName: recipientFilter || undefined,
+    };
+  }
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
@@ -69,20 +89,41 @@ export default function KpostPickupListPage() {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadList]);
 
   async function handleFilter() {
     setError(null);
     try {
-      const filters = {
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        recipientName: recipientFilter || undefined,
-      };
-      await loadList(token, filters);
+      await loadList(token, currentFilters());
     } catch (err) {
       setError(parseApiError(err));
+    }
+  }
+
+  async function handleShowAll() {
+    setDateFrom('');
+    setDateTo('');
+    setRecipientFilter('');
+    setError(null);
+    try {
+      await loadList(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleRefreshStatus() {
+    setRefreshing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await refreshKpostPickupStatuses(token);
+      await loadList(token, currentFilters());
+      setSuccess(result.message || `송장조회 완료. 수거완료 ${result.completed}건`);
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -92,12 +133,7 @@ export default function KpostPickupListPage() {
     try {
       const result = await cancelKpostPickup(token, id);
       setSuccess(result.message || '회수신청을 취소했습니다.');
-      const filters = {
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        recipientName: recipientFilter || undefined,
-      };
-      await loadList(token, filters);
+      await loadList(token, currentFilters());
     } catch (err) {
       setError(parseApiError(err));
     }
@@ -107,17 +143,17 @@ export default function KpostPickupListPage() {
 
   return (
     <div>
-      <PageHeader title="회수신청 목록" subtitle="우체국 회수신청 접수 내역을 조회하고 관리합니다." />
+      <PageHeader title="회수신청 목록" subtitle="전체 접수 내역을 보고, 송장조회로 수거완료 여부를 확인합니다." />
 
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
 
-      <Card title="회수신청 목록">
+      <Card title={`회수신청 목록 · 전체 ${items.length}건`}>
         <div
           style={{
             marginBottom: '1rem',
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr auto',
+            gridTemplateColumns: '1fr 1fr 1fr auto auto auto',
             gap: '0.5rem',
             alignItems: 'end',
           }}
@@ -142,6 +178,12 @@ export default function KpostPickupListPage() {
           <button type="button" className="btn btn-secondary" onClick={handleFilter}>
             조회
           </button>
+          <button type="button" className="btn btn-secondary" onClick={handleShowAll}>
+            전체목록
+          </button>
+          <button type="button" className="btn btn-primary" onClick={handleRefreshStatus} disabled={refreshing}>
+            {refreshing ? '송장조회 중...' : '송장조회'}
+          </button>
         </div>
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>
@@ -161,41 +203,47 @@ export default function KpostPickupListPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      {item.tracking_no || '-'}
-                      {item.is_test ? ' (테스트)' : ''}
-                    </td>
-                    <td>
-                      {item.recipient_name}
-                      <div className="text-muted">{item.recipient_phone}</div>
-                    </td>
-                    <td>
-                      [{item.zipcode}] {item.addr1} {item.addr2}
-                    </td>
-                    <td>{item.pickup_date}</td>
-                    <td>
-                      {item.box_size} × {item.box_quantity || 1}
-                    </td>
-                    <td>{item.status === 'canceled' ? '취소' : item.treat_status_name || item.status}</td>
-                    <td>
-                      {item.created_by}
-                      <div className="text-muted">{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
-                    </td>
-                    <td>
-                      {item.status === 'requested' && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => handleCancel(item.id, item.tracking_no)}
-                        >
-                          취소
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {items.map((item) => {
+                  const label = statusLabel(item);
+                  const done = label === '수거완료';
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        {item.tracking_no || '-'}
+                        {item.is_test ? ' (테스트)' : ''}
+                      </td>
+                      <td>
+                        {item.recipient_name}
+                        <div className="text-muted">{item.recipient_phone}</div>
+                      </td>
+                      <td>
+                        [{item.zipcode}] {item.addr1} {item.addr2}
+                      </td>
+                      <td>{item.pickup_date}</td>
+                      <td>
+                        {item.box_size} × {item.box_quantity || 1}
+                      </td>
+                      <td>
+                        <span style={done ? { color: '#0f766e', fontWeight: 700 } : undefined}>{label}</span>
+                      </td>
+                      <td>
+                        {item.created_by}
+                        <div className="text-muted">{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
+                      </td>
+                      <td>
+                        {canCancel(item) && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => handleCancel(item.id, item.tracking_no)}
+                          >
+                            취소
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

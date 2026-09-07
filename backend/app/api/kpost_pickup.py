@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,7 +17,10 @@ from backend.app.services.epost.client import (
     EpostError,
     cancel_order,
     get_res_info,
+    get_res_info_with_dates,
     has_epost_credentials,
+    lookup_req_ymds,
+    track_regi_no,
     insert_order,
     is_ambiguous_insert_error,
     mock_insert_order,
@@ -37,6 +41,7 @@ from backend.app.services.epost.fields import (
     resolve_infront_center,
     resolve_office_ser,
     split_pickup_address,
+    treat_status_label,
     validate_pickup_address_detail,
 )
 from logic.db import get_connection
@@ -241,7 +246,7 @@ def extract_if_needed(addr1: str) -> str:
 def _preview_payload(validated: dict[str, Any], is_test: bool) -> dict[str, Any]:
     visit = validated["visit_ymd"]
     return {
-        "vendor": "infront",
+        "vendor": "spring",
         "recipient_name": validated["name"],
         "recipient_phone": validated["phone"],
         "zipcode": validated["zipcode"],
@@ -292,6 +297,12 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     ]
     data = dict(zip(keys, row))
     data["is_test"] = bool(data["is_test"])
+    if data.get("status") == "canceled":
+        data["treat_status_name"] = "취소"
+    else:
+        data["treat_status_name"] = treat_status_label(
+            data.get("treat_status"), data.get("treat_status_name")
+        )
     return data
 
 
@@ -301,7 +312,7 @@ def pickup_meta(token: str):
     ensure_pickup_tables()
     live = has_epost_credentials()
     return {
-        "vendor": "infront",
+        "vendor": "spring",
         "default_pickup_date": default_ret_visit_iso(),
         "today": iso_today_kst(),
         "box_sizes": PICKUP_BOX_SIZES,
@@ -328,7 +339,7 @@ def preview_pickup(req: PickupSubmitRequest, token: str):
 @router.get("")
 def list_pickups(
     token: str,
-    limit: int = 50,
+    limit: int = 2000,
     date_from: str | None = None,
     date_to: str | None = None,
     recipient_name: str | None = None,
@@ -349,7 +360,7 @@ def list_pickups(
         params.append(f"%{recipient_name.strip()}%")
     
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    params.append(max(1, min(limit, 200)))
+    params.append(max(1, min(limit, 5000)))
     
     with get_connection() as con:
         rows = con.execute(
@@ -449,7 +460,12 @@ def create_pickup(req: PickupSubmitRequest, token: str):
         except Exception as first_err:
             recovered = None
             try:
-                recovered = get_res_info(order_no, validated["visit_ymd"])
+                recovered = get_res_info(
+                    order_no,
+                    validated["visit_ymd"],
+                    timeout=8.0,
+                    max_attempts=1,
+                )
                 if not (recovered.get("regiNo") or "").strip():
                     recovered = None
             except Exception:
@@ -693,6 +709,94 @@ def delete_saved_recipient(recipient_id: int, token: str):
         con.execute("DELETE FROM saved_recipients WHERE id = ?", (recipient_id,))
         con.commit()
     return {"success": True, "id": recipient_id}
+
+
+def _pickup_req_ymd(item: dict[str, Any]) -> str:
+    ymds = lookup_req_ymds(item.get("res_date"), item.get("created_at"), item.get("pickup_date"))
+    return ymds[0] if ymds else resolve_cancel_req_ymd(item.get("res_date"), item.get("created_at"))
+
+
+def _apply_tracking_info(item: dict[str, Any], info: dict[str, str]) -> dict[str, Any]:
+    item["treat_status"] = info.get("treatStusCd") or item.get("treat_status")
+    item["treat_status_name"] = treat_status_label(
+        item["treat_status"], info.get("treatStusNm") or item.get("treat_status_name")
+    )
+    if info.get("regiNo"):
+        item["tracking_no"] = info["regiNo"]
+    return item
+
+
+def _sync_pickup_like_infront(item: dict[str, Any]) -> dict[str, Any]:
+    """Infront inbound-sync: GetResInfo 먼저, 송장이 있으면 종적조회로 보완."""
+    if item.get("order_no"):
+        ymds = lookup_req_ymds(item.get("res_date"), item.get("created_at"), item.get("pickup_date"))
+        try:
+            info = get_res_info_with_dates(item["order_no"], ymds)
+            _apply_tracking_info(item, info)
+        except Exception:
+            pass
+    if item.get("treat_status") not in {"01", "03"} and item.get("tracking_no"):
+        tracked = track_regi_no(item["tracking_no"])
+        _apply_tracking_info(item, tracked)
+    return item
+
+
+@router.post("/refresh-status")
+def refresh_pickup_statuses(token: str):
+    _get_user(token)
+    ensure_pickup_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT id, vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
+                   pickup_date, goods_name, box_size, box_quantity, notes, tracking_no, req_no, res_no, res_date,
+                   price, post_office, treat_status, treat_status_name, status, is_test,
+                   created_by, created_at, canceled_at, canceled_by
+            FROM kpost_pickup_requests
+            WHERE status = 'requested' AND is_test = 0
+              AND (
+                (order_no IS NOT NULL AND order_no != '')
+                OR (tracking_no IS NOT NULL AND tracking_no != '')
+              )
+            ORDER BY id DESC
+            LIMIT 200
+            """
+        ).fetchall()
+    items = [_row_to_dict(row) for row in rows]
+    checked = 0
+    completed = 0
+    failed = 0
+    for item in items:
+        if item.get("treat_status") in {"01", "03"}:
+            if item.get("treat_status") == "01":
+                completed += 1
+            continue
+        try:
+            _sync_pickup_like_infront(item)
+            with get_connection() as con:
+                con.execute(
+                    """
+                    UPDATE kpost_pickup_requests
+                    SET treat_status=?, treat_status_name=?, tracking_no=?
+                    WHERE id=?
+                    """,
+                    (item["treat_status"], item["treat_status_name"], item["tracking_no"], item["id"]),
+                )
+                con.commit()
+            checked += 1
+            if item.get("treat_status") == "01":
+                completed += 1
+        except Exception:
+            failed += 1
+    return {
+        "success": True,
+        "checked": checked,
+        "completed": completed,
+        "failed": failed,
+        "message": f"송장 {checked}건을 조회했습니다. 수거완료 {completed}건",
+    }
+
+
 @router.get("/{pickup_id}")
 def get_pickup(pickup_id: int, token: str, refresh: bool = False):
     _get_user(token)
@@ -701,7 +805,7 @@ def get_pickup(pickup_id: int, token: str, refresh: bool = False):
         row = con.execute(
             """
             SELECT id, vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
-                   pickup_date, goods_name, box_size, notes, tracking_no, req_no, res_no, res_date,
+                   pickup_date, goods_name, box_size, box_quantity, notes, tracking_no, req_no, res_no, res_date,
                    price, post_office, treat_status, treat_status_name, status, is_test,
                    created_by, created_at, canceled_at, canceled_by
             FROM kpost_pickup_requests WHERE id = ?
@@ -711,14 +815,9 @@ def get_pickup(pickup_id: int, token: str, refresh: bool = False):
     if not row:
         raise HTTPException(status_code=404, detail="접수 내역을 찾을 수 없습니다.")
     item = _row_to_dict(row)
-    if refresh and not item["is_test"] and item["status"] == "requested" and item["order_no"]:
-        req_ymd = resolve_cancel_req_ymd(item.get("res_date"), item.get("created_at"))
+    if refresh and not item["is_test"] and item["status"] == "requested":
         try:
-            info = get_res_info(item["order_no"], req_ymd)
-            item["treat_status"] = info.get("treatStusCd") or item["treat_status"]
-            item["treat_status_name"] = info.get("treatStusNm") or item["treat_status_name"]
-            if info.get("regiNo"):
-                item["tracking_no"] = info["regiNo"]
+            _sync_pickup_like_infront(item)
             with get_connection() as con:
                 con.execute(
                     """

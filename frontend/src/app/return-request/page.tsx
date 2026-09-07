@@ -501,14 +501,20 @@ export default function ReturnRequestPage() {
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSubmit}>
               {saving ? '접수 중...' : preview.is_test ? '테스트 접수' : '회수신청 접수'}
             </button>
-            <button type="button" className="btn btn-secondary" onClick={() => setPreview(null)}>
+            <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setPreview(null)}>
               취소
             </button>
           </div>
+          {saving && (
+            <p className="text-muted" style={{ marginTop: '0.7rem', fontSize: '0.85rem' }}>
+              우체국에 접수 요청 중입니다. 최대 45초 안에 성공 또는 오류가 표시됩니다.
+              오래 멈추면 접수목록에서 송장 생성 여부를 확인하세요.
+            </p>
+          )}
         </Card>
       )}
 
