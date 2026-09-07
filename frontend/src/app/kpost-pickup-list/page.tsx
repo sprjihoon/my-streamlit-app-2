@@ -69,7 +69,8 @@ export default function KpostPickupListPage() {
         setLoading(false);
       }
     })();
-  }, [loadList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleFilter() {
     setError(null);
