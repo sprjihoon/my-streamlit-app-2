@@ -1395,8 +1395,19 @@ export async function previewKpostPickup(token: string, payload: KpostPickupPayl
   );
 }
 
-export async function listKpostPickups(token: string) {
-  return fetchApi<{ items: KpostPickupItem[] }>(`/kpost-pickup${pickupQuery(token)}`);
+export async function listKpostPickups(
+  token: string,
+  filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }
+) {
+  let url = `/kpost-pickup${pickupQuery(token)}`;
+  if (filters) {
+    const params = new URLSearchParams();
+    if (filters.dateFrom) params.set('date_from', filters.dateFrom);
+    if (filters.dateTo) params.set('date_to', filters.dateTo);
+    if (filters.recipientName) params.set('recipient_name', filters.recipientName);
+    if (params.toString()) url += `&${params.toString()}`;
+  }
+  return fetchApi<{ items: KpostPickupItem[] }>(url);
 }
 
 export async function createKpostPickup(token: string, payload: KpostPickupPayload) {
@@ -1420,6 +1431,44 @@ export async function cancelKpostPickup(token: string, id: number) {
   return fetchApi<{ success: boolean; already?: boolean; message?: string }>(
     `/kpost-pickup/${id}/cancel${pickupQuery(token, '&confirm=true')}`,
     { method: 'POST' }
+  );
+}
+
+export interface SavedRecipient {
+  id: number;
+  label: string;
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  created_at: string;
+}
+
+export interface SavedRecipientPayload {
+  label: string;
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+}
+
+export async function listSavedRecipients(token: string) {
+  return fetchApi<{ items: SavedRecipient[] }>(`/kpost-pickup/saved-recipients${pickupQuery(token)}`);
+}
+
+export async function saveRecipient(token: string, payload: SavedRecipientPayload) {
+  return fetchApi<SavedRecipient & { success: boolean }>(
+    `/kpost-pickup/saved-recipients${pickupQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function deleteSavedRecipient(token: string, id: number) {
+  return fetchApi<{ success: boolean; id: number }>(
+    `/kpost-pickup/saved-recipients/${id}${pickupQuery(token)}`,
+    { method: 'DELETE' }
   );
 }
 

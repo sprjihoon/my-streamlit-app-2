@@ -8,13 +8,17 @@ import PageHeader from '@/components/PageHeader';
 import {
   cancelKpostPickup,
   createKpostPickup,
+  deleteSavedRecipient,
   getKpostPickupMeta,
   listKpostPickups,
+  listSavedRecipients,
   previewKpostPickup,
+  saveRecipient,
   type KpostPickupBoxSize,
   type KpostPickupItem,
   type KpostPickupPayload,
   type KpostPickupPreview,
+  type SavedRecipient,
 } from '@/lib/api';
 
 declare global {
@@ -70,17 +74,26 @@ export default function ReturnRequestPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [liveReady, setLiveReady] = useState(false);
-  const [centerLabel, setCenterLabel] = useState('인프론트 · 동대구우체국');
+  const [centerLabel, setCenterLabel] = useState('스프링풀필먼트 · 동대구우체국');
   const [officeSer, setOfficeSer] = useState('260940699');
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
   const [preview, setPreview] = useState<KpostPickupPreview | null>(null);
   const [items, setItems] = useState<KpostPickupItem[]>([]);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [recipientFilter, setRecipientFilter] = useState('');
+  const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveLabel, setSaveLabel] = useState('');
 
-  const loadList = useCallback(async (auth: string) => {
-    const data = await listKpostPickups(auth);
-    setItems(data.items || []);
-  }, []);
+  const loadList = useCallback(
+    async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }) => {
+      const data = await listKpostPickups(auth, filters);
+      setItems(data.items || []);
+    },
+    []
+  );
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
@@ -92,12 +105,16 @@ export default function ReturnRequestPage() {
     }
     (async () => {
       try {
-        const meta = await getKpostPickupMeta(stored);
+        const [meta, recipients] = await Promise.all([
+          getKpostPickupMeta(stored),
+          listSavedRecipients(stored),
+        ]);
         setLiveReady(meta.live_ready);
         setBoxSizes(meta.box_sizes || []);
         setCenterLabel(`${meta.center.name} · ${meta.center.addr}`);
         if (meta.office_ser) setOfficeSer(meta.office_ser);
         setForm(emptyForm(meta.default_pickup_date));
+        setSavedRecipients(recipients.items || []);
         await loadList(stored);
       } catch (err) {
         setError(parseApiError(err));
@@ -172,7 +189,80 @@ export default function ReturnRequestPage() {
     try {
       const result = await cancelKpostPickup(token, id);
       setSuccess(result.message || '회수신청을 취소했습니다.');
-      await loadList(token);
+      const filters = {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        recipientName: recipientFilter || undefined,
+      };
+      await loadList(token, filters);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleFilter() {
+    setError(null);
+    try {
+      const filters = {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        recipientName: recipientFilter || undefined,
+      };
+      await loadList(token, filters);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  function loadRecipient(recipient: SavedRecipient) {
+    setPreview(null);
+    setForm((prev) => ({
+      ...prev,
+      recipient_name: recipient.recipient_name,
+      recipient_phone: recipient.recipient_phone,
+      zipcode: recipient.zipcode,
+      addr1: recipient.addr1,
+      addr2: recipient.addr2,
+    }));
+  }
+
+  async function handleSaveRecipient() {
+    if (!saveLabel.trim()) {
+      setError('라벨을 입력해주세요.');
+      return;
+    }
+    if (!form.recipient_name.trim() || !form.recipient_phone.trim() || !form.zipcode.trim() || !form.addr1.trim()) {
+      setError('수취인 정보를 모두 입력해주세요.');
+      return;
+    }
+    setError(null);
+    try {
+      await saveRecipient(token, {
+        label: saveLabel.trim(),
+        recipient_name: form.recipient_name,
+        recipient_phone: form.recipient_phone,
+        zipcode: form.zipcode,
+        addr1: form.addr1,
+        addr2: form.addr2,
+      });
+      const recipients = await listSavedRecipients(token);
+      setSavedRecipients(recipients.items || []);
+      setSuccess(`'${saveLabel.trim()}' 수취인을 저장했습니다.`);
+      setShowSaveDialog(false);
+      setSaveLabel('');
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleDeleteRecipient(id: number, label: string) {
+    if (!window.confirm(`'${label}' 수취인을 삭제할까요?`)) return;
+    setError(null);
+    try {
+      await deleteSavedRecipient(token, id);
+      const recipients = await listSavedRecipients(token);
+      setSavedRecipients(recipients.items || []);
+      setSuccess(`'${label}' 수취인을 삭제했습니다.`);
     } catch (err) {
       setError(parseApiError(err));
     }
@@ -196,6 +286,26 @@ export default function ReturnRequestPage() {
             ? `실접수 가능 · 공급지 ${officeSer} · 도착 ${centerLabel}`
             : `우체국 키가 없어 테스트 접수로 저장됩니다. 공급지 ${officeSer} · 도착 ${centerLabel}`}
         </p>
+        {savedRecipients.length > 0 && (
+          <div style={{ marginBottom: '1rem' }}>
+            <label className="text-muted" style={{ fontSize: '0.85rem' }}>
+              저장된 수취인
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
+              {savedRecipients.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => loadRecipient(r)}
+                  style={{ fontSize: '0.85rem', padding: '0.4rem 0.7rem' }}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <label>
             수취인 이름
@@ -327,12 +437,50 @@ export default function ReturnRequestPage() {
             테스트 접수 (우체국에 실제 신청하지 않음)
           </label>
         )}
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-secondary" onClick={handlePreview}>
             미리보기
           </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowSaveDialog(true)}
+            disabled={!form.recipient_name.trim() || !form.zipcode.trim()}
+          >
+            수취인 저장
+          </button>
         </div>
       </Card>
+
+      {showSaveDialog && (
+        <Card title="수취인 저장">
+          <label>
+            라벨 (예: 홍길동 강남점)
+            <input
+              style={inputStyle}
+              value={saveLabel}
+              onChange={(e) => setSaveLabel(e.target.value)}
+              placeholder="수취인을 구분할 이름"
+              maxLength={50}
+            />
+          </label>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+            <button type="button" className="btn btn-primary" onClick={handleSaveRecipient}>
+              저장
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setShowSaveDialog(false);
+                setSaveLabel('');
+              }}
+            >
+              취소
+            </button>
+          </div>
+        </Card>
+      )}
 
       {preview && (
         <Card title="접수 확인">
@@ -371,6 +519,28 @@ export default function ReturnRequestPage() {
       )}
 
       <Card title="최근 회수신청">
+        <div style={{ marginBottom: '1rem', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '0.5rem', alignItems: 'end' }}>
+          <label>
+            수거일 (시작)
+            <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </label>
+          <label>
+            수거일 (종료)
+            <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          <label>
+            수취인
+            <input
+              style={inputStyle}
+              value={recipientFilter}
+              onChange={(e) => setRecipientFilter(e.target.value)}
+              placeholder="수취인 이름 검색"
+            />
+          </label>
+          <button type="button" className="btn btn-secondary" onClick={handleFilter}>
+            조회
+          </button>
+        </div>
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>
         ) : (

@@ -114,6 +114,25 @@ def ensure_pickup_tables() -> None:
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_kpost_pickup_created ON kpost_pickup_requests(created_at DESC)"
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_recipients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                recipient_name TEXT NOT NULL,
+                recipient_phone TEXT NOT NULL,
+                zipcode TEXT NOT NULL,
+                addr1 TEXT NOT NULL,
+                addr2 TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, label)
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_recipients_user ON saved_recipients(user_id, created_at DESC)"
+        )
         con.commit()
 
 
@@ -237,6 +256,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         "pickup_date",
         "goods_name",
         "box_size",
+        "box_quantity",
         "notes",
         "tracking_no",
         "req_no",
@@ -289,21 +309,44 @@ def preview_pickup(req: PickupSubmitRequest, token: str):
 
 
 @router.get("")
-def list_pickups(token: str, limit: int = 50):
+def list_pickups(
+    token: str,
+    limit: int = 50,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    recipient_name: str | None = None,
+):
     _get_user(token)
     ensure_pickup_tables()
+    conditions = []
+    params: list[Any] = []
+    
+    if date_from:
+        conditions.append("pickup_date >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("pickup_date <= ?")
+        params.append(date_to)
+    if recipient_name and recipient_name.strip():
+        conditions.append("recipient_name LIKE ?")
+        params.append(f"%{recipient_name.strip()}%")
+    
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(max(1, min(limit, 200)))
+    
     with get_connection() as con:
         rows = con.execute(
-            """
+            f"""
             SELECT id, vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
-                   pickup_date, goods_name, box_size, notes, tracking_no, req_no, res_no, res_date,
+                   pickup_date, goods_name, box_size, box_quantity, notes, tracking_no, req_no, res_no, res_date,
                    price, post_office, treat_status, treat_status_name, status, is_test,
                    created_by, created_at, canceled_at, canceled_by
             FROM kpost_pickup_requests
+            {where_clause}
             ORDER BY id DESC
             LIMIT ?
             """,
-            (max(1, min(limit, 200)),),
+            tuple(params),
         ).fetchall()
     return {"items": [_row_to_dict(row) for row in rows]}
 
@@ -524,7 +567,7 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
     with get_connection() as con:
         row = con.execute(
             """
-            SELECT id, status, is_test, req_no, res_no, tracking_no, res_date, created_at, insert_snapshot
+            SELECT id, status, is_test, req_no, res_no, tracking_no, pickup_date, insert_snapshot
             FROM kpost_pickup_requests WHERE id = ?
             """,
             (pickup_id,),
@@ -534,13 +577,16 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
     if row[1] == "canceled":
         return {"success": True, "already": True, "message": "이미 취소된 접수입니다."}
     if not row[2]:
-        snapshot = json.loads(row[8] or "{}")
+        pickup_ymd = re.sub(r"\D", "", row[6] or "")[:8]
+        if len(pickup_ymd) != 8:
+            raise HTTPException(status_code=400, detail="수거 희망일 정보가 없어 취소할 수 없습니다.")
+        snapshot = json.loads(row[7] or "{}")
         try:
             cancel_order(
                 req_no=row[3] or "",
                 res_no=row[4] or "",
                 regi_no=row[5] or "",
-                req_ymd=resolve_cancel_req_ymd(row[6], row[7]),
+                req_ymd=pickup_ymd,
                 insert_snapshot=snapshot,
             )
         except Exception as exc:
@@ -564,3 +610,111 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
         user_nickname=user["nickname"],
     )
     return {"success": True, "id": pickup_id, "status": "canceled"}
+
+
+class SavedRecipientRequest(BaseModel):
+    label: str
+    recipient_name: str
+    recipient_phone: str
+    zipcode: str
+    addr1: str
+    addr2: str = ""
+
+
+@router.get("/saved-recipients")
+def list_saved_recipients(token: str):
+    user = _get_user(token)
+    ensure_pickup_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT id, label, recipient_name, recipient_phone, zipcode, addr1, addr2, created_at
+            FROM saved_recipients
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user["user_id"],),
+        ).fetchall()
+    return {
+        "items": [
+            {
+                "id": row[0],
+                "label": row[1],
+                "recipient_name": row[2],
+                "recipient_phone": row[3],
+                "zipcode": row[4],
+                "addr1": row[5],
+                "addr2": row[6] or "",
+                "created_at": row[7],
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.post("/saved-recipients")
+def save_recipient(req: SavedRecipientRequest, token: str):
+    user = _get_user(token)
+    ensure_pickup_tables()
+    label = (req.label or "").strip()
+    if len(label) < 1:
+        raise HTTPException(status_code=400, detail="라벨을 입력해주세요.")
+    if len(label) > 50:
+        raise HTTPException(status_code=400, detail="라벨은 50자 이하여야 합니다.")
+    name = (req.recipient_name or "").strip()
+    if len(name) < 1:
+        raise HTTPException(status_code=400, detail="수취인 이름을 입력해주세요.")
+    phone = normalize_phone(req.recipient_phone)
+    if len(phone) < 9:
+        raise HTTPException(status_code=400, detail="전화번호를 입력해주세요.")
+    zipcode = normalize_zip(req.zipcode)
+    if len(zipcode) != 5:
+        raise HTTPException(status_code=400, detail="우편번호 5자리가 필요합니다.")
+    addr1 = (req.addr1 or "").strip()
+    if len(addr1) < 2:
+        raise HTTPException(status_code=400, detail="주소를 입력해주세요.")
+    addr2 = (req.addr2 or "").strip()
+    created_at = datetime.now(KST).isoformat(timespec="seconds")
+    with get_connection() as con:
+        try:
+            cur = con.execute(
+                """
+                INSERT INTO saved_recipients (user_id, label, recipient_name, recipient_phone, zipcode, addr1, addr2, created_at)
+                VALUES (?,?,?,?,?,?,?,?)
+                """,
+                (user["user_id"], label, name, phone, zipcode, addr1, addr2, created_at),
+            )
+            recipient_id = cur.lastrowid
+            con.commit()
+        except Exception as exc:
+            if "UNIQUE constraint" in str(exc):
+                raise HTTPException(status_code=400, detail=f"'{label}' 라벨이 이미 존재합니다. 다른 이름을 사용해주세요.")
+            raise
+    return {
+        "success": True,
+        "id": recipient_id,
+        "label": label,
+        "recipient_name": name,
+        "recipient_phone": phone,
+        "zipcode": zipcode,
+        "addr1": addr1,
+        "addr2": addr2,
+    }
+
+
+@router.delete("/saved-recipients/{recipient_id}")
+def delete_saved_recipient(recipient_id: int, token: str):
+    user = _get_user(token)
+    ensure_pickup_tables()
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT id, user_id FROM saved_recipients WHERE id = ?",
+            (recipient_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="저장된 수취인을 찾을 수 없습니다.")
+        if row[1] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="다른 사용자의 수취인 정보는 삭제할 수 없습니다.")
+        con.execute("DELETE FROM saved_recipients WHERE id = ?", (recipient_id,))
+        con.commit()
+    return {"success": True, "id": recipient_id}

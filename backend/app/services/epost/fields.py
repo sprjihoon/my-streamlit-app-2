@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
 EPOST_PICKUP_DETAIL_MIN_LEN = 2
-EPOST_ORD_COMP_NM = "인프론트"
+EPOST_ORD_COMP_NM = "스프링풀필먼트"
 # 스프링풀필먼트 공급지코드 (발송지·회수도착지 동일, 동대구우체국)
 EPOST_OFFICE_SER = "260940699"
 EPOST_ORD_COMP_NM_MAX_BYTES = 12
@@ -40,7 +40,7 @@ EPOST_PICKUP_KR_HOLIDAYS = {
 }
 
 EPOST_CENTER_DEFAULTS = {
-    "ord_nm": "인프론트",
+    "ord_nm": "스프링풀필먼트",
     "zip": "41142",
     "addr1": "대구광역시 동구 동촌로 1",
     "addr2": "동대구우체국 2층 소포실",
@@ -300,6 +300,7 @@ def resolve_office_ser(env: dict[str, str] | None = None) -> str:
 
 def resolve_infront_center(env: dict[str, str]) -> dict[str, str]:
     raw_addr1 = (env.get("INFRONT_CENTER_ADDR1") or EPOST_CENTER_DEFAULTS["addr1"]).strip()
+    display_name = (env.get("INFRONT_CENTER_NAME") or "").strip() or "스프링풀필먼트"
     return {
         "ord_nm": (env.get("INFRONT_CENTER_ORD_NM") or EPOST_CENTER_DEFAULTS["ord_nm"]).strip(),
         "zip": re.sub(r"\D", "", env.get("INFRONT_CENTER_ZIPCODE") or EPOST_CENTER_DEFAULTS["zip"]),
@@ -309,7 +310,7 @@ def resolve_infront_center(env: dict[str, str]) -> dict[str, str]:
             EPOST_CENTER_DEFAULTS["addr2"],
         ),
         "phone": normalize_phone(env.get("INFRONT_CENTER_PHONE") or ""),
-        "display_name": env.get("INFRONT_CENTER_NAME") or EPOST_CENTER_DEFAULTS["ord_nm"],
+        "display_name": display_name,
     }
 
 
