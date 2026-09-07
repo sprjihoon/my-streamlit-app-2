@@ -778,10 +778,27 @@ def refresh_pickup_statuses(token: str):
             """
         ).fetchall()
     items = [_row_to_dict(row) for row in rows]
+    today_ymd = datetime.now(KST).strftime("%Y%m%d")
     checked = 0
     completed = 0
     failed = 0
     for item in items:
+        pickup_ymd = re.sub(r"\D", "", item.get("pickup_date") or "")[:8]
+        # 수거 희망일이 아직 오지 않은 건 처리
+        if pickup_ymd and pickup_ymd > today_ymd:
+            # 수거일이 미래인데 '수거완료'로 잘못 저장된 경우 → 신청접수로 되돌림
+            if item.get("treat_status") == "01":
+                with get_connection() as con:
+                    con.execute(
+                        """
+                        UPDATE kpost_pickup_requests
+                        SET treat_status='00', treat_status_name='신청접수'
+                        WHERE id=?
+                        """,
+                        (item["id"],),
+                    )
+                    con.commit()
+            continue
         if item.get("treat_status") in {"01", "03"}:
             if item.get("treat_status") == "01":
                 completed += 1

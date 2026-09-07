@@ -69,7 +69,9 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
     blob = text or ""
     if any(token in blob for token in ("배달완료", "배달 완료")):
         return "03"
-    if any(token in blob for token in ("집하완료", "집하 완료", "수거완료", "수거 완료", "집하")):
+    # "집하" 단독 토큰은 우체국 추적 페이지의 헤더·단계 레이블에도 등장하므로 제외.
+    # "집하완료" / "집하 완료" / "수거완료" / "수거 완료" 처럼 완료를 명시한 경우만 수거완료로 판정.
+    if any(token in blob for token in ("집하완료", "집하 완료", "수거완료", "수거 완료")):
         return "01"
     if any(token in blob for token in ("수거중", "배달준비", "발송")):
         return "02"
