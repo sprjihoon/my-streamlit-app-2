@@ -125,6 +125,7 @@ export default function Dashboard() {
       <Card title="빠른 작업">
         <div className="flex gap-1">
           <a href="/upload" className="btn btn-primary">데이터 업로드</a>
+          <a href="/return-request" className="btn btn-secondary">회수신청</a>
           <a href="/invoice" className="btn btn-success">인보이스 계산</a>
           <a href="/invoice-list" className="btn btn-secondary">인보이스 목록</a>
         </div>

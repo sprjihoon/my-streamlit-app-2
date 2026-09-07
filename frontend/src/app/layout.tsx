@@ -218,7 +218,14 @@ const NAV_GROUPS = [
       { href: '/vendors', label: '매핑 리스트', icon: <List {...IC} />, adminOnly: true },
       { href: '/rates', label: '요금표 관리', icon: <DollarSign {...IC} />, adminOnly: true },
       { href: '/insights', label: '데이터 인사이트', icon: <TrendingUp {...IC} /> },
-      { href: '/kpost-pickup', label: '우체국 회수', icon: <Truck {...IC} /> },
+    ],
+  },
+  {
+    key: 'return-request',
+    label: '회수신청',
+    icon: <Truck {...IC} />,
+    items: [
+      { href: '/return-request', label: '회수신청', icon: <Truck {...IC} /> },
     ],
   },
   {
