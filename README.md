@@ -107,17 +107,21 @@ my-streamlit-app/
 
 | 항목 | 상태 |
 |---|---|
-| 실접수 InsertOrder | 통과. 스프링풀필먼트 `260940699` 로 약 0.5초에 `regiNo` 반환 |
+| 실접수 InsertOrder | 통과. 스프링풀필먼트 `260940699` |
 | 공급지조회 GetOfficeInfo | 통과. 계약에 스프링풀필먼트·인프론트·모두의수선 등 10곳 등록됨 |
 | 테스트 접수 `testYn=Y` | 통과. 암호문 안에 넣으면 `TESTREGINOAPI`, 우체국에 실제 전송 안 됨 |
 | 회수목록 수거송장번호 | 우체국이 `regiNo`를 준 뒤에만 DB 저장 |
 | 주소지 별칭 저장/자동입력 | `/return-request`, `/saved-recipients` |
+| **운영 접수 경로** | **Railway 싱가포르 → Vercel Seoul(ICN) 중계 → ship.epost.go.kr** |
+
+> Railway(싱가포르)에서 `ship.epost.go.kr` 직접 연결 불가(해외IP 차단). Vercel `/api/epost-relay` (Seoul ICN)를 경유해 우체국에 요청을 전달한다.  
+> 환경변수: Railway `EPOST_RELAY_URL=https://tillion.io.kr`, `EPOST_RELAY_SECRET=<secret>` / Vercel `EPOST_RELAY_SECRET=<same secret>`
 
 운영 URL: https://tillion.io.kr/return-request , https://tillion.io.kr/kpost-pickup-list
 
 #### 화면
 
-- `/return-request`: 접수 폼. 다음 주소 검색, 별칭 자동입력, 박스·품명, 미리보기 후 접수
+- `/return-request`: 접수 폼. 다음 주소 검색, 별칭 자동입력, 박스·품명, **접수 버튼 1회로 바로 접수**
 - `/kpost-pickup-list`: 전체 목록, **수거송장번호**, 상태 새로고침, 취소
 - `/saved-recipients`: 별칭별 주소지 추가·수정·삭제
 

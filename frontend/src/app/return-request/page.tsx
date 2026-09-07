@@ -9,11 +9,9 @@ import {
   createKpostPickup,
   getKpostPickupMeta,
   listSavedRecipients,
-  previewKpostPickup,
   saveRecipient,
   type KpostPickupBoxSize,
   type KpostPickupPayload,
-  type KpostPickupPreview,
   type SavedRecipient,
 } from '@/lib/api';
 
@@ -106,7 +104,6 @@ export default function ReturnRequestPage() {
   const [officeSer, setOfficeSer] = useState('260940699');
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
-  const [preview, setPreview] = useState<KpostPickupPreview | null>(null);
   const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState('');
   const [saveAddress, setSaveAddress] = useState(false);
@@ -148,13 +145,11 @@ export default function ReturnRequestPage() {
     }
     const recipient = savedRecipients.find((item) => String(item.id) === id);
     if (!recipient) return;
-    setPreview(null);
     setSelectedSavedId(id);
     setForm((prev) => applySavedRecipientToForm(prev, recipient));
   }
 
   function updateForm<K extends keyof KpostPickupPayload>(key: K, value: KpostPickupPayload[K]) {
-    setPreview(null);
     setSelectedSavedId('');
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -164,7 +159,7 @@ export default function ReturnRequestPage() {
       if (!window.daum?.Postcode) return;
       new window.daum.Postcode({
         oncomplete(data) {
-          setPreview(null);
+
           setSelectedSavedId('');
           setForm((prev) => ({
             ...prev,
@@ -184,30 +179,7 @@ export default function ReturnRequestPage() {
     document.body.appendChild(script);
   }
 
-  async function handlePreview() {
-    setError(null);
-    setSuccess(null);
-    const aliasErr = saveAliasError(
-      saveAddress,
-      addressAlias,
-      savedRecipients.map((item) => item.label),
-    );
-    if (aliasErr) {
-      setPreview(null);
-      setError(aliasErr);
-      return;
-    }
-    try {
-      const data = await previewKpostPickup(token, form);
-      setPreview(data.preview);
-    } catch (err) {
-      setPreview(null);
-      setError(parseApiError(err));
-    }
-  }
-
   async function handleSubmit() {
-    if (!preview) return;
     const aliasErr = saveAliasError(
       saveAddress,
       addressAlias,
@@ -247,7 +219,6 @@ export default function ReturnRequestPage() {
         const mode = result.is_test ? '테스트 접수' : '우체국 접수';
         setSuccess(`${mode} 완료. 송장 ${result.tracking_no}${extra}`);
       }
-      setPreview(null);
       setSelectedSavedId('');
       setSaveAddress(false);
       setAddressAlias('');
@@ -353,7 +324,7 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.pickup_date}
               onChange={(e) => {
-                setPreview(null);
+      
                 setForm((p) => ({ ...p, pickup_date: e.target.value }));
               }}
             />
@@ -364,7 +335,7 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.goods_name}
               onChange={(e) => {
-                setPreview(null);
+      
                 setForm((p) => ({ ...p, goods_name: e.target.value }));
               }}
             >
@@ -380,7 +351,7 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.box_size}
               onChange={(e) => {
-                setPreview(null);
+      
                 setForm((p) => ({ ...p, box_size: e.target.value }));
               }}
             >
@@ -400,7 +371,7 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.box_quantity || 1}
               onChange={(e) => {
-                setPreview(null);
+      
                 const val = Math.max(1, Math.min(99, parseInt(e.target.value) || 1));
                 setForm((p) => ({ ...p, box_quantity: val }));
               }}
@@ -412,7 +383,6 @@ export default function ReturnRequestPage() {
               style={inputStyle}
               value={form.notes}
               onChange={(e) => {
-                setPreview(null);
                 setForm((p) => ({ ...p, notes: e.target.value }));
               }}
             />
@@ -435,7 +405,6 @@ export default function ReturnRequestPage() {
                 const checked = e.target.checked;
                 setSaveAddress(checked);
                 if (!checked) setAddressAlias('');
-                setPreview(null);
               }}
             />
             해당 정보 저장하기
@@ -450,7 +419,6 @@ export default function ReturnRequestPage() {
                 maxLength={50}
                 onChange={(e) => {
                   setAddressAlias(e.target.value);
-                  setPreview(null);
                 }}
               />
             </label>
@@ -462,61 +430,23 @@ export default function ReturnRequestPage() {
               type="checkbox"
               checked={!!form.test_mode}
               onChange={(e) => {
-                setPreview(null);
                 setForm((p) => ({ ...p, test_mode: e.target.checked }));
               }}
             />
             테스트 접수 (우체국에 실제 신청하지 않음)
           </label>
         )}
-        <div style={{ marginTop: '1rem' }}>
-          <button type="button" className="btn btn-primary" onClick={handlePreview} disabled={saving}>
-            {preview ? '다시 확인' : '접수 확인'}
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
+            {saving ? '접수 중...' : liveReady && !form.test_mode ? '회수신청 접수' : '테스트 접수'}
           </button>
-        </div>
-      </Card>
-
-      {preview && (
-        <Card title="접수 확인">
-          <p style={{ marginBottom: '0.75rem' }}>
-            아래 내용으로 {preview.is_test ? '테스트 저장' : '우체국 실접수'}합니다. 맞으면 접수를 눌러주세요.
-          </p>
-          <div className="table-container">
-            <table>
-              <tbody>
-                {[
-                  ['수취인', `${preview.recipient_name} / ${preview.recipient_phone}`],
-                  ['수거지', `[${preview.zipcode}] ${preview.addr1} ${preview.addr2}`],
-                  ['수거일', preview.pickup_date],
-                  ['품명/규격', `${preview.goods_name} · ${preview.box_label}`],
-                  ['도착', `${preview.center_name} · ${preview.center_addr}`],
-                  ['공급지코드', preview.office_ser || officeSer],
-                  ['메모', preview.notes || '-'],
-                ].map(([label, value]) => (
-                  <tr key={label}>
-                    <th style={{ width: '120px' }}>{label}</th>
-                    <td>{value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSubmit}>
-              {saving ? '접수 중...' : preview.is_test ? '테스트 접수' : '회수신청 접수'}
-            </button>
-            <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setPreview(null)}>
-              취소
-            </button>
-          </div>
           {saving && (
-            <p className="text-muted" style={{ marginTop: '0.7rem', fontSize: '0.85rem' }}>
+            <p className="text-muted" style={{ margin: 0, fontSize: '0.85rem' }}>
               우체국에 접수 요청 중입니다. 18초 안에 성공 또는 오류가 표시됩니다.
-              이 문구가 그대로면 새로고침 후 접수목록을 확인하세요.
             </p>
           )}
-        </Card>
-      )}
+        </div>
+      </Card>
 
       <Card title="접수 내역 확인">
         <p className="text-muted" style={{ marginBottom: '1rem' }}>
