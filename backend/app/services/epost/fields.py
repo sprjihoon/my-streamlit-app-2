@@ -11,14 +11,13 @@ from zoneinfo import ZoneInfo
 KST = ZoneInfo("Asia/Seoul")
 EPOST_PICKUP_DETAIL_MIN_LEN = 2
 EPOST_DISPLAY_CENTER_NM = "스프링풀필먼트"
-# 우체국 계약 회수도착지. 인프론트·모두의수선과 같은 공급지코드여야 InsertOrder가 즉시 regiNo를 준다.
-EPOST_OFFICE_SER = "260537802"
-EPOST_UNREGISTERED_OFFICE_SER = "260940699"
-# 계약 화면 표기(12바이트). 스프링풀필먼트는 24바라 잘리면 우체국이 송장을 안 준다.
-EPOST_CONTRACT_COMP_NM = "인포커스"
+# 공급지관리의 스프링풀필먼트 공급지코드.
+EPOST_OFFICE_SER = "260940699"
+EPOST_LEGACY_INFOCUS_OFFICE_SER = "260537802"
+EPOST_CONTRACT_COMP_NM = "스프링풀필먼트"
 EPOST_ORD_COMP_NM = EPOST_CONTRACT_COMP_NM
 LEGACY_CENTER_NAME_MARKERS = ("인프론트", "infront")
-EPOST_ORD_COMP_NM_MAX_BYTES = 12
+EPOST_ORD_COMP_NM_MAX_BYTES = 24
 EPOST_ADDR_MAX_BYTES = 100
 EPOST_ORDER_NO_MAX_BYTES = 30
 EPOST_GOODS_NM_MAX_BYTES = 40
@@ -337,7 +336,7 @@ def sanitize_center_addr(addr: str, default: str) -> str:
 def resolve_office_ser(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
     raw = re.sub(r"\D", "", (source.get("EPOST_OFFICE_SER") or EPOST_OFFICE_SER).strip())
-    if not raw or raw == EPOST_UNREGISTERED_OFFICE_SER:
+    if not raw or raw == EPOST_LEGACY_INFOCUS_OFFICE_SER:
         return EPOST_OFFICE_SER
     return raw
 
@@ -455,7 +454,7 @@ def build_return_pickup_params(input_data: dict[str, Any]) -> dict[str, Any]:
         "officeSer": resolve_office_ser({"EPOST_OFFICE_SER": str(input_data.get("office_ser") or "")}),
         "orderNo": input_data["order_no"],
         "ordCompNm": EPOST_CONTRACT_COMP_NM,
-        "ordNm": truncate_utf8_bytes(EPOST_CONTRACT_COMP_NM, 12),
+        "ordNm": truncate_utf8_bytes(EPOST_CONTRACT_COMP_NM, 40),
         "inqTelCn": center_phone,
         "ordZip": normalize_zip(center.get("zip")),
         "ordAddr1": normalize_addr1(center.get("addr1")),
@@ -495,7 +494,7 @@ def sanitize_insert_order_body(body: dict[str, Any]) -> dict[str, Any]:
             cleaned["inqTelCn"] = require_phone(str(cleaned["inqTelCn"]), "문의전화(inqTelCn)")
     if str(cleaned.get("reqType", "")) == "2":
         cleaned["ordCompNm"] = EPOST_CONTRACT_COMP_NM
-        cleaned["ordNm"] = truncate_utf8_bytes(EPOST_CONTRACT_COMP_NM, 12)
+        cleaned["ordNm"] = truncate_utf8_bytes(EPOST_CONTRACT_COMP_NM, 40)
         cleaned["officeSer"] = resolve_office_ser(
             {"EPOST_OFFICE_SER": str(cleaned.get("officeSer") or "")}
         )
