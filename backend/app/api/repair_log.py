@@ -195,6 +195,16 @@ def _clean(v) -> Optional[str]:
     return s
 
 
+def _clean_vendor(v) -> Optional[str]:
+    """공급처 컬럼 값에서 '공급처 ' 접두어를 제거한다.
+    예: '공급처 헤이즐샵1' → '헤이즐샵1'
+    """
+    s = _clean(v)
+    if s and s.startswith("공급처 "):
+        s = s[len("공급처 "):].strip() or None
+    return s or None
+
+
 def _strip_option(v: Optional[str]) -> Optional[str]:
     if not v:
         return None
@@ -581,8 +591,8 @@ def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
     rows = []
     for _, r in df.iterrows():
         barcode = _clean(r.get(barcode_col))
-        vendor = _clean(r.get(vendor_col))
-        wholesale = _clean(r.get(wholesale_col)) if wholesale_col else None
+        vendor = _clean_vendor(r.get(vendor_col))
+        wholesale = _clean_vendor(r.get(wholesale_col)) if wholesale_col else None
         short_name = _clean(r.get(short_name_col)) if short_name_col else None
         long_name = _clean(r.get(long_name_col)) if long_name_col else None
         product = short_name or long_name
@@ -828,6 +838,17 @@ async def delete_barcode(barcode: str):
         con.execute("DELETE FROM repair_barcode WHERE 바코드 = ?", (barcode,))
         con.commit()
     return {"success": True, "message": "바코드가 삭제되었습니다."}
+
+
+@router.delete("/barcodes")
+async def delete_all_barcodes():
+    """repair_barcode 테이블 전체 삭제 (잘못 업로드된 데이터 초기화용)."""
+    ensure_repair_tables()
+    with get_connection() as con:
+        cnt = con.execute("SELECT COUNT(*) FROM repair_barcode").fetchone()[0]
+        con.execute("DELETE FROM repair_barcode")
+        con.commit()
+    return {"success": True, "deleted": cnt, "message": f"{cnt}건의 바코드 데이터를 모두 삭제했습니다."}
 
 
 @router.get("/catalog")
