@@ -1834,20 +1834,12 @@ export async function ocrPreview(token: string, file: File) {
   const compressed = await compressImageForOcr(file);
   const form = new FormData();
   form.append('file', compressed);
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/inbound/ocr-preview`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
-      throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
-    }
-    throw e;
-  }
+  // 프록시 경유 (브라우저 → Vercel → Railway) → 장거리 TCP 유지 문제 해결
+  const response = await fetch('/api/ocr/preview', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
   if (!response.ok) {
     const err = await response.text().catch(() => '');
     throw new Error(err || `OCR 실패 (${response.status})`);
@@ -1859,21 +1851,12 @@ export async function runInboundOcr(token: string, batchId: string, file: File) 
   const compressed = await compressImageForOcr(file);
   const form = new FormData();
   form.append('file', compressed);
-  // fetchApi 대신 직접 fetch: FormData 사용 시 Content-Type을 브라우저가 자동 설정하도록 함
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/inbound/batches/${batchId}/ocr`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },  // Content-Type 명시하지 않음
-      body: form,
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
-      throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
-    }
-    throw e;
-  }
+  // 프록시 경유 (브라우저 → Vercel → Railway) → 장거리 TCP 유지 문제 해결
+  const response = await fetch(`/api/ocr/batch/${encodeURIComponent(batchId)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
   if (!response.ok) {
     const err = await response.text().catch(() => '');
     throw new Error(err || `OCR 실패 (${response.status})`);
