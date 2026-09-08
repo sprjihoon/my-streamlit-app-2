@@ -216,7 +216,7 @@ export default function KpostPickupListPage() {
                   <th>상태</th>
                   <th>접수자</th>
                   <th>취소자</th>
-                  <th></th>
+                  <th style={{ whiteSpace: 'nowrap', width: '1%' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -252,8 +252,8 @@ export default function KpostPickupListPage() {
                           ? (<>{item.canceled_by}<div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.canceled_at?.replace('T', ' ').slice(0, 16)}</div></>)
                           : <span className="text-muted">-</span>}
                       </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                      <td style={{ whiteSpace: 'nowrap', verticalAlign: 'middle', width: '1%' }}>
+                        <div style={{ display: 'flex', gap: '0.3rem' }}>
                           {canCancel(item) && (
                             <button
                               type="button"
