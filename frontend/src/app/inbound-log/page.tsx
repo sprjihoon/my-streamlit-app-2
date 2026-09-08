@@ -104,7 +104,7 @@ function StatusBadge({ status, label, map }: { status: string; label: string; ma
 
 function getToken() {
   if (typeof window === 'undefined') return '';
-  return localStorage.getItem('auth_token') || '';
+  return localStorage.getItem('token') || '';
 }
 
 function fmt(dt: string | null) {
@@ -533,7 +533,7 @@ export default function InboundLogPage() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
 
-  useEffect(() => { setToken(localStorage.getItem('auth_token') || ''); }, []);
+  useEffect(() => { setToken(localStorage.getItem('token') || ''); }, []);
 
   const load = useCallback(async (tok: string) => {
     if (!tok) return;

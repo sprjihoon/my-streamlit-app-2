@@ -18,7 +18,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 function getToken() {
   if (typeof window === 'undefined') return '';
-  return localStorage.getItem('auth_token') || '';
+  return localStorage.getItem('token') || '';
 }
 
 function inboundAuthHeaders(token: string) {
@@ -322,7 +322,7 @@ export default function InboundWorkPage() {
   const [closeMsg, setCloseMsg] = useState('');
 
   useEffect(() => {
-    const tok = localStorage.getItem('auth_token') || '';
+    const tok = localStorage.getItem('token') || '';
     setToken(tok);
     if (!tok) {
       setError('로그인이 필요합니다. 앱에서 로그인 후 다시 열어주세요.');
