@@ -317,9 +317,10 @@ export default function RootLayout({
   // 로그인 페이지는 레이아웃 적용 안함
   const isLoginPage = pathname === '/login';
   const isPublicPage = pathname === '/estimate';
+  const isMobileWorkPage = pathname.startsWith('/inbound/') && pathname !== '/inbound-log';
 
   useEffect(() => {
-    if (isLoginPage || isPublicPage) {
+    if (isLoginPage || isPublicPage || isMobileWorkPage) {
       setLoading(false);
       return;
     }
@@ -432,13 +433,13 @@ export default function RootLayout({
   }
 
   // 로그인 페이지 또는 공개 페이지 (사이드바 없이)
-  if (isLoginPage || isPublicPage) {
+  if (isLoginPage || isPublicPage || isMobileWorkPage) {
     return (
       <html lang="ko">
         <head>
-          <title>{isPublicPage ? '견적서 만들기' : '로그인'} - 틸리언 그룹웨어</title>
+          <title>{isPublicPage ? '견적서 만들기' : isMobileWorkPage ? '입고 작업' : '로그인'} - 틸리언 그룹웨어</title>
           <link rel="icon" href="/favicon.png" type="image/png" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         </head>
         <body style={isPublicPage ? { background: '#000', minHeight: '100vh' } : undefined}>{children}</body>
       </html>

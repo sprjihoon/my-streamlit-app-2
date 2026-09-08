@@ -16,6 +16,7 @@ MODE_JOURNAL = "journal"
 MODE_REPAIR = "repair"
 MODE_DEFECT = "defect"
 MODE_QUERY = "query"
+MODE_INBOUND = "inbound"
 
 MODE_LABELS = {
     MODE_IDLE: "기본상태",
@@ -23,6 +24,7 @@ MODE_LABELS = {
     MODE_REPAIR: "수선모드",
     MODE_DEFECT: "불량모드",
     MODE_QUERY: "조회모드",
+    MODE_INBOUND: "입고모드",
 }
 
 _START_MAP = {
@@ -53,6 +55,16 @@ _START_MAP = {
     "조회할래": MODE_QUERY,
     "조회할게": MODE_QUERY,
     "기록좀볼래": MODE_QUERY,
+    "입고모드시작": MODE_INBOUND,
+    "입고시작": MODE_INBOUND,
+    "입고": MODE_INBOUND,
+    "입고모드": MODE_INBOUND,
+    "입고할래": MODE_INBOUND,
+    "입고할게": MODE_INBOUND,
+    "물건들어왔어": MODE_INBOUND,
+    "오늘물건들어왔어": MODE_INBOUND,
+    "장끼등록": MODE_INBOUND,
+    "장끼등록할게": MODE_INBOUND,
 }
 
 _END_EXACT = frozenset(("모드종료", "종료", "끝"))
@@ -185,6 +197,7 @@ def idle_guide() -> str:
         "• 일지모드 시작\n"
         "• 수선모드 시작\n"
         "• 불량모드 시작\n"
+        "• 입고모드 시작\n"
         "• 조회모드 시작\n"
         "• 기능설명"
     )
@@ -210,6 +223,8 @@ def decide_bot_route(user_id: str, channel_id: Optional[str], text: str) -> str:
         return "repair"
     if mode == MODE_QUERY:
         return "query"
+    if mode == MODE_INBOUND:
+        return "inbound"
     return "journal"
 
 

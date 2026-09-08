@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     # 프론트엔드 설정
     # ─────────────────────────────────────
     NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
+    FRONTEND_URL: str = "https://tillion.io.kr"
     
     # ─────────────────────────────────────
     # 네이버 웍스 Bot 설정

@@ -24,6 +24,7 @@ from backend.app.services.bot_mode import (
     MODE_JOURNAL,
     MODE_REPAIR,
     MODE_DEFECT,
+    MODE_INBOUND,
     apply_mode_command,
     get_mode,
     idle_guide,
@@ -211,6 +212,21 @@ async def process_message(
             await _send_prefixed(nw_client, user_id, channel_id, "불량 처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
             return
 
+    if mode == MODE_INBOUND:
+        try:
+            from backend.app.services.inbound_bot import handle_user_text as handle_inbound_text
+            reply = await handle_inbound_text(user_id, channel_id, text, user_name)
+            add_debug_log("inbound_text_handled", {"reply": (reply or "")[:200]})
+            if reply:
+                conv_manager.add_message(user_id, channel_id, "assistant", reply)
+                conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
+                await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+            return
+        except Exception as e:
+            add_debug_log("inbound_text_error", error=str(e))
+            await _send_prefixed(nw_client, user_id, channel_id, "입고 처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
+            return
+
     if mode == MODE_JOURNAL:
         try:
             from backend.app.services.journal_bot import handle_user_text as handle_journal_text
@@ -388,10 +404,10 @@ async def process_image_upload(
     try:
         nw_client = get_naver_works_client()
         current_mode = get_mode(user_id, channel_id)
-        if current_mode not in (MODE_REPAIR, MODE_DEFECT):
+        if current_mode not in (MODE_REPAIR, MODE_DEFECT, MODE_INBOUND):
             await _send_prefixed(
                 nw_client, user_id, channel_id,
-                "사진은 수선모드 또는 불량모드에서만 받아요. 해당 모드를 먼저 시작해주세요.",
+                "사진은 수선모드, 불량모드, 또는 입고모드에서만 받아요. 해당 모드를 먼저 시작해주세요.",
                 channel_type,
             )
             return
@@ -423,6 +439,23 @@ async def process_image_upload(
             await _send_prefixed(nw_client, user_id, ch_id, msg, ch_type)
 
         event_key = ":".join(part for part in ((event_id or "").strip(), (file_id or "").strip()) if part) or None
+        # 입고모드: 장끼 이미지 처리
+        if current_mode == MODE_INBOUND:
+            from backend.app.services.inbound_bot import handle_image as handle_inbound_image, pending_is_inbound
+            if pending_is_inbound(user_id, channel_id):
+                reply = await handle_inbound_image(
+                    user_id=user_id,
+                    channel_id=channel_id,
+                    image_data=data,
+                    filename=file_name or "janggi.jpg",
+                    user_name=user_name,
+                )
+                if reply:
+                    await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+            else:
+                await _send_prefixed(nw_client, user_id, channel_id, "입고모드에서 장끼 사진을 받으려면 먼저 `입고`를 입력해 화주사를 설정해주세요.", channel_type)
+            return
+
         await receive_photo(
             user_id=user_id,
             channel_id=channel_id,
