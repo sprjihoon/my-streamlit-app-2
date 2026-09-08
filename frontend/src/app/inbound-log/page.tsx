@@ -11,14 +11,20 @@ import {
   updateInboundBatch,
   runInboundOcr,
   updateInboundItem,
+  addInboundItem,
+  deleteInboundItem,
   closeInboundBatch,
   deleteInboundBatch,
   listInboundVendors,
   downloadInboundBarcodePdf,
   upsertVendorAlias,
+  getRepairBarcodes,
+  getVendorAliases,
   InboundBatch,
   InboundItem,
   InboundRegisteredVendor,
+  VendorAlias,
+  RepairBarcode,
 } from '@/lib/api';
 
 // ─────────────────────────────────────
@@ -161,7 +167,7 @@ function Modal({ title, onClose, children, wide }: {
 // 품목 행 컴포넌트
 // ─────────────────────────────────────
 
-function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string; onUpdated: () => void }) {
+function ItemRow({ item, token, onUpdated, onDelete }: { item: InboundItem; token: string; onUpdated: () => void; onDelete?: () => void }) {
   const [actualQty, setActualQty] = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
   const [saving, setSaving] = useState(false);
@@ -271,6 +277,14 @@ function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string;
             >
               ✏️ 수정
             </button>
+            {onDelete && (
+              <button
+                onClick={() => { if (confirm(`품목 "${item.item_name || item.line_no + '번'}"을 삭제하시겠습니까?`)) onDelete(); }}
+                style={{ ...btn('#ef4444'), fontSize: '0.78rem' }}
+              >
+                🗑
+              </button>
+            )}
           </div>
         </td>
       </tr>
@@ -319,6 +333,308 @@ function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string;
         </tr>
       )}
     </>
+  );
+}
+
+// ─────────────────────────────────────
+// 품목 직접 추가 섹션 (BatchDetailModal 내부용)
+// ─────────────────────────────────────
+
+function AddItemSection({ token, batchId, batchVendor, onAdded }: {
+  token: string;
+  batchId: string;
+  batchVendor: string;
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // 업체 선택
+  const [vendorList, setVendorList] = useState<InboundRegisteredVendor[]>([]);
+  const [aliasList, setAliasList] = useState<VendorAlias[]>([]);
+  const [vendorQuery, setVendorQuery] = useState('');
+  const [vendorOpen, setVendorOpen] = useState(false);
+  const [selectedVendors, setSelectedVendors] = useState<string[]>([]);
+  const [vendorDisplay, setVendorDisplay] = useState('');
+  // 바코드 검색
+  const [barcodeResults, setBarcodeResults] = useState<RepairBarcode[]>([]);
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [selectedBarcode, setSelectedBarcode] = useState<RepairBarcode | null>(null);
+  // 폼
+  const [form, setForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+  const [adding, setAdding] = useState(false);
+
+  const vendorRef = useRef<HTMLDivElement>(null);
+  const barcodeRef = useRef<HTMLDivElement>(null);
+
+  // 업체/별칭 목록 로드
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([listInboundVendors(token), getVendorAliases(token)])
+      .then(([v, a]) => {
+        setVendorList(v.registered);
+        setAliasList(a.aliases);
+        // batch 업체와 일치하는 등록업체 자동 선택
+        const matched = v.registered.find(r => r.name === batchVendor || r.aliases.includes(batchVendor));
+        const aliasMatched = a.aliases.find(al => al.canonical === batchVendor);
+        if (matched && !vendorDisplay) {
+          setVendorDisplay(matched.name);
+          setVendorQuery(matched.name);
+          setSelectedVendors([matched.name]);
+        } else if (aliasMatched && !vendorDisplay) {
+          setVendorDisplay(aliasMatched.canonical);
+          setVendorQuery(aliasMatched.canonical);
+          setSelectedVendors(aliasMatched.aliases.length > 0 ? aliasMatched.aliases : [aliasMatched.canonical]);
+        }
+      })
+      .catch(() => {});
+  }, [open, token, batchVendor]);
+
+  // 바코드 목록 로드
+  useEffect(() => {
+    if (selectedVendors.length === 0) { setBarcodeResults([]); return; }
+    setBarcodeLoading(true);
+    Promise.all(selectedVendors.map(v => getRepairBarcodes({ vendor: v, limit: 300 })))
+      .then(results => {
+        const seen = new Set<string>();
+        setBarcodeResults(results.flatMap(r => r.items).filter(b => {
+          if (seen.has(b.바코드)) return false;
+          seen.add(b.바코드); return true;
+        }));
+      })
+      .catch(() => setBarcodeResults([]))
+      .finally(() => setBarcodeLoading(false));
+  }, [selectedVendors]);
+
+  // 외부 클릭 닫기
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (vendorRef.current && !vendorRef.current.contains(e.target as Node)) setVendorOpen(false);
+      if (barcodeRef.current && !barcodeRef.current.contains(e.target as Node)) setBarcodeOpen(false);
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  function selectVendor(name: string, members: string[]) {
+    setVendorDisplay(name); setVendorQuery(name);
+    setSelectedVendors(members.length > 0 ? members : [name]);
+    setVendorOpen(false); setSelectedBarcode(null); setBarcodeQuery('');
+  }
+
+  function selectBarcode(b: RepairBarcode) {
+    setSelectedBarcode(b);
+    setBarcodeQuery(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
+    setBarcodeOpen(false);
+    setForm(f => ({ ...f, item_name: f.item_name || b.제품명, option_text: f.option_text || (b.옵션 || '') }));
+  }
+
+  const fvq = vendorQuery.toLowerCase();
+  const fVendors = vendorList.filter(v => v.name.toLowerCase().includes(fvq) || v.aliases.some(a => a.toLowerCase().includes(fvq)));
+  const fAliases = aliasList.filter(a => a.canonical.toLowerCase().includes(fvq) || a.aliases.some(al => al.toLowerCase().includes(fvq)));
+  const fbq = barcodeQuery.toLowerCase();
+  const fBarcodes = barcodeResults.filter(b =>
+    b.바코드.toLowerCase().includes(fbq) || b.제품명.toLowerCase().includes(fbq) ||
+    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq)
+  );
+
+  function resetForm() {
+    setForm({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+    setSelectedBarcode(null); setBarcodeQuery('');
+  }
+
+  async function handleAdd() {
+    if (!form.item_name.trim()) return;
+    setAdding(true);
+    try {
+      await addInboundItem(token, batchId, {
+        item_name: form.item_name.trim(),
+        option_text: form.option_text.trim() || undefined,
+        janggi_qty: form.janggi_qty,
+        unit_price: form.unit_price ? Number(form.unit_price) : undefined,
+        memo: 'manual',
+        matched_barcode: selectedBarcode?.바코드,
+        matched_vendor: selectedBarcode?.업체명,
+        matched_product: selectedBarcode?.제품명,
+        matched_option: selectedBarcode?.옵션 || undefined,
+      });
+      resetForm();
+      onAdded();
+    } catch (e) {
+      alert('품목 추가 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const inp: React.CSSProperties = { ...inputStyle, width: '100%' };
+  const lbl: React.CSSProperties = { fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 3, display: 'block' };
+  const dropBase: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 600,
+    background: '#fff', border: '1px solid var(--border)', borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', marginTop: 2,
+  };
+  const grpLbl: React.CSSProperties = {
+    padding: '4px 10px', fontSize: 10, color: '#9ca3af', fontWeight: 700,
+    textTransform: 'uppercase', background: '#fafafa', borderBottom: '1px solid #f3f4f6',
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '0.5rem 1rem', border: '2px dashed #c7d2fe',
+          background: '#eef2ff', color: '#4361ee', borderRadius: 6,
+          fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', marginBottom: '0.75rem',
+        }}
+      >
+        ➕ 품목 직접 추가
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: '1rem', border: '1px solid #c7d2fe', borderRadius: 8, background: '#f8faff', padding: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#4361ee' }}>➕ 품목 직접 추가</span>
+        <button onClick={() => { setOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '1.1rem' }}>×</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
+        {/* 업체 선택 */}
+        <div ref={vendorRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
+          <label style={lbl}>업체 (등록업체·별칭 검색)</label>
+          <input
+            value={vendorQuery}
+            onChange={e => { setVendorQuery(e.target.value); setVendorOpen(true); if (!e.target.value) { setSelectedVendors([]); setVendorDisplay(''); } }}
+            onFocus={() => setVendorOpen(true)}
+            placeholder="업체명 또는 별칭 검색…"
+            style={inp}
+          />
+          {vendorOpen && (fVendors.length > 0 || fAliases.length > 0) && (
+            <div style={dropBase}>
+              {fVendors.length > 0 && (
+                <>
+                  <div style={grpLbl}>📦 등록 업체</div>
+                  {fVendors.map(v => (
+                    <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
+                      style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13, background: vendorDisplay === v.name ? '#eef2ff' : undefined }}>
+                      <strong>{v.name}</strong>
+                      {v.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>({v.aliases.join(', ')})</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+              {fAliases.length > 0 && (
+                <>
+                  <div style={grpLbl}>🏷️ 화주사 별칭</div>
+                  {fAliases.map(a => (
+                    <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
+                      style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}>
+                      <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{a.canonical}</span>
+                      {a.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>→ {a.aliases.join(', ')}</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 바코드 검색 */}
+        <div ref={barcodeRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
+          <label style={lbl}>바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
+          {selectedVendors.length === 0 ? (
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af', padding: '0.4rem 0' }}>↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
+          ) : barcodeLoading ? (
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>바코드 목록 불러오는 중…</div>
+          ) : barcodeResults.length === 0 ? (
+            <div style={{ padding: '0.6rem 0.8rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: '0.82rem' }}>
+              <span style={{ color: '#dc2626' }}>"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
+              <a href="/journal-settings" target="_blank" style={{ color: '#4361ee', fontWeight: 600 }}>신규 바코드 등록 →</a>
+              <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 3 }}>아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
+            </div>
+          ) : (
+            <>
+              {selectedBarcode ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
+                    ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
+                  </div>
+                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    value={barcodeQuery}
+                    onChange={e => { setBarcodeQuery(e.target.value); setBarcodeOpen(true); }}
+                    onFocus={() => setBarcodeOpen(true)}
+                    placeholder={`바코드·제품명 검색 (${barcodeResults.length}개 중)`}
+                    style={inp}
+                  />
+                  {barcodeOpen && fBarcodes.length > 0 && (
+                    <div style={dropBase}>
+                      {fBarcodes.slice(0, 50).map(b => (
+                        <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
+                          style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 500 }}>{b.제품명}</span>
+                              {b.옵션 && <span style={{ fontSize: 12, color: '#6b7280' }}> / {b.옵션}</span>}
+                              <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{b.바코드}</div>
+                            </div>
+                            <span style={{ fontSize: 11, color: '#7c3aed', flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 품명 */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={lbl}>품명 *</label>
+          <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))} placeholder="예) 타원 백팩" style={inp} />
+        </div>
+
+        {/* 옵션 */}
+        <div>
+          <label style={lbl}>옵션</label>
+          <input value={form.option_text} onChange={e => setForm(f => ({ ...f, option_text: e.target.value }))} placeholder="블랙, L" style={inp} />
+        </div>
+
+        {/* 장끼 수량 */}
+        <div>
+          <label style={lbl}>장끼 수량 *</label>
+          <input type="number" min={1} value={form.janggi_qty} onChange={e => setForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
+            style={{ ...inp, textAlign: 'center', fontWeight: 700, fontSize: '1rem' }} />
+        </div>
+
+        {/* 단가 */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={lbl}>단가 (선택)</label>
+          <input type="number" min={0} value={form.unit_price} onChange={e => setForm(f => ({ ...f, unit_price: e.target.value }))}
+            placeholder="0" style={{ ...inp, maxWidth: 160 }} />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => { setOpen(false); resetForm(); }} style={btnOutline}>취소</button>
+        <button
+          onClick={handleAdd}
+          disabled={adding || !form.item_name.trim()}
+          style={{ ...btn('#4361ee'), opacity: (adding || !form.item_name.trim()) ? 0.5 : 1 }}
+        >
+          {adding ? '추가 중…' : '➕ 추가'}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -507,6 +823,14 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
         </div>
       )}
 
+      {/* 품목 직접 추가 섹션 */}
+      <AddItemSection
+        token={token}
+        batchId={batch.id}
+        batchVendor={batch.vendor}
+        onAdded={reload}
+      />
+
       {/* 품목 테이블 */}
       {items.length > 0 ? (
         <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
@@ -522,14 +846,29 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
             </thead>
             <tbody>
               {items.map(item => (
-                <ItemRow key={item.id} item={item} token={token} onUpdated={reload} />
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  token={token}
+                  onUpdated={reload}
+                  onDelete={async () => {
+                    try {
+                      await deleteInboundItem(token, item.id);
+                      await reload();
+                    } catch (e) {
+                      alert('삭제 실패: ' + (e instanceof Error ? e.message : String(e)));
+                    }
+                  }}
+                />
               ))}
             </tbody>
           </table>
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)', fontSize: '0.875rem', background: '#f8f9fc', borderRadius: 8, marginBottom: '1rem' }}>
-          장끼 OCR을 실행하면 품목이 표시됩니다.
+        <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.875rem', background: '#f8f9fc', borderRadius: 8, marginBottom: '1rem' }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: 8 }}>📋</div>
+          <div>품목이 없습니다.</div>
+          <div style={{ fontSize: '0.8rem', color: '#9ca3af', marginTop: 4 }}>위 "품목 직접 추가" 버튼으로 추가하거나, 장끼 사진 OCR을 실행하세요.</div>
         </div>
       )}
 

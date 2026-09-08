@@ -1784,13 +1784,75 @@ export async function updateInboundBatch(token: string, batchId: string, body: {
   );
 }
 
+export interface OcrPreviewReceipt {
+  storeName: string | null;
+  receiptNo: string | null;
+  orderDate: string | null;
+  totalAmount: number | null;
+  isHandwritten: boolean;
+  confidence: number;
+  needsReview: boolean;
+  warnings: string[];
+}
+export interface OcrPreviewItem {
+  lineNo: number;
+  itemName: string;
+  color: string | null;
+  optionText: string | null;
+  unitPrice: number | null;
+  quantity: number | null;
+  amount: number | null;
+  confidence: number;
+  needsReview: boolean;
+  warnings: string[];
+}
+export async function ocrPreview(token: string, file: File) {
+  const form = new FormData();
+  form.append('file', file);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/inbound/ocr-preview`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
+      throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    throw e;
+  }
+  if (!response.ok) {
+    const err = await response.text().catch(() => '');
+    throw new Error(err || `OCR 실패 (${response.status})`);
+  }
+  return response.json() as Promise<{ ok: boolean; receipt: OcrPreviewReceipt; items: OcrPreviewItem[]; raw: unknown }>;
+}
+
 export async function runInboundOcr(token: string, batchId: string, file: File) {
   const form = new FormData();
   form.append('file', file);
-  return fetchApi<{ ok: boolean; item_count: number; matched_count: number; needs_matching_count: number; wholesale: string | null; items: InboundItem[] }>(
-    `/inbound/batches/${batchId}/ocr`,
-    { method: 'POST', headers: inboundHeaders(token), body: form }
-  );
+  // fetchApi 대신 직접 fetch: FormData 사용 시 Content-Type을 브라우저가 자동 설정하도록 함
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/inbound/batches/${batchId}/ocr`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },  // Content-Type 명시하지 않음
+      body: form,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed')) {
+      throw new Error('서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+    }
+    throw e;
+  }
+  if (!response.ok) {
+    const err = await response.text().catch(() => '');
+    throw new Error(err || `OCR 실패 (${response.status})`);
+  }
+  return response.json() as Promise<{ ok: boolean; item_count: number; matched_count: number; needs_matching_count: number; wholesale: string | null; items: InboundItem[] }>;
 }
 
 export async function addInboundItem(token: string, batchId: string, body: {
@@ -1799,10 +1861,23 @@ export async function addInboundItem(token: string, batchId: string, body: {
   janggi_qty: number;
   unit_price?: number;
   memo?: string;
+  matched_barcode?: string;
+  matched_vendor?: string;
+  matched_product?: string;
+  matched_option?: string;
+  supplier_location?: string;
+  supplier_contact?: string;
 }) {
   return fetchApi<{ id: string }>(
     `/inbound/batches/${batchId}/items`,
     { method: 'POST', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+}
+
+export async function deleteInboundItem(token: string, itemId: string) {
+  return fetchApi<{ ok: boolean }>(
+    `/inbound/items/${itemId}`,
+    { method: 'DELETE', headers: inboundHeaders(token) }
   );
 }
 

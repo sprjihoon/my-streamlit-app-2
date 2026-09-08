@@ -6,9 +6,17 @@ import {
   getInboundBatch,
   addInboundItem,
   updateInboundItem,
+  deleteInboundItem,
   closeInboundBatch,
+  runInboundOcr,
+  listInboundVendors,
+  getRepairBarcodes,
+  getVendorAliases,
   InboundBatch,
   InboundItem,
+  InboundRegisteredVendor,
+  VendorAlias,
+  RepairBarcode,
 } from '@/lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -54,10 +62,11 @@ const ITEM_STATUS_OPTS: { value: string; label: string; color: string }[] = [
 // 품목 카드 컴포넌트
 // ─────────────────────────────────────
 
-function ItemCard({ item, token, onUpdated }: {
+function ItemCard({ item, token, onUpdated, onDelete }: {
   item: InboundItem;
   token: string;
   onUpdated: () => void;
+  onDelete?: () => void;
 }) {
   const [actualQty, setActualQty] = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
@@ -230,6 +239,16 @@ function ItemCard({ item, token, onUpdated }: {
           >
             ✏️ {editMode ? '닫기' : '수정'}
           </button>
+          {onDelete && (
+            <button
+              onClick={() => { if (confirm(`"${item.item_name || item.line_no + '번'}" 품목을 삭제하시겠습니까?`)) onDelete(); }}
+              style={{
+                fontSize: 11, padding: '3px 9px', borderRadius: 8,
+                background: '#fef2f2', color: '#dc2626',
+                border: '1px solid #fecaca', cursor: 'pointer', fontWeight: 600,
+              }}
+            >🗑 삭제</button>
+          )}
         </div>
       </div>
 
@@ -445,6 +464,10 @@ export default function InboundWorkPage() {
   const [closing, setClosing] = useState(false);
   const [closeMsg, setCloseMsg] = useState('');
 
+  // OCR
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMsg, setOcrMsg] = useState('');
+
   // 수동 추가 모달
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
@@ -476,6 +499,21 @@ export default function InboundWorkPage() {
   useEffect(() => {
     if (token) reload(token);
   }, [token, reload]);
+
+  async function handleOcr(file: File) {
+    if (!batch) return;
+    setOcrLoading(true);
+    setOcrMsg('');
+    try {
+      const res = await runInboundOcr(token, batch.id, file);
+      await reload(token);
+      setOcrMsg(`✅ OCR 완료: ${res.item_count}개 품목 (자동매칭 ${res.matched_count}개)`);
+    } catch (e) {
+      setOcrMsg('❌ ' + (e instanceof Error ? e.message : 'OCR 실패'));
+    } finally {
+      setOcrLoading(false);
+    }
+  }
 
   async function handleClose(closeType: 'am' | 'pm') {
     if (!batch) return;
@@ -611,9 +649,8 @@ export default function InboundWorkPage() {
             {batch.status === 'ocr_pending' ? (
               <>
                 <div style={{ fontWeight: 600, color: '#374151', fontSize: 14 }}>장끼 OCR 대기 중</div>
-                <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
-                  봇 채팅에 장끼 사진을 보내면 자동으로 품목이 채워집니다.<br />
-                  수기 영수증이거나 OCR이 어렵다면 아래에서 직접 입력해주세요.
+                <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6, color: '#6b7280' }}>
+                  아래 버튼으로 장끼 사진을 찍으면 AI가 품목을 자동으로 읽어드립니다.
                 </div>
               </>
             ) : (
@@ -621,19 +658,61 @@ export default function InboundWorkPage() {
                 <div style={{ fontWeight: 600, color: '#374151', fontSize: 14 }}>OCR 결과 품목 없음</div>
                 <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
                   수기 영수증이거나 인식에 실패했을 수 있습니다.<br />
-                  아래 버튼으로 품목을 직접 입력해주세요.
+                  다시 촬영하거나 직접 입력해주세요.
                 </div>
               </>
             )}
+
+            {/* OCR 메시지 */}
+            {ocrMsg && (
+              <div style={{
+                margin: '12px 0 0', padding: '10px 14px', borderRadius: 8, fontSize: 13,
+                background: ocrMsg.startsWith('✅') ? '#dcfce7' : '#fef2f2',
+                color: ocrMsg.startsWith('✅') ? '#15803d' : '#dc2626',
+                textAlign: 'left',
+              }}>
+                {ocrMsg}
+              </div>
+            )}
+
+            {/* 장끼 사진 OCR 버튼 */}
+            <label style={{
+              display: 'block', marginTop: 16,
+              padding: '13px 24px',
+              background: ocrLoading ? '#9ca3af' : '#a16207',
+              color: '#fff', borderRadius: 10,
+              fontSize: 15, fontWeight: 700,
+              cursor: ocrLoading ? 'not-allowed' : 'pointer',
+              textAlign: 'center',
+            }}>
+              {ocrLoading ? (
+                <span>🤖 AI 분석 중… (10~30초)</span>
+              ) : (
+                <span>📷 장끼 사진 촬영 → AI 분석</span>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: 'none' }}
+                disabled={ocrLoading}
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) handleOcr(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+
             <button
               onClick={() => setShowAddModal(true)}
               style={{
-                marginTop: 16, padding: '10px 24px',
-                background: '#4361ee', color: '#fff',
-                border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                marginTop: 10, padding: '10px 24px',
+                background: 'transparent', color: '#4361ee',
+                border: '2px solid #4361ee', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
               }}
             >
-              ➕ 품목 직접 추가
+              ➕ 품목 직접 입력
             </button>
           </div>
         ) : (
@@ -643,9 +722,33 @@ export default function InboundWorkPage() {
         )}
       </div>
 
-      {/* 품목 직접 추가 버튼 (항상 표시) */}
+      {/* 품목 직접 추가 + 재분석 버튼 (항상 표시) */}
       {items.length > 0 && (
-        <div style={{ padding: '0 16px 4px' }}>
+        <div style={{ padding: '0 16px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {ocrMsg && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, fontSize: 13,
+              background: ocrMsg.startsWith('✅') ? '#dcfce7' : '#fef2f2',
+              color: ocrMsg.startsWith('✅') ? '#15803d' : '#dc2626',
+            }}>
+              {ocrMsg}
+            </div>
+          )}
+          <label style={{
+            display: 'block', padding: '10px',
+            border: '2px dashed #fbbf24', background: '#fffbeb',
+            color: '#a16207', borderRadius: 8,
+            fontSize: 14, fontWeight: 600, cursor: ocrLoading ? 'not-allowed' : 'pointer',
+            textAlign: 'center',
+          }}>
+            {ocrLoading ? '🤖 AI 분석 중…' : '🔄 장끼 재분석 (사진 재촬영)'}
+            <input
+              type="file" accept="image/*" capture="environment"
+              style={{ display: 'none' }}
+              disabled={ocrLoading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleOcr(f); e.target.value = ''; }}
+            />
+          </label>
           <button
             onClick={() => setShowAddModal(true)}
             style={{
