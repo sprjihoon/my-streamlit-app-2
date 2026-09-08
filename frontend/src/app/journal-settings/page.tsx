@@ -82,7 +82,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<RepairBarcode | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const emptyForm = { 바코드: '', 업체명: '', 제품명: '', 옵션: '', 상품코드: '', 로케이션: '', 상품명: '' };
+  const emptyForm = { 바코드: '', 업체명: '', 제품명: '', 옵션: '', 도매처: '', 상품코드: '', 로케이션: '', 상품명: '' };
   const [form, setForm] = useState(emptyForm);
 
   async function load() {
@@ -110,6 +110,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
       if (editing) {
         await updateRepairBarcode(editing.바코드, {
           업체명: form.업체명, 제품명: form.제품명, 옵션: form.옵션,
+          도매처: form.도매처,
           상품코드: form.상품코드, 로케이션: form.로케이션, 상품명: form.상품명,
         });
         onMessage({ type: 'success', text: '바코드가 수정되었습니다.' });
@@ -119,6 +120,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
           업체명: form.업체명.trim(),
           제품명: form.제품명.trim(),
           옵션: form.옵션 || undefined,
+          도매처: form.도매처 || undefined,
           상품코드: form.상품코드 || undefined,
           로케이션: form.로케이션 || undefined,
           상품명: form.상품명 || undefined,
@@ -164,6 +166,9 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
           </Field>
           <Field label="옵션">
             <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} style={inputStyle} placeholder="블랙" />
+          </Field>
+          <Field label="도매처">
+            <input value={form.도매처} onChange={(e) => setForm({ ...form, 도매처: e.target.value })} style={inputStyle} placeholder="줄리" />
           </Field>
           <Field label="상품코드">
             <input value={form.상품코드} onChange={(e) => setForm({ ...form, 상품코드: e.target.value })} style={inputStyle} />
@@ -224,7 +229,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    {['바코드', '업체명', '제품명', '옵션', '상품코드', '로케이션', '출처', ''].map((h) => (
+                    {['바코드', '업체명', '도매처', '제품명', '옵션', '상품코드', '로케이션', '출처', ''].map((h) => (
                       <th key={h} style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
                     ))}
                   </tr>
@@ -234,6 +239,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
                     <tr key={row.바코드} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ padding: '0.5rem', fontFamily: 'monospace' }}>{row.바코드}</td>
                       <td style={{ padding: '0.5rem' }}>{row.업체명}</td>
+                      <td style={{ padding: '0.5rem', color: '#7c3aed' }}>{row.도매처 || '-'}</td>
                       <td style={{ padding: '0.5rem' }}>{row.제품명}</td>
                       <td style={{ padding: '0.5rem' }}>{row.옵션 || '-'}</td>
                       <td style={{ padding: '0.5rem' }}>{row.상품코드 || '-'}</td>
@@ -242,7 +248,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
                       <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
                         <button onClick={() => {
                           setEditing(row);
-                          setForm({ 바코드: row.바코드, 업체명: row.업체명, 제품명: row.제품명, 옵션: row.옵션 || '', 상품코드: row.상품코드 || '', 로케이션: row.로케이션 || '', 상품명: row.상품명 || '' });
+                          setForm({ 바코드: row.바코드, 업체명: row.업체명, 제품명: row.제품명, 옵션: row.옵션 || '', 도매처: row.도매처 || '', 상품코드: row.상품코드 || '', 로케이션: row.로케이션 || '', 상품명: row.상품명 || '' });
                         }} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>수정</button>
                         <button onClick={() => setDeleting(row.바코드)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>삭제</button>
                       </td>

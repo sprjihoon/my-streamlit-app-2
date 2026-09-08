@@ -172,6 +172,37 @@ def ensure_inbound_tables():
                 FOREIGN KEY (item_id) REFERENCES inbound_items(id)
             )
         """)
+    # inbound_share_links 테이블
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_share_links (
+                token TEXT PRIMARY KEY,
+                batch_id TEXT NOT NULL,
+                password TEXT,
+                expires_at TEXT,
+                allow_excel INTEGER DEFAULT 0,
+                created_by TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (batch_id) REFERENCES inbound_batches(id)
+            )
+        """)
+        # barcode_print_jobs 테이블
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS barcode_print_jobs (
+                id TEXT PRIMARY KEY,
+                batch_id TEXT NOT NULL,
+                item_id TEXT,
+                barcode TEXT,
+                product TEXT,
+                option_text TEXT,
+                vendor TEXT,
+                wholesale TEXT,
+                qty INTEGER DEFAULT 1,
+                pdf_filename TEXT,
+                printed_by TEXT,
+                printed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (batch_id) REFERENCES inbound_batches(id)
+            )
+        """)
         # 기존 테이블에 inbound 연결 컬럼 추가
         for table, col in [
             ("defect_log",      "inbound_item_id TEXT"),
@@ -1028,3 +1059,310 @@ def get_stats(
             for r in rows
         ]
     }
+
+
+# ── 바코드 라벨 PDF ────────────────────
+
+@router.post("/batches/{batch_id}/barcode-pdf")
+def generate_barcode_pdf(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    실입고 확정 품목의 바코드 라벨 PDF 생성.
+    품목별 actual_qty 수량만큼 라벨 생성.
+    """
+    from fastapi.responses import StreamingResponse as SR
+    import io
+
+    user = _get_user(authorization)
+
+    with get_connection() as con:
+        batch_row = con.execute(
+            "SELECT vendor, inbound_date, wholesale FROM inbound_batches WHERE id=?", (batch_id,)
+        ).fetchone()
+        if not batch_row:
+            raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+
+        items = con.execute("""
+            SELECT id, line_no, item_name, option_text, actual_qty,
+                   matched_barcode, matched_vendor, matched_product, matched_option
+            FROM inbound_items
+            WHERE batch_id=? AND actual_qty > 0 AND matched_barcode IS NOT NULL
+            ORDER BY line_no
+        """, (batch_id,)).fetchall()
+
+    if not items:
+        raise HTTPException(status_code=400, detail="실입고 확정 및 바코드 매칭된 품목이 없습니다.")
+
+    vendor = batch_row[0]
+    inbound_date = batch_row[1]
+    wholesale = batch_row[2] or ""
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Paragraph
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.graphics.barcode import code128
+        from reportlab.graphics.shapes import Drawing
+        from reportlab.graphics import renderPDF
+    except ImportError:
+        raise HTTPException(status_code=500, detail="reportlab 라이브러리가 없습니다. pip install reportlab")
+
+    # 라벨 크기: 62mm × 38mm (열 4개 × 페이지)
+    LABEL_W = 62 * mm
+    LABEL_H = 38 * mm
+    COLS = 3
+    PAGE_W, PAGE_H = A4
+
+    buf = io.BytesIO()
+
+    from reportlab.pdfgen import canvas as rl_canvas
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+
+    # 폰트 (한글 지원 - Noto Sans CJK 없으면 기본 폰트 사용)
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        import os as _os
+        font_paths = [
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/System/Library/Fonts/PingFang.ttc",
+        ]
+        font_loaded = False
+        for fp in font_paths:
+            if _os.path.exists(fp):
+                pdfmetrics.registerFont(TTFont("NotoKR", fp))
+                FONT = "NotoKR"
+                font_loaded = True
+                break
+        if not font_loaded:
+            FONT = "Helvetica"
+    except Exception:
+        FONT = "Helvetica"
+
+    margin_x = 10 * mm
+    margin_y = 10 * mm
+    col_gap = 3 * mm
+    row_gap = 3 * mm
+
+    label_list = []
+    for item in items:
+        item_id, line_no, item_name, option_text, actual_qty, barcode, m_vendor, m_product, m_option = item
+        for _ in range(actual_qty):
+            label_list.append({
+                "barcode": barcode or "",
+                "product": m_product or item_name or "",
+                "option": m_option or option_text or "",
+                "vendor": m_vendor or vendor,
+                "wholesale": wholesale,
+            })
+
+    idx = 0
+    total_labels = len(label_list)
+    while idx < total_labels:
+        # 페이지당 몇 행 들어가는지 계산
+        rows_per_page = int((PAGE_H - 2 * margin_y) / (LABEL_H + row_gap))
+        labels_per_page = COLS * rows_per_page
+
+        for row_i in range(rows_per_page):
+            for col_i in range(COLS):
+                if idx >= total_labels:
+                    break
+                lbl = label_list[idx]
+                idx += 1
+
+                x = margin_x + col_i * (LABEL_W + col_gap)
+                y = PAGE_H - margin_y - (row_i + 1) * (LABEL_H + row_gap) + row_gap
+
+                # 라벨 테두리
+                c.setStrokeColorRGB(0.8, 0.8, 0.8)
+                c.setLineWidth(0.5)
+                c.rect(x, y, LABEL_W, LABEL_H)
+
+                # 바코드
+                if lbl["barcode"]:
+                    try:
+                        bc = code128.Code128(lbl["barcode"], barHeight=12 * mm, barWidth=0.6)
+                        bc_w = bc.width
+                        bc_x = x + (LABEL_W - bc_w) / 2
+                        bc_y = y + LABEL_H - 14 * mm
+                        bc.drawOn(c, bc_x, bc_y)
+                        # 바코드 텍스트
+                        c.setFont(FONT, 7)
+                        c.drawCentredString(x + LABEL_W / 2, y + LABEL_H - 15.5 * mm, lbl["barcode"])
+                    except Exception:
+                        pass
+
+                # 상품명
+                c.setFont(FONT, 8)
+                product_text = lbl["product"][:20]
+                c.drawCentredString(x + LABEL_W / 2, y + 7 * mm, product_text)
+
+                # 옵션
+                if lbl["option"]:
+                    c.setFont(FONT, 7)
+                    c.setFillColorRGB(0.4, 0.4, 0.4)
+                    c.drawCentredString(x + LABEL_W / 2, y + 4.5 * mm, lbl["option"][:20])
+                    c.setFillColorRGB(0, 0, 0)
+
+                # 업체명 (좌하단)
+                c.setFont(FONT, 6)
+                c.setFillColorRGB(0.5, 0.5, 0.5)
+                c.drawString(x + 1.5 * mm, y + 2 * mm, lbl["vendor"][:15])
+                c.setFillColorRGB(0, 0, 0)
+
+            if idx >= total_labels:
+                break
+
+        if idx < total_labels:
+            c.showPage()
+
+    c.showPage()
+    c.save()
+    buf.seek(0)
+
+    # 출력 이력 저장
+    now = datetime.utcnow().isoformat()
+    job_id = uuid.uuid4().hex
+    with get_connection() as con:
+        con.execute(
+            "INSERT INTO barcode_print_jobs (id, batch_id, qty, printed_by, printed_at) VALUES (?, ?, ?, ?, ?)",
+            (job_id, batch_id, total_labels, user["nickname"], now)
+        )
+        con.commit()
+
+    filename = f"barcode_{vendor}_{inbound_date}.pdf"
+    return SR(
+        content=buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    )
+
+
+# ── 화주사 공유 링크 생성 ────────────────
+
+class ShareLinkCreate(BaseModel):
+    password: Optional[str] = None
+    expires_days: int = 7
+    allow_excel: bool = False
+
+
+@router.post("/batches/{batch_id}/share")
+def create_share_link(
+    batch_id: str,
+    body: ShareLinkCreate,
+    authorization: Optional[str] = Header(None),
+):
+    user = _get_user(authorization)
+    with get_connection() as con:
+        if not con.execute("SELECT 1 FROM inbound_batches WHERE id=?", (batch_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+        # 기존 링크 만료 처리
+        token = uuid.uuid4().hex
+        from datetime import timedelta
+        expires_at = (datetime.utcnow() + timedelta(days=body.expires_days)).strftime("%Y-%m-%d")
+        con.execute("""
+            INSERT INTO inbound_share_links (token, batch_id, password, expires_at, allow_excel, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (token, batch_id, body.password or None, expires_at, int(body.allow_excel), user["nickname"]))
+        con.commit()
+    link = f"{settings.FRONTEND_URL}/share/{token}"
+    return {"token": token, "link": link, "expires_at": expires_at}
+
+
+@router.get("/share/{token}")
+def get_share_data(
+    token: str,
+    password: Optional[str] = None,
+):
+    """공유 링크 데이터 (인증 불필요, 비밀번호 확인만)"""
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT batch_id, password, expires_at, allow_excel FROM inbound_share_links WHERE token=?",
+            (token,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
+        batch_id, stored_pw, expires_at, allow_excel = row
+
+        # 만료 확인
+        if expires_at and datetime.utcnow().strftime("%Y-%m-%d") > expires_at:
+            raise HTTPException(status_code=410, detail="링크가 만료되었습니다.")
+
+        # 비밀번호 확인
+        if stored_pw and password != stored_pw:
+            if not password:
+                return {"needs_password": True}
+            raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+
+        # 배치 + 품목 조회
+        batch_row = con.execute("""
+            SELECT id, vendor, inbound_date, status, wholesale, janggi_date, janggi_no,
+                   total_janggi_qty, total_actual_qty, total_missing_qty, created_by, closed_at
+            FROM inbound_batches WHERE id=?
+        """, (batch_id,)).fetchone()
+        if not batch_row:
+            raise HTTPException(status_code=404, detail="입고 데이터를 찾을 수 없습니다.")
+
+        items = con.execute("""
+            SELECT id, line_no, item_name, option_text, janggi_qty, actual_qty, missing_qty,
+                   status, matched_barcode, matched_vendor, matched_product, matched_option
+            FROM inbound_items WHERE batch_id=? ORDER BY line_no
+        """, (batch_id,)).fetchall()
+
+        photos_map: dict = {}
+        if items:
+            ids_ph = [r[0] for r in items]
+            ph_rows = con.execute(
+                f"SELECT item_id, id, filename FROM inbound_item_photos WHERE item_id IN ({','.join('?' for _ in ids_ph)})",
+                ids_ph
+            ).fetchall()
+            for ph in ph_rows:
+                photos_map.setdefault(ph[0], []).append({"id": ph[1], "filename": ph[2]})
+
+    STATUS_LABEL_MAP = {
+        "ocr_pending": "장끼 확인 중", "confirming": "수량 확인 중",
+        "inbound_done": "입고접수 완료", "grading": "양품화 중",
+        "repairing": "수선 중", "done": "최종완료", "cancelled": "취소",
+    }
+    ITEM_LABEL_MAP = {
+        "pending": "확인 전", "confirmed": "정상", "missing": "미입고",
+        "defect": "불량", "repair": "수선대기", "unrecoverable": "회생불가", "done": "완료",
+    }
+
+    return {
+        "batch": {
+            "id": batch_row[0], "vendor": batch_row[1], "inbound_date": batch_row[2],
+            "status": batch_row[3], "status_label": STATUS_LABEL_MAP.get(batch_row[3], batch_row[3]),
+            "wholesale": batch_row[4], "janggi_date": batch_row[5], "janggi_no": batch_row[6],
+            "total_janggi_qty": batch_row[7], "total_actual_qty": batch_row[8],
+            "total_missing_qty": batch_row[9], "created_by": batch_row[10], "closed_at": batch_row[11],
+        },
+        "items": [{
+            "id": r[0], "line_no": r[1], "item_name": r[2], "option_text": r[3],
+            "janggi_qty": r[4], "actual_qty": r[5], "missing_qty": r[6],
+            "status": r[7], "status_label": ITEM_LABEL_MAP.get(r[7], r[7]),
+            "matched_barcode": r[8], "matched_vendor": r[9],
+            "matched_product": r[10], "matched_option": r[11],
+            "photos": [
+                {"id": p["id"], "url": f"/inbound/share-photo/{p['filename']}"}
+                for p in photos_map.get(r[0], [])
+            ],
+        } for r in items],
+        "allow_excel": bool(allow_excel),
+        "expires_at": expires_at,
+    }
+
+
+@router.get("/share-photo/{filename}")
+def serve_share_photo(filename: str):
+    """공유 링크용 사진 (인증 불필요)"""
+    safe_name = Path(filename).name
+    path = UPLOAD_DIR / safe_name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="사진을 찾을 수 없습니다.")
+    return FileResponse(path)

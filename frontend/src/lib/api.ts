@@ -964,6 +964,7 @@ export interface RepairBarcode {
   업체명: string;
   제품명: string;
   옵션: string | null;
+  도매처: string | null;
   상품코드: string | null;
   로케이션: string | null;
   상품명: string | null;
@@ -1153,6 +1154,7 @@ export async function createRepairBarcode(data: {
   업체명: string;
   제품명: string;
   옵션?: string;
+  도매처?: string;
   상품코드?: string;
   로케이션?: string;
   상품명?: string;
@@ -1167,6 +1169,7 @@ export async function updateRepairBarcode(barcode: string, data: Partial<{
   업체명: string;
   제품명: string;
   옵션: string;
+  도매처: string;
   상품코드: string;
   로케이션: string;
   상품명: string;
@@ -1803,6 +1806,24 @@ export async function deleteInboundBatch(token: string, batchId: string) {
 
 export async function listInboundVendors(token: string) {
   return fetchApi<{ vendors: string[] }>('/inbound/vendors', { headers: inboundHeaders(token) });
+}
+
+export async function downloadInboundBarcodePdf(token: string, batchId: string, vendor: string, date: string) {
+  const res = await fetch(`${API_BASE}/inbound/batches/${batchId}/barcode-pdf`, {
+    method: 'POST',
+    headers: inboundHeaders(token),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `PDF 생성 실패: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `barcode_${vendor}_${date}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 

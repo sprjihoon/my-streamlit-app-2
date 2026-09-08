@@ -69,6 +69,7 @@ class BarcodeCreate(BaseModel):
     업체명: str
     제품명: str
     옵션: Optional[str] = None
+    도매처: Optional[str] = None
     상품코드: Optional[str] = None
     로케이션: Optional[str] = None
     상품명: Optional[str] = None
@@ -79,6 +80,7 @@ class BarcodeUpdate(BaseModel):
     업체명: Optional[str] = None
     제품명: Optional[str] = None
     옵션: Optional[str] = None
+    도매처: Optional[str] = None
     상품코드: Optional[str] = None
     로케이션: Optional[str] = None
     상품명: Optional[str] = None
@@ -779,10 +781,10 @@ async def create_barcode(data: BarcodeCreate):
             raise HTTPException(status_code=409, detail="이미 등록된 바코드입니다.")
         con.execute(
             """INSERT INTO repair_barcode
-               (바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (바코드, 업체명, 도매처, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                barcode, vendor, data.제품명.strip(), _strip_option(data.옵션),
+                barcode, vendor, _clean(data.도매처), data.제품명.strip(), _strip_option(data.옵션),
                 _clean(data.상품코드), _clean(data.로케이션), _clean(data.상품명),
                 data.출처, now,
             ),
@@ -820,6 +822,9 @@ async def update_barcode(barcode: str, data: BarcodeUpdate):
         if data.옵션 is not None:
             updates.append("옵션 = ?")
             params.append(_strip_option(data.옵션))
+        if data.도매처 is not None:
+            updates.append("도매처 = ?")
+            params.append(_clean(data.도매처))
         if data.상품코드 is not None:
             updates.append("상품코드 = ?")
             params.append(_clean(data.상품코드))

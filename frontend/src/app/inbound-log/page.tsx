@@ -13,6 +13,7 @@ import {
   closeInboundBatch,
   deleteInboundBatch,
   listInboundVendors,
+  downloadInboundBarcodePdf,
   InboundBatch,
   InboundItem,
 } from '@/lib/api';
@@ -234,6 +235,9 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [warning, setWarning] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [shareLink, setShareLink] = useState('');
+  const [shareLoading, setShareLoading] = useState(false);
 
   const reload = useCallback(async () => {
     const data = await getInboundBatch(token, batch.id);
@@ -251,6 +255,35 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
       alert('OCR 실패: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setOcrLoading(false);
+    }
+  }
+
+  async function handlePdf() {
+    setPdfLoading(true);
+    try {
+      await downloadInboundBarcodePdf(token, batch.id, batch.vendor, batch.inbound_date);
+    } catch (e: unknown) {
+      alert('PDF 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
+  async function handleShare() {
+    setShareLoading(true);
+    try {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${API_BASE}/inbound/batches/${batch.id}/share`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expires_days: 14, allow_excel: false }),
+      });
+      const data = await res.json();
+      setShareLink(data.link);
+    } catch (e: unknown) {
+      alert('공유 링크 생성 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setShareLoading(false);
     }
   }
 
@@ -374,6 +407,25 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
           장끼 OCR을 실행하면 품목이 표시됩니다.
         </div>
       )}
+
+      {/* 공유 링크 표시 */}
+      {shareLink && (
+        <div style={{ marginBottom: '0.75rem', padding: '0.75rem 1rem', background: '#f0fff4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.85rem' }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>🔗 화주사 공유 링크 (14일 유효)</div>
+          <div style={{ wordBreak: 'break-all', color: '#4361ee' }}>{shareLink}</div>
+          <button onClick={() => { navigator.clipboard.writeText(shareLink); }} style={{ marginTop: 6, fontSize: '0.78rem', ...btnOutline }}>복사</button>
+        </div>
+      )}
+
+      {/* PDF + 공유 버튼 */}
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+        <button onClick={handlePdf} disabled={pdfLoading} style={{ ...btn('#0f766e'), opacity: pdfLoading ? 0.5 : 1 }}>
+          {pdfLoading ? '생성 중…' : '📄 바코드 PDF'}
+        </button>
+        <button onClick={handleShare} disabled={shareLoading} style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}>
+          {shareLoading ? '생성 중…' : '🔗 화주사 공유 링크'}
+        </button>
+      </div>
 
       {/* 마감 버튼 */}
       {canClose && (
