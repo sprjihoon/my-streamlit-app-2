@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -41,6 +41,7 @@ from backend.app.services.epost.fields import (
     resolve_infront_center,
     resolve_office_ser,
     split_pickup_address,
+    today_kst,
     treat_status_label,
     validate_pickup_address_detail,
 )
@@ -314,6 +315,7 @@ def pickup_meta(token: str):
     return {
         "vendor": "spring",
         "default_pickup_date": default_ret_visit_iso(),
+        "max_pickup_date": (today_kst() + timedelta(days=21)).isoformat(),
         "today": iso_today_kst(),
         "box_sizes": PICKUP_BOX_SIZES,
         "live_ready": live,

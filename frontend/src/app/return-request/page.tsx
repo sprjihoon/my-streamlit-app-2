@@ -103,6 +103,8 @@ export default function ReturnRequestPage() {
   const [centerLabel, setCenterLabel] = useState('스프링풀필먼트 · 동대구우체국');
   const [officeSer, setOfficeSer] = useState('260940699');
   const [boxSizes, setBoxSizes] = useState<KpostPickupBoxSize[]>([]);
+  const [minPickupDate, setMinPickupDate] = useState('');
+  const [maxPickupDate, setMaxPickupDate] = useState('');
   const [form, setForm] = useState<KpostPickupPayload>(emptyForm());
   const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState('');
@@ -128,6 +130,8 @@ export default function ReturnRequestPage() {
         setBoxSizes(meta.box_sizes || []);
         setCenterLabel(`${meta.center.name} · ${meta.center.addr}`);
         if (meta.office_ser) setOfficeSer(meta.office_ser);
+        if (meta.default_pickup_date) setMinPickupDate(meta.default_pickup_date);
+        if (meta.max_pickup_date) setMaxPickupDate(meta.max_pickup_date);
         setForm(emptyForm(meta.default_pickup_date));
         setSavedRecipients(recipients.items || []);
       } catch (err) {
@@ -323,6 +327,8 @@ export default function ReturnRequestPage() {
               type="date"
               style={inputStyle}
               value={form.pickup_date}
+              min={minPickupDate || undefined}
+              max={maxPickupDate || undefined}
               onChange={(e) => {
       
                 setForm((p) => ({ ...p, pickup_date: e.target.value }));

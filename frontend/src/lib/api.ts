@@ -1537,6 +1537,7 @@ export async function getKpostPickupMeta(token: string) {
   return fetchApi<{
     vendor: string;
     default_pickup_date: string;
+    max_pickup_date: string;
     today: string;
     box_sizes: KpostPickupBoxSize[];
     live_ready: boolean;
