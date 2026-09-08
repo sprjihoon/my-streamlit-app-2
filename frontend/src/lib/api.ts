@@ -1674,3 +1674,135 @@ export async function deleteSavedRecipient(token: string, id: number) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────
+// 입고모드 (Inbound)
+// ─────────────────────────────────────────────────────────────────
+
+export interface InboundBatch {
+  id: string;
+  vendor: string;
+  inbound_date: string;
+  status: string;
+  status_label: string;
+  memo: string | null;
+  receipt_id: string | null;
+  janggi_filename: string | null;
+  janggi_date: string | null;
+  janggi_no: string | null;
+  wholesale: string | null;
+  total_janggi_qty: number;
+  total_actual_qty: number;
+  total_missing_qty: number;
+  created_by: string | null;
+  closed_by: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  items?: InboundItem[];
+}
+
+export interface InboundItem {
+  id: string;
+  batch_id: string;
+  line_no: number;
+  item_name: string | null;
+  option_text: string | null;
+  unit_price: number | null;
+  janggi_qty: number;
+  actual_qty: number;
+  missing_qty: number;
+  status: string;
+  status_label: string;
+  matched_barcode: string | null;
+  matched_vendor: string | null;
+  matched_product: string | null;
+  matched_option: string | null;
+  match_confidence: number;
+  needs_matching: boolean;
+  memo: string | null;
+  created_at: string;
+  photos?: InboundItemPhoto[];
+}
+
+export interface InboundItemPhoto {
+  id: string;
+  url: string;
+  filename: string;
+  created_at: string;
+}
+
+function inboundHeaders(token: string) {
+  return { Authorization: `Bearer ${token}` };
+}
+
+export async function listInboundBatches(
+  token: string,
+  filters?: { vendor?: string; status?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }
+) {
+  const params = new URLSearchParams();
+  if (filters?.vendor) params.set('vendor', filters.vendor);
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.dateFrom) params.set('date_from', filters.dateFrom);
+  if (filters?.dateTo) params.set('date_to', filters.dateTo);
+  if (filters?.limit != null) params.set('limit', String(filters.limit));
+  if (filters?.offset != null) params.set('offset', String(filters.offset));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return fetchApi<{ items: InboundBatch[]; total: number }>(
+    `/inbound/batches${qs}`,
+    { headers: inboundHeaders(token) }
+  );
+}
+
+export async function createInboundBatch(token: string, body: { vendor: string; inbound_date: string; memo?: string }) {
+  return fetchApi<{ id: string; status: string }>(
+    '/inbound/batches',
+    { method: 'POST', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+}
+
+export async function getInboundBatch(token: string, batchId: string) {
+  return fetchApi<InboundBatch>(`/inbound/batches/${batchId}`, { headers: inboundHeaders(token) });
+}
+
+export async function updateInboundBatch(token: string, batchId: string, body: { status?: string; memo?: string; vendor?: string; inbound_date?: string }) {
+  return fetchApi<{ ok: boolean }>(
+    `/inbound/batches/${batchId}`,
+    { method: 'PATCH', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+}
+
+export async function runInboundOcr(token: string, batchId: string, file: File) {
+  const form = new FormData();
+  form.append('file', file);
+  return fetchApi<{ ok: boolean; item_count: number; matched_count: number; needs_matching_count: number; wholesale: string | null; items: InboundItem[] }>(
+    `/inbound/batches/${batchId}/ocr`,
+    { method: 'POST', headers: inboundHeaders(token), body: form }
+  );
+}
+
+export async function updateInboundItem(token: string, itemId: string, body: Partial<{
+  actual_qty: number; missing_qty: number; status: string; memo: string;
+  matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
+}>) {
+  return fetchApi<{ ok: boolean }>(
+    `/inbound/items/${itemId}`,
+    { method: 'PATCH', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+}
+
+export async function closeInboundBatch(token: string, batchId: string) {
+  return fetchApi<{ ok: boolean; status?: string; status_label?: string; warning?: string; pending_count?: number; repair_count?: number }>(
+    `/inbound/batches/${batchId}/close`,
+    { method: 'POST', headers: inboundHeaders(token) }
+  );
+}
+
+export async function deleteInboundBatch(token: string, batchId: string) {
+  return fetchApi<{ ok: boolean }>(`/inbound/batches/${batchId}`, { method: 'DELETE', headers: inboundHeaders(token) });
+}
+
+export async function listInboundVendors(token: string) {
+  return fetchApi<{ vendors: string[] }>('/inbound/vendors', { headers: inboundHeaders(token) });
+}
+
+
