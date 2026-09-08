@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
@@ -13,10 +13,13 @@ import {
   uploadRepairPhotos,
   getOldRepairPhotos,
   purgeOldRepairPhotos,
-  getRepairBarcodes,
   lookupRepairBarcode,
   getRepairCatalog,
   getRepairCatalogPrice,
+  saveRepairWorkType,
+  deleteRepairWorkType,
+  saveRepairDefect,
+  deleteRepairDefect,
   repairImageUrl,
   RepairLog,
   RepairLogFilters,
@@ -55,7 +58,7 @@ function monthRange() {
 
 function formatPrice(n: number | null | undefined) {
   if (n == null) return '-';
-  return `${n.toLocaleString()}??;
+  return `${n.toLocaleString()}원`;
 }
 
 function formatDateTime(dateStr: string | null) {
@@ -77,7 +80,7 @@ function PhotoThumb({
 }) {
   const url = repairImageUrl(filename);
   if (!url) {
-    return <span style={{ color: '#bbb', fontSize: '0.75rem' }}>{label} ?놁쓬</span>;
+    return <span style={{ color: '#bbb', fontSize: '0.75rem' }}>{label} 없음</span>;
   }
   return (
     <button
@@ -98,9 +101,9 @@ export default function RepairLogPage() {
     <div style={{ padding: '1rem' }}>
       <h1 style={{
         fontSize: '1.375rem', fontWeight: 700, marginBottom: '1rem',
-        color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)',
+        color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)'
       }}>
-        ?섏꽑?묒뾽?쇱?
+        수선작업일지
       </h1>
 
       {message && (
@@ -167,7 +170,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
       setFilters(list.filters);
       setStats(st);
     } catch (e) {
-      onMessage({ type: 'error', text: e instanceof Error ? e.message : '遺덈윭?ㅺ린 ?ㅽ뙣' });
+      onMessage({ type: 'error', text: e instanceof Error ? e.message : '불러오기 실패' });
     } finally {
       setLoading(false);
     }
@@ -188,71 +191,71 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
     <>
       {stats && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-          <Card title="議고쉶 嫄댁닔"><p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total.toLocaleString()}</p></Card>
-          <Card title="議고쉶 湲덉븸"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a' }}>{stats.total_amount.toLocaleString()}??/p></Card>
-          <Card title="?ㅻ뒛 嫄댁닔"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{stats.today.toLocaleString()}</p></Card>
+          <Card title="조회 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total.toLocaleString()}</p></Card>
+          <Card title="조회 금액"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a' }}>{stats.total_amount.toLocaleString()}원</p></Card>
+          <Card title="오늘 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{stats.today.toLocaleString()}</p></Card>
         </div>
       )}
 
-      <Card title="寃???꾪꽣">
+      <Card title="검색 필터">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>?쒖옉??/label>
+            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>시작일</label>
             <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>醫낅즺??/label>
+            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>종료일</label>
             <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>?낆껜紐?/label>
+            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>업체명</label>
             <select value={vendor} onChange={(e) => setVendor(e.target.value)} style={inputStyle}>
-              <option value="">?꾩껜</option>
+              <option value="">전체</option>
               {filters?.vendors.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>?묒뾽</label>
+            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>작업</label>
             <select value={workType} onChange={(e) => setWorkType(e.target.value)} style={inputStyle}>
-              <option value="">?꾩껜</option>
+              <option value="">전체</option>
               {filters?.work_types.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>遺덈웾紐?/label>
+            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>불량명</label>
             <select value={defect} onChange={(e) => setDefect(e.target.value)} style={inputStyle}>
-              <option value="">?꾩껜</option>
+              <option value="">전체</option>
               {filters?.defects.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>?묒꽦??/label>
+            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>작성자</label>
             <select value={author} onChange={(e) => setAuthor(e.target.value)} style={inputStyle}>
-              <option value="">?꾩껜</option>
+              <option value="">전체</option>
               {filters?.authors.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button onClick={() => { setCurrentPage(1); load(); }} style={btn('#2563eb')}>寃??/button>
+          <button onClick={() => { setCurrentPage(1); load(); }} style={btn('#2563eb')}>검색</button>
           <button onClick={() => {
             const r = monthRange();
             setPeriodFrom(r.from); setPeriodTo(r.to);
             setVendor(''); setWorkType(''); setDefect(''); setAuthor('');
             setCurrentPage(1);
-          }} style={btn('#6b7280')}>珥덇린??/button>
+          }} style={btn('#6b7280')}>초기화</button>
           <button
             onClick={async () => {
               if (!periodFrom || !periodTo) {
-                onMessage({ type: 'error', text: '?묒? 蹂닿퀬瑜??꾪빐 ?쒖옉?쇨낵 醫낅즺?쇱쓣 ?좏깮?섏꽭??' });
+                onMessage({ type: 'error', text: '엑셀 보고를 위해 시작일과 종료일을 선택하세요.' });
                 return;
               }
               setExcelExporting(true);
               try {
                 await downloadRepairLogExcel(currentFilters);
-                onMessage({ type: 'success', text: '?ъ쭊 ?ы븿 ?묒? 蹂닿퀬?쒕? ??ν뻽?듬땲??' });
+                onMessage({ type: 'success', text: '사진 포함 엑셀 보고서를 저장했습니다.' });
               } catch (e) {
-                onMessage({ type: 'error', text: e instanceof Error ? e.message : '?묒? ?앹꽦 ?ㅽ뙣' });
+                onMessage({ type: 'error', text: e instanceof Error ? e.message : '엑셀 생성 실패' });
               } finally {
                 setExcelExporting(false);
               }
@@ -260,17 +263,17 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             disabled={excelExporting}
             style={btn('#0f766e')}
           >
-            {excelExporting ? '?묒? 留뚮뱶??以?..' : '?묒? ?ㅼ슫濡쒕뱶 (?ъ쭊 ?ы븿)'}
+            {excelExporting ? '엑셀 만드는 중...' : '엑셀 다운로드 (사진 포함)'}
           </button>
           <button
             onClick={async () => {
               try {
                 const info = await getOldRepairPhotos(60);
                 if (!info.files) {
-                  onMessage({ type: 'success', text: `${info.cutoff} ?댁쟾 ??젣???ъ쭊???놁뒿?덈떎.` });
+                  onMessage({ type: 'success', text: `${info.cutoff} 이전 삭제할 사진이 없습니다.` });
                   return;
                 }
-                if (!window.confirm(`${info.cutoff} ?댁쟾 ?ъ쭊 ${info.files}??諛붿퐫?쑣룹쟾?꽷룹뿰寃??녿뒗 ?뚯씪, ${info.logs}嫄????쒕쾭?먯꽌 ?꾩쟾????젣?좉퉴??\n?쇱? ?댁슜? 洹몃?濡??⑥뒿?덈떎. ?섎룎由????놁뒿?덈떎.`)) {
+                if (!window.confirm(`${info.cutoff} 이전 사진 ${info.files}장(바코드·전후·연결 없는 파일, ${info.logs}건)을 서버에서 완전히 삭제할까요?\n일지 내용은 그대로 남습니다. 되돌릴 수 없습니다.`)) {
                   return;
                 }
                 setPurgingOld(true);
@@ -278,7 +281,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
                 onMessage({ type: 'success', text: result.message });
                 load();
               } catch (e) {
-                onMessage({ type: 'error', text: e instanceof Error ? e.message : '?ъ쭊 ??젣 ?ㅽ뙣' });
+                onMessage({ type: 'error', text: e instanceof Error ? e.message : '사진 삭제 실패' });
               } finally {
                 setPurgingOld(false);
               }
@@ -286,77 +289,77 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             disabled={purgingOld}
             style={btn('#b45309')}
           >
-            {purgingOld ? '??젣 以?..' : '60???댁쟾 ?ъ쭊 ?꾩쟾 ??젣'}
+            {purgingOld ? '삭제 중...' : '60일 이전 사진 완전 삭제'}
           </button>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '0.875rem', color: '#666' }}>?섏씠吏??</span>
+            <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
             <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}>
-              <option value={50}>50媛?/option>
-              <option value={100}>100媛?/option>
-              <option value={200}>200媛?/option>
-              <option value={0}>?꾩껜</option>
+              <option value={50}>50개</option>
+              <option value={100}>100개</option>
+              <option value={200}>200개</option>
+              <option value={0}>전체</option>
             </select>
           </div>
         </div>
         <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0.6rem 0 0' }}>
-          ?묒?? ?꾩옱 ?좏깮???낆껜쨌湲곌컙 ?꾪꽣???섏꽑?쇱?? ?묒뾽 ?ъ쭊???댁뒿?덈떎. 諛붿퐫???ъ쭊? ?ｌ? ?딆뒿?덈떎.
+          엑셀은 현재 선택한 업체·기간 필터의 수선일지와 작업 사진을 담습니다. 바코드 사진은 넣지 않습니다.
         </p>
       </Card>
 
       <div style={{ marginTop: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>
-            ?섏꽑?쇱? 紐⑸줉
+            수선일지 목록
             <span style={{ color: '#666', fontWeight: 400, marginLeft: 8 }}>
-              ({pageSize === 0 ? totalCount : `${logs.length}/${totalCount}`}嫄?
+              ({pageSize === 0 ? totalCount : `${logs.length}/${totalCount}`}건)
             </span>
           </h3>
-          <button onClick={() => setShowAdd(true)} style={btn('#22c55e')}>???섎룞 異붽?</button>
+          <button onClick={() => setShowAdd(true)} style={btn('#22c55e')}>➕ 수동 추가</button>
         </div>
 
         <Card title="">
           {loading ? <Loading /> : logs.length === 0 ? (
-            <p style={{ color: '#666' }}>?섏꽑?쇱?媛 ?놁뒿?덈떎.</p>
+            <p style={{ color: '#666' }}>수선일지가 없습니다.</p>
           ) : (
             <>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    {['?좎쭨', '?낆껜紐?, '?쒗뭹紐?, '?듭뀡', '諛붿퐫??, '遺덈웾紐?, '?묒뾽', '?섎웾', '鍮꾩슜', '?묒꽦??, '?섏젙??, '?섏젙?쒓컙', '?ъ쭊', ''].map((h) => (
-                      <th key={h} style={{ padding: '0.5rem', textAlign: h === '?섎웾' || h === '鍮꾩슜' ? 'right' : 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
+                    {['날짜', '업체명', '제품명', '옵션', '바코드', '불량명', '작업', '수량', '비용', '작성자', '수정자', '수정시간', '사진', ''].map((h) => (
+                      <th key={h} style={{ padding: '0.5rem', textAlign: h === '수량' || h === '비용' ? 'right' : 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {logs.map((log) => (
                     <tr key={log.id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '0.5rem' }}>{log.?좎쭨 || '-'}</td>
-                      <td style={{ padding: '0.5rem', fontWeight: 500 }}>{log.?낆껜紐?|| '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{log.?쒗뭹紐?|| '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{log.?듭뀡 || '-'}</td>
-                      <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{log.諛붿퐫??|| '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{log.遺덈웾紐?|| '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{log.?묒뾽 || '-'}</td>
-                      <td style={{ padding: '0.5rem', textAlign: 'right' }}>{log.?섎웾?.toLocaleString() ?? '-'}</td>
-                      <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>{formatPrice(log.鍮꾩슜)}</td>
-                      <td style={{ padding: '0.5rem' }}>{log.?묒꽦??|| '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{log.?섏젙??|| '-'}</td>
-                      <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>{formatDateTime(log.?섏젙?쒓컙)}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.날짜 || '-'}</td>
+                      <td style={{ padding: '0.5rem', fontWeight: 500 }}>{log.업체명 || '-'}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.제품명 || '-'}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.옵션 || '-'}</td>
+                      <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{log.바코드 || '-'}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.불량명 || '-'}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.작업 || '-'}</td>
+                      <td style={{ padding: '0.5rem', textAlign: 'right' }}>{log.수량?.toLocaleString() ?? '-'}</td>
+                      <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>{formatPrice(log.비용)}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.작성자 || '-'}</td>
+                      <td style={{ padding: '0.5rem' }}>{log.수정자 || '-'}</td>
+                      <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>{formatDateTime(log.수정시간)}</td>
                       <td style={{ padding: '0.5rem' }}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {[
-                            ['?ъ쭊1', log.before_image],
-                            ['?ъ쭊2', log.after_image],
-                            ...(log.extra_images || []).map((fn, i) => [`異붽?${i + 1}`, fn] as const),
+                            ['사진1', log.before_image],
+                            ['사진2', log.after_image],
+                            ...(log.extra_images || []).map((fn, i) => [`추가${i + 1}`, fn] as const),
                           ].filter(([, fn]) => fn).map(([label, fn]) => (
                             <PhotoThumb key={`${label}-${fn}`} filename={fn as string} label={label as string} onClick={setPreview} />
                           ))}
                         </div>
                       </td>
                       <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
-                        <button onClick={() => setEditing(log)} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>?섏젙</button>
-                        <button onClick={() => setDeletingId(log.id)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>??젣</button>
+                        <button onClick={() => setEditing(log)} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>수정</button>
+                        <button onClick={() => setDeletingId(log.id)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>삭제</button>
                       </td>
                     </tr>
                   ))}
@@ -365,9 +368,9 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             </div>
             {totalPages > 1 && pageSize !== 0 && (
               <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 12 }}>
-                <button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} style={btn(currentPage === 1 ? '#9ca3af' : '#6b7280')}>?댁쟾</button>
+                <button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} style={btn(currentPage === 1 ? '#9ca3af' : '#6b7280')}>이전</button>
                 <span style={{ alignSelf: 'center', fontSize: '0.875rem' }}>{currentPage} / {totalPages}</span>
-                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)} style={btn(currentPage === totalPages ? '#9ca3af' : '#6b7280')}>?ㅼ쓬</button>
+                <button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)} style={btn(currentPage === totalPages ? '#9ca3af' : '#6b7280')}>다음</button>
               </div>
             )}
             </>
@@ -377,7 +380,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
 
       {showAdd && (
         <LogFormModal
-          title="?섏꽑?쇱? ?섎룞 異붽?"
+          title="수선일지 수동 추가"
           workTypes={catalogWorks}
           defects={catalogDefects}
           onClose={() => setShowAdd(false)}
@@ -387,7 +390,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
       )}
       {editing && (
         <LogFormModal
-          title="?섏꽑?쇱? ?섏젙"
+          title="수선일지 수정"
           initial={editing}
           workTypes={catalogWorks}
           defects={catalogDefects}
@@ -398,16 +401,16 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
       )}
       {deletingId != null && (
         <ConfirmModal
-          text="???섏꽑?쇱?瑜???젣?섏떆寃좎뒿?덇퉴? ?ъ쭊???④퍡 ??젣?⑸땲??"
+          text="이 수선일지를 삭제하시겠습니까? 사진도 함께 삭제됩니다."
           onCancel={() => setDeletingId(null)}
           onConfirm={async () => {
             try {
               await deleteRepairLog(deletingId);
-              onMessage({ type: 'success', text: '?섏꽑?쇱?媛 ??젣?섏뿀?듬땲??' });
+              onMessage({ type: 'success', text: '수선일지가 삭제되었습니다.' });
               setDeletingId(null);
               load();
             } catch (e) {
-              onMessage({ type: 'error', text: e instanceof Error ? e.message : '??젣 ?ㅽ뙣' });
+              onMessage({ type: 'error', text: e instanceof Error ? e.message : '삭제 실패' });
             }
           }}
         />
@@ -417,7 +420,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, cursor: 'zoom-out',
         }}>
-          <img src={preview} alt="誘몃━蹂닿린" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8 }} />
+          <img src={preview} alt="미리보기" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8 }} />
         </div>
       )}
     </>
@@ -436,22 +439,22 @@ function LogFormModal({
   onMessage: (m: { type: 'success' | 'error'; text: string } | null) => void;
 }) {
   const [form, setForm] = useState({
-    ?좎쭨: initial?.?좎쭨 || todayStr(),
-    諛붿퐫?? initial?.諛붿퐫??|| '',
-    ?낆껜紐? initial?.?낆껜紐?|| '',
-    ?쒗뭹紐? initial?.?쒗뭹紐?|| '',
-    ?듭뀡: initial?.?듭뀡 || '',
-    遺덈웾紐? initial?.遺덈웾紐?|| '',
-    ?묒뾽: initial?.?묒뾽 || '',
-    ?섎웾: initial?.?섎웾 ?? 1,
-    鍮꾩슜: initial?.鍮꾩슜 ?? 0,
-    鍮꾧퀬: initial?.鍮꾧퀬 || '',
+    날짜: initial?.날짜 || todayStr(),
+    바코드: initial?.바코드 || '',
+    업체명: initial?.업체명 || '',
+    제품명: initial?.제품명 || '',
+    옵션: initial?.옵션 || '',
+    불량명: initial?.불량명 || '',
+    작업: initial?.작업 || '',
+    수량: initial?.수량 ?? 1,
+    비용: initial?.비용 ?? 0,
+    비고: initial?.비고 || '',
   });
   const [customWork, setCustomWork] = useState(
-    !!(initial?.?묒뾽 && !workTypes.some((w) => w.?묒뾽紐?=== initial.?묒뾽))
+    !!(initial?.작업 && !workTypes.some((w) => w.작업명 === initial.작업))
   );
   const [customDefect, setCustomDefect] = useState(
-    !!(initial?.遺덈웾紐?&& !defects.some((d) => d.遺덈웾紐?=== initial.遺덈웾紐?)
+    !!(initial?.불량명 && !defects.some((d) => d.불량명 === initial.불량명))
   );
   const [lookupHint, setLookupHint] = useState('');
   const [lookupOk, setLookupOk] = useState(false);
@@ -465,9 +468,9 @@ function LogFormModal({
   async function fillPrice(work: string, vendorName: string, productName?: string) {
     if (!work.trim()) return;
     try {
-      const p = await getRepairCatalogPrice(work, vendorName || undefined, productName || form.?쒗뭹紐?|| undefined);
-      if (p.found && p.鍮꾩슜 != null) {
-        setForm((f) => ({ ...f, ?묒뾽: p.?묒뾽紐?|| f.?묒뾽, 鍮꾩슜: p.鍮꾩슜 as number }));
+      const p = await getRepairCatalogPrice(work, vendorName || undefined, productName || form.제품명 || undefined);
+      if (p.found && p.비용 != null) {
+        setForm((f) => ({ ...f, 작업: p.작업명 || f.작업, 비용: p.비용 as number }));
         setPriceHint(p.message);
       } else {
         setPriceHint(p.message);
@@ -478,80 +481,80 @@ function LogFormModal({
   }
 
   async function searchBarcode(raw?: string) {
-    const code = (raw ?? form.諛붿퐫??.trim();
+    const code = (raw ?? form.바코드).trim();
     if (!code) {
       setLookupOk(false);
-      setLookupHint('諛붿퐫?쒕? ?낅젰????寃?됲븯?몄슂.');
+      setLookupHint('바코드를 입력한 뒤 검색하세요.');
       return;
     }
     setLookingUp(true);
-    setLookupHint('寃??以?..');
+    setLookupHint('검색 중...');
     setLookupOk(false);
     try {
       const found = await lookupRepairBarcode(code);
-      const vendorName = found.?낆껜紐?|| form.?낆껜紐?
+      const vendorName = found.업체명 || form.업체명;
       setForm((f) => ({
         ...f,
-        諛붿퐫?? found.諛붿퐫??|| code,
-        ?낆껜紐? found.?낆껜紐?|| f.?낆껜紐?
-        ?쒗뭹紐? found.?쒗뭹紐?|| f.?쒗뭹紐?
-        ?듭뀡: found.?듭뀡 || f.?듭뀡,
+        바코드: found.바코드 || code,
+        업체명: found.업체명 || f.업체명,
+        제품명: found.제품명 || f.제품명,
+        옵션: found.옵션 || f.옵션,
       }));
-      const extra = [found.?곹뭹肄붾뱶 && `肄붾뱶 ${found.?곹뭹肄붾뱶}`, found.濡쒖??댁뀡 && `濡쒖??댁뀡 ${found.濡쒖??댁뀡}`]
+      const extra = [found.상품코드 && `코드 ${found.상품코드}`, found.로케이션 && `로케이션 ${found.로케이션}`]
         .filter(Boolean)
-        .join(' 쨌 ');
+        .join(' · ');
       setLookupOk(true);
       setLookupHint(
-        `?깅줉 ?뺣낫 ?낅젰?? ${found.?낆껜紐? / ${found.?쒗뭹紐?${found.?듭뀡 ? ` / ${found.?듭뀡}` : ''}${extra ? ` (${extra})` : ''}`
+        `등록 정보 입력됨: ${found.업체명} / ${found.제품명}${found.옵션 ? ` / ${found.옵션}` : ''}${extra ? ` (${extra})` : ''}`
       );
-      if (form.?묒뾽) fillPrice(form.?묒뾽, vendorName, found.?쒗뭹紐?|| form.?쒗뭹紐?;
+      if (form.작업) fillPrice(form.작업, vendorName, found.제품명 || form.제품명);
     } catch {
       setLookupOk(false);
-      setLookupHint('誘몃벑濡?諛붿퐫?쒖엯?덈떎. ?낆껜紐끒룹젣?덈챸??吏곸젒 ?낅젰?섏꽭??');
+      setLookupHint('미등록 바코드입니다. 업체명·제품명을 직접 입력하세요.');
     } finally {
       setLookingUp(false);
     }
   }
 
   async function save() {
-    if (!form.?묒뾽.trim() || !form.鍮꾩슜) {
-      onMessage({ type: 'error', text: '?묒뾽怨?鍮꾩슜? ?꾩닔?낅땲??' });
+    if (!form.작업.trim() || !form.비용) {
+      onMessage({ type: 'error', text: '작업과 비용은 필수입니다.' });
       return;
     }
-    if (!form.諛붿퐫??trim() && (!form.?낆껜紐?trim() || !form.?쒗뭹紐?trim())) {
-      onMessage({ type: 'error', text: '諛붿퐫???먮뒗 ?낆껜紐??쒗뭹紐낆쓣 ?낅젰?섏꽭??' });
+    if (!form.바코드.trim() && (!form.업체명.trim() || !form.제품명.trim())) {
+      onMessage({ type: 'error', text: '바코드 또는 업체명+제품명을 입력하세요.' });
       return;
     }
     setSaving(true);
     try {
       const payload = {
-        ?좎쭨: form.?좎쭨,
-        諛붿퐫?? form.諛붿퐫??trim() || undefined,
-        ?낆껜紐? form.?낆껜紐?trim() || undefined,
-        ?쒗뭹紐? form.?쒗뭹紐?trim() || undefined,
-        ?듭뀡: form.?듭뀡.trim() || undefined,
-        遺덈웾紐? form.遺덈웾紐?trim() || undefined,
-        ?묒뾽: form.?묒뾽.trim(),
-        ?섎웾: Number(form.?섎웾) || 1,
-        鍮꾩슜: Number(form.鍮꾩슜) || 0,
-        鍮꾧퀬: form.鍮꾧퀬.trim() || undefined,
-        異쒖쿂: 'manual',
+        날짜: form.날짜,
+        바코드: form.바코드.trim() || undefined,
+        업체명: form.업체명.trim() || undefined,
+        제품명: form.제품명.trim() || undefined,
+        옵션: form.옵션.trim() || undefined,
+        불량명: form.불량명.trim() || undefined,
+        작업: form.작업.trim(),
+        수량: Number(form.수량) || 1,
+        비용: Number(form.비용) || 0,
+        비고: form.비고.trim() || undefined,
+        출처: 'manual',
       };
       let id = initial?.id;
       if (initial) {
         await updateRepairLog(initial.id, payload);
-        onMessage({ type: 'success', text: '?섏꽑?쇱?媛 ?섏젙?섏뿀?듬땲??' });
+        onMessage({ type: 'success', text: '수선일지가 수정되었습니다.' });
       } else {
         const created = await createRepairLog(payload);
         id = created.id;
-        onMessage({ type: 'success', text: '?섏꽑?쇱?媛 異붽??섏뿀?듬땲??' });
+        onMessage({ type: 'success', text: '수선일지가 추가되었습니다.' });
       }
       if (id && (beforeFile || afterFile || extraFiles.length)) {
         await uploadRepairPhotos(id, { before: beforeFile, after: afterFile, extra: extraFiles });
       }
       onSaved();
     } catch (e) {
-      onMessage({ type: 'error', text: e instanceof Error ? e.message : '????ㅽ뙣' });
+      onMessage({ type: 'error', text: e instanceof Error ? e.message : '저장 실패' });
     } finally {
       setSaving(false);
     }
@@ -560,21 +563,21 @@ function LogFormModal({
   return (
     <Modal title={title} onClose={onClose} maxWidth={860}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem 1.25rem' }}>
-        <Field label="?좎쭨 *">
-          <input type="date" value={form.?좎쭨} onChange={(e) => setForm({ ...form, ?좎쭨: e.target.value })} style={inputStyle} />
+        <Field label="날짜 *">
+          <input type="date" value={form.날짜} onChange={(e) => setForm({ ...form, 날짜: e.target.value })} style={inputStyle} />
         </Field>
-        <Field label="諛붿퐫??>
+        <Field label="바코드">
           <div style={{ display: 'flex', gap: 8 }}>
             <input
-              value={form.諛붿퐫??
-              onChange={(e) => { setForm({ ...form, 諛붿퐫?? e.target.value }); setLookupHint(''); setLookupOk(false); }}
+              value={form.바코드}
+              onChange={(e) => { setForm({ ...form, 바코드: e.target.value }); setLookupHint(''); setLookupOk(false); }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   searchBarcode(e.currentTarget.value);
                 }
               }}
-              placeholder="諛붿퐫???낅젰 ??寃??
+              placeholder="바코드 입력 후 검색"
               style={inputStyle}
             />
             <button
@@ -583,7 +586,7 @@ function LogFormModal({
               disabled={lookingUp}
               style={{ ...btn('#0f766e'), whiteSpace: 'nowrap', opacity: lookingUp ? 0.7 : 1 }}
             >
-              {lookingUp ? '寃??以?..' : '寃??}
+              {lookingUp ? '검색 중...' : '검색'}
             </button>
           </div>
           {lookupHint && (
@@ -592,106 +595,106 @@ function LogFormModal({
             </p>
           )}
         </Field>
-        <Field label="?낆껜紐?>
+        <Field label="업체명">
           <input
-            value={form.?낆껜紐?
-            onChange={(e) => setForm({ ...form, ?낆껜紐? e.target.value })}
-            onBlur={() => { if (form.?묒뾽) fillPrice(form.?묒뾽, form.?낆껜紐? form.?쒗뭹紐?; }}
+            value={form.업체명}
+            onChange={(e) => setForm({ ...form, 업체명: e.target.value })}
+            onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명, form.제품명); }}
             style={inputStyle}
           />
         </Field>
-        <Field label="?쒗뭹紐?>
+        <Field label="제품명">
           <input
-            value={form.?쒗뭹紐?
-            onChange={(e) => setForm({ ...form, ?쒗뭹紐? e.target.value })}
-            onBlur={() => { if (form.?묒뾽) fillPrice(form.?묒뾽, form.?낆껜紐? form.?쒗뭹紐?; }}
+            value={form.제품명}
+            onChange={(e) => setForm({ ...form, 제품명: e.target.value })}
+            onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명, form.제품명); }}
             style={inputStyle}
           />
         </Field>
-        <Field label="?듭뀡">
-          <input value={form.?듭뀡} onChange={(e) => setForm({ ...form, ?듭뀡: e.target.value })} placeholder="釉붾옓" style={inputStyle} />
+        <Field label="옵션">
+          <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} placeholder="블랙" style={inputStyle} />
         </Field>
-        <Field label="遺덈웾紐?>
+        <Field label="불량명">
           <select
-            value={customDefect ? '__custom__' : form.遺덈웾紐?
+            value={customDefect ? '__custom__' : form.불량명}
             onChange={(e) => {
               if (e.target.value === '__custom__') {
                 setCustomDefect(true);
-                setForm({ ...form, 遺덈웾紐? '' });
+                setForm({ ...form, 불량명: '' });
               } else {
                 setCustomDefect(false);
-                setForm({ ...form, 遺덈웾紐? e.target.value });
+                setForm({ ...form, 불량명: e.target.value });
               }
             }}
             style={inputStyle}
           >
-            <option value="">?좏깮</option>
-            {defects.map((d) => <option key={d.遺덈웾紐? value={d.遺덈웾紐?>{d.遺덈웾紐?{d.蹂꾩묶 ? ` (${d.蹂꾩묶})` : ''}</option>)}
-            <option value="__custom__">吏곸젒 ?낅젰</option>
+            <option value="">선택</option>
+            {defects.map((d) => <option key={d.불량명} value={d.불량명}>{d.불량명}{d.별칭 ? ` (${d.별칭})` : ''}</option>)}
+            <option value="__custom__">직접 입력</option>
           </select>
           {customDefect && (
             <input
-              value={form.遺덈웾紐?
-              onChange={(e) => setForm({ ...form, 遺덈웾紐? e.target.value })}
-              placeholder="??遺덈웾紐?
+              value={form.불량명}
+              onChange={(e) => setForm({ ...form, 불량명: e.target.value })}
+              placeholder="새 불량명"
               style={{ ...inputStyle, marginTop: 6 }}
             />
           )}
         </Field>
-        <Field label="?묒뾽 *">
+        <Field label="작업 *">
           <select
-            value={customWork ? '__custom__' : form.?묒뾽}
+            value={customWork ? '__custom__' : form.작업}
             onChange={(e) => {
               if (e.target.value === '__custom__') {
                 setCustomWork(true);
-                setForm({ ...form, ?묒뾽: '' });
+                setForm({ ...form, 작업: '' });
                 setPriceHint('');
               } else {
                 setCustomWork(false);
-                setForm({ ...form, ?묒뾽: e.target.value });
-                fillPrice(e.target.value, form.?낆껜紐? form.?쒗뭹紐?;
+                setForm({ ...form, 작업: e.target.value });
+                fillPrice(e.target.value, form.업체명, form.제품명);
               }
             }}
             style={inputStyle}
           >
-            <option value="">?좏깮</option>
-            {workTypes.map((t) => <option key={t.?묒뾽紐? value={t.?묒뾽紐?>{t.?묒뾽紐? ({t.湲곕낯鍮꾩슜.toLocaleString()}??</option>)}
-            <option value="__custom__">吏곸젒 ?낅젰</option>
+            <option value="">선택</option>
+            {workTypes.map((t) => <option key={t.작업명} value={t.작업명}>{t.작업명} ({t.기본비용.toLocaleString()}원)</option>)}
+            <option value="__custom__">직접 입력</option>
           </select>
           {customWork && (
             <input
-              value={form.?묒뾽}
-              onChange={(e) => setForm({ ...form, ?묒뾽: e.target.value })}
-              onBlur={() => { if (form.?묒뾽) fillPrice(form.?묒뾽, form.?낆껜紐? form.?쒗뭹紐?; }}
-              placeholder="???묒뾽紐?
+              value={form.작업}
+              onChange={(e) => setForm({ ...form, 작업: e.target.value })}
+              onBlur={() => { if (form.작업) fillPrice(form.작업, form.업체명, form.제품명); }}
+              placeholder="새 작업명"
               style={{ ...inputStyle, marginTop: 6 }}
             />
           )}
         </Field>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-          <Field label="?섎웾">
-            <input type="number" min={1} value={form.?섎웾} onChange={(e) => setForm({ ...form, ?섎웾: Number(e.target.value) })} style={inputStyle} />
+          <Field label="수량">
+            <input type="number" min={1} value={form.수량} onChange={(e) => setForm({ ...form, 수량: Number(e.target.value) })} style={inputStyle} />
           </Field>
-          <Field label="鍮꾩슜 *">
-            <input type="number" min={0} value={form.鍮꾩슜} onChange={(e) => { setForm({ ...form, 鍮꾩슜: Number(e.target.value) }); setPriceHint(''); }} style={inputStyle} />
+          <Field label="비용 *">
+            <input type="number" min={0} value={form.비용} onChange={(e) => { setForm({ ...form, 비용: Number(e.target.value) }); setPriceHint(''); }} style={inputStyle} />
           </Field>
         </div>
         {priceHint && <p style={{ gridColumn: '1 / -1', fontSize: '0.8rem', color: '#2563eb', margin: 0 }}>{priceHint}</p>}
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="鍮꾧퀬">
-            <input value={form.鍮꾧퀬} onChange={(e) => setForm({ ...form, 鍮꾧퀬: e.target.value })} style={inputStyle} />
+          <Field label="비고">
+            <input value={form.비고} onChange={(e) => setForm({ ...form, 비고: e.target.value })} style={inputStyle} />
           </Field>
         </div>
         <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, minWidth: 0 }}>
-          <Field label="?ъ쭊 1">
+          <Field label="사진 1">
             <input type="file" accept="image/*" onChange={(e) => setBeforeFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
-          <Field label="?ъ쭊 2">
+          <Field label="사진 2">
             <input type="file" accept="image/*" onChange={(e) => setAfterFile(e.target.files?.[0] || null)} style={{ width: '100%', maxWidth: '100%' }} />
           </Field>
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
-          <Field label="異붽? ?ъ쭊 (?щ윭 ??">
+          <Field label="추가 사진 (여러 장)">
             <input
               type="file"
               accept="image/*"
@@ -703,22 +706,21 @@ function LogFormModal({
         </div>
         {initial && (
           <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <PhotoThumb filename={initial.before_image} label="?ъ쭊1" onClick={() => {}} />
-            <PhotoThumb filename={initial.after_image} label="?ъ쭊2" onClick={() => {}} />
+            <PhotoThumb filename={initial.before_image} label="사진1" onClick={() => {}} />
+            <PhotoThumb filename={initial.after_image} label="사진2" onClick={() => {}} />
             {(initial.extra_images || []).map((fn, i) => (
-              <PhotoThumb key={`${fn}-${i}`} filename={fn} label={`異붽?${i + 1}`} onClick={() => {}} />
+              <PhotoThumb key={`${fn}-${i}`} filename={fn} label={`추가${i + 1}`} onClick={() => {}} />
             ))}
           </div>
         )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-          <button onClick={onClose} style={btn('#6b7280')}>痍⑥냼</button>
-          <button onClick={save} disabled={saving} style={btn('#2563eb')}>{saving ? '???以?..' : '???}</button>
+          <button onClick={onClose} style={btn('#6b7280')}>취소</button>
+          <button onClick={save} disabled={saving} style={btn('#2563eb')}>{saving ? '저장 중...' : '저장'}</button>
         </div>
       </div>
     </Modal>
   );
 }
-
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -754,11 +756,11 @@ function Modal({ title, onClose, children, maxWidth = 560 }: {
 
 function ConfirmModal({ text, onCancel, onConfirm }: { text: string; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <Modal title="?뺤씤" onClose={onCancel}>
+    <Modal title="확인" onClose={onCancel}>
       <p style={{ marginBottom: 16 }}>{text}</p>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button onClick={onCancel} style={btn('#6b7280')}>痍⑥냼</button>
-        <button onClick={onConfirm} style={btn('#ef4444')}>??젣</button>
+        <button onClick={onCancel} style={btn('#6b7280')}>취소</button>
+        <button onClick={onConfirm} style={btn('#ef4444')}>삭제</button>
       </div>
     </Modal>
   );
