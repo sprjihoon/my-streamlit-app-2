@@ -252,26 +252,28 @@ export default function KpostPickupListPage() {
                           ? (<>{item.canceled_by}<div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.canceled_at?.replace('T', ' ').slice(0, 16)}</div></>)
                           : <span className="text-muted">-</span>}
                       </td>
-                      <td style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-                        {canCancel(item) && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => handleCancel(item.id, item.tracking_no)}
-                          >
-                            취소
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ color: '#dc2626' }}
-                            onClick={() => handleDelete(item.id, item.tracking_no)}
-                          >
-                            삭제
-                          </button>
-                        )}
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
+                          {canCancel(item) && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              onClick={() => handleCancel(item.id, item.tracking_no)}
+                            >
+                              취소
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ color: '#dc2626' }}
+                              onClick={() => handleDelete(item.id, item.tracking_no)}
+                            >
+                              삭제
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
