@@ -1343,10 +1343,13 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
             await _flush_later(uid, cid, PHOTO_EXTRA_WAIT_SEC, send_fn, depth + 1)
         return
 
-    from backend.app.services.bot_mode import MODE_REPAIR, get_mode
+    from backend.app.services.bot_mode import MODE_DEFECT, MODE_REPAIR, get_mode
 
-    if get_mode(uid, cid) != MODE_REPAIR:
+    current_mode = get_mode(uid, cid)
+    _PHOTO_MODES = {MODE_REPAIR, MODE_DEFECT}
+    if current_mode not in _PHOTO_MODES:
         _release_inbox_claim(uid, cid)
+        return
 
     photos = [p for p in claimed["photos"] if p.data]
     if len(photos) < PHOTO_MIN_SIZE:
@@ -1355,6 +1358,35 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
             await send_fn(claimed["channel_id"], PHOTO_RETRY_MSG, claimed["channel_type"])
         return
 
+    # 불량모드 → defect_bot으로 분기
+    if current_mode == MODE_DEFECT:
+        try:
+            from backend.app.services.defect_bot import finalize_defect_photo_set
+            reply = await finalize_defect_photo_set(
+                user_id=uid,
+                channel_id=claimed["channel_id"],
+                photos=photos,
+                user_name=claimed["user_name"],
+            )
+        except Exception:
+            logger.exception("finalize_defect_photo_set failed user=%s channel=%s", uid, cid)
+            _release_inbox_claim(uid, cid)
+            if send_fn:
+                await send_fn(claimed["channel_id"], PHOTO_RETRY_MSG, claimed["channel_type"])
+            return
+        if not reply:
+            _release_inbox_claim(uid, cid)
+            return
+        if reply == PHOTO_RETRY_MSG:
+            _release_inbox_claim(uid, cid)
+        else:
+            _commit_inbox_claim(uid, cid, claimed.get("file_ids"))
+        if send_fn and reply:
+            await send_fn(claimed["channel_id"], reply, claimed["channel_type"])
+        _keep_overflow_off_next_case(uid, claimed["channel_id"])
+        return
+
+    # 수선모드 기존 흐름
     try:
         reply = await finalize_photo_set(
             user_id=uid,

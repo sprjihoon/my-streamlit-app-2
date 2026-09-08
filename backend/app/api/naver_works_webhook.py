@@ -23,6 +23,7 @@ from backend.app.services.bot_mode import (
     MODE_IDLE,
     MODE_JOURNAL,
     MODE_REPAIR,
+    MODE_DEFECT,
     apply_mode_command,
     get_mode,
     idle_guide,
@@ -193,6 +194,21 @@ async def process_message(
         except Exception as e:
             add_debug_log("repair_text_error", error=str(e))
             await _send_prefixed(nw_client, user_id, channel_id, "수선 처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
+            return
+
+    if mode == MODE_DEFECT:
+        try:
+            from backend.app.services.defect_bot import handle_user_text as handle_defect_text
+            reply = await handle_defect_text(user_id, channel_id, text, user_name, nlu_intent=nlu)
+            add_debug_log("defect_text_handled", {"reply": (reply or "")[:200]})
+            if reply:
+                conv_manager.add_message(user_id, channel_id, "assistant", reply)
+                conv_manager.remember_webhook_event(event_id, user_id, channel_id, reply)
+                await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+            return
+        except Exception as e:
+            add_debug_log("defect_text_error", error=str(e))
+            await _send_prefixed(nw_client, user_id, channel_id, "불량 처리 중 문제가 났어요. 다시 시도해 주세요.", channel_type)
             return
 
     if mode == MODE_JOURNAL:
@@ -367,14 +383,15 @@ async def process_image_upload(
     file_name: str,
     event_id: Optional[str] = None,
 ):
-    """수선용 사진 수신 → 수선모드에서만 수선 흐름으로 보낸다."""
+    """수선/불량용 사진 수신 → 해당 모드에서만 처리한다."""
     add_debug_log("repair_image_start", {"file_name": file_name, "has_url": bool(file_url), "file_id": file_id})
     try:
         nw_client = get_naver_works_client()
-        if get_mode(user_id, channel_id) != MODE_REPAIR:
+        current_mode = get_mode(user_id, channel_id)
+        if current_mode not in (MODE_REPAIR, MODE_DEFECT):
             await _send_prefixed(
                 nw_client, user_id, channel_id,
-                "사진은 수선모드에서만 받아요. 수선모드 시작 을 먼저 보내주세요.",
+                "사진은 수선모드 또는 불량모드에서만 받아요. 해당 모드를 먼저 시작해주세요.",
                 channel_type,
             )
             return

@@ -14,12 +14,14 @@ from logic.db import get_connection
 MODE_IDLE = "idle"
 MODE_JOURNAL = "journal"
 MODE_REPAIR = "repair"
+MODE_DEFECT = "defect"
 MODE_QUERY = "query"
 
 MODE_LABELS = {
     MODE_IDLE: "기본상태",
     MODE_JOURNAL: "일지모드",
     MODE_REPAIR: "수선모드",
+    MODE_DEFECT: "불량모드",
     MODE_QUERY: "조회모드",
 }
 
@@ -37,6 +39,13 @@ _START_MAP = {
     "수선모드": MODE_REPAIR,
     "수선할래": MODE_REPAIR,
     "수선할게": MODE_REPAIR,
+    "불량모드시작": MODE_DEFECT,
+    "불량시작": MODE_DEFECT,
+    "불량모드": MODE_DEFECT,
+    "불량할래": MODE_DEFECT,
+    "불량할게": MODE_DEFECT,
+    "불량처리": MODE_DEFECT,
+    "불량처리시작": MODE_DEFECT,
     "조회모드시작": MODE_QUERY,
     "조회시작": MODE_QUERY,
     "조회": MODE_QUERY,
@@ -175,9 +184,14 @@ def idle_guide() -> str:
         "사용할 모드를 선택해주세요.\n"
         "• 일지모드 시작\n"
         "• 수선모드 시작\n"
+        "• 불량모드 시작\n"
         "• 조회모드 시작\n"
         "• 기능설명"
     )
+
+
+def should_accept_defect_photo(user_id: str, channel_id: Optional[str]) -> bool:
+    return get_mode(user_id, channel_id) == MODE_DEFECT
 
 
 def mode_feature_guide() -> str:

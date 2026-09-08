@@ -9,7 +9,7 @@ import {
   BarChart2, FileText, FileSpreadsheet, TrendingUp, CalendarDays,
   Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package, Truck,
   PlusCircle, Users, ScrollText, Settings, ChevronDown,
-  User, LogOut, KeyRound, ShieldCheck,
+  User, LogOut, KeyRound, ShieldCheck, AlertTriangle,
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -225,6 +225,7 @@ const NAV_GROUPS = [
     items: [
       { href: '/work-log', label: '작업일지', icon: <ClipboardList {...IC} /> },
       { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} /> },
+      { href: '/defect-log', label: '불량일지', icon: <AlertTriangle {...IC} /> },
     ],
   },
   {
