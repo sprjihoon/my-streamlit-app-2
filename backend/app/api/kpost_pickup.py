@@ -910,8 +910,14 @@ def cancel_pickup(pickup_id: int, token: str, confirm: bool = False):
                 msg = str(exc)
                 import logging as _logging
                 _logging.getLogger("epost").warning("[Cancel WARN] %s | regiNo=%s", msg, regi_no)
-                if "ERR-123" in msg or "예약된 정보가 없" in msg or "필수값 누락" in msg:
-                    pass
+                if (
+                    "ERR-123" in msg
+                    or "예약된 정보가 없" in msg
+                    or "필수값 누락" in msg
+                    or "취소 미완료" in msg       # canceledYn=N: 우체국이 취소 불가 반환
+                    or "canceledYn=N" in msg
+                ):
+                    pass  # 우체국 취소 실패해도 DB는 취소 처리
                 else:
                     raise HTTPException(status_code=502, detail=msg) from exc
     canceled_at = datetime.now(KST).isoformat(timespec="seconds")
