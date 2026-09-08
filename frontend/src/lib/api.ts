@@ -1807,7 +1807,7 @@ export interface OcrPreviewItem {
   warnings: string[];
 }
 /** 이미지를 maxPx 이하로 리사이즈 후 JPEG 압축 (OCR 속도 개선용) */
-async function compressImageForOcr(file: File, maxPx = 1200, quality = 0.85): Promise<File> {
+async function compressImageForOcr(file: File, maxPx = 2048, quality = 0.90): Promise<File> {
   return new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
