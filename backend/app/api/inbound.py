@@ -1171,7 +1171,7 @@ async def upload_item_photo(
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 작업자도 사진 업로드 가능 (인증 불필요)
     with get_connection() as con:
         item_row = con.execute("SELECT batch_id FROM inbound_items WHERE id=?", (item_id,)).fetchone()
         if not item_row:
@@ -1219,7 +1219,7 @@ def serve_photo(
     filename: str,
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 작업자도 사진 조회 가능 (인증 불필요)
     # 경로 탈출 방지
     safe_name = Path(filename).name
     path = UPLOAD_DIR / safe_name

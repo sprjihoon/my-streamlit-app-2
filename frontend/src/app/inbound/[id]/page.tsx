@@ -62,11 +62,12 @@ const ITEM_STATUS_OPTS: { value: string; label: string; color: string }[] = [
 // 품목 카드 컴포넌트
 // ─────────────────────────────────────
 
-function ItemCard({ item, token, workerName, isAdmin, onUpdated, onDelete }: {
+function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, onDelete }: {
   item: InboundItem;
   token: string;
   workerName: string;
   isAdmin: boolean;
+  batchVendor: string;
   onUpdated: () => void;
   onDelete?: () => void;
 }) {
@@ -77,6 +78,48 @@ function ItemCard({ item, token, workerName, isAdmin, onUpdated, onDelete }: {
   const [uploading, setUploading] = useState(false);
   const [photos, setPhotos] = useState(item.photos || []);
   const [saved, setSaved] = useState(false);
+
+  // 바코드 매칭 섹션
+  const [showBarcode, setShowBarcode] = useState(false);
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const [barcodeResults, setBarcodeResults] = useState<RepairBarcode[]>([]);
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [matchSaving, setMatchSaving] = useState(false);
+  const [matchSaved, setMatchSaved] = useState(false);
+  const barcodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleBarcodeInput(val: string) {
+    setBarcodeQuery(val);
+    if (barcodeTimerRef.current) clearTimeout(barcodeTimerRef.current);
+    if (!val.trim()) { setBarcodeResults([]); return; }
+    barcodeTimerRef.current = setTimeout(async () => {
+      setBarcodeLoading(true);
+      try {
+        const res = await getRepairBarcodes({ q: val.trim(), vendor: batchVendor || undefined, limit: 30 });
+        setBarcodeResults(res.items);
+      } catch { setBarcodeResults([]); }
+      finally { setBarcodeLoading(false); }
+    }, 350);
+  }
+
+  async function handleSelectBarcode(b: RepairBarcode) {
+    setMatchSaving(true);
+    try {
+      await updateInboundItem(token, item.id, {
+        matched_barcode: b.바코드,
+        matched_vendor: b.업체명,
+        matched_product: b.제품명,
+        matched_option: b.옵션 || undefined,
+        ...(workerName ? { confirmed_by: workerName } : {}),
+      });
+      setMatchSaved(true);
+      setTimeout(() => setMatchSaved(false), 2500);
+      setBarcodeQuery('');
+      setBarcodeResults([]);
+      onUpdated();
+    } catch { alert('매칭 저장 실패'); }
+    finally { setMatchSaving(false); }
+  }
 
   // 수정 모드
   const [editMode, setEditMode] = useState(false);
@@ -426,19 +469,85 @@ function ItemCard({ item, token, workerName, isAdmin, onUpdated, onDelete }: {
           {saving ? '저장 중…' : '수량 저장'}
         </button>
 
-        {/* 제품 사진 (관리자만) */}
-        {isAdmin && (
-          <div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>제품 사진</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-              {photos.map((photo) => (
-                <div key={photo.id} style={{ position: 'relative' }}>
-                  <img
-                    src={`${API_BASE}${photo.url}?t=${getToken()}`}
-                    alt="제품사진"
-                    style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7f0' }}
-                    onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
-                  />
+        {/* 바코드 검색 매칭 (작업자·관리자 모두 가능) */}
+        <div style={{ marginBottom: 10 }}>
+          <button
+            onClick={() => { setShowBarcode(s => !s); if (!showBarcode) { setBarcodeQuery(''); setBarcodeResults([]); } }}
+            style={{
+              width: '100%', padding: '8px 12px', borderRadius: 8,
+              background: showBarcode ? '#ede9fe' : '#f3f4f6',
+              color: showBarcode ? '#7c3aed' : '#374151',
+              border: `1px solid ${showBarcode ? '#c4b5fd' : '#e5e7f0'}`,
+              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}
+          >
+            <span>🔍 바코드 검색 매칭</span>
+            <span style={{ fontSize: 11 }}>
+              {item.matched_barcode
+                ? <span style={{ color: '#7c3aed' }}>✓ {item.matched_barcode}</span>
+                : <span style={{ color: '#9ca3af' }}>미매칭</span>}
+              {matchSaved && <span style={{ color: '#15803d', marginLeft: 6 }}>저장됨 ✓</span>}
+            </span>
+          </button>
+
+          {showBarcode && (
+            <div style={{ marginTop: 6, padding: '10px 12px', background: '#faf5ff', borderRadius: 8, border: '1px solid #e9d5ff' }}>
+              <input
+                value={barcodeQuery}
+                onChange={e => handleBarcodeInput(e.target.value)}
+                placeholder={batchVendor ? `"${batchVendor}" 바코드·제품명 검색` : '바코드·제품명 검색'}
+                autoFocus
+                style={{
+                  width: '100%', padding: '8px 10px', border: '1px solid #c4b5fd',
+                  borderRadius: 8, fontSize: 14, boxSizing: 'border-box',
+                  marginBottom: 6, outline: 'none',
+                }}
+              />
+              {barcodeLoading && <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>검색 중…</div>}
+              {!barcodeLoading && barcodeQuery && barcodeResults.length === 0 && (
+                <div style={{ fontSize: 12, color: '#dc2626', padding: '4px 0' }}>검색 결과 없음</div>
+              )}
+              {barcodeResults.map(b => (
+                <button
+                  key={b.바코드}
+                  onClick={() => handleSelectBarcode(b)}
+                  disabled={matchSaving}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '8px 10px',
+                    marginBottom: 4, borderRadius: 8,
+                    background: matchSaving ? '#f3f4f6' : '#fff',
+                    border: '1px solid #e9d5ff', cursor: matchSaving ? 'not-allowed' : 'pointer',
+                    display: 'block',
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+                    {b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', display: 'flex', gap: 8, marginTop: 2 }}>
+                    <span style={{ fontFamily: 'monospace' }}>{b.바코드}</span>
+                    <span>{b.업체명}</span>
+                    {b.도매처 && <span>도: {b.도매처}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 제품 사진 (업로드·보기: 모두 가능 / 삭제: 관리자만) */}
+        <div>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>제품 사진</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            {photos.map((photo) => (
+              <div key={photo.id} style={{ position: 'relative' }}>
+                <img
+                  src={`${API_BASE}${photo.url}`}
+                  alt="제품사진"
+                  style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7f0' }}
+                  onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
+                />
+                {isAdmin && (
                   <button
                     onClick={() => handlePhotoDelete(photo.id, photo.filename)}
                     style={{
@@ -450,26 +559,26 @@ function ItemCard({ item, token, workerName, isAdmin, onUpdated, onDelete }: {
                   >
                     ×
                   </button>
-                </div>
-              ))}
-              <label style={{
-                width: 72, height: 72, borderRadius: 8,
-                border: '2px dashed #e5e7f0', background: '#f8f9fc',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                cursor: uploading ? 'wait' : 'pointer', color: '#9ca3af', fontSize: 10,
-              }}>
-                <span style={{ fontSize: 22 }}>{uploading ? '⏳' : '📷'}</span>
-                <span>{uploading ? '업로드 중' : '사진 추가'}</span>
-                <input
-                  type="file" accept="image/*" capture="environment"
-                  style={{ display: 'none' }}
-                  onChange={handlePhotoUpload}
-                  disabled={uploading}
-                />
-              </label>
-            </div>
+                )}
+              </div>
+            ))}
+            <label style={{
+              width: 72, height: 72, borderRadius: 8,
+              border: '2px dashed #e5e7f0', background: '#f8f9fc',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              cursor: uploading ? 'wait' : 'pointer', color: '#9ca3af', fontSize: 10,
+            }}>
+              <span style={{ fontSize: 22 }}>{uploading ? '⏳' : '📷'}</span>
+              <span>{uploading ? '업로드 중' : '사진 추가'}</span>
+              <input
+                type="file" accept="image/*" capture="environment"
+                style={{ display: 'none' }}
+                onChange={handlePhotoUpload}
+                disabled={uploading}
+              />
+            </label>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -1040,6 +1149,7 @@ export default function InboundWorkPage() {
               token={token}
               workerName={workerName}
               isAdmin={isAdmin}
+              batchVendor={batch?.vendor || ''}
               onUpdated={() => reload(token)}
               onDelete={isAdmin ? async () => {
                 try {
