@@ -47,6 +47,7 @@ const ITEM_STATUS_OPTS: { value: string; label: string; color: string }[] = [
   { value: 'defect',        label: '불량',       color: '#c2410c' },
   { value: 'repair',        label: '수선대기',   color: '#a16207' },
   { value: 'unrecoverable', label: '회생불가',   color: '#991b1b' },
+  { value: 'etc',           label: '기타',       color: '#7c3aed' },
 ];
 
 // ─────────────────────────────────────
@@ -65,6 +66,21 @@ function ItemCard({ item, token, onUpdated }: {
   const [uploading, setUploading] = useState(false);
   const [photos, setPhotos] = useState(item.photos || []);
   const [saved, setSaved] = useState(false);
+
+  // 수정 모드
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({
+    item_name: item.item_name || '',
+    option_text: item.option_text || '',
+    matched_barcode: item.matched_barcode || '',
+    matched_vendor: item.matched_vendor || '',
+    matched_product: item.matched_product || '',
+    matched_option: item.matched_option || '',
+    supplier_location: item.supplier_location || '',
+    supplier_contact: item.supplier_contact || '',
+    memo: item.memo || '',
+  });
+  const [editSaving, setEditSaving] = useState(false);
 
   async function handleSave() {
     setSaving(true);
@@ -97,6 +113,27 @@ function ItemCard({ item, token, onUpdated }: {
       alert('상태 변경 실패');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleEditSave() {
+    setEditSaving(true);
+    try {
+      await updateInboundItem(token, item.id, {
+        matched_barcode: editForm.matched_barcode || undefined,
+        matched_vendor: editForm.matched_vendor || undefined,
+        matched_product: editForm.matched_product || undefined,
+        matched_option: editForm.matched_option || undefined,
+        supplier_location: editForm.supplier_location || undefined,
+        supplier_contact: editForm.supplier_contact || undefined,
+        memo: editForm.memo || undefined,
+      });
+      setEditMode(false);
+      onUpdated();
+    } catch {
+      alert('수정 저장 실패');
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -139,6 +176,12 @@ function ItemCard({ item, token, onUpdated }: {
   const statusInfo = ITEM_STATUS_OPTS.find(o => o.value === status);
   const needsAttention = status === 'pending';
 
+  const inputS: React.CSSProperties = {
+    width: '100%', padding: '8px 10px', border: '1px solid #e5e7f0',
+    borderRadius: 8, fontSize: 14, boxSizing: 'border-box',
+  };
+  const labelS: React.CSSProperties = { fontSize: 11, color: '#9ca3af', display: 'block', marginBottom: 3 };
+
   return (
     <div style={{
       background: '#fff',
@@ -161,30 +204,110 @@ function ItemCard({ item, token, onUpdated }: {
           </div>
           <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{item.item_name || '(품명 없음)'}</div>
           {item.option_text && <div style={{ fontSize: 13, color: '#6b7280', marginTop: 1 }}>{item.option_text}</div>}
+          {item.updated_at && (
+            <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 2 }}>
+              수정: {item.updated_at.replace('T', ' ').slice(0, 16)}
+            </div>
+          )}
         </div>
-        <div style={{
-          padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-          background: (BATCH_STATUS_COLOR[status]?.bg || '#f3f4f6'),
-          color: (BATCH_STATUS_COLOR[status]?.color || '#6b7280'),
-          whiteSpace: 'nowrap', flexShrink: 0,
-        }}>
-          {statusInfo?.label || status}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <div style={{
+            padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+            background: (BATCH_STATUS_COLOR[status]?.bg || '#f3f4f6'),
+            color: (BATCH_STATUS_COLOR[status]?.color || '#6b7280'),
+            whiteSpace: 'nowrap',
+          }}>
+            {statusInfo?.label || status}
+          </div>
+          <button
+            onClick={() => setEditMode(m => !m)}
+            style={{
+              fontSize: 11, padding: '3px 9px', borderRadius: 8,
+              background: editMode ? '#4361ee' : '#f3f4f6',
+              color: editMode ? '#fff' : '#6b7280',
+              border: 'none', cursor: 'pointer', fontWeight: 600,
+            }}
+          >
+            ✏️ {editMode ? '닫기' : '수정'}
+          </button>
         </div>
       </div>
 
-      {/* 매칭 상품 */}
-      {item.matched_product && (
-        <div style={{ padding: '8px 14px', background: '#f8f9fc', fontSize: 12, borderBottom: '1px solid #f3f4f6' }}>
-          <span style={{ color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor}</span>
-          {' · '}
-          <span>{item.matched_product}</span>
-          {item.matched_option && <span style={{ color: '#9ca3af' }}> · {item.matched_option}</span>}
-          {item.matched_barcode && <span style={{ fontFamily: 'monospace', color: '#9ca3af' }}> ({item.matched_barcode})</span>}
-        </div>
+      {/* 매칭/공급처 정보 */}
+      {!editMode && (
+        <>
+          {item.matched_product ? (
+            <div style={{ padding: '8px 14px', background: '#f8f9fc', fontSize: 12, borderBottom: '1px solid #f3f4f6' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                <span><span style={{ color: '#9ca3af' }}>공급처: </span><span style={{ color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor}</span></span>
+                <span><span style={{ color: '#9ca3af' }}>상품명: </span>{item.matched_product}</span>
+                {item.matched_option && <span><span style={{ color: '#9ca3af' }}>옵션: </span>{item.matched_option}</span>}
+                {item.matched_barcode && <span style={{ fontFamily: 'monospace', color: '#9ca3af' }}>바코드: {item.matched_barcode}</span>}
+              </div>
+              {(item.supplier_location || item.supplier_contact) && (
+                <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                  {item.supplier_location && <span><span style={{ color: '#9ca3af' }}>위치: </span>{item.supplier_location}</span>}
+                  {item.supplier_contact && <span><span style={{ color: '#9ca3af' }}>연락처: </span>{item.supplier_contact}</span>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: '6px 14px', background: '#fef2f2', fontSize: 12, color: '#dc2626', borderBottom: '1px solid #f3f4f6' }}>
+              ⚠️ 미매칭 — 수정 버튼으로 상품 정보를 직접 입력해주세요
+            </div>
+          )}
+        </>
       )}
-      {!item.matched_product && (
-        <div style={{ padding: '6px 14px', background: '#fef2f2', fontSize: 12, color: '#dc2626', borderBottom: '1px solid #f3f4f6' }}>
-          ⚠️ 미매칭 — 수동으로 상품을 연결해주세요
+
+      {/* ── 수정 폼 ── */}
+      {editMode && (
+        <div style={{ padding: '12px 14px', background: '#f0f4ff', borderBottom: '1px solid #e0e7ff' }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#4361ee', marginBottom: 10 }}>✏️ 품목 정보 수정</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <div>
+              <label style={labelS}>바코드</label>
+              <input value={editForm.matched_barcode} onChange={e => setEditForm(f => ({ ...f, matched_barcode: e.target.value }))} style={inputS} placeholder="바코드" />
+            </div>
+            <div>
+              <label style={labelS}>공급처(업체명)</label>
+              <input value={editForm.matched_vendor} onChange={e => setEditForm(f => ({ ...f, matched_vendor: e.target.value }))} style={inputS} placeholder="공급처" />
+            </div>
+            <div>
+              <label style={labelS}>공급처 상품명</label>
+              <input value={editForm.matched_product} onChange={e => setEditForm(f => ({ ...f, matched_product: e.target.value }))} style={inputS} placeholder="공급처 상품명" />
+            </div>
+            <div>
+              <label style={labelS}>공급처 옵션</label>
+              <input value={editForm.matched_option} onChange={e => setEditForm(f => ({ ...f, matched_option: e.target.value }))} style={inputS} placeholder="공급처 옵션" />
+            </div>
+            <div>
+              <label style={labelS}>공급처 위치</label>
+              <input value={editForm.supplier_location} onChange={e => setEditForm(f => ({ ...f, supplier_location: e.target.value }))} style={inputS} placeholder="예) 동대문 A동 3층" />
+            </div>
+            <div>
+              <label style={labelS}>공급처 연락처</label>
+              <input value={editForm.supplier_contact} onChange={e => setEditForm(f => ({ ...f, supplier_contact: e.target.value }))} style={inputS} placeholder="예) 010-0000-0000" />
+            </div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label style={labelS}>메모</label>
+            <input value={editForm.memo} onChange={e => setEditForm(f => ({ ...f, memo: e.target.value }))} style={inputS} placeholder="메모" />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={handleEditSave}
+              disabled={editSaving}
+              style={{ flex: 2, padding: '10px', background: editSaving ? '#9ca3af' : '#4361ee', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+            >
+              {editSaving ? '저장 중…' : '수정 저장'}
+            </button>
+            <button
+              onClick={() => setEditMode(false)}
+              style={{ flex: 1, padding: '10px', background: '#fff', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', color: '#6b7280' }}
+            >
+              취소
+            </button>
+          </div>
         </div>
       )}
 
@@ -224,9 +347,9 @@ function ItemCard({ item, token, onUpdated }: {
           </div>
         </div>
 
-        {/* 상태 버튼 그룹 */}
+        {/* 처리상태 버튼 그룹 */}
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>상태 선택</div>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>처리상태</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {ITEM_STATUS_OPTS.map(opt => (
               <button

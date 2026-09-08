@@ -86,7 +86,7 @@ STATUS_LABELS = {
     "cancelled":   "취소",
 }
 
-ITEM_STATUS_VALUES = ("pending", "confirmed", "missing", "defect", "repair", "unrecoverable", "done")
+ITEM_STATUS_VALUES = ("pending", "confirmed", "missing", "defect", "repair", "unrecoverable", "done", "etc")
 ITEM_STATUS_LABELS = {
     "pending": "확인 전",
     "confirmed": "정상",
@@ -95,6 +95,7 @@ ITEM_STATUS_LABELS = {
     "repair": "수선대기",
     "unrecoverable": "회생불가",
     "done": "완료",
+    "etc": "기타",
 }
 
 
@@ -126,6 +127,8 @@ class InboundItemUpdate(BaseModel):
     matched_vendor: Optional[str] = None
     matched_product: Optional[str] = None
     matched_option: Optional[str] = None
+    supplier_location: Optional[str] = None
+    supplier_contact: Optional[str] = None
 
 
 class InboundItemCreate(BaseModel):
@@ -140,6 +143,8 @@ class InboundItemCreate(BaseModel):
     matched_vendor: Optional[str] = None
     matched_product: Optional[str] = None
     matched_option: Optional[str] = None
+    supplier_location: Optional[str] = None
+    supplier_contact: Optional[str] = None
     memo: Optional[str] = None
 
 
@@ -189,10 +194,13 @@ def ensure_inbound_tables():
                 matched_option TEXT,
                 match_confidence REAL DEFAULT 0.0,
                 needs_matching INTEGER DEFAULT 0,
+                supplier_location TEXT,
+                supplier_contact TEXT,
                 memo TEXT,
                 defect_case_id TEXT,
                 inbound_item_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (batch_id) REFERENCES inbound_batches(id)
             )
         """)
@@ -263,6 +271,16 @@ def ensure_inbound_tables():
             con.execute("ALTER TABLE inbound_batches ADD COLUMN vendor_canonical TEXT")
         except Exception:
             pass
+        # inbound_items 에 신규 컬럼 추가 (기존 DB 마이그레이션)
+        for col_def in [
+            "supplier_location TEXT",
+            "supplier_contact TEXT",
+            "updated_at DATETIME",
+        ]:
+            try:
+                con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
+            except Exception:
+                pass
         con.commit()
 
 
@@ -367,7 +385,10 @@ def _serialize_item(row) -> dict:
         "match_confidence": row[14],
         "needs_matching": bool(row[15]),
         "memo": row[16],
-        "created_at": row[17],
+        "supplier_location": row[17],
+        "supplier_contact": row[18],
+        "created_at": row[19],
+        "updated_at": row[20],
     }
 
 
@@ -662,7 +683,8 @@ def get_batch(
             SELECT id, batch_id, line_no, item_name, option_text, unit_price,
                    janggi_qty, actual_qty, missing_qty, status,
                    matched_barcode, matched_vendor, matched_product, matched_option,
-                   match_confidence, needs_matching, memo, created_at
+                   match_confidence, needs_matching, memo,
+                   supplier_location, supplier_contact, created_at, updated_at
             FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
         """, (batch_id,)).fetchall()
         item_list = []
@@ -877,10 +899,15 @@ def update_item(
         fields.append("matched_product=?"); params.append(body.matched_product)
     if body.matched_option is not None:
         fields.append("matched_option=?"); params.append(body.matched_option)
+    if body.supplier_location is not None:
+        fields.append("supplier_location=?"); params.append(body.supplier_location)
+    if body.supplier_contact is not None:
+        fields.append("supplier_contact=?"); params.append(body.supplier_contact)
 
     if not fields:
         raise HTTPException(status_code=400, detail="변경할 필드가 없습니다.")
 
+    fields.append("updated_at=CURRENT_TIMESTAMP")
     params.append(item_id)
     with get_connection() as con:
         con.execute(f"UPDATE inbound_items SET {', '.join(fields)} WHERE id=?", params)

@@ -1730,7 +1730,10 @@ export interface InboundItem {
   match_confidence: number;
   needs_matching: boolean;
   memo: string | null;
+  supplier_location: string | null;
+  supplier_contact: string | null;
   created_at: string;
+  updated_at: string | null;
   photos?: InboundItemPhoto[];
 }
 
@@ -1806,6 +1809,7 @@ export async function addInboundItem(token: string, batchId: string, body: {
 export async function updateInboundItem(token: string, itemId: string, body: Partial<{
   actual_qty: number; missing_qty: number; status: string; memo: string;
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
+  supplier_location: string; supplier_contact: string;
 }>) {
   return fetchApi<{ ok: boolean }>(
     `/inbound/items/${itemId}`,

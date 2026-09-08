@@ -337,6 +337,9 @@ async def handle_image(
     vendor = pending.get("vendor", "")
 
     if step != "wait_janggi" or not batch_id:
+        # 화주사 입력을 아직 안 한 경우
+        if step == "wait_vendor":
+            return "아직 화주사를 입력하지 않았어요. 어느 화주사의 입고인가요?"
         return None  # 입고모드지만 장끼 대기 상태가 아님
 
     try:

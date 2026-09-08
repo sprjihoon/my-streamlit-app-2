@@ -8,6 +8,7 @@ import {
   listInboundBatches,
   createInboundBatch,
   getInboundBatch,
+  updateInboundBatch,
   runInboundOcr,
   updateInboundItem,
   closeInboundBatch,
@@ -84,6 +85,7 @@ const ITEM_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
   repair:        { bg: '#fef9c3', color: '#a16207' },
   unrecoverable: { bg: '#fecaca', color: '#991b1b' },
   done:          { bg: '#bbf7d0', color: '#166534' },
+  etc:           { bg: '#ede9fe', color: '#7c3aed' },
 };
 
 function StatusBadge({ status, label, map }: { status: string; label: string; map: Record<string, { bg: string; color: string }> }) {
@@ -163,6 +165,17 @@ function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string;
   const [actualQty, setActualQty] = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
   const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({
+    matched_barcode: item.matched_barcode || '',
+    matched_vendor: item.matched_vendor || '',
+    matched_product: item.matched_product || '',
+    matched_option: item.matched_option || '',
+    supplier_location: item.supplier_location || '',
+    supplier_contact: item.supplier_contact || '',
+    memo: item.memo || '',
+  });
+  const [editSaving, setEditSaving] = useState(false);
 
   async function save() {
     setSaving(true);
@@ -177,51 +190,135 @@ function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string;
     }
   }
 
+  async function saveEdit() {
+    setEditSaving(true);
+    try {
+      await updateInboundItem(token, item.id, {
+        matched_barcode: editForm.matched_barcode || undefined,
+        matched_vendor: editForm.matched_vendor || undefined,
+        matched_product: editForm.matched_product || undefined,
+        matched_option: editForm.matched_option || undefined,
+        supplier_location: editForm.supplier_location || undefined,
+        supplier_contact: editForm.supplier_contact || undefined,
+        memo: editForm.memo || undefined,
+      });
+      setEditMode(false);
+      onUpdated();
+    } catch {
+      alert('수정 저장 실패');
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   const tdStyle: React.CSSProperties = { padding: '0.55rem 0.75rem', fontSize: '0.82rem', verticalAlign: 'middle', borderBottom: '1px solid #f3f4f6' };
+  const editInput: React.CSSProperties = { ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '0.3rem 0.5rem' };
 
   return (
-    <tr style={{ background: '#fff' }}>
-      <td style={{ ...tdStyle, color: '#9ca3af', textAlign: 'center' }}>{item.line_no}</td>
-      <td style={tdStyle}>
-        <div style={{ fontWeight: 500 }}>{item.item_name || '-'}</div>
-        {item.option_text && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.option_text}</div>}
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#1d4ed8' }}>{item.janggi_qty}</td>
-      <td style={tdStyle}>
-        {item.matched_product ? (
-          <div style={{ fontSize: '0.78rem' }}>
-            <div style={{ color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor}</div>
-            <div>{item.matched_product}</div>
-            {item.matched_option && <div style={{ color: 'var(--text-secondary)' }}>{item.matched_option}</div>}
-            <div style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{item.matched_barcode}</div>
+    <>
+      <tr style={{ background: '#fff' }}>
+        <td style={{ ...tdStyle, color: '#9ca3af', textAlign: 'center' }}>{item.line_no}</td>
+        <td style={tdStyle}>
+          <div style={{ fontWeight: 500 }}>{item.item_name || '-'}</div>
+          {item.option_text && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.option_text}</div>}
+          {item.updated_at && <div style={{ fontSize: '0.7rem', color: '#d1d5db' }}>수정: {item.updated_at.slice(0,16).replace('T',' ')}</div>}
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#1d4ed8' }}>{item.janggi_qty}</td>
+        <td style={tdStyle}>
+          {item.matched_product ? (
+            <div style={{ fontSize: '0.78rem' }}>
+              <div style={{ color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor}</div>
+              <div>{item.matched_product}</div>
+              {item.matched_option && <div style={{ color: 'var(--text-secondary)' }}>{item.matched_option}</div>}
+              <div style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{item.matched_barcode}</div>
+              {(item.supplier_location || item.supplier_contact) && (
+                <div style={{ marginTop: 2, fontSize: '0.72rem', color: '#6b7280' }}>
+                  {item.supplier_location && <span>📍 {item.supplier_location}</span>}
+                  {item.supplier_location && item.supplier_contact && ' · '}
+                  {item.supplier_contact && <span>📞 {item.supplier_contact}</span>}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>미매칭</span>
+          )}
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <input
+            type="number" min={0} value={actualQty}
+            onChange={e => setActualQty(Number(e.target.value))}
+            style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
+          />
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <input
+            type="number" min={0} value={missingQty}
+            onChange={e => setMissingQty(Number(e.target.value))}
+            style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
+          />
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <StatusBadge status={item.status} label={item.status_label} map={ITEM_STATUS_COLOR} />
+        </td>
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+            <button onClick={save} disabled={saving} style={btn('#4361ee')}>
+              {saving ? '…' : '저장'}
+            </button>
+            <button
+              onClick={() => setEditMode(m => !m)}
+              style={{ ...btn(editMode ? '#6b7280' : '#f59e0b'), fontSize: '0.78rem' }}
+            >
+              ✏️ 수정
+            </button>
           </div>
-        ) : (
-          <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>미매칭</span>
-        )}
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <input
-          type="number" min={0} value={actualQty}
-          onChange={e => setActualQty(Number(e.target.value))}
-          style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
-        />
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <input
-          type="number" min={0} value={missingQty}
-          onChange={e => setMissingQty(Number(e.target.value))}
-          style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
-        />
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <StatusBadge status={item.status} label={item.status_label} map={ITEM_STATUS_COLOR} />
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <button onClick={save} disabled={saving} style={btn('#4361ee')}>
-          {saving ? '…' : '저장'}
-        </button>
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {/* 수정 폼 인라인 */}
+      {editMode && (
+        <tr style={{ background: '#f0f4ff' }}>
+          <td colSpan={8} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e0e7ff' }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4361ee', marginBottom: 8 }}>✏️ 품목 정보 수정</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>바코드</div>
+                <input value={editForm.matched_barcode} onChange={e => setEditForm(f => ({ ...f, matched_barcode: e.target.value }))} style={editInput} placeholder="바코드" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처(업체명)</div>
+                <input value={editForm.matched_vendor} onChange={e => setEditForm(f => ({ ...f, matched_vendor: e.target.value }))} style={editInput} placeholder="공급처" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 상품명</div>
+                <input value={editForm.matched_product} onChange={e => setEditForm(f => ({ ...f, matched_product: e.target.value }))} style={editInput} placeholder="공급처 상품명" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 옵션</div>
+                <input value={editForm.matched_option} onChange={e => setEditForm(f => ({ ...f, matched_option: e.target.value }))} style={editInput} placeholder="공급처 옵션" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 위치</div>
+                <input value={editForm.supplier_location} onChange={e => setEditForm(f => ({ ...f, supplier_location: e.target.value }))} style={editInput} placeholder="예) A동 3층" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 연락처</div>
+                <input value={editForm.supplier_contact} onChange={e => setEditForm(f => ({ ...f, supplier_contact: e.target.value }))} style={editInput} placeholder="010-0000-0000" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>메모</div>
+                <input value={editForm.memo} onChange={e => setEditForm(f => ({ ...f, memo: e.target.value }))} style={editInput} placeholder="메모" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={saveEdit} disabled={editSaving} style={{ ...btn('#4361ee'), opacity: editSaving ? 0.5 : 1 }}>
+                {editSaving ? '저장 중…' : '수정 저장'}
+              </button>
+              <button onClick={() => setEditMode(false)} style={btnOutline}>취소</button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -885,6 +982,79 @@ function CreateBatchModal({ token, onClose, onCreated }: {
 }
 
 // ─────────────────────────────────────
+// 배치 수정 모달
+// ─────────────────────────────────────
+
+function EditBatchModal({ batch, token, onClose, onUpdated }: {
+  batch: InboundBatch; token: string; onClose: () => void; onUpdated: () => void;
+}) {
+  const [vendor, setVendor] = useState(batch.vendor);
+  const [inboundDate, setInboundDate] = useState(batch.inbound_date);
+  const [memo, setMemo] = useState(batch.memo || '');
+  const [wholesale, setWholesale] = useState(batch.wholesale || '');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await updateInboundBatch(token, batch.id, {
+        vendor: vendor.trim(),
+        inbound_date: inboundDate,
+        memo: memo.trim() || undefined,
+      });
+      onUpdated();
+      onClose();
+    } catch (e: unknown) {
+      alert('수정 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fRow: React.CSSProperties = { marginBottom: '1rem' };
+
+  return (
+    <Modal title="입고 정보 수정" onClose={onClose}>
+      <div>
+        <div style={fRow}>
+          <label style={labelStyle}>화주사</label>
+          <input
+            value={vendor} onChange={e => setVendor(e.target.value)}
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </div>
+        <div style={fRow}>
+          <label style={labelStyle}>입고일</label>
+          <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={inputStyle} />
+        </div>
+        <div style={fRow}>
+          <label style={labelStyle}>도매처</label>
+          <input
+            value={wholesale} onChange={e => setWholesale(e.target.value)}
+            placeholder="도매처 이름"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </div>
+        <div style={fRow}>
+          <label style={labelStyle}>메모</label>
+          <input
+            value={memo} onChange={e => setMemo(e.target.value)}
+            placeholder="메모"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '0.5rem' }}>
+          <button onClick={onClose} style={btnOutline}>취소</button>
+          <button onClick={handleSave} disabled={saving} style={{ ...btn('#f59e0b'), opacity: saving ? 0.5 : 1 }}>
+            {saving ? '저장 중…' : '수정 저장'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────
 // 메인 페이지
 // ─────────────────────────────────────
 
@@ -896,6 +1066,7 @@ export default function InboundLogPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<InboundBatch | null>(null);
+  const [editingBatch, setEditingBatch] = useState<InboundBatch | null>(null);
 
   const [filterVendor, setFilterVendor] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -1069,12 +1240,20 @@ export default function InboundLogPage() {
                     <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{b.created_by || '-'}</td>
                     <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-muted)' }}>{fmt(b.created_at)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleDelete(b.id)}
-                        style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, color: '#dc2626', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
-                      >
-                        삭제
-                      </button>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => setEditingBatch(b)}
+                          style={{ background: 'none', border: '1px solid #fde68a', borderRadius: 4, color: '#d97706', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
+                        >
+                          수정
+                        </button>
+                        <button
+                          onClick={() => handleDelete(b.id)}
+                          style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, color: '#dc2626', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
+                        >
+                          삭제
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1090,6 +1269,14 @@ export default function InboundLogPage() {
           token={token}
           onClose={() => setShowCreate(false)}
           onCreated={batch => { setShowCreate(false); setSelectedBatch(batch); load(token); }}
+        />
+      )}
+      {editingBatch && (
+        <EditBatchModal
+          batch={editingBatch}
+          token={token}
+          onClose={() => setEditingBatch(null)}
+          onUpdated={() => { load(token); setEditingBatch(null); }}
         />
       )}
       {selectedBatch && (

@@ -391,6 +391,7 @@ Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는
 | **입고모드 (봇·웹·공유링크·바코드PDF)** | ✅ 완료 (2026-09-08) |
 | **입고 화주사 콤보박스 + 별칭 관리** | ✅ 완료 (2026-09-08) |
 | **도매처 프론트 연결** (journal-settings) | ✅ 완료 (2026-09-08) |
+| **입고일지 필드 확장 + 수정 버튼** | ✅ 완료 (2026-09-08) |
 
 ---
 
@@ -398,7 +399,30 @@ Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는
 
 ## 🗓️ 개발 이력
 
-### 2026-09-08 — 입고모드 전체 구현 + 코드검증 + 기능 개선
+### 2026-09-08 (2) — 입고일지 필드 확장 + 수정 버튼 + 봇 버그 수정
+
+#### 구현 내용
+
+| 항목 | 설명 |
+|---|---|
+| **입고 버그 수정** | `apply_mode_command`가 `clear_state()` 후 inbound 초기 상태(`step=wait_vendor`)를 설정하지 않아 `pending_is_inbound()` → False → 사진 업로드 시 "먼저 입고 입력해줘" 반복 오류 수정. `bot_mode.py`에서 `MODE_INBOUND` 시작 시 `_set_pending` 자동 호출 |
+| **inbound_items 필드 추가** | `supplier_location`(공급처 위치), `supplier_contact`(공급처 연락처), `updated_at`(수정시간) 컬럼 추가. 기존 DB는 `ALTER TABLE`로 자동 마이그레이션 |
+| **처리상태 `기타` 추가** | `ITEM_STATUS_VALUES`에 `etc`(기타) 추가. 봇/웹 모두 적용 |
+| **품목 수정 버튼 (모바일)** | `/inbound/[id]` 각 품목 카드 우상단 ✏️ 수정 버튼 → 인라인 폼(바코드·공급처상품명·옵션·위치·연락처·메모). `updated_at` 자동 갱신 후 수정시간 표시 |
+| **품목 수정 버튼 (PC)** | `/inbound-log` 품목 행 우측 ✏️ 수정 버튼 → 행 아래 인라인 폼 펼침 |
+| **배치 수정 버튼 (PC)** | `/inbound-log` 목록 행에 수정 버튼 → 배치(입고일·화주사·도매처·메모) 수정 모달 |
+| **공급처 정보 표시 개선** | 품목 카드/행에서 공급처상품명·옵션·바코드·위치·연락처 구조화 표시 |
+
+#### 버그 수정
+
+| # | 파일 | 버그 | 수정 |
+|---|---|---|---|
+| 1 | `bot_mode.py` | `apply_mode_command`에서 MODE_INBOUND 시작 시 state 초기화 누락 | `_set_pending(step=wait_vendor)` 추가 |
+| 2 | `inbound_bot.py` | 이미지 수신 시 step=wait_vendor면 None 반환 → 무반응 | "화주사를 먼저 입력해주세요" 메시지 반환 |
+
+---
+
+### 2026-09-08 (1) — 입고모드 전체 구현 + 코드검증 + 기능 개선
 
 #### 구현 내용
 
