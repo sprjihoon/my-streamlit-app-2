@@ -348,17 +348,21 @@ export default function InboundWorkPage() {
     if (token) reload(token);
   }, [token, reload]);
 
-  async function handleClose() {
+  async function handleClose(closeType: 'am' | 'pm') {
     if (!batch) return;
     setClosing(true);
     setCloseMsg('');
     try {
-      const res = await closeInboundBatch(token, batch.id);
+      const res = await closeInboundBatch(token, batch.id, closeType);
       if (!res.ok && res.warning) {
         setCloseMsg('⚠️ ' + res.warning);
       } else {
         await reload(token);
-        setCloseMsg('✅ ' + (res.status_label || '완료'));
+        if (closeType === 'pm' && res.formula_str) {
+          setCloseMsg(`✅ ${res.status_label || '완료'}\n${res.formula_str}`);
+        } else {
+          setCloseMsg('✅ ' + (res.message || res.status_label || '완료'));
+        }
       }
     } catch (e) {
       setCloseMsg('오류: ' + (e instanceof Error ? e.message : String(e)));
@@ -397,13 +401,7 @@ export default function InboundWorkPage() {
   const items = batch.items || [];
   const doneCount = items.filter(i => i.status !== 'pending').length;
   const progress = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
-  const canClose = ['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status);
-  const closeLabel: Record<string, string> = {
-    confirming: '입고접수 완료로 진행',
-    inbound_done: '양품화 시작',
-    grading: '최종 마감',
-    repairing: '최종 마감',
-  };
+  // AM/PM 버튼 직접 분기
 
   const statusC = BATCH_STATUS_COLOR[batch.status] || { bg: '#f3f4f6', color: '#6b7280' };
 
@@ -470,31 +468,53 @@ export default function InboundWorkPage() {
         )}
       </div>
 
-      {/* 마감 버튼 */}
-      {canClose && (
+      {/* ── AM / PM 마감 버튼 ─────────── */}
+      {['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status) && (
         <div style={{ padding: '0 16px 32px' }}>
           {closeMsg && (
             <div style={{
               marginBottom: 10, padding: '10px 14px', borderRadius: 8, fontSize: 13,
+              whiteSpace: 'pre-line',
               background: closeMsg.startsWith('✅') ? '#dcfce7' : '#fef2f2',
               color: closeMsg.startsWith('✅') ? '#15803d' : '#dc2626',
             }}>
               {closeMsg}
             </div>
           )}
-          <button
-            onClick={handleClose}
-            disabled={closing}
-            style={{
-              width: '100%', padding: '15px',
-              background: closing ? '#9ca3af' : '#4361ee',
-              color: '#fff', border: 'none', borderRadius: 12,
-              fontSize: 16, fontWeight: 700, cursor: closing ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 12px rgba(67,97,238,0.3)',
-            }}
-          >
-            {closing ? '처리 중…' : (closeLabel[batch.status] || '마감')}
-          </button>
+
+          {/* 오전: confirming 상태만 */}
+          {batch.status === 'confirming' && (
+            <button
+              onClick={() => handleClose('am')}
+              disabled={closing}
+              style={{
+                width: '100%', padding: '15px', marginBottom: 10,
+                background: closing ? '#9ca3af' : '#0369a1',
+                color: '#fff', border: 'none', borderRadius: 12,
+                fontSize: 16, fontWeight: 700, cursor: closing ? 'not-allowed' : 'pointer',
+                boxShadow: '0 4px 12px rgba(3,105,161,0.3)',
+              }}
+            >
+              {closing ? '처리 중…' : '☀️ 오전 입고접수 완료'}
+            </button>
+          )}
+
+          {/* 오후: inbound_done / grading / repairing 상태 */}
+          {['inbound_done', 'grading', 'repairing'].includes(batch.status) && (
+            <button
+              onClick={() => handleClose('pm')}
+              disabled={closing}
+              style={{
+                width: '100%', padding: '15px',
+                background: closing ? '#9ca3af' : '#7c3aed',
+                color: '#fff', border: 'none', borderRadius: 12,
+                fontSize: 16, fontWeight: 700, cursor: closing ? 'not-allowed' : 'pointer',
+                boxShadow: '0 4px 12px rgba(124,58,237,0.3)',
+              }}
+            >
+              {closing ? '처리 중…' : '🌆 오후 최종 마감'}
+            </button>
+          )}
         </div>
       )}
 

@@ -16,8 +16,11 @@ backend/app/api/inbound.py - 입고모드 API
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +39,36 @@ router = APIRouter(prefix="/inbound", tags=["inbound"])
 UPLOAD_DIR = Path(settings.UPLOAD_DIR) / "inbound"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+# ─────────────────────────────────────
+# 비밀번호 해시 헬퍼
+# ─────────────────────────────────────
+
+def _hash_password(plain: str) -> str:
+    """SHA-256 + random 16-byte hex salt.
+    저장 형식: sha256:{salt}:{hex_digest}
+    원문 비밀번호는 이 함수 호출 후 즉시 폐기해야 합니다.
+    """
+    salt = secrets.token_hex(16)
+    digest = hashlib.sha256(f"{salt}:{plain}".encode("utf-8")).hexdigest()
+    return f"sha256:{salt}:{digest}"
+
+
+def _verify_password(plain: str, stored: str) -> bool:
+    """해시 비교 (타이밍 공격 방지 compare_digest 사용).
+    stored 가 sha256:… 형식이 아닌 경우(레거시 플레인텍스트) 도 처리.
+    """
+    if not stored:
+        return not plain  # 저장 비번 없음 → 빈 값만 통과
+    if stored.startswith("sha256:"):
+        parts = stored.split(":", 2)
+        if len(parts) != 3:
+            return False
+        _, salt, h = parts
+        candidate = hashlib.sha256(f"{salt}:{plain}".encode("utf-8")).hexdigest()
+        return hmac.compare_digest(candidate, h)
+    # 레거시: 플레인텍스트로 저장된 경우 (해시 마이그레이션 전 데이터)
+    return hmac.compare_digest(plain, stored)
+
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
 
 # ─────────────────────────────────────
@@ -45,12 +78,12 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"}
 STATUS_VALUES = ("ocr_pending", "confirming", "inbound_done", "grading", "repairing", "done", "cancelled")
 STATUS_LABELS = {
     "ocr_pending": "장끼 확인 중",
-    "confirming": "수량 확인 중",
-    "inbound_done": "입고접수 완료",
-    "grading": "양품화 중",
-    "repairing": "수선 중",
-    "done": "최종완료",
-    "cancelled": "취소",
+    "confirming":  "수량 확인 중",
+    "inbound_done": "양품화 중",          # 오전 입고접수 완료 후 상태
+    "grading":     "양품화 중(수선처리)",  # 수선 품목 있을 때
+    "repairing":   "수선 중",
+    "done":        "최종완료",
+    "cancelled":   "취소",
 }
 
 ITEM_STATUS_VALUES = ("pending", "confirmed", "missing", "defect", "repair", "unrecoverable", "done")
@@ -948,19 +981,32 @@ def serve_photo(
     return FileResponse(path)
 
 
-# ── 마감 ───────────────────────────────
+# ── 마감 (AM/PM 분리) ────────────────────
+
+class CloseRequest(BaseModel):
+    """
+    close_type:
+      'am'  오전 입고접수 완료  confirming → inbound_done (양품화 중)
+      'pm'  오후 최종 마감      inbound_done / grading / repairing → done (수량 확정)
+    """
+    close_type: str = "am"  # "am" | "pm"
+
 
 @router.post("/batches/{batch_id}/close")
 def close_batch(
     batch_id: str,
+    body: CloseRequest = CloseRequest(),
     authorization: Optional[str] = Header(None),
 ):
     """
-    마감 요청:
-    - inbound_done → grading (수선 대상 없으면 바로 done)
-    - grading/repairing → done
-    수량 미확인 품목이 있으면 경고 반환 (강제 마감 불가)
+    오전(am): confirming → inbound_done (양품화 중 시작, 확인 전 품목 없어야 함)
+    오후(pm): inbound_done / grading / repairing → done
+              장끼수량 = 미입고 + 일반정상 + 수선중 + 수선후정상 + 회생불가 검증 포함
     """
+    close_type = body.close_type.lower().strip()
+    if close_type not in ("am", "pm"):
+        raise HTTPException(status_code=400, detail="close_type은 'am' 또는 'pm'이어야 합니다.")
+
     user = _get_user(authorization)
     with get_connection() as con:
         batch_row = con.execute(
@@ -971,12 +1017,13 @@ def close_batch(
             raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
 
         current_status = batch_row[0]
-        janggi_qty = batch_row[1]
-        actual_qty = batch_row[2]
-        missing_qty = batch_row[3]
+        total_janggi = batch_row[1] or 0
 
-        # 수량 검증
-        if current_status == "confirming":
+        # ── 오전 마감: confirming → inbound_done ──────────────
+        if close_type == "am":
+            if current_status != "confirming":
+                return {"ok": False, "warning": f"오전 입고접수 완료는 '수량 확인 중' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
+
             pending_count = con.execute(
                 "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='pending'",
                 (batch_id,)
@@ -984,52 +1031,102 @@ def close_batch(
             if pending_count > 0:
                 return {
                     "ok": False,
-                    "warning": f"아직 확인 전 품목이 {pending_count}개 있습니다. 모든 품목 확인 후 마감해주세요.",
+                    "warning": f"확인 전 품목이 {pending_count}개 남아 있습니다. 모두 확인 후 오전 완료해주세요.",
                     "pending_count": pending_count,
                 }
-            # confirming → inbound_done
+
             next_status = "inbound_done"
-            msg = "입고접수 완료"
-        elif current_status == "inbound_done":
-            next_status = "grading"
-            msg = "양품화 중"
-        elif current_status in ("grading", "repairing"):
-            # 수선 대기 품목 확인
-            repair_count = con.execute(
-                "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status IN ('repair', 'defect')",
-                (batch_id,)
-            ).fetchone()[0]
-            if repair_count > 0:
-                return {
-                    "ok": False,
-                    "warning": f"수선/불량 처리 중인 품목이 {repair_count}개 있습니다.",
-                    "repair_count": repair_count,
-                }
-            next_status = "done"
-            msg = "최종완료"
-        elif current_status == "done":
-            return {"ok": False, "warning": "이미 완료된 입고건입니다."}
-        else:
-            raise HTTPException(status_code=400, detail=f"현재 상태({current_status})에서는 마감할 수 없습니다.")
+            now = datetime.utcnow().isoformat()
+            con.execute(
+                "UPDATE inbound_batches SET status=?, updated_at=? WHERE id=?",
+                (next_status, now, batch_id)
+            )
+            con.commit()
+            add_log("inbound", "am_close", f"오전 입고접수 완료: {batch_id}", user["user_id"])
+            return {
+                "ok": True,
+                "close_type": "am",
+                "status": next_status,
+                "status_label": STATUS_LABELS[next_status],
+                "message": "오전 입고접수 완료 — 양품화를 진행해주세요",
+            }
+
+        # ── 오후 마감: inbound_done / grading / repairing → done ──
+        # close_type == "pm"
+        if current_status == "done":
+            return {"ok": False, "warning": "이미 최종 마감된 입고건입니다."}
+        if current_status not in ("inbound_done", "grading", "repairing"):
+            return {"ok": False, "warning": f"오후 최종 마감은 '양품화 중' 또는 '수선 중' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
+
+        # 미처리 품목 경고 (pending 또는 defect)
+        unresolved = con.execute(
+            "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status IN ('pending', 'defect')",
+            (batch_id,)
+        ).fetchone()[0]
+        if unresolved > 0:
+            return {
+                "ok": False,
+                "warning": f"미처리(확인전/불량) 품목이 {unresolved}개 있습니다. 처리 후 오후 마감해주세요.",
+                "unresolved_count": unresolved,
+            }
+
+        # ── 수량 정산 ──
+        # 공식: 장끼수량 = 미입고 + 일반정상 + 수선중 + 수선후정상 + 회생불가
+        rows = con.execute("""
+            SELECT status,
+                   COALESCE(SUM(actual_qty),  0) AS actual_sum,
+                   COALESCE(SUM(missing_qty), 0) AS missing_sum,
+                   COALESCE(SUM(janggi_qty),  0) AS janggi_sum
+            FROM inbound_items WHERE batch_id=? GROUP BY status
+        """, (batch_id,)).fetchall()
+        sd: dict[str, dict] = {r[0]: {"actual": r[1], "missing": r[2], "janggi": r[3]} for r in rows}
+
+        # 각 카테고리 수량 (개수 기준)
+        정상_qty     = sd.get("confirmed",     {}).get("actual", 0)
+        수선중_qty    = sd.get("repair",        {}).get("actual", 0)
+        수선후정상_qty = sd.get("done",          {}).get("actual", 0)
+        회생불가_qty  = sd.get("unrecoverable", {}).get("actual", 0)
+        # 미입고: 전체 품목의 missing_qty 합계 (어떤 status든 missing_qty가 있으면 미입고)
+        미입고_qty = sum(v["missing"] for v in sd.values())
+
+        formula_total = 미입고_qty + 정상_qty + 수선중_qty + 수선후정상_qty + 회생불가_qty
+        discrepancy = total_janggi - formula_total  # 0이면 정상
 
         now = datetime.utcnow().isoformat()
         con.execute("""
             UPDATE inbound_batches
-            SET status=?, closed_by=?, closed_at=?, updated_at=?
+            SET status='done', closed_by=?, closed_at=?, updated_at=?
             WHERE id=?
-        """, (next_status, user["nickname"], now if next_status == "done" else None, now, batch_id))
+        """, (user["nickname"], now, now, batch_id))
         con.commit()
 
-    add_log("inbound", "close", f"입고 마감: {batch_id} → {next_status}", user["user_id"])
-    return {
+    add_log("inbound", "pm_close",
+            f"오후 최종 마감: {batch_id} | 정상{정상_qty}/수선중{수선중_qty}/수선후{수선후정상_qty}/회생불가{회생불가_qty}/미입고{미입고_qty}",
+            user["user_id"])
+
+    result = {
         "ok": True,
-        "status": next_status,
-        "status_label": STATUS_LABELS[next_status],
-        "message": msg,
-        "total_janggi_qty": janggi_qty,
-        "total_actual_qty": actual_qty,
-        "total_missing_qty": missing_qty,
+        "close_type": "pm",
+        "status": "done",
+        "status_label": STATUS_LABELS["done"],
+        "message": "오후 최종 마감 완료",
+        # ── 수량 정산 (공식 기준) ──
+        "total_janggi_qty":    total_janggi,
+        "정상_qty":            정상_qty,
+        "수선중_qty":           수선중_qty,
+        "수선후정상_qty":       수선후정상_qty,
+        "회생불가_qty":         회생불가_qty,
+        "미입고_qty":           미입고_qty,
+        "formula_total":       formula_total,
+        "discrepancy":         discrepancy,
+        "formula_ok":          discrepancy == 0,
+        "formula_str": (
+            f"장끼{total_janggi} = 미입고{미입고_qty} + 정상{정상_qty} "
+            f"+ 수선중{수선중_qty} + 수선후정상{수선후정상_qty} + 회생불가{회생불가_qty}"
+            f" ({'✓ 일치' if discrepancy == 0 else f'⚠️ 차이 {discrepancy:+d}'})"
+        ),
     }
+    return result
 
 
 # ── 배치 삭제 (관리자) ──────────────────
@@ -1377,21 +1474,38 @@ def create_share_link(
     body: ShareLinkCreate,
     authorization: Optional[str] = Header(None),
 ):
+    """
+    공유 링크 생성.
+    비밀번호가 있으면 SHA-256+salt 해시로 변환해 저장.
+    원문 비밀번호는 응답에 한 번만 포함 — 이후 API·로그·DB 어디에도 원문 없음.
+    """
     user = _get_user(authorization)
+    plain_password = (body.password or "").strip() or None  # None = 비번 없는 링크
+
+    # 해시 변환 (원문 즉시 폐기)
+    stored_password = _hash_password(plain_password) if plain_password else None
+
     with get_connection() as con:
         if not con.execute("SELECT 1 FROM inbound_batches WHERE id=?", (batch_id,)).fetchone():
             raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
-        # 기존 링크 만료 처리
-        token = uuid.uuid4().hex
         from datetime import timedelta
+        token = uuid.uuid4().hex
         expires_at = (datetime.utcnow() + timedelta(days=body.expires_days)).strftime("%Y-%m-%d")
         con.execute("""
             INSERT INTO inbound_share_links (token, batch_id, password, expires_at, allow_excel, created_by)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (token, batch_id, body.password or None, expires_at, int(body.allow_excel), user["nickname"]))
+        """, (token, batch_id, stored_password, expires_at, int(body.allow_excel), user["nickname"]))
         con.commit()
+
     link = f"{settings.FRONTEND_URL}/share/{token}"
-    return {"token": token, "link": link, "expires_at": expires_at}
+    # plain_password 는 생성 응답에만 포함. 이 이후로는 서버 어디에도 원문이 없음.
+    return {
+        "token": token,
+        "link": link,
+        "expires_at": expires_at,
+        "has_password": plain_password is not None,
+        "password_once": plain_password,  # 프론트가 1회 표시 후 즉시 소멸해야 함
+    }
 
 
 @router.get("/share/{token}")
@@ -1413,11 +1527,12 @@ def get_share_data(
         if expires_at and datetime.utcnow().strftime("%Y-%m-%d") > expires_at:
             raise HTTPException(status_code=410, detail="링크가 만료되었습니다.")
 
-        # 비밀번호 확인
-        if stored_pw and password != stored_pw:
+        # 비밀번호 확인 (해시 비교 — 원문 절대 반환하지 않음)
+        if stored_pw:
             if not password:
                 return {"needs_password": True}
-            raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+            if not _verify_password(password, stored_pw):
+                raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
 
         # 배치 + 품목 조회
         batch_row = con.execute("""
@@ -1486,3 +1601,140 @@ def serve_share_photo(filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="사진을 찾을 수 없습니다.")
     return FileResponse(path)
+
+
+# ── 불량일지·수선일지 inbound_item 연결 ─────────────────
+
+class DefectLogLink(BaseModel):
+    불량명: str
+    수량: int = 1
+    비고: Optional[str] = None
+    작성자: Optional[str] = None
+
+
+class RepairLogLink(BaseModel):
+    불량명: Optional[str] = None
+    작업: str
+    수량: int = 1
+    비용: int = 0
+    비고: Optional[str] = None
+    작성자: Optional[str] = None
+
+
+@router.post("/items/{item_id}/defect-log", status_code=201)
+def link_defect_log(
+    item_id: str,
+    body: DefectLogLink,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    입고 품목에서 불량일지 생성 + inbound_items.defect_case_id 연결.
+    item의 matched_barcode / matched_vendor / matched_product 를 자동 사용.
+    """
+    from backend.app.api.defect_log import insert_defect_log_record, ensure_defect_tables
+    ensure_defect_tables()
+    user = _get_user(authorization)
+
+    with get_connection() as con:
+        item = con.execute("""
+            SELECT id, batch_id, item_name, option_text,
+                   matched_barcode, matched_vendor, matched_product, matched_option
+            FROM inbound_items WHERE id=?
+        """, (item_id,)).fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+        batch = con.execute(
+            "SELECT inbound_date, vendor FROM inbound_batches WHERE id=?", (item[1],)
+        ).fetchone()
+
+    inbound_date = batch[0] if batch else datetime.utcnow().strftime("%Y-%m-%d")
+    vendor = item[5] or (batch[1] if batch else None)
+    product = item[6] or item[2]
+    option = item[7] or item[3]
+    barcode = item[4]
+
+    result = insert_defect_log_record(
+        날짜=inbound_date,
+        업체명=vendor,
+        제품명=product,
+        옵션=option,
+        바코드=barcode,
+        불량명=body.불량명,
+        수량=body.수량,
+        비고=body.비고,
+        작성자=body.작성자 or user["nickname"],
+        출처="inbound",
+        inbound_item_id=item_id,
+    )
+
+    defect_log_id = result["id"]
+
+    # inbound_items에 defect_case_id 기록
+    with get_connection() as con:
+        con.execute(
+            "UPDATE inbound_items SET defect_case_id=? WHERE id=?",
+            (str(defect_log_id), item_id)
+        )
+        con.commit()
+
+    return {**result, "defect_log_id": defect_log_id, "inbound_item_id": item_id}
+
+
+@router.post("/items/{item_id}/repair-log", status_code=201)
+def link_repair_log(
+    item_id: str,
+    body: RepairLogLink,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    입고 품목에서 수선일지 생성 + inbound_items.defect_case_id 연결.
+    """
+    from backend.app.api.repair_log import insert_repair_log_record, ensure_repair_tables
+    ensure_repair_tables()
+    user = _get_user(authorization)
+
+    with get_connection() as con:
+        item = con.execute("""
+            SELECT id, batch_id, item_name, option_text,
+                   matched_barcode, matched_vendor, matched_product, matched_option
+            FROM inbound_items WHERE id=?
+        """, (item_id,)).fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+        batch = con.execute(
+            "SELECT inbound_date, vendor FROM inbound_batches WHERE id=?", (item[1],)
+        ).fetchone()
+
+    inbound_date = batch[0] if batch else datetime.utcnow().strftime("%Y-%m-%d")
+    vendor = item[5] or (batch[1] if batch else None)
+    product = item[6] or item[2]
+    option = item[7] or item[3]
+    barcode = item[4]
+
+    result = insert_repair_log_record(
+        날짜=inbound_date,
+        업체명=vendor,
+        제품명=product,
+        옵션=option,
+        바코드=barcode,
+        불량명=body.불량명,
+        작업=body.작업,
+        수량=body.수량,
+        비용=body.비용,
+        비고=body.비고,
+        작성자=body.작성자 or user["nickname"],
+        출처="inbound",
+        inbound_item_id=item_id,
+    )
+
+    repair_log_id = result["id"]
+
+    # inbound_items에 defect_case_id 기록 (수선일지 ID)
+    with get_connection() as con:
+        con.execute(
+            "UPDATE inbound_items SET defect_case_id=? WHERE id=?",
+            (f"repair:{repair_log_id}", item_id)
+        )
+        con.commit()
+
+    return {**result, "repair_log_id": repair_log_id, "inbound_item_id": item_id}

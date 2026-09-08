@@ -240,6 +240,16 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
+  const [sharePassword, setSharePassword] = useState('');
+  const [sharePasswordOpen, setSharePasswordOpen] = useState(false);
+  // 비밀번호 1회 표시: 생성 직후에만 보이고, 확인 버튼 누르면 소멸
+  const [shownPasswordOnce, setShownPasswordOnce] = useState('');
+  const [closeSummary, setCloseSummary] = useState<{
+    total_janggi_qty: number;
+    정상_qty: number; 수선중_qty: number; 수선후정상_qty: number;
+    회생불가_qty: number; 미입고_qty: number;
+    formula_ok: boolean; formula_str: string; discrepancy: number;
+  } | null>(null);
 
   const reload = useCallback(async () => {
     const data = await getInboundBatch(token, batch.id);
@@ -278,10 +288,18 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
       const res = await fetch(`${API_BASE}/inbound/batches/${batch.id}/share`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expires_days: 14, allow_excel: false }),
+        body: JSON.stringify({
+          expires_days: 14,
+          allow_excel: false,
+          password: sharePassword.trim() || null,
+        }),
       });
       const data = await res.json();
       setShareLink(data.link);
+      // 비밀번호 원문 — 생성 응답에서 한 번만 받아 표시
+      setShownPasswordOnce(data.password_once || '');
+      setSharePassword('');      // 입력창 즉시 초기화
+      setSharePasswordOpen(false);
     } catch (e: unknown) {
       alert('공유 링크 생성 실패: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -289,13 +307,27 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
     }
   }
 
-  async function handleClose() {
-    setCloseLoading(true); setWarning('');
+  async function handleClose(closeType: 'am' | 'pm') {
+    setCloseLoading(true); setWarning(''); setCloseSummary(null);
     try {
-      const res = await closeInboundBatch(token, batch.id);
+      const res = await closeInboundBatch(token, batch.id, closeType);
       if (!res.ok && res.warning) {
         setWarning(res.warning);
       } else {
+        // PM 마감이면 정산 데이터 저장
+        if (closeType === 'pm' && res.close_type === 'pm') {
+          setCloseSummary({
+            total_janggi_qty: res.total_janggi_qty ?? 0,
+            정상_qty:          res.정상_qty ?? 0,
+            수선중_qty:         res.수선중_qty ?? 0,
+            수선후정상_qty:     res.수선후정상_qty ?? 0,
+            회생불가_qty:       res.회생불가_qty ?? 0,
+            미입고_qty:         res.미입고_qty ?? 0,
+            formula_ok:        res.formula_ok ?? true,
+            formula_str:       res.formula_str ?? '',
+            discrepancy:       res.discrepancy ?? 0,
+          });
+        }
         await reload();
         onUpdated();
       }
@@ -307,13 +339,7 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
   }
 
   const items = batch.items || [];
-  const canClose = ['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status);
-  const closeLabel: Record<string, string> = {
-    confirming: '입고접수 완료',
-    inbound_done: '양품화 시작',
-    grading: '최종 마감',
-    repairing: '최종 마감',
-  };
+  // AM/PM 버튼은 JSX에서 batch.status 조건으로 직접 분기
 
   const statBox = (label: string, value: number, color: string) => (
     <div style={{ textAlign: 'center', padding: '0.5rem 1rem', background: '#f8f9fc', borderRadius: 8 }}>
@@ -410,37 +436,145 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
         </div>
       )}
 
-      {/* 공유 링크 표시 */}
+      {/* ── 오후 마감 정산 결과 ─────────── */}
+      {closeSummary && (
+        <div style={{ marginBottom: '0.75rem', padding: '0.9rem 1rem', background: closeSummary.formula_ok ? '#f0f9ff' : '#fff7ed', border: `1px solid ${closeSummary.formula_ok ? '#bae6fd' : '#fed7aa'}`, borderRadius: 8, fontSize: '0.85rem' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>📊 오후 최종 마감 정산</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            {[
+              { label: '장끼수량',   qty: closeSummary.total_janggi_qty, color: '#1d4ed8', bg: '#dbeafe' },
+              { label: '일반정상',   qty: closeSummary.정상_qty,          color: '#15803d', bg: '#dcfce7' },
+              { label: '수선중',     qty: closeSummary.수선중_qty,         color: '#a16207', bg: '#fef9c3' },
+              { label: '수선후정상', qty: closeSummary.수선후정상_qty,     color: '#166534', bg: '#bbf7d0' },
+              { label: '회생불가',   qty: closeSummary.회생불가_qty,       color: '#991b1b', bg: '#fecaca' },
+              { label: '미입고',     qty: closeSummary.미입고_qty,         color: '#dc2626', bg: '#fee2e2' },
+            ].map(s => (
+              <div key={s.label} style={{ background: s.bg, borderRadius: 8, padding: '6px 12px', textAlign: 'center', minWidth: 68 }}>
+                <div style={{ fontSize: '0.7rem', color: s.color, fontWeight: 700 }}>{s.label}</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: s.color }}>{s.qty}<span style={{ fontSize: '0.68rem' }}>개</span></div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: closeSummary.formula_ok ? '#0369a1' : '#c2410c', fontFamily: 'monospace', background: closeSummary.formula_ok ? '#e0f2fe' : '#fff7ed', padding: '5px 8px', borderRadius: 5 }}>
+            {closeSummary.formula_str}
+          </div>
+          {!closeSummary.formula_ok && (
+            <div style={{ marginTop: 6, fontSize: '0.8rem', color: '#c2410c', fontWeight: 600 }}>
+              ⚠️ 수량 합계가 맞지 않습니다. 품목 수량을 다시 확인해주세요.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 공유 링크 비밀번호 입력 ─────── */}
+      {sharePasswordOpen && (
+        <div style={{ marginBottom: '0.75rem', padding: '0.85rem 1rem', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 8 }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6, color: '#7c3aed' }}>🔒 공유 링크 비밀번호 (선택)</div>
+          <div style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: 8 }}>
+            비밀번호를 설정하면 화주사가 링크를 열 때 입력해야 합니다.<br />
+            <strong>생성 후 비밀번호는 아래에 딱 한 번만 표시됩니다.</strong>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="text"
+              value={sharePassword}
+              onChange={e => setSharePassword(e.target.value)}
+              placeholder="비밀번호 없으면 비워두세요"
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button onClick={handleShare} disabled={shareLoading} style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}>
+              {shareLoading ? '생성 중…' : '링크 생성'}
+            </button>
+            <button onClick={() => { setSharePasswordOpen(false); setSharePassword(''); }} style={btnOutline}>취소</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 공유 링크 1회 비밀번호 표시 ─── */}
+      {shareLink && shownPasswordOnce && (
+        <div style={{ marginBottom: '0.75rem', padding: '0.9rem 1rem', background: '#fefce8', border: '2px solid #fde047', borderRadius: 8, fontSize: '0.85rem' }}>
+          <div style={{ fontWeight: 700, color: '#a16207', marginBottom: 6 }}>🔐 비밀번호 (지금만 표시 — 저장해두세요)</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '0.15em', color: '#92400e', fontFamily: 'monospace', marginBottom: 8 }}>
+            {shownPasswordOnce}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => { navigator.clipboard.writeText(shownPasswordOnce); alert('비밀번호를 클립보드에 복사했습니다.'); }}
+              style={{ ...btn('#a16207'), fontSize: '0.8rem' }}
+            >
+              복사
+            </button>
+            <button
+              onClick={() => setShownPasswordOnce('')}
+              style={{ ...btnOutline, fontSize: '0.8rem', color: '#dc2626', borderColor: '#dc2626' }}
+            >
+              확인했습니다 (닫기)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 공유 링크 표시 ─────────────── */}
       {shareLink && (
         <div style={{ marginBottom: '0.75rem', padding: '0.75rem 1rem', background: '#f0fff4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.85rem' }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>🔗 화주사 공유 링크 (14일 유효)</div>
-          <div style={{ wordBreak: 'break-all', color: '#4361ee' }}>{shareLink}</div>
-          <button onClick={() => { navigator.clipboard.writeText(shareLink); }} style={{ marginTop: 6, fontSize: '0.78rem', ...btnOutline }}>복사</button>
+          <div style={{ wordBreak: 'break-all', color: '#4361ee', marginBottom: 6 }}>{shareLink}</div>
+          <button onClick={() => { navigator.clipboard.writeText(shareLink); }} style={{ fontSize: '0.78rem', ...btnOutline }}>링크 복사</button>
         </div>
       )}
 
-      {/* PDF + 공유 버튼 */}
-      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
-        <button onClick={handlePdf} disabled={pdfLoading} style={{ ...btn('#0f766e'), opacity: pdfLoading ? 0.5 : 1 }}>
-          {pdfLoading ? '생성 중…' : '📄 바코드 PDF'}
-        </button>
-        <button onClick={handleShare} disabled={shareLoading} style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}>
-          {shareLoading ? '생성 중…' : '🔗 화주사 공유 링크'}
-        </button>
-      </div>
+      {/* ── PDF + 공유 버튼 ────────────── */}
+      {(() => {
+        const totalLabels = items.reduce((s, i) => s + (i.actual_qty || 0), 0);
+        const matchedItems = items.filter(i => i.actual_qty > 0 && i.matched_barcode).length;
+        return (
+          <div style={{ marginBottom: '0.75rem' }}>
+            {totalLabels > 0 && (
+              <div style={{ fontSize: '0.8rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 6, padding: '5px 10px', marginBottom: 6 }}>
+                🏷️ 라벨 예상 <strong>{totalLabels}장</strong> (바코드 매칭 품목 {matchedItems}건)
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button onClick={handlePdf} disabled={pdfLoading} style={{ ...btn('#0f766e'), opacity: pdfLoading ? 0.5 : 1 }}>
+                {pdfLoading ? '생성 중…' : `📄 바코드 PDF${totalLabels > 0 ? ` (${totalLabels}장)` : ''}`}
+              </button>
+              <button
+                onClick={() => { setSharePasswordOpen(true); setShareLink(''); setShownPasswordOnce(''); }}
+                disabled={shareLoading}
+                style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}
+              >
+                🔗 화주사 공유 링크
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
-      {/* 마감 버튼 */}
-      {canClose && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      {/* ── AM / PM 마감 버튼 ─────────── */}
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        {/* 오전: confirming 상태에서만 */}
+        {batch.status === 'confirming' && (
           <button
-            onClick={handleClose}
+            onClick={() => handleClose('am')}
             disabled={closeLoading}
-            style={{ ...btn('var(--color-brand)'), opacity: closeLoading ? 0.5 : 1 }}
+            style={{ ...btn('#0369a1'), opacity: closeLoading ? 0.5 : 1 }}
+            title="수량 확인 완료 후 양품화 단계로 진행"
           >
-            {closeLoading ? '처리 중…' : (closeLabel[batch.status] || '마감')}
+            {closeLoading ? '처리 중…' : '☀️ 오전 입고접수 완료'}
           </button>
-        </div>
-      )}
+        )}
+        {/* 오후: inbound_done / grading / repairing 상태에서만 */}
+        {['inbound_done', 'grading', 'repairing'].includes(batch.status) && (
+          <button
+            onClick={() => handleClose('pm')}
+            disabled={closeLoading}
+            style={{ ...btn('#7c3aed'), opacity: closeLoading ? 0.5 : 1 }}
+            title="양품화 및 수선 완료 후 최종 수량 확정"
+          >
+            {closeLoading ? '처리 중…' : '🌆 오후 최종 마감'}
+          </button>
+        )}
+      </div>
     </Modal>
   );
 }

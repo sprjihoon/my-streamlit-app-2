@@ -1189,6 +1189,8 @@ def insert_repair_log_record(
     after_image: Optional[str] = None,
     extra_images: Optional[List[str]] = None,
     price_stated: bool = False,
+    inbound_item_id: Optional[str] = None,   # 입고 품목 연결
+    defect_case_id: Optional[str] = None,    # 입고 결함 케이스 ID
 ) -> dict:
     """수선일지 한 건 저장. 봇/웹 공통."""
     ensure_repair_tables()
@@ -1223,12 +1225,13 @@ def insert_repair_log_record(
         cur = con.execute(
             """INSERT INTO repair_work_log
                (날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고, 작성자, 저장시간, 출처,
-                barcode_image, before_image, after_image, extra_images)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                barcode_image, before_image, after_image, extra_images, inbound_item_id, defect_case_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 날짜, vendor, product, option, barcode, defect, work,
                 qty, int(비용), _clean(비고), _clean(작성자), now, 출처,
                 barcode_image, before_image, after_image, dump_extra_images(extra_images),
+                inbound_item_id, defect_case_id,
             ),
         )
         con.commit()
