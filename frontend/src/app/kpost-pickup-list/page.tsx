@@ -214,7 +214,8 @@ export default function KpostPickupListPage() {
                   <th>수거일</th>
                   <th>박스</th>
                   <th>상태</th>
-                  <th>작성</th>
+                  <th>접수자</th>
+                  <th>취소자</th>
                   <th></th>
                 </tr>
               </thead>
@@ -243,8 +244,13 @@ export default function KpostPickupListPage() {
                         <span style={done ? { color: '#0f766e', fontWeight: 700 } : undefined}>{label}</span>
                       </td>
                       <td>
-                        {item.created_by}
-                        <div className="text-muted">{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
+                        {item.created_by || '-'}
+                        <div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
+                      </td>
+                      <td>
+                        {item.canceled_by
+                          ? (<>{item.canceled_by}<div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.canceled_at?.replace('T', ' ').slice(0, 16)}</div></>)
+                          : <span className="text-muted">-</span>}
                       </td>
                       <td style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
                         {canCancel(item) && (
