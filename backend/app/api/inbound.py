@@ -227,7 +227,9 @@ def _get_user(token: Optional[str]) -> dict:
     tok = token.replace("Bearer ", "").strip()
     with get_connection() as con:
         row = con.execute(
-            "SELECT user_id, nickname, is_admin FROM users WHERE session_token = ?",
+            """SELECT u.user_id, u.nickname, u.is_admin
+               FROM sessions s JOIN users u ON s.user_id = u.user_id
+               WHERE s.token = ?""",
             (tok,)
         ).fetchone()
     if not row:
