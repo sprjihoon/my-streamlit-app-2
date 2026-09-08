@@ -180,6 +180,8 @@ def insert_defect_log_record(
     before_image: Optional[str] = None,
     after_image: Optional[str] = None,
     extra_images: Optional[List[str]] = None,
+    inbound_item_id: Optional[str] = None,   # 입고 품목 연결
+    defect_case_id: Optional[str] = None,    # 입고 배치 내 결함 케이스 ID
 ) -> dict:
     ensure_defect_tables()
     qty = 수량 or 1
@@ -208,12 +210,13 @@ def insert_defect_log_record(
         cur = con.execute(
             """INSERT INTO defect_log
                (날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 수량, 비고, 작성자, 저장시간, 출처,
-                before_image, after_image, extra_images)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                before_image, after_image, extra_images, inbound_item_id, defect_case_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 날짜, vendor, product, option, barcode, defect,
                 qty, _clean(비고), _clean(작성자), now, 출처,
                 before_image, after_image, dump_extra_images(extra_images),
+                inbound_item_id, defect_case_id,
             ),
         )
         con.commit()
@@ -541,3 +544,76 @@ async def upload_photos(
         con.commit()
 
     return {"success": True, "saved": saved, "message": "사진이 저장되었습니다."}
+
+
+# ─────────────────────────────────────
+# 바코드 자동 채움 (일괄)
+# ─────────────────────────────────────
+
+@router.post("/auto-fill-from-barcode")
+async def auto_fill_from_barcode(
+    token: Optional[str] = Query(None),
+):
+    """
+    defect_log 에서 바코드가 있지만 업체명 또는 제품명이 비어 있는 행을
+    repair_barcode 에서 조회해 자동으로 채운다.
+    반환: { updated: N, skipped: M, details: [...] }
+    """
+    editor = _editor_name(token)
+    now = datetime.now().isoformat()
+
+    with get_connection() as con:
+        rows = con.execute("""
+            SELECT id, 바코드 FROM defect_log
+            WHERE 바코드 IS NOT NULL AND 바코드 != ''
+              AND (업체명 IS NULL OR 업체명 = ''
+                OR 제품명 IS NULL OR 제품명 = '')
+        """).fetchall()
+
+        if not rows:
+            return {"updated": 0, "skipped": 0, "details": []}
+
+        updated = 0
+        skipped = 0
+        details = []
+
+        for row in rows:
+            log_id, barcode = row[0], row[1]
+            bc = con.execute(
+                """SELECT 업체명, 제품명, 옵션
+                   FROM repair_barcode
+                   WHERE 바코드 = ? LIMIT 1""",
+                (barcode,)
+            ).fetchone()
+
+            if not bc:
+                skipped += 1
+                details.append({"id": log_id, "barcode": barcode, "result": "not_found"})
+                continue
+
+            bc_vendor, bc_product, bc_option = bc
+            sets, params = [], []
+            if bc_vendor:
+                sets.append("업체명 = ?"); params.append(bc_vendor)
+            if bc_product:
+                sets.append("제품명 = ?"); params.append(bc_product)
+            if bc_option:
+                sets.append("옵션 = ?"); params.append(bc_option)
+
+            if not sets:
+                skipped += 1
+                details.append({"id": log_id, "barcode": barcode, "result": "empty_barcode_data"})
+                continue
+
+            sets += ["수정자 = ?", "수정시간 = ?"]
+            params += [editor, now, log_id]
+            con.execute(f"UPDATE defect_log SET {', '.join(sets)} WHERE id = ?", params)
+            updated += 1
+            details.append({
+                "id": log_id, "barcode": barcode, "result": "updated",
+                "업체명": bc_vendor, "제품명": bc_product, "옵션": bc_option,
+            })
+
+        con.commit()
+
+    return {"updated": updated, "skipped": skipped, "details": details}

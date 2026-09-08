@@ -1394,6 +1394,13 @@ export async function deleteDefectLog(id: number) {
   });
 }
 
+export async function autoFillDefectFromBarcode(token?: string) {
+  const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+  return fetchApi<{ updated: number; skipped: number; details: Array<{ id: number; barcode: string; result: string; 업체명?: string; 제품명?: string; 옵션?: string }> }>(
+    `/defect-log/auto-fill-from-barcode${qs}`, { method: 'POST' }
+  );
+}
+
 export async function uploadDefectPhotos(
   id: number,
   files: { before?: File | null; after?: File | null; extra?: File[] | null }
