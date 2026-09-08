@@ -94,6 +94,17 @@ const ITEM_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
   etc:           { bg: '#ede9fe', color: '#7c3aed' },
 };
 
+const ITEM_STATUS_LABELS: Record<string, string> = {
+  pending: '확인 전',
+  confirmed: '정상',
+  missing: '미입고',
+  defect: '불량',
+  repair: '수선대기',
+  unrecoverable: '회생불가',
+  done: '완료',
+  etc: '기타',
+};
+
 function StatusBadge({ status, label, map }: { status: string; label: string; map: Record<string, { bg: string; color: string }> }) {
   const c = map[status] || { bg: '#f3f4f6', color: '#6b7280' };
   return (
@@ -167,9 +178,19 @@ function Modal({ title, onClose, children, wide }: {
 // 품목 행 컴포넌트
 // ─────────────────────────────────────
 
-function ItemRow({ item, token, onUpdated, onDelete }: { item: InboundItem; token: string; onUpdated: () => void; onDelete?: () => void }) {
+function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, batchWholesale, batchCreatedBy }: {
+  item: InboundItem;
+  token: string;
+  onUpdated: () => void;
+  onDelete?: () => void;
+  batchVendor?: string;
+  batchDate?: string;
+  batchWholesale?: string | null;
+  batchCreatedBy?: string | null;
+}) {
   const [actualQty, setActualQty] = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
+  const [status, setStatus] = useState(item.status);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -186,8 +207,7 @@ function ItemRow({ item, token, onUpdated, onDelete }: { item: InboundItem; toke
   async function save() {
     setSaving(true);
     try {
-      const newStatus = actualQty > 0 ? 'confirmed' : missingQty > 0 ? 'missing' : 'pending';
-      await updateInboundItem(token, item.id, { actual_qty: actualQty, missing_qty: missingQty, status: newStatus });
+      await updateInboundItem(token, item.id, { actual_qty: actualQty, missing_qty: missingQty, status });
       onUpdated();
     } catch {
       alert('저장 실패');
@@ -217,70 +237,104 @@ function ItemRow({ item, token, onUpdated, onDelete }: { item: InboundItem; toke
     }
   }
 
-  const tdStyle: React.CSSProperties = { padding: '0.55rem 0.75rem', fontSize: '0.82rem', verticalAlign: 'middle', borderBottom: '1px solid #f3f4f6' };
+  const tdStyle: React.CSSProperties = { padding: '0.5rem 0.6rem', fontSize: '0.8rem', verticalAlign: 'middle', borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' };
+  const tdWrap: React.CSSProperties = { ...tdStyle, whiteSpace: 'normal', minWidth: 90 };
   const editInput: React.CSSProperties = { ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '0.3rem 0.5rem' };
+  const photoCount = item.photos?.length ?? 0;
 
   return (
     <>
       <tr style={{ background: '#fff' }}>
+        {/* No */}
         <td style={{ ...tdStyle, color: '#9ca3af', textAlign: 'center' }}>{item.line_no}</td>
-        <td style={tdStyle}>
+        {/* 날짜 */}
+        <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{batchDate || '-'}</td>
+        {/* 업체명 */}
+        <td style={{ ...tdStyle, fontWeight: 500 }}>{batchVendor || '-'}</td>
+        {/* 도매처 */}
+        <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{batchWholesale || '-'}</td>
+        {/* 제품명 */}
+        <td style={tdWrap}>
           <div style={{ fontWeight: 500 }}>{item.item_name || '-'}</div>
-          {item.option_text && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.option_text}</div>}
-          {item.updated_at && <div style={{ fontSize: '0.7rem', color: '#d1d5db' }}>수정: {item.updated_at.slice(0,16).replace('T',' ')}</div>}
         </td>
+        {/* 옵션 */}
+        <td style={tdWrap}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>{item.option_text || '-'}</div>
+        </td>
+        {/* 바코드 */}
+        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '0.75rem', color: '#6b7280' }}>
+          {item.matched_barcode || '-'}
+        </td>
+        {/* 장끼수량 */}
         <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#1d4ed8' }}>{item.janggi_qty}</td>
-        <td style={tdStyle}>
-          {item.matched_product ? (
-            <div style={{ fontSize: '0.78rem' }}>
-              <div style={{ color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor}</div>
-              <div>{item.matched_product}</div>
-              {item.matched_option && <div style={{ color: 'var(--text-secondary)' }}>{item.matched_option}</div>}
-              <div style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{item.matched_barcode}</div>
-              {(item.supplier_location || item.supplier_contact) && (
-                <div style={{ marginTop: 2, fontSize: '0.72rem', color: '#6b7280' }}>
-                  {item.supplier_location && <span>📍 {item.supplier_location}</span>}
-                  {item.supplier_location && item.supplier_contact && ' · '}
-                  {item.supplier_contact && <span>📞 {item.supplier_contact}</span>}
-                </div>
-              )}
-            </div>
-          ) : (
-            <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>미매칭</span>
-          )}
-        </td>
+        {/* 실입고 */}
         <td style={{ ...tdStyle, textAlign: 'center' }}>
           <input
             type="number" min={0} value={actualQty}
             onChange={e => setActualQty(Number(e.target.value))}
-            style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
+            style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
           />
         </td>
+        {/* 미입고 */}
         <td style={{ ...tdStyle, textAlign: 'center' }}>
           <input
             type="number" min={0} value={missingQty}
             onChange={e => setMissingQty(Number(e.target.value))}
-            style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
+            style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
           />
         </td>
+        {/* 처리상태 */}
         <td style={{ ...tdStyle, textAlign: 'center' }}>
-          <StatusBadge status={item.status} label={item.status_label} map={ITEM_STATUS_COLOR} />
+          <select
+            value={status}
+            onChange={e => setStatus(e.target.value)}
+            style={{ ...inputStyle, padding: '0.2rem 0.3rem', fontSize: '0.75rem', minWidth: 72 }}
+          >
+            {Object.entries(ITEM_STATUS_LABELS).map(([val, lbl]) => (
+              <option key={val} value={val}>{lbl}</option>
+            ))}
+          </select>
         </td>
+        {/* 공급처상품명 */}
+        <td style={tdWrap}>
+          <div style={{ fontSize: '0.78rem', color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor || '-'}</div>
+          <div style={{ fontSize: '0.78rem' }}>{item.matched_product || '-'}</div>
+        </td>
+        {/* 공급처옵션 */}
+        <td style={{ ...tdStyle, color: 'var(--text-secondary)', fontSize: '0.78rem' }}>{item.matched_option || '-'}</td>
+        {/* 공급처위치 */}
+        <td style={{ ...tdStyle, fontSize: '0.78rem', color: '#374151' }}>{item.supplier_location || '-'}</td>
+        {/* 공급처연락처 */}
+        <td style={{ ...tdStyle, fontSize: '0.78rem', color: '#374151' }}>{item.supplier_contact || '-'}</td>
+        {/* 작성자 */}
+        <td style={{ ...tdStyle, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{batchCreatedBy || '-'}</td>
+        {/* 수정시간 */}
+        <td style={{ ...tdStyle, fontSize: '0.73rem', color: '#9ca3af' }}>
+          {item.updated_at ? item.updated_at.slice(0, 16).replace('T', ' ') : '-'}
+        </td>
+        {/* 사진 */}
         <td style={{ ...tdStyle, textAlign: 'center' }}>
-          <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-            <button onClick={save} disabled={saving} style={btn('#4361ee')}>
+          {photoCount > 0
+            ? <span style={{ fontSize: '0.78rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, padding: '2px 6px' }}>📷 {photoCount}</span>
+            : <span style={{ fontSize: '0.75rem', color: '#d1d5db' }}>-</span>
+          }
+        </td>
+        {/* 액션 */}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
+            <button onClick={save} disabled={saving} style={{ ...btn('#4361ee'), fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}>
               {saving ? '…' : '저장'}
             </button>
             <button
               onClick={() => setEditMode(m => !m)}
-              style={{ ...btn(editMode ? '#6b7280' : '#f59e0b'), fontSize: '0.78rem' }}
+              style={{ ...btn(editMode ? '#6b7280' : '#f59e0b'), fontSize: '0.73rem', padding: '0.2rem 0.5rem' }}
             >
-              ✏️ 수정
+              ✏️
             </button>
             {onDelete && (
               <button
                 onClick={() => { if (confirm(`품목 "${item.item_name || item.line_no + '번'}"을 삭제하시겠습니까?`)) onDelete(); }}
-                style={{ ...btn('#ef4444'), fontSize: '0.78rem' }}
+                style={{ ...btn('#ef4444'), fontSize: '0.73rem', padding: '0.2rem 0.5rem' }}
               >
                 🗑
               </button>
@@ -291,7 +345,7 @@ function ItemRow({ item, token, onUpdated, onDelete }: { item: InboundItem; toke
       {/* 수정 폼 인라인 */}
       {editMode && (
         <tr style={{ background: '#f0f4ff' }}>
-          <td colSpan={8} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e0e7ff' }}>
+          <td colSpan={19} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e0e7ff' }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4361ee', marginBottom: 8 }}>✏️ 품목 정보 수정</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
               <div>
@@ -837,9 +891,29 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
           <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
             <thead>
               <tr style={{ background: '#f8f9fc' }}>
-                {['No', '품명/옵션', '장끼수량', '매칭 상품', '실입고', '미입고', '상태', ''].map(h => (
-                  <th key={h} style={{ padding: '0.6rem 0.75rem', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: h === '품명/옵션' || h === '매칭 상품' ? 'left' : 'center', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                    {h}
+                {[
+                  { label: 'No', align: 'center' },
+                  { label: '날짜', align: 'left' },
+                  { label: '업체명', align: 'left' },
+                  { label: '도매처', align: 'left' },
+                  { label: '제품명', align: 'left' },
+                  { label: '옵션', align: 'left' },
+                  { label: '바코드', align: 'left' },
+                  { label: '장끼수량', align: 'center' },
+                  { label: '실입고', align: 'center' },
+                  { label: '미입고', align: 'center' },
+                  { label: '처리상태', align: 'center' },
+                  { label: '공급처상품명', align: 'left' },
+                  { label: '공급처옵션', align: 'left' },
+                  { label: '공급처위치', align: 'left' },
+                  { label: '공급처연락처', align: 'left' },
+                  { label: '작성자', align: 'left' },
+                  { label: '수정시간', align: 'left' },
+                  { label: '사진', align: 'center' },
+                  { label: '', align: 'center' },
+                ].map(h => (
+                  <th key={h.label} style={{ padding: '0.55rem 0.6rem', fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: h.align as 'left' | 'center', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: '#f8f9fc', position: 'sticky', top: 0, zIndex: 1 }}>
+                    {h.label}
                   </th>
                 ))}
               </tr>
@@ -851,6 +925,10 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
                   item={item}
                   token={token}
                   onUpdated={reload}
+                  batchVendor={batch.vendor}
+                  batchDate={batch.inbound_date}
+                  batchWholesale={batch.wholesale}
+                  batchCreatedBy={batch.created_by}
                   onDelete={async () => {
                     try {
                       await deleteInboundItem(token, item.id);
@@ -1500,6 +1578,7 @@ export default function InboundLogPage() {
               <option value="repairing">수선 중</option>
               <option value="done">최종완료</option>
               <option value="cancelled">취소</option>
+              <option value="etc">기타</option>
             </select>
           </div>
           <div>
