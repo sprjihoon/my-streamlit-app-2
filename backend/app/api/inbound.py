@@ -567,13 +567,13 @@ async def _run_ocr(image_path: Path) -> Optional[dict]:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": [
                     {"type": "image_url",
-                     "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"}}
+                     "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "auto"}}
                 ]}
             ],
             "max_tokens": 2000,
             "response_format": {"type": "json_object"},
         }
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},

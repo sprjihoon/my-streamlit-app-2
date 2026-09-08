@@ -1806,9 +1806,34 @@ export interface OcrPreviewItem {
   needsReview: boolean;
   warnings: string[];
 }
+/** 이미지를 maxPx 이하로 리사이즈 후 JPEG 압축 (OCR 속도 개선용) */
+async function compressImageForOcr(file: File, maxPx = 1200, quality = 0.85): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const { width, height } = img;
+      const scale = Math.min(1, maxPx / Math.max(width, height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => resolve(blob ? new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }) : file),
+        'image/jpeg', quality
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 export async function ocrPreview(token: string, file: File) {
+  const compressed = await compressImageForOcr(file);
   const form = new FormData();
-  form.append('file', file);
+  form.append('file', compressed);
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/inbound/ocr-preview`, {
@@ -1831,8 +1856,9 @@ export async function ocrPreview(token: string, file: File) {
 }
 
 export async function runInboundOcr(token: string, batchId: string, file: File) {
+  const compressed = await compressImageForOcr(file);
   const form = new FormData();
-  form.append('file', file);
+  form.append('file', compressed);
   // fetchApi 대신 직접 fetch: FormData 사용 시 Content-Type을 브라우저가 자동 설정하도록 함
   let response: Response;
   try {
