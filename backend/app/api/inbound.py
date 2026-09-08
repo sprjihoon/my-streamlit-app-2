@@ -456,13 +456,13 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
     vendor_ph = ",".join("?" * len(vendor_names))  # IN (?,?,...) 플레이스홀더
 
     with get_connection() as con:
-        # 1순위: 화주사(별칭 포함) + 도매처 + 공급처상품명/상품명 + 옵션 정확 매칭
+        # 1순위: 화주사(별칭 포함) + 도매처 + 제품명/상품명 + 옵션 정확 매칭
         if wholesale and option_text:
             row = con.execute(f"""
-                SELECT 바코드, 업체명, 공급처상품명, 옵션
+                SELECT 바코드, 업체명, 제품명, 옵션
                 FROM repair_barcode
                 WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
-                  AND (공급처상품명=? OR 상품명=?)
+                  AND (제품명=? OR 상품명=?)
                   AND 옵션=?
                 LIMIT 1
             """, (*vendor_names, wholesale, item_name, item_name, option_text)).fetchone()
@@ -471,13 +471,13 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
                         "matched_product": row[2] or item_name, "matched_option": row[3],
                         "match_confidence": 1.0, "needs_matching": False}
 
-        # 2순위: 화주사(별칭 포함) + 도매처 + 상품명 (옵션 무시)
+        # 2순위: 화주사(별칭 포함) + 도매처 + 제품명/상품명 (옵션 무시)
         if wholesale:
             row = con.execute(f"""
-                SELECT 바코드, 업체명, 공급처상품명, 옵션
+                SELECT 바코드, 업체명, 제품명, 옵션
                 FROM repair_barcode
                 WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
-                  AND (공급처상품명=? OR 상품명=?)
+                  AND (제품명=? OR 상품명=?)
                 LIMIT 1
             """, (*vendor_names, wholesale, item_name, item_name)).fetchone()
             if row:
@@ -485,11 +485,11 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
                         "matched_product": row[2] or item_name, "matched_option": row[3],
                         "match_confidence": 0.85, "needs_matching": False}
 
-        # 3순위: 화주사(별칭 포함) + 상품명
+        # 3순위: 화주사(별칭 포함) + 제품명/상품명
         row = con.execute(f"""
-            SELECT 바코드, 업체명, 공급처상품명, 옵션
+            SELECT 바코드, 업체명, 제품명, 옵션
             FROM repair_barcode
-            WHERE 업체명 IN ({vendor_ph}) AND (공급처상품명=? OR 상품명=?)
+            WHERE 업체명 IN ({vendor_ph}) AND (제품명=? OR 상품명=?)
             LIMIT 1
         """, (*vendor_names, item_name, item_name)).fetchone()
         if row:
@@ -500,9 +500,9 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
         # 4순위: 부분 일치 (LIKE) — 화주사 별칭 포함
         keyword = f"%{item_name}%"
         row = con.execute(f"""
-            SELECT 바코드, 업체명, 공급처상품명, 옵션
+            SELECT 바코드, 업체명, 제품명, 옵션
             FROM repair_barcode
-            WHERE 업체명 IN ({vendor_ph}) AND (공급처상품명 LIKE ? OR 상품명 LIKE ?)
+            WHERE 업체명 IN ({vendor_ph}) AND (제품명 LIKE ? OR 상품명 LIKE ?)
             LIMIT 1
         """, (*vendor_names, keyword, keyword)).fetchone()
         if row:

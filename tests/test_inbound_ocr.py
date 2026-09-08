@@ -504,6 +504,160 @@ def test_11_success_replaces_ocr_items(isolated_runtime, monkeypatch):
 import os as _os
 
 
+# ─────────────────────────────────────
+# Test 12–16 – _match_barcode: 실제 repair_barcode 스키마(제품명/상품명) 기반 매칭
+# ─────────────────────────────────────
+
+def _seed_repair_barcode(con, *, barcode, vendor, 제품명, 상품명, option, wholesale):
+    """repair_barcode 테스트 행 삽입 (운영 스키마: 제품명/상품명/도매처 등)."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS repair_barcode (
+            바코드 TEXT, 업체명 TEXT, 제품명 TEXT, 옵션 TEXT,
+            상품코드 TEXT, 로케이션 TEXT, 상품명 TEXT,
+            출처 TEXT, 저장시간 TEXT, 도매처 TEXT
+        )
+    """)
+    con.execute(
+        "INSERT INTO repair_barcode VALUES (?,?,?,?,NULL,NULL,?,NULL,NULL,?)",
+        (barcode, vendor, 제품명, option, 상품명, wholesale),
+    )
+    con.commit()
+
+
+def test_12_match_by_제품명_option_exact(isolated_runtime):
+    """1순위: 업체명+도매처+제품명+옵션 정확 매칭."""
+    import logic.db as logic_db
+    from backend.app.api.inbound import _match_barcode, ensure_inbound_tables
+
+    ensure_inbound_tables()
+    with logic_db.get_connection() as con:
+        _seed_repair_barcode(
+            con, barcode="BC001", vendor="테스트화주",
+            제품명="제이가방", 상품명="제이가방 긴상품명", option="검정", wholesale="NODI",
+        )
+
+    result = _match_barcode("테스트화주", "제이가방", "검정", "NODI")
+    assert result["matched_barcode"] == "BC001"
+    assert result["match_confidence"] == 1.0
+    assert result["needs_matching"] is False
+
+
+def test_13_match_by_제품명_no_option(isolated_runtime):
+    """2순위: 업체명+도매처+제품명 정확 매칭 (옵션 무시)."""
+    import logic.db as logic_db
+    from backend.app.api.inbound import _match_barcode, ensure_inbound_tables
+
+    ensure_inbound_tables()
+    with logic_db.get_connection() as con:
+        _seed_repair_barcode(
+            con, barcode="BC002", vendor="테스트화주",
+            제품명="제이가방", 상품명="제이가방 긴상품명", option="아이", wholesale="NODI",
+        )
+
+    result = _match_barcode("테스트화주", "제이가방", None, "NODI")
+    assert result["matched_barcode"] == "BC002"
+    assert result["match_confidence"] == 0.85
+    assert result["needs_matching"] is False
+
+
+def test_14_match_by_상품명_fallback(isolated_runtime):
+    """상품명(긴 이름) 컬럼으로 대체 매칭 (제품명이 다를 때)."""
+    import logic.db as logic_db
+    from backend.app.api.inbound import _match_barcode, ensure_inbound_tables
+
+    ensure_inbound_tables()
+    with logic_db.get_connection() as con:
+        _seed_repair_barcode(
+            con, barcode="BC003", vendor="테스트화주",
+            제품명="짧은이름", 상품명="긴상품명전체", option=None, wholesale="NODI",
+        )
+
+    # 긴 상품명으로 검색 → 상품명 컬럼에서 일치
+    result = _match_barcode("테스트화주", "긴상품명전체", None, "NODI")
+    assert result["matched_barcode"] == "BC003"
+    assert result["needs_matching"] is False
+
+
+def test_15_match_partial_like(isolated_runtime):
+    """4순위: 제품명 부분 일치(LIKE) 매칭."""
+    import logic.db as logic_db
+    from backend.app.api.inbound import _match_barcode, ensure_inbound_tables
+
+    ensure_inbound_tables()
+    with logic_db.get_connection() as con:
+        _seed_repair_barcode(
+            con, barcode="BC004", vendor="테스트화주",
+            제품명="가방시리즈A", 상품명="가방시리즈A 전체상품명", option=None, wholesale=None,
+        )
+
+    result = _match_barcode("테스트화주", "가방시리즈", None, None)
+    assert result["matched_barcode"] == "BC004"
+    assert result["match_confidence"] == 0.5
+    assert result["needs_matching"] is True  # 부분 일치는 needs_matching=True
+
+
+def test_16_ocr_success_saves_inbound_items(isolated_runtime, monkeypatch):
+    """OCR 성공 → inbound_items에 제품명 기반 매칭 결과 포함 저장."""
+    import logic.db as logic_db
+    from backend.app.api import inbound as inbound_mod
+    from backend.app.api.inbound import ensure_inbound_tables
+    from backend.app.services.inbound_bot import _run_ocr_and_match
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    upload_dir = isolated_runtime["uploads"] / "inbound"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(inbound_mod, "UPLOAD_DIR", upload_dir)
+
+    ensure_inbound_tables()
+
+    batch_id = uuid.uuid4().hex
+    vendor = "테스트화주"
+    now = datetime.utcnow().isoformat()
+
+    with logic_db.get_connection() as con:
+        con.execute("""
+            INSERT INTO inbound_batches
+                (id, vendor, inbound_date, status, created_by, created_at, updated_at)
+            VALUES (?, ?, '2026-09-08', 'ocr_pending', 'test', ?, ?)
+        """, (batch_id, vendor, now, now))
+        # repair_barcode에 제품명 기반 행 삽입
+        _seed_repair_barcode(
+            con, barcode="BC_NODI_01", vendor=vendor,
+            제품명="제이가방", 상품명="제이가방 긴상품명", option="검정", wholesale="NODI",
+        )
+
+    ocr_json = _ocr_json()
+    ocr_json["receipt"]["storeName"] = "NODI"
+    ocr_json["items"][0]["itemName"] = "제이가방"
+    ocr_json["items"][0]["color"] = "검정"
+    ctx = _AsyncCtx(resp=_make_api_resp(200, _api_body(ocr_json)))
+
+    async def _run():
+        with patch("httpx.AsyncClient", return_value=ctx):
+            return await _run_ocr_and_match(
+                batch_id=batch_id,
+                image_data=make_jpeg(),
+                filename="test.jpg",
+                vendor=vendor,
+            )
+
+    result = asyncio.run(_run())
+    assert result["item_count"] == 1
+
+    with logic_db.get_connection() as con:
+        items = con.execute(
+            "SELECT item_name, matched_barcode FROM inbound_items WHERE batch_id=?",
+            (batch_id,),
+        ).fetchall()
+
+    assert len(items) == 1
+    assert items[0][0] == "제이가방"
+    assert items[0][1] == "BC_NODI_01", "제품명 기반 바코드 매칭이 저장돼야 한다"
+
+
+# ─────────────────────────────────────
+
 @pytest.mark.skip(reason="RUN_LIVE_OCR=1 환경변수 설정 시에만 실행")
 def test_live_ocr_with_real_api():
     """실제 OpenAI API 호출 (RUN_LIVE_OCR=1 및 OPENAI_API_KEY 필요)."""
