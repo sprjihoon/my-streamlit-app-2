@@ -557,44 +557,57 @@ def _find_col(columns, *names) -> Optional[str]:
     return None
 
 
-def _find_vendor_col(columns) -> Optional[str]:
-    """공급처 열이 여러 개면 첫 번째(화주사=업체명). '공급처 상품명' 등 복합 헤더는 제외."""
-    matches = [c for c in columns if str(c).strip() == "공급처"]
-    if matches:
-        return matches[0]   # [0] = 화주사(업체명)
-    return _find_col(columns, "업체명")
+def _find_col_idx(columns, *names) -> Optional[int]:
+    """컬럼명으로 첫 번째 매칭 인덱스 반환."""
+    for name in names:
+        for i, c in enumerate(columns):
+            if str(c).strip() == name:
+                return i
+    return None
 
 
-def _find_wholesale_col(columns) -> Optional[str]:
-    """공급처가 여러 개면 마지막 열이 도매처."""
-    matches = [c for c in columns if str(c).strip() == "공급처"]
-    if len(matches) >= 2:
-        return matches[-1]
+def _find_vendor_col_idx(columns) -> Optional[int]:
+    """첫 번째 '공급처' 열 인덱스 = 화주사(업체명).
+    중복 컬럼명이 있어도 위치 기반으로 정확히 접근한다."""
+    for i, c in enumerate(columns):
+        if str(c).strip() == "공급처":
+            return i
+    return _find_col_idx(columns, "업체명")
+
+
+def _find_wholesale_col_idx(columns) -> Optional[int]:
+    """마지막 '공급처' 열 인덱스 = 도매처.
+    '공급처' 컬럼이 2개 이상일 때만 반환."""
+    idxs = [i for i, c in enumerate(columns) if str(c).strip() == "공급처"]
+    if len(idxs) >= 2:
+        return idxs[-1]
     return None
 
 
 def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
-    barcode_col = _find_col(df.columns, "바코드")
-    vendor_col = _find_vendor_col(df.columns)
-    wholesale_col = _find_wholesale_col(df.columns)
-    short_name_col = _find_col(df.columns, "공급처 상품명", "제품명")
-    long_name_col = _find_col(df.columns, "상품명")
-    option_col = _find_col(df.columns, "옵션")
-    code_col = _find_col(df.columns, "상품코드")
-    loc_col = _find_col(df.columns, "로케이션")
+    cols = list(df.columns)
 
-    if not barcode_col:
+    barcode_idx = _find_col_idx(cols, "바코드")
+    vendor_idx = _find_vendor_col_idx(cols)
+    wholesale_idx = _find_wholesale_col_idx(cols)
+    short_name_idx = _find_col_idx(cols, "공급처 상품명", "제품명")
+    long_name_idx = _find_col_idx(cols, "상품명")
+    option_idx = _find_col_idx(cols, "옵션")
+    code_idx = _find_col_idx(cols, "상품코드")
+    loc_idx = _find_col_idx(cols, "로케이션")
+
+    if barcode_idx is None:
         raise HTTPException(status_code=400, detail="바코드 열이 없습니다.")
-    if not vendor_col:
+    if vendor_idx is None:
         raise HTTPException(status_code=400, detail="공급처(업체명) 열이 없습니다.")
 
     rows = []
     for _, r in df.iterrows():
-        barcode = _clean(r.get(barcode_col))
-        vendor = _clean_vendor(r.get(vendor_col))
-        wholesale = _clean_vendor(r.get(wholesale_col)) if wholesale_col else None
-        short_name = _clean(r.get(short_name_col)) if short_name_col else None
-        long_name = _clean(r.get(long_name_col)) if long_name_col else None
+        barcode = _clean(r.iloc[barcode_idx])
+        vendor = _clean_vendor(r.iloc[vendor_idx])
+        wholesale = _clean_vendor(r.iloc[wholesale_idx]) if wholesale_idx is not None else None
+        short_name = _clean(r.iloc[short_name_idx]) if short_name_idx is not None else None
+        long_name = _clean(r.iloc[long_name_idx]) if long_name_idx is not None else None
         product = short_name or long_name
         if not barcode or not vendor or not product:
             continue
@@ -603,9 +616,9 @@ def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
             "업체명": vendor,
             "도매처": wholesale,
             "제품명": product,
-            "옵션": _strip_option(_clean(r.get(option_col))) if option_col else None,
-            "상품코드": _clean(r.get(code_col)) if code_col else None,
-            "로케이션": _clean(r.get(loc_col)) if loc_col else None,
+            "옵션": _strip_option(_clean(r.iloc[option_idx])) if option_idx is not None else None,
+            "상품코드": _clean(r.iloc[code_idx]) if code_idx is not None else None,
+            "로케이션": _clean(r.iloc[loc_idx]) if loc_idx is not None else None,
             "상품명": long_name,
         })
     return rows
