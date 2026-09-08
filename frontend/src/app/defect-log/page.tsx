@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
@@ -463,40 +463,39 @@ function DefectFormModal({
     처리결과: initial?.처리결과 || '',
   });
   const [saving, setSaving] = useState(false);
-  const [barcodeLoading, setBarcodeLoading] = useState(false);
-  const [barcodeFilled, setBarcodeFilled] = useState(false);
-  const barcodeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupHint, setLookupHint] = useState('');
+  const [lookupOk, setLookupOk] = useState(false);
   const [beforeFile, setBeforeFile] = useState<File | null>(null);
   const [afterFile, setAfterFile] = useState<File | null>(null);
   const [extraFiles, setExtraFiles] = useState<File[]>([]);
 
-  // 바코드 입력 후 즉시 조회 (디바운스 600ms)
-  function handleBarcodeChange(value: string) {
-    setForm(f => ({ ...f, 바코드: value }));
-    setBarcodeFilled(false);
-    if (barcodeRef.current) clearTimeout(barcodeRef.current);
-    if (value.trim().length >= 4) {
-      barcodeRef.current = setTimeout(() => lookupAndFill(value.trim()), 600);
+  async function searchBarcode(raw?: string) {
+    const code = (raw ?? form.바코드).trim();
+    if (!code) {
+      setLookupOk(false);
+      setLookupHint('바코드를 입력한 뒤 검색하세요.');
+      return;
     }
-  }
-
-  async function lookupAndFill(barcode: string) {
-    setBarcodeLoading(true);
+    setLookingUp(true);
+    setLookupHint('검색 중...');
+    setLookupOk(false);
     try {
-      const bc = await lookupRepairBarcode(barcode);
-      if (bc) {
-        setForm(f => ({
-          ...f,
-          업체명: bc.업체명 || f.업체명,
-          제품명: bc.제품명 || f.제품명,
-          옵션: bc.옵션 || f.옵션,
-        }));
-        setBarcodeFilled(true);
-      }
+      const found = await lookupRepairBarcode(code);
+      setForm(f => ({
+        ...f,
+        바코드: found.바코드 || code,
+        업체명: found.업체명 || f.업체명,
+        제품명: found.제품명 || f.제품명,
+        옵션: found.옵션 || f.옵션,
+      }));
+      setLookupOk(true);
+      setLookupHint(`✓ ${found.업체명 || ''} / ${found.제품명 || ''} ${found.옵션 ? `/ ${found.옵션}` : ''} 자동 입력됨`);
     } catch {
-      // 미매칭 시 조용히 넘어감
+      setLookupOk(false);
+      setLookupHint('미등록 바코드입니다. 업체명·제품명을 직접 입력하세요.');
     } finally {
-      setBarcodeLoading(false);
+      setLookingUp(false);
     }
   }
 
@@ -545,34 +544,35 @@ function DefectFormModal({
         <Field label="날짜 *">
           <input type="date" value={form.날짜} onChange={(e) => setForm({ ...form, 날짜: e.target.value })} style={inputStyle} />
         </Field>
-        <Field label={
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            바코드
-            {barcodeLoading && <span style={{ fontSize: 11, color: '#8b5cf6' }}>조회 중…</span>}
-            {barcodeFilled && !barcodeLoading && <span style={{ fontSize: 11, color: '#22c55e' }}>✓ 정보 채움</span>}
-          </span>
-        }>
-          <div style={{ display: 'flex', gap: 4 }}>
+        <Field label="바코드">
+          <div style={{ display: 'flex', gap: 8 }}>
             <input
               value={form.바코드}
-              onChange={(e) => handleBarcodeChange(e.target.value)}
-              placeholder="ON56S152917"
-              style={{ ...inputStyle, flex: 1 }}
+              onChange={(e) => { setForm({ ...form, 바코드: e.target.value }); setLookupHint(''); setLookupOk(false); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchBarcode(); } }}
+              placeholder="바코드 입력 후 검색"
+              style={inputStyle}
             />
             <button
               type="button"
-              onClick={() => form.바코드.trim() && lookupAndFill(form.바코드.trim())}
-              disabled={barcodeLoading || !form.바코드.trim()}
-              style={{ ...btn('#8b5cf6'), padding: '0.5rem 0.75rem', opacity: (barcodeLoading || !form.바코드.trim()) ? 0.5 : 1, whiteSpace: 'nowrap', fontSize: '0.8rem' }}
-              title="repair_barcode에서 업체명·제품명·옵션 조회"
-            >🔍 조회</button>
+              onClick={() => searchBarcode()}
+              disabled={lookingUp}
+              style={{ ...btn('#0f766e'), whiteSpace: 'nowrap', opacity: lookingUp ? 0.7 : 1 }}
+            >
+              {lookingUp ? '검색 중...' : '검색'}
+            </button>
           </div>
+          {lookupHint && (
+            <p style={{ fontSize: '0.8rem', color: lookupOk ? '#16a34a' : '#b45309', margin: '0.25rem 0 0' }}>
+              {lookupHint}
+            </p>
+          )}
         </Field>
         <Field label="업체명">
-          <input value={form.업체명} onChange={(e) => { setForm({ ...form, 업체명: e.target.value }); setBarcodeFilled(false); }} style={inputStyle} />
+          <input value={form.업체명} onChange={(e) => { setForm({ ...form, 업체명: e.target.value }); setLookupHint(''); setLookupOk(false); }} style={inputStyle} />
         </Field>
         <Field label="제품명">
-          <input value={form.제품명} onChange={(e) => { setForm({ ...form, 제품명: e.target.value }); setBarcodeFilled(false); }} style={inputStyle} />
+          <input value={form.제품명} onChange={(e) => { setForm({ ...form, 제품명: e.target.value }); setLookupHint(''); setLookupOk(false); }} style={inputStyle} />
         </Field>
         <Field label="옵션">
           <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} placeholder="블랙" style={inputStyle} />
