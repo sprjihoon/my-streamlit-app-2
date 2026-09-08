@@ -129,6 +129,8 @@ class InboundItemUpdate(BaseModel):
     missing_qty: Optional[int] = None
     status: Optional[str] = None
     memo: Optional[str] = None
+    item_name: Optional[str] = None        # 상품명 직접 수정
+    item_wholesale: Optional[str] = None   # 도매처 직접 수정 (배치 wholesale 오버라이드)
     matched_barcode: Optional[str] = None
     matched_vendor: Optional[str] = None
     matched_product: Optional[str] = None
@@ -283,7 +285,8 @@ def ensure_inbound_tables():
             "supplier_location TEXT",
             "supplier_contact TEXT",
             "updated_at DATETIME",
-            "confirmed_by TEXT",  # 로그인 없이 접근하는 작업자 이름
+            "confirmed_by TEXT",    # 로그인 없이 접근하는 작업자 이름
+            "item_wholesale TEXT",  # 도매처 항목별 오버라이드
         ]:
             try:
                 con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
@@ -398,6 +401,7 @@ def _serialize_item(row) -> dict:
         "created_at": row[19],
         "updated_at": row[20],
         "confirmed_by": row[21] if len(row) > 21 else None,
+        "item_wholesale": row[22] if len(row) > 22 else None,
     }
 
 
@@ -869,7 +873,7 @@ def get_batch(
                    matched_barcode, matched_vendor, matched_product, matched_option,
                    match_confidence, needs_matching, memo,
                    supplier_location, supplier_contact, created_at, updated_at,
-                   confirmed_by
+                   confirmed_by, item_wholesale
             FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
         """, (batch_id,)).fetchall()
         item_list = []
@@ -1107,6 +1111,12 @@ def update_item(
         fields.append("status=?"); params.append(body.status)
     if body.memo is not None:
         fields.append("memo=?"); params.append(body.memo)
+    if body.item_name is not None:
+        name_val = body.item_name.strip()
+        fields.append("item_name=?"); params.append(name_val if name_val else None)
+    if body.item_wholesale is not None:
+        ws_val = body.item_wholesale.strip()
+        fields.append("item_wholesale=?"); params.append(ws_val if ws_val else None)
     if body.confirmed_by is not None:
         name = body.confirmed_by.strip()[:50]  # 최대 50자, 앞뒤 공백 제거
         fields.append("confirmed_by=?"); params.append(name if name else None)

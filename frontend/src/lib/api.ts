@@ -1716,6 +1716,7 @@ export interface InboundItem {
   batch_id: string;
   line_no: number;
   confirmed_by: string | null;
+  item_wholesale: string | null;
   item_name: string | null;
   option_text: string | null;
   unit_price: number | null;
@@ -1895,9 +1896,10 @@ export async function deleteInboundItem(token: string, itemId: string) {
 
 export async function updateInboundItem(token: string, itemId: string, body: Partial<{
   actual_qty: number; missing_qty: number; status: string; memo: string;
+  item_name: string; item_wholesale: string;
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
   supplier_location: string; supplier_contact: string;
-  confirmed_by: string;  // 로그인 없이 접근하는 작업자 이름
+  confirmed_by: string;
 }>) {
   return fetchApi<{ ok: boolean }>(
     `/inbound/items/${itemId}`,
