@@ -1844,10 +1844,20 @@ export interface InboundRegisteredVendor {
   aliases: string[];
 }
 
+export interface VendorAlias {
+  canonical: string;
+  aliases: string[];
+  memo: string | null;
+}
+
 export async function listInboundVendors(token: string) {
   return fetchApi<{ registered: InboundRegisteredVendor[]; recent: string[] }>(
     '/inbound/vendors', { headers: inboundHeaders(token) }
   );
+}
+
+export async function getVendorAliases(token: string) {
+  return fetchApi<{ aliases: VendorAlias[] }>('/inbound/vendor-aliases', { headers: inboundHeaders(token) });
 }
 
 export async function upsertVendorAlias(token: string, canonical: string, aliases: string[], memo?: string) {

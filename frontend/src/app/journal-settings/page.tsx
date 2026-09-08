@@ -15,9 +15,13 @@ import {
   deleteRepairWorkType,
   saveRepairDefect,
   deleteRepairDefect,
+  getVendorAliases,
+  upsertVendorAlias,
+  deleteVendorAlias,
   RepairBarcode,
   RepairWorkType,
   RepairDefect,
+  VendorAlias,
 } from '@/lib/api';
 
 const inputStyle: React.CSSProperties = {
@@ -282,6 +286,245 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
 }
 
 // ─── 작업/불량 설정 탭 ────────────────────────────────────────────
+// ─────────────────────────────────────
+// 화주사 별칭 관리 탭
+// ─────────────────────────────────────
+
+function VendorAliasTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; text: string } | null) => void }) {
+  const [token, setToken] = useState('');
+  const [aliases, setAliases] = useState<VendorAlias[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<VendorAlias | null>(null);
+  const [newCanonical, setNewCanonical] = useState('');
+  const [newAliases, setNewAliases] = useState('');
+  const [newMemo, setNewMemo] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const tok = localStorage.getItem('token') || '';
+    setToken(tok);
+    if (tok) load(tok);
+  }, []);
+
+  async function load(tok: string) {
+    setLoading(true);
+    try {
+      const r = await getVendorAliases(tok);
+      setAliases(r.aliases);
+    } catch {
+      onMessage({ type: 'error', text: '별칭 목록 불러오기 실패' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSave(canonical: string, aliasStr: string, memo: string) {
+    setSaving(true);
+    try {
+      const list = aliasStr.split(',').map(a => a.trim()).filter(Boolean);
+      await upsertVendorAlias(token, canonical, list, memo || undefined);
+      onMessage({ type: 'success', text: `"${canonical}" 별칭 저장됨` });
+      setEditing(null);
+      setNewCanonical(''); setNewAliases(''); setNewMemo('');
+      load(token);
+    } catch {
+      onMessage({ type: 'error', text: '저장 실패' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(canonical: string) {
+    if (!confirm(`"${canonical}" 별칭을 삭제할까요?`)) return;
+    try {
+      await deleteVendorAlias(token, canonical);
+      onMessage({ type: 'success', text: '삭제됨' });
+      load(token);
+    } catch {
+      onMessage({ type: 'error', text: '삭제 실패' });
+    }
+  }
+
+  const thStyle: React.CSSProperties = {
+    padding: '0.5rem 0.75rem', textAlign: 'left',
+    borderBottom: '2px solid #e5e7eb', fontSize: '0.82rem',
+    color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap',
+  };
+  const tdStyle: React.CSSProperties = {
+    padding: '0.6rem 0.75rem', borderBottom: '1px solid #f3f4f6',
+    fontSize: '0.875rem', verticalAlign: 'middle',
+  };
+
+  return (
+    <div>
+      {/* 설명 */}
+      <Card title="화주사 별칭이란?">
+        <p style={{ fontSize: '0.875rem', color: '#374151', lineHeight: 1.7, margin: 0 }}>
+          <strong>정식 업체명</strong>(repair_barcode 에 등록된 업체명)에 대해 OCR·봇이 읽는 다양한 표기를 <strong>별칭</strong>으로 등록합니다.<br />
+          예: 업체명 <code>자체제작_베으</code> → 별칭 <code>베으, 베으샵, BEEU</code><br />
+          입고 OCR 매칭 시 별칭까지 확장해 바코드 풀을 검색합니다.
+        </p>
+      </Card>
+
+      {/* 신규 등록 폼 */}
+      <Card title="+ 별칭 새로 등록">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 8, alignItems: 'end' }}>
+          <Field label="정식 업체명 (canonical)">
+            <input
+              value={newCanonical}
+              onChange={e => setNewCanonical(e.target.value)}
+              placeholder="자체제작_베으"
+              style={inputStyle}
+            />
+          </Field>
+          <Field label="별칭 (쉼표 구분)">
+            <input
+              value={newAliases}
+              onChange={e => setNewAliases(e.target.value)}
+              placeholder="베으, 베으샵, BEEU"
+              style={inputStyle}
+            />
+          </Field>
+          <Field label="메모">
+            <input
+              value={newMemo}
+              onChange={e => setNewMemo(e.target.value)}
+              placeholder="선택 메모"
+              style={inputStyle}
+            />
+          </Field>
+          <button
+            onClick={() => newCanonical.trim() && handleSave(newCanonical.trim(), newAliases, newMemo)}
+            disabled={saving || !newCanonical.trim()}
+            style={{ ...btn('#2563eb'), opacity: (saving || !newCanonical.trim()) ? 0.5 : 1, whiteSpace: 'nowrap' }}
+          >
+            {saving ? '저장 중…' : '등록'}
+          </button>
+        </div>
+      </Card>
+
+      {/* 목록 */}
+      <Card title="등록된 별칭 목록">
+        {loading ? <Loading /> : aliases.length === 0 ? (
+          <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>등록된 별칭이 없습니다. 위에서 추가하세요.</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ background: '#f9fafb' }}>
+                  <th style={thStyle}>정식 업체명</th>
+                  <th style={thStyle}>별칭 목록</th>
+                  <th style={thStyle}>메모</th>
+                  <th style={thStyle}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {aliases.map(a => (
+                  <tr key={a.canonical}>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{a.canonical}</td>
+                    <td style={tdStyle}>
+                      {a.aliases.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {a.aliases.map(al => (
+                            <span key={al} style={{
+                              background: '#ede9fe', color: '#7c3aed',
+                              borderRadius: 12, padding: '2px 8px', fontSize: '0.78rem', fontWeight: 500,
+                            }}>{al}</span>
+                          ))}
+                        </div>
+                      ) : <span style={{ color: '#9ca3af' }}>없음</span>}
+                    </td>
+                    <td style={{ ...tdStyle, color: '#6b7280' }}>{a.memo || '-'}</td>
+                    <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => setEditing({ ...a })}
+                        style={{ ...btn('#6b7280'), padding: '0.25rem 0.6rem', fontSize: '0.78rem', marginRight: 4 }}
+                      >수정</button>
+                      <button
+                        onClick={() => handleDelete(a.canonical)}
+                        style={{ ...btn('#dc2626'), padding: '0.25rem 0.6rem', fontSize: '0.78rem' }}
+                      >삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* 수정 모달 */}
+      {editing && (
+        <EditAliasModal
+          initial={editing}
+          saving={saving}
+          onClose={() => setEditing(null)}
+          onSave={(aliasStr, memo) => handleSave(editing.canonical, aliasStr, memo)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditAliasModal({ initial, saving, onClose, onSave }: {
+  initial: VendorAlias;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (aliases: string, memo: string) => void;
+}) {
+  const [aliasStr, setAliasStr] = useState(initial.aliases.join(', '));
+  const [memo, setMemo] = useState(initial.memo || '');
+
+  const overlay: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 500,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(0,0,0,0.45)',
+  };
+  const box: React.CSSProperties = {
+    background: '#fff', borderRadius: 10, padding: '1.5rem',
+    width: 420, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+  };
+
+  return (
+    <div style={overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={box} onMouseDown={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '1rem' }}>
+          ✎ &quot;{initial.canonical}&quot; 별칭 수정
+        </div>
+        <Field label="별칭 (쉼표 구분)">
+          <textarea
+            value={aliasStr}
+            onChange={e => setAliasStr(e.target.value)}
+            placeholder="베으, 베으샵, BEEU"
+            rows={3}
+            style={{ ...inputStyle, resize: 'vertical' }}
+          />
+        </Field>
+        <div style={{ marginTop: 8 }}>
+          <Field label="메모">
+            <input value={memo} onChange={e => setMemo(e.target.value)} style={inputStyle} />
+          </Field>
+        </div>
+        <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 6 }}>
+          OCR·봇이 이 별칭으로 읽어도 <strong>{initial.canonical}</strong> 바코드 목록에서 매칭합니다.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={{ ...btn('#9ca3af') }}>취소</button>
+          <button
+            onClick={() => onSave(aliasStr, memo)}
+            disabled={saving}
+            style={{ ...btn('#2563eb'), opacity: saving ? 0.6 : 1 }}
+          >{saving ? '저장 중…' : '저장'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────
+// 작업/불량 설정 탭
+// ─────────────────────────────────────
+
 function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; text: string } | null) => void }) {
   const [workTypes, setWorkTypes] = useState<RepairWorkType[]>([]);
   const [defects, setDefects] = useState<RepairDefect[]>([]);
@@ -446,12 +689,13 @@ function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error';
 
 // ─── 메인 페이지 ──────────────────────────────────────────────────
 export default function JournalSettingsPage() {
-  const [tab, setTab] = useState<'barcodes' | 'catalog'>('barcodes');
+  const [tab, setTab] = useState<'barcodes' | 'catalog' | 'vendor-aliases'>('barcodes');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const tabs: [string, string][] = [
     ['barcodes', '바코드 등록'],
     ['catalog', '작업/불량 설정'],
+    ['vendor-aliases', '화주사 별칭 관리'],
   ];
 
   return (
@@ -497,6 +741,9 @@ export default function JournalSettingsPage() {
       </div>
       <div style={{ display: tab === 'catalog' ? 'block' : 'none' }}>
         <CatalogTab onMessage={setMessage} />
+      </div>
+      <div style={{ display: tab === 'vendor-aliases' ? 'block' : 'none' }}>
+        <VendorAliasTab onMessage={setMessage} />
       </div>
     </div>
   );
