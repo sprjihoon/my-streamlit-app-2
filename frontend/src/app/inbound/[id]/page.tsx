@@ -62,9 +62,11 @@ const ITEM_STATUS_OPTS: { value: string; label: string; color: string }[] = [
 // 품목 카드 컴포넌트
 // ─────────────────────────────────────
 
-function ItemCard({ item, token, onUpdated, onDelete }: {
+function ItemCard({ item, token, workerName, isAdmin, onUpdated, onDelete }: {
   item: InboundItem;
   token: string;
+  workerName: string;
+  isAdmin: boolean;
   onUpdated: () => void;
   onDelete?: () => void;
 }) {
@@ -100,6 +102,7 @@ function ItemCard({ item, token, onUpdated, onDelete }: {
         actual_qty: actualQty,
         missing_qty: missingQty,
         status: autoStatus,
+        ...(workerName ? { confirmed_by: workerName } : {}),
       });
       setStatus(autoStatus);
       setSaved(true);
@@ -116,7 +119,10 @@ function ItemCard({ item, token, onUpdated, onDelete }: {
     setStatus(newStatus);
     setSaving(true);
     try {
-      await updateInboundItem(token, item.id, { status: newStatus });
+      await updateInboundItem(token, item.id, {
+        status: newStatus,
+        ...(workerName ? { confirmed_by: workerName } : {}),
+      });
       onUpdated();
     } catch {
       alert('상태 변경 실패');
@@ -213,11 +219,18 @@ function ItemCard({ item, token, onUpdated, onDelete }: {
           </div>
           <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{item.item_name || '(품명 없음)'}</div>
           {item.option_text && <div style={{ fontSize: 13, color: '#6b7280', marginTop: 1 }}>{item.option_text}</div>}
-          {item.updated_at && (
-            <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 2 }}>
-              수정: {item.updated_at.replace('T', ' ').slice(0, 16)}
-            </div>
-          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
+            {item.confirmed_by && (
+              <span style={{ fontSize: 10, color: '#4361ee', background: '#eef2ff', padding: '1px 6px', borderRadius: 8 }}>
+                입력: {item.confirmed_by}
+              </span>
+            )}
+            {item.updated_at && (
+              <span style={{ fontSize: 10, color: '#d1d5db' }}>
+                {item.updated_at.replace('T', ' ').slice(0, 16)}
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
           <div style={{
@@ -228,26 +241,30 @@ function ItemCard({ item, token, onUpdated, onDelete }: {
           }}>
             {statusInfo?.label || status}
           </div>
-          <button
-            onClick={() => setEditMode(m => !m)}
-            style={{
-              fontSize: 11, padding: '3px 9px', borderRadius: 8,
-              background: editMode ? '#4361ee' : '#f3f4f6',
-              color: editMode ? '#fff' : '#6b7280',
-              border: 'none', cursor: 'pointer', fontWeight: 600,
-            }}
-          >
-            ✏️ {editMode ? '닫기' : '수정'}
-          </button>
-          {onDelete && (
-            <button
-              onClick={() => { if (confirm(`"${item.item_name || item.line_no + '번'}" 품목을 삭제하시겠습니까?`)) onDelete(); }}
-              style={{
-                fontSize: 11, padding: '3px 9px', borderRadius: 8,
-                background: '#fef2f2', color: '#dc2626',
-                border: '1px solid #fecaca', cursor: 'pointer', fontWeight: 600,
-              }}
-            >🗑 삭제</button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => setEditMode(m => !m)}
+                style={{
+                  fontSize: 11, padding: '3px 9px', borderRadius: 8,
+                  background: editMode ? '#4361ee' : '#f3f4f6',
+                  color: editMode ? '#fff' : '#6b7280',
+                  border: 'none', cursor: 'pointer', fontWeight: 600,
+                }}
+              >
+                ✏️ {editMode ? '닫기' : '수정'}
+              </button>
+              {onDelete && (
+                <button
+                  onClick={() => { if (confirm(`"${item.item_name || item.line_no + '번'}" 품목을 삭제하시겠습니까?`)) onDelete(); }}
+                  style={{
+                    fontSize: 11, padding: '3px 9px', borderRadius: 8,
+                    background: '#fef2f2', color: '#dc2626',
+                    border: '1px solid #fecaca', cursor: 'pointer', fontWeight: 600,
+                  }}
+                >🗑 삭제</button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -389,63 +406,70 @@ function ItemCard({ item, token, onUpdated, onDelete }: {
           </div>
         </div>
 
-        {/* 저장 버튼 */}
+        {/* 저장 버튼 (비로그인 시 이름 필수) */}
+        {!isAdmin && !workerName && (
+          <div style={{ marginBottom: 10, padding: '8px 12px', background: '#fffbeb', borderRadius: 8, fontSize: 12, color: '#a16207', border: '1px solid #fbbf24' }}>
+            ↑ 상단에서 이름을 먼저 입력해주세요
+          </div>
+        )}
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || (!isAdmin && !workerName)}
           style={{
             width: '100%', padding: '12px', borderRadius: 8,
-            background: saving ? '#9ca3af' : '#4361ee',
+            background: (saving || (!isAdmin && !workerName)) ? '#9ca3af' : '#4361ee',
             color: '#fff', border: 'none', fontSize: 15, fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
+            cursor: (saving || (!isAdmin && !workerName)) ? 'not-allowed' : 'pointer',
             marginBottom: 10,
           }}
         >
           {saving ? '저장 중…' : '수량 저장'}
         </button>
 
-        {/* 제품 사진 */}
-        <div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>제품 사진</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-            {photos.map((photo) => (
-              <div key={photo.id} style={{ position: 'relative' }}>
-                <img
-                  src={`${API_BASE}${photo.url}?t=${getToken()}`}
-                  alt="제품사진"
-                  style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7f0' }}
-                  onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
+        {/* 제품 사진 (관리자만) */}
+        {isAdmin && (
+          <div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>제품 사진</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              {photos.map((photo) => (
+                <div key={photo.id} style={{ position: 'relative' }}>
+                  <img
+                    src={`${API_BASE}${photo.url}?t=${getToken()}`}
+                    alt="제품사진"
+                    style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7f0' }}
+                    onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
+                  />
+                  <button
+                    onClick={() => handlePhotoDelete(photo.id, photo.filename)}
+                    style={{
+                      position: 'absolute', top: -6, right: -6,
+                      width: 20, height: 20, borderRadius: '50%',
+                      background: '#dc2626', color: '#fff', border: 'none',
+                      fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <label style={{
+                width: 72, height: 72, borderRadius: 8,
+                border: '2px dashed #e5e7f0', background: '#f8f9fc',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                cursor: uploading ? 'wait' : 'pointer', color: '#9ca3af', fontSize: 10,
+              }}>
+                <span style={{ fontSize: 22 }}>{uploading ? '⏳' : '📷'}</span>
+                <span>{uploading ? '업로드 중' : '사진 추가'}</span>
+                <input
+                  type="file" accept="image/*" capture="environment"
+                  style={{ display: 'none' }}
+                  onChange={handlePhotoUpload}
+                  disabled={uploading}
                 />
-                <button
-                  onClick={() => handlePhotoDelete(photo.id, photo.filename)}
-                  style={{
-                    position: 'absolute', top: -6, right: -6,
-                    width: 20, height: 20, borderRadius: '50%',
-                    background: '#dc2626', color: '#fff', border: 'none',
-                    fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            <label style={{
-              width: 72, height: 72, borderRadius: 8,
-              border: '2px dashed #e5e7f0', background: '#f8f9fc',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              cursor: uploading ? 'wait' : 'pointer', color: '#9ca3af', fontSize: 10,
-            }}>
-              <span style={{ fontSize: 22 }}>{uploading ? '⏳' : '📷'}</span>
-              <span>{uploading ? '업로드 중' : '사진 추가'}</span>
-              <input
-                type="file" accept="image/*" capture="environment"
-                style={{ display: 'none' }}
-                onChange={handlePhotoUpload}
-                disabled={uploading}
-              />
-            </label>
+              </label>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -724,6 +748,11 @@ export default function InboundWorkPage() {
   const [closing, setClosing] = useState(false);
   const [closeMsg, setCloseMsg] = useState('');
 
+  // 작업자 이름 (로그인 없이 접근하는 경우)
+  const [workerName, setWorkerName] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [showNameEdit, setShowNameEdit] = useState(false);
+
   // OCR
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrMsg, setOcrMsg] = useState('');
@@ -731,18 +760,8 @@ export default function InboundWorkPage() {
   // 수동 추가 모달
   const [showAddModal, setShowAddModal] = useState(false);
 
-  useEffect(() => {
-    const tok = localStorage.getItem('token') || '';
-    setToken(tok);
-    if (!tok) {
-      setError('로그인이 필요합니다. 앱에서 로그인 후 다시 열어주세요.');
-      setLoading(false);
-      return;
-    }
-  }, []);
-
   const reload = useCallback(async (tok: string) => {
-    if (!tok || !id) return;
+    if (!id) return;
     setLoading(true);
     try {
       const data = await getInboundBatch(tok, id);
@@ -755,8 +774,13 @@ export default function InboundWorkPage() {
   }, [id]);
 
   useEffect(() => {
-    if (token) reload(token);
-  }, [token, reload]);
+    const tok = localStorage.getItem('token') || '';
+    const savedName = localStorage.getItem('inbound_worker_name') || '';
+    setToken(tok);
+    setWorkerName(savedName);
+    setNameInput(savedName);
+    reload(tok);  // 토큰 없어도 로드 가능
+  }, [reload]);
 
   async function handleOcr(file: File) {
     if (!batch) return;
@@ -803,12 +827,20 @@ export default function InboundWorkPage() {
     return (
       <div style={{ minHeight: '100vh', background: '#f0f2f8', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
         <div style={{ background: '#fff', borderRadius: 12, padding: 24, textAlign: 'center', maxWidth: 320 }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📦</div>
           <div style={{ color: '#dc2626', fontSize: 14 }}>{error}</div>
-          <a href="/login" style={{ display: 'block', marginTop: 16, color: '#4361ee', fontSize: 14 }}>로그인 페이지로</a>
         </div>
       </div>
     );
+  }
+
+  const isAdmin = !!token;
+
+  function saveName() {
+    const name = nameInput.trim();
+    setWorkerName(name);
+    localStorage.setItem('inbound_worker_name', name);
+    setShowNameEdit(false);
   }
 
   if (loading) {
@@ -865,6 +897,50 @@ export default function InboundWorkPage() {
         )}
       </div>
 
+      {/* 이름 배너 (로그인 없이 접근하는 작업자용) */}
+      {!isAdmin && (
+        <div style={{
+          background: workerName ? '#f0fdf4' : '#fffbeb',
+          borderBottom: `2px solid ${workerName ? '#86efac' : '#fbbf24'}`,
+          padding: '10px 16px',
+        }}>
+          {!workerName || showNameEdit ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#a16207', whiteSpace: 'nowrap' }}>👤 이름:</span>
+              <input
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveName(); }}
+                placeholder="이름을 입력하세요"
+                autoFocus
+                style={{
+                  flex: 1, padding: '6px 10px', border: '1px solid #fbbf24',
+                  borderRadius: 8, fontSize: 14, outline: 'none',
+                }}
+              />
+              <button
+                onClick={saveName}
+                disabled={!nameInput.trim()}
+                style={{
+                  padding: '6px 14px', background: nameInput.trim() ? '#4361ee' : '#9ca3af',
+                  color: '#fff', border: 'none', borderRadius: 8,
+                  fontSize: 13, fontWeight: 700, cursor: nameInput.trim() ? 'pointer' : 'not-allowed',
+                  whiteSpace: 'nowrap',
+                }}
+              >확인</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, color: '#15803d' }}>👤 입력자: <strong>{workerName}</strong></span>
+              <button
+                onClick={() => { setShowNameEdit(true); setNameInput(workerName); }}
+                style={{ fontSize: 12, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+              >변경</button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 수량 요약 */}
       <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: '#fff', borderBottom: '1px solid #f3f4f6' }}>
         {[
@@ -913,45 +989,48 @@ export default function InboundWorkPage() {
               </div>
             )}
 
-            {/* 장끼 사진 OCR 버튼 */}
-            <label style={{
-              display: 'block', marginTop: 16,
-              padding: '13px 24px',
-              background: ocrLoading ? '#9ca3af' : '#a16207',
-              color: '#fff', borderRadius: 10,
-              fontSize: 15, fontWeight: 700,
-              cursor: ocrLoading ? 'not-allowed' : 'pointer',
-              textAlign: 'center',
-            }}>
-              {ocrLoading ? (
-                <span>🤖 AI 분석 중… (10~30초)</span>
-              ) : (
-                <span>📷 장끼 사진 촬영 → AI 분석</span>
-              )}
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                style={{ display: 'none' }}
-                disabled={ocrLoading}
-                onChange={e => {
-                  const f = e.target.files?.[0];
-                  if (f) handleOcr(f);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-
-            <button
-              onClick={() => setShowAddModal(true)}
-              style={{
-                marginTop: 10, padding: '10px 24px',
-                background: 'transparent', color: '#4361ee',
-                border: '2px solid #4361ee', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              ➕ 품목 직접 입력
-            </button>
+            {/* 관리자만: OCR + 품목추가 */}
+            {isAdmin && (
+              <>
+                <label style={{
+                  display: 'block', marginTop: 16,
+                  padding: '13px 24px',
+                  background: ocrLoading ? '#9ca3af' : '#a16207',
+                  color: '#fff', borderRadius: 10,
+                  fontSize: 15, fontWeight: 700,
+                  cursor: ocrLoading ? 'not-allowed' : 'pointer',
+                  textAlign: 'center',
+                }}>
+                  {ocrLoading ? (
+                    <span>🤖 AI 분석 중… (10~30초)</span>
+                  ) : (
+                    <span>📷 장끼 사진 촬영 → AI 분석</span>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: 'none' }}
+                    disabled={ocrLoading}
+                    onChange={e => {
+                      const f = e.target.files?.[0];
+                      if (f) handleOcr(f);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  style={{
+                    marginTop: 10, padding: '10px 24px',
+                    background: 'transparent', color: '#4361ee',
+                    border: '2px solid #4361ee', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  ➕ 품목 직접 입력
+                </button>
+              </>
+            )}
           </div>
         ) : (
           items.map(item => (
@@ -959,22 +1038,24 @@ export default function InboundWorkPage() {
               key={item.id}
               item={item}
               token={token}
+              workerName={workerName}
+              isAdmin={isAdmin}
               onUpdated={() => reload(token)}
-              onDelete={async () => {
+              onDelete={isAdmin ? async () => {
                 try {
                   await deleteInboundItem(token, item.id);
                   await reload(token);
                 } catch (e) {
                   alert('삭제 실패: ' + (e instanceof Error ? e.message : String(e)));
                 }
-              }}
+              } : undefined}
             />
           ))
         )}
       </div>
 
-      {/* 품목 직접 추가 + 재분석 버튼 (항상 표시) */}
-      {items.length > 0 && (
+      {/* 관리자 전용: OCR 재분석 + 품목 직접 추가 */}
+      {isAdmin && items.length > 0 && (
         <div style={{ padding: '0 16px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {ocrMsg && (
             <div style={{
@@ -1024,8 +1105,8 @@ export default function InboundWorkPage() {
         />
       )}
 
-      {/* ── AM / PM 마감 버튼 ─────────── */}
-      {['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status) && (
+      {/* ── AM / PM 마감 버튼 (관리자만) ─────────── */}
+      {isAdmin && ['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status) && (
         <div style={{ padding: '0 16px 32px' }}>
           {closeMsg && (
             <div style={{

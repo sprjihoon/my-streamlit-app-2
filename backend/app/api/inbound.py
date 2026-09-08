@@ -135,6 +135,7 @@ class InboundItemUpdate(BaseModel):
     matched_option: Optional[str] = None
     supplier_location: Optional[str] = None
     supplier_contact: Optional[str] = None
+    confirmed_by: Optional[str] = None  # 로그인 없이 접근하는 작업자 이름
 
 
 class InboundItemCreate(BaseModel):
@@ -282,6 +283,7 @@ def ensure_inbound_tables():
             "supplier_location TEXT",
             "supplier_contact TEXT",
             "updated_at DATETIME",
+            "confirmed_by TEXT",  # 로그인 없이 접근하는 작업자 이름
         ]:
             try:
                 con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
@@ -395,6 +397,7 @@ def _serialize_item(row) -> dict:
         "supplier_contact": row[18],
         "created_at": row[19],
         "updated_at": row[20],
+        "confirmed_by": row[21] if len(row) > 21 else None,
     }
 
 
@@ -847,7 +850,7 @@ def get_batch(
     batch_id: str,
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 실수량 입력 링크는 로그인 없이 접근 가능 (배치 ID가 비밀 토큰 역할)
     with get_connection() as con:
         row = con.execute("""
             SELECT id, vendor, inbound_date, status, memo, receipt_id,
@@ -865,7 +868,8 @@ def get_batch(
                    janggi_qty, actual_qty, missing_qty, status,
                    matched_barcode, matched_vendor, matched_product, matched_option,
                    match_confidence, needs_matching, memo,
-                   supplier_location, supplier_contact, created_at, updated_at
+                   supplier_location, supplier_contact, created_at, updated_at,
+                   confirmed_by
             FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
         """, (batch_id,)).fetchall()
         item_list = []
@@ -1090,7 +1094,7 @@ def update_item(
     body: InboundItemUpdate,
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 실수량 입력은 로그인 없이도 가능 — confirmed_by로 입력자 이름 기록
     fields, params = [], []
 
     if body.actual_qty is not None:
@@ -1103,6 +1107,9 @@ def update_item(
         fields.append("status=?"); params.append(body.status)
     if body.memo is not None:
         fields.append("memo=?"); params.append(body.memo)
+    if body.confirmed_by is not None:
+        name = body.confirmed_by.strip()[:50]  # 최대 50자, 앞뒤 공백 제거
+        fields.append("confirmed_by=?"); params.append(name if name else None)
     if body.matched_barcode is not None:
         fields.append("matched_barcode=?"); params.append(body.matched_barcode)
         fields.append("needs_matching=0")

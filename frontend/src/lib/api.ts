@@ -1715,6 +1715,7 @@ export interface InboundItem {
   id: string;
   batch_id: string;
   line_no: number;
+  confirmed_by: string | null;
   item_name: string | null;
   option_text: string | null;
   unit_price: number | null;
@@ -1774,7 +1775,9 @@ export async function createInboundBatch(token: string, body: { vendor: string; 
 }
 
 export async function getInboundBatch(token: string, batchId: string) {
-  return fetchApi<InboundBatch>(`/inbound/batches/${batchId}`, { headers: inboundHeaders(token) });
+  // 실수량 입력 링크는 토큰 없이도 접근 가능
+  const opts: RequestInit = token ? { headers: inboundHeaders(token) } : {};
+  return fetchApi<InboundBatch>(`/inbound/batches/${batchId}`, opts);
 }
 
 export async function updateInboundBatch(token: string, batchId: string, body: { status?: string; memo?: string; vendor?: string; inbound_date?: string }) {
@@ -1894,6 +1897,7 @@ export async function updateInboundItem(token: string, itemId: string, body: Par
   actual_qty: number; missing_qty: number; status: string; memo: string;
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
   supplier_location: string; supplier_contact: string;
+  confirmed_by: string;  // 로그인 없이 접근하는 작업자 이름
 }>) {
   return fetchApi<{ ok: boolean }>(
     `/inbound/items/${itemId}`,
