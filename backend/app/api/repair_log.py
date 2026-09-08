@@ -543,10 +543,11 @@ def _find_col(columns, *names) -> Optional[str]:
 
 
 def _find_vendor_col(columns) -> Optional[str]:
-    """공급처가 여러 개면 마지막 열만 업체명. '공급처 상품명' 등은 제외."""
+    """공급처 열이 여러 개면 첫 번째(화주사=업체명). 마지막은 도매처이므로 제외.
+    '공급처 상품명' 등 복합 헤더는 제외."""
     matches = [c for c in columns if str(c).strip() == "공급처"]
     if matches:
-        return matches[-1]
+        return matches[0]   # [0] = 화주사(업체명), [-1] = 도매처
     return _find_col(columns, "업체명")
 
 
