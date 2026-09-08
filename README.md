@@ -374,7 +374,7 @@ Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는
 | 수선작업일지 (웹 + 같은 봇) | ✅ 완료 |
 | 수선일지 엑셀 보고 (업체·기간 필터 + 작업 사진 포함) | ✅ 완료 |
 | 바코드 사진 미저장 (봇·웹 모두) | ✅ 완료 |
-| **불량모드 봇 + 불량일지 페이지** | ✅ 완료 (2026-09-08) |
+| **불량모드 봇 + 불량일지 페이지** | ✅ 완료 |
 | 연차 관리 / 결재 워크플로우 | ✅ 완료 |
 | 연차 캘린더 뷰 | ✅ 완료 |
 | 업체/요금표/매핑 관리 | ✅ 완료 |
@@ -385,7 +385,36 @@ Vercel에 FastAPI entrypoint(`pyproject.toml`의 `tool.vercel`)를 넣지 않는
 | 알림장 관리 | ✅ 완료 |
 | 사용자/권한 관리 | ✅ 완료 |
 | 시스템 로그 | ✅ 완료 |
-| **입고모드 (봇·웹·공유링크·바코드PDF)** | 🔲 개발 예정 (2026-09-08 기획 확정) |
+| **입고모드 (봇·웹·공유링크·바코드PDF)** | ✅ 완료 (2026-09-08) |
+| **도매처 프론트 연결** (journal-settings) | ✅ 완료 (2026-09-08) |
+
+---
+
+---
+
+## 🗓️ 개발 이력
+
+### 2026-09-08 — 입고모드 전체 구현 + 코드검증
+
+#### 구현 내용
+
+| 항목 | 설명 |
+|---|---|
+| **DB 마이그레이션** | `inbound_batches`, `inbound_items`, `inbound_item_photos`, `inbound_share_links`, `barcode_print_jobs` 테이블 생성. `defect_log·repair_work_log`에 `inbound_item_id`, `defect_case_id` 컬럼 추가 |
+| **백엔드 API** | `/inbound/*` 16개 엔드포인트: 배치 CRUD, 아이템 수량 업데이트, OCR(장끼 → 품목 자동 매칭), 마감, 바코드 PDF 생성, 공유 링크 생성·조회, 사진 서빙, 통계 |
+| **입고일지 웹** (`/inbound-log`) | 배치 목록(화주사·상태·기간 필터), 신규 등록 모달, 상세 모달(OCR 업로드·품목 수량 확인·바코드 PDF·공유 링크) |
+| **모바일 작업 링크** (`/inbound/[id]`) | 사이드바 없는 모바일 전용 페이지. 직원이 링크만 열어 사진+수량 입력 |
+| **봇 MODE_INBOUND** | 네이버웍스에서 `입고`, `오늘 물건 들어왔어` 등 트리거 → 화주사 선택 → 장끼 사진 업로드 → OCR 매칭 → 모바일 작업 링크 제공 → `현황`, `링크`, `입고 마감` 명령 처리 |
+| **바코드 라벨 PDF** | `reportlab` Code128 사용. 실입고 수량만큼 라벨 생성 (바코드·제품명·화주사·날짜) |
+| **화주사 공유 링크** (`/share/[token]`) | 로그인 없는 읽기 전용 페이지. 수량 현황·품목 상세 실시간 표시. 만료일 설정 가능 |
+| **도매처 프론트 연결** | `journal-settings` 수동 등록 폼·바코드 목록 테이블·수정 폼에 `도매처` 필드 추가 |
+
+#### 버그 수정 (코드검증 테스트)
+
+| # | 파일 | 버그 | 수정 |
+|---|---|---|---|
+| 1 | `backend/app/api/inbound.py` | `_get_user()`가 `users.session_token` 조회 (컬럼 없음) | `sessions JOIN users WHERE s.token=?` 로 수정 |
+| 2 | `frontend/.../inbound-log/page.tsx`, `inbound/[id]/page.tsx` | `localStorage.getItem('auth_token')` — 실제 키는 `'token'` | `'token'`으로 수정 |
 
 ---
 
