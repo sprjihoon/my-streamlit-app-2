@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import {
   getInboundBatch,
+  addInboundItem,
   updateInboundItem,
   closeInboundBatch,
   InboundBatch,
@@ -321,6 +322,11 @@ export default function InboundWorkPage() {
   const [closing, setClosing] = useState(false);
   const [closeMsg, setCloseMsg] = useState('');
 
+  // 수동 추가 모달
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+  const [adding, setAdding] = useState(false);
+
   useEffect(() => {
     const tok = localStorage.getItem('token') || '';
     setToken(tok);
@@ -368,6 +374,27 @@ export default function InboundWorkPage() {
       setCloseMsg('오류: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setClosing(false);
+    }
+  }
+
+  async function handleAddItem() {
+    if (!batch || !addForm.item_name.trim()) return;
+    setAdding(true);
+    try {
+      await addInboundItem(token, batch.id, {
+        item_name: addForm.item_name.trim(),
+        option_text: addForm.option_text.trim() || undefined,
+        janggi_qty: addForm.janggi_qty,
+        unit_price: addForm.unit_price ? Number(addForm.unit_price) : undefined,
+        memo: 'manual',
+      });
+      setShowAddModal(false);
+      setAddForm({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+      await reload(token);
+    } catch {
+      alert('품목 추가 실패');
+    } finally {
+      setAdding(false);
     }
   }
 
@@ -456,10 +483,35 @@ export default function InboundWorkPage() {
       {/* 품목 목록 */}
       <div style={{ padding: '12px 16px' }}>
         {items.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#9ca3af' }}>
+          <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#9ca3af' }}>
             <div style={{ fontSize: 40, marginBottom: 8 }}>📋</div>
-            <div>장끼 OCR 후 품목이 표시됩니다.</div>
-            <div style={{ fontSize: 12, marginTop: 8 }}>PC에서 입고일지를 열어 OCR을 먼저 실행해주세요.</div>
+            {batch.status === 'ocr_pending' ? (
+              <>
+                <div style={{ fontWeight: 600, color: '#374151', fontSize: 14 }}>장끼 OCR 대기 중</div>
+                <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+                  봇 채팅에 장끼 사진을 보내면 자동으로 품목이 채워집니다.<br />
+                  수기 영수증이거나 OCR이 어렵다면 아래에서 직접 입력해주세요.
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 600, color: '#374151', fontSize: 14 }}>OCR 결과 품목 없음</div>
+                <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+                  수기 영수증이거나 인식에 실패했을 수 있습니다.<br />
+                  아래 버튼으로 품목을 직접 입력해주세요.
+                </div>
+              </>
+            )}
+            <button
+              onClick={() => setShowAddModal(true)}
+              style={{
+                marginTop: 16, padding: '10px 24px',
+                background: '#4361ee', color: '#fff',
+                border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              ➕ 품목 직접 추가
+            </button>
           </div>
         ) : (
           items.map(item => (
@@ -467,6 +519,96 @@ export default function InboundWorkPage() {
           ))
         )}
       </div>
+
+      {/* 품목 직접 추가 버튼 (항상 표시) */}
+      {items.length > 0 && (
+        <div style={{ padding: '0 16px 4px' }}>
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              width: '100%', padding: '10px', border: '2px dashed #c7d2fe',
+              background: '#eef2ff', color: '#4361ee', borderRadius: 8,
+              fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            ➕ 품목 직접 추가
+          </button>
+        </div>
+      )}
+
+      {/* 수동 추가 모달 */}
+      {showAddModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200,
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: '16px 16px 0 0',
+            padding: '24px 20px 36px', width: '100%', maxWidth: 480,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>품목 직접 추가</div>
+
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>품명 *</label>
+            <input
+              value={addForm.item_name}
+              onChange={e => setAddForm(f => ({ ...f, item_name: e.target.value }))}
+              placeholder="예) 타원 백팩"
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }}
+            />
+
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>옵션 (색상·사이즈 등)</label>
+            <input
+              value={addForm.option_text}
+              onChange={e => setAddForm(f => ({ ...f, option_text: e.target.value }))}
+              placeholder="예) 블랙, L"
+              style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }}
+            />
+
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>장끼 수량 *</label>
+                <input
+                  type="number" inputMode="numeric" min={1}
+                  value={addForm.janggi_qty}
+                  onChange={e => setAddForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 18, fontWeight: 700, textAlign: 'center', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>단가 (선택)</label>
+                <input
+                  type="number" inputMode="numeric" min={0}
+                  value={addForm.unit_price}
+                  onChange={e => setAddForm(f => ({ ...f, unit_price: e.target.value }))}
+                  placeholder="0"
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, textAlign: 'center', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setShowAddModal(false)}
+                style={{ flex: 1, padding: '13px', border: '1px solid #e5e7f0', background: '#fff', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer', color: '#6b7280' }}
+              >
+                취소
+              </button>
+              <button
+                onClick={handleAddItem}
+                disabled={adding || !addForm.item_name.trim()}
+                style={{
+                  flex: 2, padding: '13px', border: 'none',
+                  background: adding || !addForm.item_name.trim() ? '#9ca3af' : '#4361ee',
+                  color: '#fff', borderRadius: 10, fontSize: 15, fontWeight: 700,
+                  cursor: adding || !addForm.item_name.trim() ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {adding ? '추가 중…' : '추가'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── AM / PM 마감 버튼 ─────────── */}
       {['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status) && (

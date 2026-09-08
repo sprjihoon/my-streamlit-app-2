@@ -1790,6 +1790,19 @@ export async function runInboundOcr(token: string, batchId: string, file: File) 
   );
 }
 
+export async function addInboundItem(token: string, batchId: string, body: {
+  item_name: string;
+  option_text?: string;
+  janggi_qty: number;
+  unit_price?: number;
+  memo?: string;
+}) {
+  return fetchApi<{ id: string }>(
+    `/inbound/batches/${batchId}/items`,
+    { method: 'POST', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+}
+
 export async function updateInboundItem(token: string, itemId: string, body: Partial<{
   actual_qty: number; missing_qty: number; status: string; memo: string;
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
