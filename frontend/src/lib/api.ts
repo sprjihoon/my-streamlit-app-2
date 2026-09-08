@@ -1756,7 +1756,7 @@ export async function listInboundBatches(
   );
 }
 
-export async function createInboundBatch(token: string, body: { vendor: string; inbound_date: string; memo?: string }) {
+export async function createInboundBatch(token: string, body: { vendor: string; vendor_canonical?: string; inbound_date: string; memo?: string }) {
   return fetchApi<{ id: string; status: string }>(
     '/inbound/batches',
     { method: 'POST', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
@@ -1804,8 +1804,26 @@ export async function deleteInboundBatch(token: string, batchId: string) {
   return fetchApi<{ ok: boolean }>(`/inbound/batches/${batchId}`, { method: 'DELETE', headers: inboundHeaders(token) });
 }
 
+export interface InboundRegisteredVendor {
+  name: string;
+  aliases: string[];
+}
+
 export async function listInboundVendors(token: string) {
-  return fetchApi<{ vendors: string[] }>('/inbound/vendors', { headers: inboundHeaders(token) });
+  return fetchApi<{ registered: InboundRegisteredVendor[]; recent: string[] }>(
+    '/inbound/vendors', { headers: inboundHeaders(token) }
+  );
+}
+
+export async function upsertVendorAlias(token: string, canonical: string, aliases: string[], memo?: string) {
+  return fetchApi<{ ok: boolean; canonical: string; aliases: string[] }>(
+    `/inbound/vendor-aliases/${encodeURIComponent(canonical)}`,
+    { method: 'PUT', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify({ aliases, memo }) }
+  );
+}
+
+export async function deleteVendorAlias(token: string, canonical: string) {
+  return fetchApi<{ ok: boolean }>(`/inbound/vendor-aliases/${encodeURIComponent(canonical)}`, { method: 'DELETE', headers: inboundHeaders(token) });
 }
 
 export async function downloadInboundBarcodePdf(token: string, batchId: string, vendor: string, date: string) {

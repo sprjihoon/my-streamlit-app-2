@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
@@ -14,8 +14,10 @@ import {
   deleteInboundBatch,
   listInboundVendors,
   downloadInboundBarcodePdf,
+  upsertVendorAlias,
   InboundBatch,
   InboundItem,
+  InboundRegisteredVendor,
 } from '@/lib/api';
 
 // ─────────────────────────────────────
@@ -444,6 +446,242 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
 }
 
 // ─────────────────────────────────────
+// 벤더 콤보박스 컴포넌트
+// ─────────────────────────────────────
+
+interface VendorComboboxProps {
+  token: string;
+  value: string;                           // 표시 텍스트
+  canonical: string | null;               // 선택된 등록 업체 (null = 직접입력)
+  onChange: (display: string, canonical: string | null) => void;
+}
+
+function VendorCombobox({ token, value, canonical, onChange }: VendorComboboxProps) {
+  const [registered, setRegistered] = useState<InboundRegisteredVendor[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+  const [aliasModal, setAliasModal] = useState<InboundRegisteredVendor | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listInboundVendors(token)
+      .then(r => { setRegistered(r.registered); setRecent(r.recent); })
+      .catch(() => {});
+  }, [token]);
+
+  // 바깥 클릭 시 닫기
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  // query → 부모에 반영 (직접입력 모드)
+  function handleInput(v: string) {
+    setQuery(v);
+    onChange(v, null);  // canonical = null → 직접입력
+    setOpen(true);
+  }
+
+  // 등록 업체 선택
+  function selectRegistered(v: InboundRegisteredVendor) {
+    setQuery(v.name);
+    onChange(v.name, v.name);
+    setOpen(false);
+  }
+
+  // 최근 업체 선택
+  function selectRecent(v: string) {
+    setQuery(v);
+    onChange(v, null);
+    setOpen(false);
+  }
+
+  // 필터링
+  const q = query.toLowerCase();
+  const filteredReg = registered.filter(v =>
+    v.name.toLowerCase().includes(q) ||
+    v.aliases.some(a => a.toLowerCase().includes(q))
+  );
+  const filteredRecent = recent.filter(v => v.toLowerCase().includes(q));
+
+  const dropW: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+    background: '#fff', border: '1px solid #d1d5db', borderRadius: 6,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.12)', maxHeight: 260, overflowY: 'auto',
+    marginTop: 2,
+  };
+  const groupLbl: React.CSSProperties = {
+    padding: '4px 10px', fontSize: 11, color: '#9ca3af',
+    fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+    borderBottom: '1px solid #f3f4f6', background: '#fafafa',
+  };
+  const optItem: React.CSSProperties = {
+    padding: '7px 12px', cursor: 'pointer', fontSize: 13,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input
+          value={query}
+          onChange={e => handleInput(e.target.value)}
+          onFocus={() => setOpen(true)}
+          placeholder="업체명 검색 또는 직접 입력"
+          style={{ ...inputStyle, flex: 1 }}
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          style={{ ...btnOutline, padding: '0 10px', minWidth: 32, fontSize: 12 }}
+          title="목록 열기"
+        >▾</button>
+      </div>
+
+      {/* 선택된 등록업체 뱃지 */}
+      {canonical && (
+        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: 'var(--color-brand)', background: '#ede9fe', borderRadius: 4, padding: '2px 7px' }}>
+            📦 등록업체: {canonical}
+          </span>
+          <button
+            type="button"
+            style={{ fontSize: 11, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onClick={() => setAliasModal(registered.find(r => r.name === canonical) ?? { name: canonical, aliases: [] })}
+            title="별칭 관리"
+          >✎ 별칭</button>
+        </div>
+      )}
+
+      {open && (filteredReg.length > 0 || filteredRecent.length > 0 || query) && (
+        <div style={dropW}>
+          {/* 등록 업체 섹션 */}
+          {filteredReg.length > 0 && (
+            <>
+              <div style={groupLbl}>📦 바코드 등록 업체</div>
+              {filteredReg.map(v => (
+                <div
+                  key={v.name}
+                  style={{ ...optItem, background: v.name === canonical ? '#ede9fe' : undefined }}
+                  onMouseDown={() => selectRegistered(v)}
+                >
+                  <div>
+                    <span style={{ fontWeight: 500 }}>{v.name}</span>
+                    {v.aliases.length > 0 && (
+                      <span style={{ marginLeft: 6, fontSize: 11, color: '#9ca3af' }}>
+                        ({v.aliases.join(', ')})
+                      </span>
+                    )}
+                  </div>
+                  {v.name === canonical && <span style={{ color: 'var(--color-brand)', fontSize: 12 }}>✓</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {/* 최근 사용 섹션 */}
+          {filteredRecent.length > 0 && (
+            <>
+              <div style={groupLbl}>🕐 최근 입고</div>
+              {filteredRecent.map(v => (
+                <div key={v} style={optItem} onMouseDown={() => selectRecent(v)}>
+                  <span>{v}</span>
+                </div>
+              ))}
+            </>
+          )}
+          {/* 직접입력 안내 */}
+          {query && !filteredReg.find(v => v.name === query) && !filteredRecent.includes(query) && (
+            <>
+              <div style={groupLbl}>✏ 직접입력</div>
+              <div style={{ ...optItem, color: '#374151' }} onMouseDown={() => { onChange(query, null); setOpen(false); }}>
+                &quot;{query}&quot; 로 직접 입력
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 별칭 관리 미니 모달 */}
+      {aliasModal && (
+        <AliasEditor
+          token={token}
+          vendor={aliasModal}
+          onClose={() => setAliasModal(null)}
+          onSaved={(newAliases) => {
+            setRegistered(prev => prev.map(v => v.name === aliasModal.name ? { ...v, aliases: newAliases } : v));
+            setAliasModal(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────
+// 별칭 편집기 미니 모달
+// ─────────────────────────────────────
+
+function AliasEditor({ token, vendor, onClose, onSaved }: {
+  token: string;
+  vendor: InboundRegisteredVendor;
+  onClose: () => void;
+  onSaved: (aliases: string[]) => void;
+}) {
+  const [aliases, setAliases] = useState(vendor.aliases.join(', '));
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const list = aliases.split(',').map(a => a.trim()).filter(Boolean);
+      await upsertVendorAlias(token, vendor.name, list);
+      onSaved(list);
+    } catch { alert('저장 실패'); }
+    finally { setSaving(false); }
+  }
+
+  const overlay: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 500, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)',
+  };
+  const box: React.CSSProperties = {
+    background: '#fff', borderRadius: 10, padding: '1.5rem',
+    width: 340, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+  };
+
+  return (
+    <div style={overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={box} onMouseDown={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: '0.75rem' }}>
+          ✎ &quot;{vendor.name}&quot; 별칭 관리
+        </div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+          쉼표로 구분. OCR이 별칭으로 읽어도 이 업체 바코드 목록에서 매칭합니다.
+        </div>
+        <textarea
+          value={aliases}
+          onChange={e => setAliases(e.target.value)}
+          placeholder="예: ABC코리아, 에이비씨, ABC"
+          rows={3}
+          style={{ ...inputStyle, width: '100%', resize: 'vertical' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+          <button onClick={onClose} style={btnOutline}>취소</button>
+          <button onClick={save} disabled={saving} style={{ ...btn('var(--color-brand)'), opacity: saving ? 0.6 : 1 }}>
+            {saving ? '저장 중…' : '저장'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────
 // 신규 입고 등록 모달
 // ─────────────────────────────────────
 
@@ -451,20 +689,21 @@ function CreateBatchModal({ token, onClose, onCreated }: {
   token: string; onClose: () => void; onCreated: (batch: InboundBatch) => void;
 }) {
   const [vendor, setVendor] = useState('');
+  const [vendorCanonical, setVendorCanonical] = useState<string | null>(null);
   const [inboundDate, setInboundDate] = useState(todayStr());
   const [memo, setMemo] = useState('');
-  const [vendors, setVendors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    listInboundVendors(token).then(r => setVendors(r.vendors)).catch(() => {});
-  }, [token]);
 
   async function handleCreate() {
     if (!vendor.trim()) { alert('화주사를 입력해주세요.'); return; }
     setSaving(true);
     try {
-      const res = await createInboundBatch(token, { vendor: vendor.trim(), inbound_date: inboundDate, memo: memo.trim() || undefined });
+      const res = await createInboundBatch(token, {
+        vendor: vendor.trim(),
+        vendor_canonical: vendorCanonical ?? undefined,
+        inbound_date: inboundDate,
+        memo: memo.trim() || undefined,
+      });
       const newBatch = await getInboundBatch(token, res.id);
       onCreated(newBatch);
     } catch (e: unknown) {
@@ -481,16 +720,12 @@ function CreateBatchModal({ token, onClose, onCreated }: {
       <div>
         <div style={fRow}>
           <label style={labelStyle}>화주사 *</label>
-          <input
-            list="vendor-list"
+          <VendorCombobox
+            token={token}
             value={vendor}
-            onChange={e => setVendor(e.target.value)}
-            placeholder="예: 틸리언"
-            style={{ ...inputStyle, width: '100%' }}
+            canonical={vendorCanonical}
+            onChange={(display, can) => { setVendor(display); setVendorCanonical(can); }}
           />
-          <datalist id="vendor-list">
-            {vendors.map(v => <option key={v} value={v} />)}
-          </datalist>
         </div>
         <div style={fRow}>
           <label style={labelStyle}>입고일 *</label>

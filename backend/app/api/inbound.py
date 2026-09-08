@@ -70,8 +70,9 @@ ITEM_STATUS_LABELS = {
 # ─────────────────────────────────────
 
 class InboundBatchCreate(BaseModel):
-    vendor: str                  # 화주사
-    inbound_date: str            # YYYY-MM-DD
+    vendor: str                           # 화주사 (표시명 / 직접입력)
+    vendor_canonical: Optional[str] = None  # repair_barcode.업체명 정식명 (선택 시)
+    inbound_date: str                     # YYYY-MM-DD
     memo: Optional[str] = None
     created_by: Optional[str] = None
 
@@ -203,6 +204,16 @@ def ensure_inbound_tables():
                 FOREIGN KEY (batch_id) REFERENCES inbound_batches(id)
             )
         """)
+        # 벤더 별칭 테이블
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_vendor_aliases (
+                canonical TEXT PRIMARY KEY,
+                aliases TEXT DEFAULT '',
+                memo TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # 기존 테이블에 inbound 연결 컬럼 추가
         for table, col in [
             ("defect_log",      "inbound_item_id TEXT"),
@@ -214,6 +225,11 @@ def ensure_inbound_tables():
                 con.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
             except Exception:
                 pass  # 이미 존재하면 무시
+        # inbound_batches 에 vendor_canonical 컬럼 추가
+        try:
+            con.execute("ALTER TABLE inbound_batches ADD COLUMN vendor_canonical TEXT")
+        except Exception:
+            pass
         con.commit()
 
 
@@ -334,6 +350,32 @@ def _get_item_photos(con, item_id: str) -> list:
 # 상품 자동 매칭
 # ─────────────────────────────────────
 
+def _resolve_vendor_names(vendor: str) -> List[str]:
+    """
+    주어진 vendor 문자열에 대해 매칭 가능한 모든 업체명 반환.
+    1) repair_barcode 에 vendor 그대로 있으면 우선
+    2) inbound_vendor_aliases 에서 canonical 또는 alias 로 등록된 업체 포함
+    3) 없으면 [vendor] 그대로
+    """
+    names = [vendor]
+    with get_connection() as con:
+        # canonical 로 등록된 경우 → 별칭들도 추가 (역방향: 별칭 포함 바코드 검색 위해)
+        row = con.execute(
+            "SELECT aliases FROM inbound_vendor_aliases WHERE canonical=?", (vendor,)
+        ).fetchone()
+        if row and row[0]:
+            names += [a.strip() for a in row[0].split(",") if a.strip()]
+        # 혹시 vendor 가 별칭으로 등록된 경우 → canonical 추가
+        rows = con.execute(
+            "SELECT canonical FROM inbound_vendor_aliases WHERE aliases LIKE ?",
+            (f"%{vendor}%",)
+        ).fetchall()
+        for r in rows:
+            if r[0] not in names:
+                names.append(r[0])
+    return list(dict.fromkeys(names))  # 중복 제거, 순서 유지
+
+
 def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], wholesale: Optional[str]) -> dict:
     """
     repair_barcode DB에서 품목을 매칭한다.
@@ -350,56 +392,59 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
     if not item_name:
         return result
 
+    vendor_names = _resolve_vendor_names(vendor)  # 별칭 포함 후보 업체명 목록
+    vendor_ph = ",".join("?" * len(vendor_names))  # IN (?,?,...) 플레이스홀더
+
     with get_connection() as con:
-        # 1순위: 화주사 + 도매처 + 공급처상품명/상품명 + 옵션 정확 매칭
+        # 1순위: 화주사(별칭 포함) + 도매처 + 공급처상품명/상품명 + 옵션 정확 매칭
         if wholesale and option_text:
-            row = con.execute("""
+            row = con.execute(f"""
                 SELECT 바코드, 업체명, 공급처상품명, 옵션
                 FROM repair_barcode
-                WHERE 업체명=? AND 도매처=?
+                WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
                   AND (공급처상품명=? OR 상품명=?)
                   AND 옵션=?
                 LIMIT 1
-            """, (vendor, wholesale, item_name, item_name, option_text)).fetchone()
+            """, (*vendor_names, wholesale, item_name, item_name, option_text)).fetchone()
             if row:
                 return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
                         "matched_product": row[2] or item_name, "matched_option": row[3],
                         "match_confidence": 1.0, "needs_matching": False}
 
-        # 2순위: 화주사 + 도매처 + 상품명 (옵션 무시)
+        # 2순위: 화주사(별칭 포함) + 도매처 + 상품명 (옵션 무시)
         if wholesale:
-            row = con.execute("""
+            row = con.execute(f"""
                 SELECT 바코드, 업체명, 공급처상품명, 옵션
                 FROM repair_barcode
-                WHERE 업체명=? AND 도매처=?
+                WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
                   AND (공급처상품명=? OR 상품명=?)
                 LIMIT 1
-            """, (vendor, wholesale, item_name, item_name)).fetchone()
+            """, (*vendor_names, wholesale, item_name, item_name)).fetchone()
             if row:
                 return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
                         "matched_product": row[2] or item_name, "matched_option": row[3],
                         "match_confidence": 0.85, "needs_matching": False}
 
-        # 3순위: 화주사 + 상품명
-        row = con.execute("""
+        # 3순위: 화주사(별칭 포함) + 상품명
+        row = con.execute(f"""
             SELECT 바코드, 업체명, 공급처상품명, 옵션
             FROM repair_barcode
-            WHERE 업체명=? AND (공급처상품명=? OR 상품명=?)
+            WHERE 업체명 IN ({vendor_ph}) AND (공급처상품명=? OR 상품명=?)
             LIMIT 1
-        """, (vendor, item_name, item_name)).fetchone()
+        """, (*vendor_names, item_name, item_name)).fetchone()
         if row:
             return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
                     "matched_product": row[2] or item_name, "matched_option": row[3],
                     "match_confidence": 0.7, "needs_matching": False}
 
-        # 4순위: 부분 일치 (LIKE)
+        # 4순위: 부분 일치 (LIKE) — 화주사 별칭 포함
         keyword = f"%{item_name}%"
-        row = con.execute("""
+        row = con.execute(f"""
             SELECT 바코드, 업체명, 공급처상품명, 옵션
             FROM repair_barcode
-            WHERE 업체명=? AND (공급처상품명 LIKE ? OR 상품명 LIKE ?)
+            WHERE 업체명 IN ({vendor_ph}) AND (공급처상품명 LIKE ? OR 상품명 LIKE ?)
             LIMIT 1
-        """, (vendor, keyword, keyword)).fetchone()
+        """, (*vendor_names, keyword, keyword)).fetchone()
         if row:
             return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
                     "matched_product": row[2] or item_name, "matched_option": row[3],
@@ -550,9 +595,10 @@ def create_batch(
     with get_connection() as con:
         con.execute("""
             INSERT INTO inbound_batches
-                (id, vendor, inbound_date, status, memo, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, 'ocr_pending', ?, ?, ?, ?)
-        """, (batch_id, body.vendor, body.inbound_date, body.memo,
+                (id, vendor, vendor_canonical, inbound_date, status, memo, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'ocr_pending', ?, ?, ?, ?)
+        """, (batch_id, body.vendor, body.vendor_canonical or body.vendor,
+              body.inbound_date, body.memo,
               body.created_by or user["nickname"], now, now))
         con.commit()
     add_log("inbound", "create_batch", f"입고 배치 생성: {body.vendor} {body.inbound_date}", user["user_id"])
@@ -640,12 +686,13 @@ async def run_ocr(
     # 배치 조회
     with get_connection() as con:
         batch_row = con.execute(
-            "SELECT id, vendor, status FROM inbound_batches WHERE id=?", (batch_id,)
+            "SELECT id, vendor, status, vendor_canonical FROM inbound_batches WHERE id=?", (batch_id,)
         ).fetchone()
     if not batch_row:
         raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
 
-    vendor = batch_row[1]
+    # vendor_canonical 우선 사용 (없으면 vendor 그대로)
+    vendor = batch_row[3] or batch_row[1]
 
     # 이미지 저장
     janggi_filename = await _save_upload(file)
@@ -1021,17 +1068,88 @@ def delete_batch(
 def list_inbound_vendors(
     authorization: Optional[str] = Header(None),
 ):
-    """입고 실적이 있는 화주사 + repair_barcode 등록 업체명 합집합"""
+    """
+    repair_barcode 등록 업체명 (registered) +
+    최근 입고 실적 업체 (recent) 를 분리 반환.
+    각 등록 업체에 별칭(aliases) 포함.
+    """
     _get_user(authorization)
     with get_connection() as con:
-        vendors_from_batches = {r[0] for r in con.execute(
-            "SELECT DISTINCT vendor FROM inbound_batches ORDER BY vendor"
-        ).fetchall() if r[0]}
-        vendors_from_barcodes = {r[0] for r in con.execute(
-            "SELECT DISTINCT 업체명 FROM repair_barcode ORDER BY 업체명"
-        ).fetchall() if r[0]}
-    all_vendors = sorted(vendors_from_batches | vendors_from_barcodes)
-    return {"vendors": all_vendors}
+        # repair_barcode 등록 업체 + 별칭
+        barcode_vendors = [r[0] for r in con.execute(
+            "SELECT DISTINCT \uc5c5\uccb4\uba85 FROM repair_barcode WHERE \uc5c5\uccb4\uba85 IS NOT NULL ORDER BY \uc5c5\uccb4\uba85"
+        ).fetchall() if r[0]]
+        alias_rows = {r[0]: r[1] for r in con.execute(
+            "SELECT canonical, aliases FROM inbound_vendor_aliases"
+        ).fetchall()}
+        registered = [
+            {
+                "name": v,
+                "aliases": [a.strip() for a in (alias_rows.get(v) or "").split(",") if a.strip()],
+            }
+            for v in barcode_vendors
+        ]
+        # 최근 입고 실적 업체 (등록 업체 제외)
+        registered_names = set(barcode_vendors)
+        recent_raw = [r[0] for r in con.execute(
+            "SELECT DISTINCT vendor FROM inbound_batches ORDER BY created_at DESC LIMIT 20"
+        ).fetchall() if r[0]]
+        recent = [v for v in recent_raw if v not in registered_names]
+    return {"registered": registered, "recent": recent}
+
+
+# ── 벤더 별칭 관리 ──────────────────────
+
+class VendorAliasUpdate(BaseModel):
+    aliases: List[str]     # 새 별칭 목록 (덮어쓰기)
+    memo: Optional[str] = None
+
+
+@router.get("/vendor-aliases")
+def get_vendor_aliases(authorization: Optional[str] = Header(None)):
+    """등록된 벤더 별칭 전체 조회"""
+    _get_user(authorization)
+    with get_connection() as con:
+        rows = con.execute(
+            "SELECT canonical, aliases, memo FROM inbound_vendor_aliases ORDER BY canonical"
+        ).fetchall()
+    return {"aliases": [{"canonical": r[0], "aliases": [a.strip() for a in (r[1] or "").split(",") if a.strip()], "memo": r[2]} for r in rows]}
+
+
+@router.put("/vendor-aliases/{canonical}")
+def upsert_vendor_alias(
+    canonical: str,
+    body: VendorAliasUpdate,
+    authorization: Optional[str] = Header(None),
+):
+    """특정 업체의 별칭 저장 (없으면 생성, 있으면 덮어쓰기)"""
+    _get_user(authorization)
+    aliases_str = ", ".join(a.strip() for a in body.aliases if a.strip())
+    now = datetime.utcnow().isoformat()
+    with get_connection() as con:
+        con.execute("""
+            INSERT INTO inbound_vendor_aliases (canonical, aliases, memo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(canonical) DO UPDATE SET
+                aliases = excluded.aliases,
+                memo = excluded.memo,
+                updated_at = excluded.updated_at
+        """, (canonical, aliases_str, body.memo, now, now))
+        con.commit()
+    return {"ok": True, "canonical": canonical, "aliases": body.aliases}
+
+
+@router.delete("/vendor-aliases/{canonical}")
+def delete_vendor_alias(
+    canonical: str,
+    authorization: Optional[str] = Header(None),
+):
+    """특정 업체 별칭 삭제"""
+    _get_user(authorization)
+    with get_connection() as con:
+        con.execute("DELETE FROM inbound_vendor_aliases WHERE canonical=?", (canonical,))
+        con.commit()
+    return {"ok": True}
 
 
 # ── 입고 통계 ───────────────────────────
