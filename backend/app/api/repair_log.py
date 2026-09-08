@@ -132,6 +132,10 @@ def ensure_repair_tables():
         ]:
             if col not in existing_cols:
                 con.execute(f"ALTER TABLE repair_work_log ADD COLUMN [{col}] {coltype}")
+        # repair_barcode 마이그레이션
+        bc_cols = [c[1] for c in con.execute("PRAGMA table_info(repair_barcode)")]
+        if "도매처" not in bc_cols:
+            con.execute("ALTER TABLE repair_barcode ADD COLUMN 도매처 TEXT")
         con.execute("""
             CREATE TABLE IF NOT EXISTS repair_photo_inbox (
                 user_id TEXT PRIMARY KEY,
@@ -202,7 +206,7 @@ def _lookup_barcode(con, barcode: str) -> Optional[dict]:
         return None
     code = barcode.strip()
     row = con.execute(
-        """SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명
+        """SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 도매처
            FROM repair_barcode
            WHERE 바코드 = ? OR UPPER(TRIM(바코드)) = UPPER(?)""",
         (code, code),
@@ -217,6 +221,7 @@ def _lookup_barcode(con, barcode: str) -> Optional[dict]:
         "상품코드": row[4],
         "로케이션": row[5],
         "상품명": row[6],
+        "도매처": row[7],
     }
 
 
@@ -543,17 +548,25 @@ def _find_col(columns, *names) -> Optional[str]:
 
 
 def _find_vendor_col(columns) -> Optional[str]:
-    """공급처 열이 여러 개면 첫 번째(화주사=업체명). 마지막은 도매처이므로 제외.
-    '공급처 상품명' 등 복합 헤더는 제외."""
+    """공급처 열이 여러 개면 첫 번째(화주사=업체명). '공급처 상품명' 등 복합 헤더는 제외."""
     matches = [c for c in columns if str(c).strip() == "공급처"]
     if matches:
-        return matches[0]   # [0] = 화주사(업체명), [-1] = 도매처
+        return matches[0]   # [0] = 화주사(업체명)
     return _find_col(columns, "업체명")
+
+
+def _find_wholesale_col(columns) -> Optional[str]:
+    """공급처가 여러 개면 마지막 열이 도매처."""
+    matches = [c for c in columns if str(c).strip() == "공급처"]
+    if len(matches) >= 2:
+        return matches[-1]
+    return None
 
 
 def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
     barcode_col = _find_col(df.columns, "바코드")
     vendor_col = _find_vendor_col(df.columns)
+    wholesale_col = _find_wholesale_col(df.columns)
     short_name_col = _find_col(df.columns, "공급처 상품명", "제품명")
     long_name_col = _find_col(df.columns, "상품명")
     option_col = _find_col(df.columns, "옵션")
@@ -569,6 +582,7 @@ def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
     for _, r in df.iterrows():
         barcode = _clean(r.get(barcode_col))
         vendor = _clean(r.get(vendor_col))
+        wholesale = _clean(r.get(wholesale_col)) if wholesale_col else None
         short_name = _clean(r.get(short_name_col)) if short_name_col else None
         long_name = _clean(r.get(long_name_col)) if long_name_col else None
         product = short_name or long_name
@@ -577,6 +591,7 @@ def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
         rows.append({
             "바코드": barcode,
             "업체명": vendor,
+            "도매처": wholesale,
             "제품명": product,
             "옵션": _strip_option(_clean(r.get(option_col))) if option_col else None,
             "상품코드": _clean(r.get(code_col)) if code_col else None,
@@ -611,7 +626,7 @@ async def list_barcodes(
 
         total = con.execute(f"SELECT COUNT(*) FROM repair_barcode {where}", params).fetchone()[0]
         rows = con.execute(
-            f"""SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간
+            f"""SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간, 도매처
                 FROM repair_barcode {where}
                 ORDER BY 저장시간 DESC, 바코드
                 LIMIT ? OFFSET ?""",
@@ -635,6 +650,7 @@ async def list_barcodes(
             "상품명": r[6],
             "출처": r[7],
             "저장시간": str(r[8]) if r[8] else None,
+            "도매처": r[9] if len(r) > 9 else None,
         })
     return {"items": items, "total": total, "filters": {"vendors": vendors}}
 
@@ -686,10 +702,11 @@ async def upload_barcodes(file: UploadFile = File(...)):
             ).fetchone()
             con.execute(
                 """INSERT INTO repair_barcode
-                   (바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'excel', ?)
+                   (바코드, 업체명, 도매처, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'excel', ?)
                    ON CONFLICT(바코드) DO UPDATE SET
                      업체명=excluded.업체명,
+                     도매처=excluded.도매처,
                      제품명=excluded.제품명,
                      옵션=excluded.옵션,
                      상품코드=excluded.상품코드,
@@ -698,7 +715,7 @@ async def upload_barcodes(file: UploadFile = File(...)):
                      출처='excel',
                      저장시간=excluded.저장시간""",
                 (
-                    row["바코드"], vendor, row["제품명"], row["옵션"],
+                    row["바코드"], vendor, row.get("도매처"), row["제품명"], row["옵션"],
                     row["상품코드"], row["로케이션"], row["상품명"], now,
                 ),
             )
