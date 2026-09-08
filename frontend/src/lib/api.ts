@@ -1800,10 +1800,38 @@ export async function updateInboundItem(token: string, itemId: string, body: Par
   );
 }
 
-export async function closeInboundBatch(token: string, batchId: string) {
-  return fetchApi<{ ok: boolean; status?: string; status_label?: string; warning?: string; pending_count?: number; repair_count?: number }>(
+export async function closeInboundBatch(
+  token: string,
+  batchId: string,
+  closeType: 'am' | 'pm' = 'am',
+) {
+  return fetchApi<{
+    ok: boolean;
+    close_type?: 'am' | 'pm';
+    status?: string;
+    status_label?: string;
+    message?: string;
+    warning?: string;
+    pending_count?: number;
+    unresolved_count?: number;
+    // AM 응답에는 없음; PM 마감 시 수량 정산
+    total_janggi_qty?: number;
+    '정상_qty'?: number;
+    '수선중_qty'?: number;
+    '수선후정상_qty'?: number;
+    '회생불가_qty'?: number;
+    '미입고_qty'?: number;
+    formula_total?: number;
+    discrepancy?: number;
+    formula_ok?: boolean;
+    formula_str?: string;
+  }>(
     `/inbound/batches/${batchId}/close`,
-    { method: 'POST', headers: inboundHeaders(token) }
+    {
+      method: 'POST',
+      headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ close_type: closeType }),
+    }
   );
 }
 
