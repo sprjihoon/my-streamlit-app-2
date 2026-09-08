@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import {
   getInboundBatch,
@@ -452,6 +452,266 @@ function ItemCard({ item, token, onUpdated, onDelete }: {
 }
 
 // ─────────────────────────────────────
+// 품목 직접 추가 모달 (모바일 bottom sheet)
+// ─────────────────────────────────────
+
+function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
+  token: string; batchId: string; batchVendor: string;
+  onClose: () => void; onAdded: () => void;
+}) {
+  // 업체 선택
+  const [vendorList, setVendorList] = useState<InboundRegisteredVendor[]>([]);
+  const [aliasList, setAliasList] = useState<VendorAlias[]>([]);
+  const [vendorQuery, setVendorQuery] = useState('');
+  const [vendorOpen, setVendorOpen] = useState(false);
+  const [selectedVendors, setSelectedVendors] = useState<string[]>([]);
+  const [vendorDisplay, setVendorDisplay] = useState('');
+  // 바코드 검색
+  const [barcodeResults, setBarcodeResults] = useState<RepairBarcode[]>([]);
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [selectedBarcode, setSelectedBarcode] = useState<RepairBarcode | null>(null);
+  // 폼
+  const [form, setForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+  const [adding, setAdding] = useState(false);
+
+  const vendorRef = useRef<HTMLDivElement>(null);
+  const barcodeRef = useRef<HTMLDivElement>(null);
+
+  // 업체/별칭 로드 + 배치 업체 자동 선택
+  useEffect(() => {
+    Promise.all([listInboundVendors(token), getVendorAliases(token)])
+      .then(([v, a]) => {
+        setVendorList(v.registered);
+        setAliasList(a.aliases);
+        const matched = v.registered.find(r => r.name === batchVendor || r.aliases.includes(batchVendor));
+        const aliasMatched = a.aliases.find(al => al.canonical === batchVendor);
+        if (matched) { setVendorDisplay(matched.name); setVendorQuery(matched.name); setSelectedVendors([matched.name]); }
+        else if (aliasMatched) { setVendorDisplay(aliasMatched.canonical); setVendorQuery(aliasMatched.canonical); setSelectedVendors(aliasMatched.aliases.length > 0 ? aliasMatched.aliases : [aliasMatched.canonical]); }
+      })
+      .catch(() => {});
+  }, [token, batchVendor]);
+
+  // 바코드 로드
+  useEffect(() => {
+    if (selectedVendors.length === 0) { setBarcodeResults([]); return; }
+    setBarcodeLoading(true);
+    Promise.all(selectedVendors.map(v => getRepairBarcodes({ vendor: v, limit: 300 })))
+      .then(results => {
+        const seen = new Set<string>();
+        setBarcodeResults(results.flatMap(r => r.items).filter(b => { if (seen.has(b.바코드)) return false; seen.add(b.바코드); return true; }));
+      })
+      .catch(() => setBarcodeResults([]))
+      .finally(() => setBarcodeLoading(false));
+  }, [selectedVendors]);
+
+  // 외부 클릭
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (vendorRef.current && !vendorRef.current.contains(e.target as Node)) setVendorOpen(false);
+      if (barcodeRef.current && !barcodeRef.current.contains(e.target as Node)) setBarcodeOpen(false);
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  function selectVendor(name: string, members: string[]) {
+    setVendorDisplay(name); setVendorQuery(name);
+    setSelectedVendors(members.length > 0 ? members : [name]);
+    setVendorOpen(false); setSelectedBarcode(null); setBarcodeQuery('');
+  }
+
+  function selectBarcode(b: RepairBarcode) {
+    setSelectedBarcode(b);
+    setBarcodeQuery(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
+    setBarcodeOpen(false);
+    setForm(f => ({ ...f, item_name: f.item_name || b.제품명, option_text: f.option_text || (b.옵션 || '') }));
+  }
+
+  const fvq = vendorQuery.toLowerCase();
+  const fVendors = vendorList.filter(v => v.name.toLowerCase().includes(fvq) || v.aliases.some(a => a.toLowerCase().includes(fvq)));
+  const fAliases = aliasList.filter(a => a.canonical.toLowerCase().includes(fvq) || a.aliases.some(al => al.toLowerCase().includes(fvq)));
+  const fbq = (selectedBarcode ? '' : barcodeQuery).toLowerCase();
+  const fBarcodes = barcodeResults.filter(b =>
+    b.바코드.toLowerCase().includes(fbq) || b.제품명.toLowerCase().includes(fbq) ||
+    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq)
+  );
+
+  async function handleAdd() {
+    if (!form.item_name.trim()) return;
+    setAdding(true);
+    try {
+      await addInboundItem(token, batchId, {
+        item_name: form.item_name.trim(),
+        option_text: form.option_text.trim() || undefined,
+        janggi_qty: form.janggi_qty,
+        unit_price: form.unit_price ? Number(form.unit_price) : undefined,
+        memo: 'manual',
+        matched_barcode: selectedBarcode?.바코드,
+        matched_vendor: selectedBarcode?.업체명,
+        matched_product: selectedBarcode?.제품명,
+        matched_option: selectedBarcode?.옵션 || undefined,
+      });
+      onAdded();
+    } catch {
+      alert('품목 추가 실패');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const inputS: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' };
+  const lbl: React.CSSProperties = { fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 };
+  const dropS: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 400,
+    background: '#fff', border: '1px solid #e5e7f0', borderRadius: 8,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 200, overflowY: 'auto', marginTop: 2,
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', padding: '20px 18px 36px', width: '100%', maxWidth: 480, maxHeight: '88vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span style={{ fontWeight: 700, fontSize: 16 }}>품목 직접 추가</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#6b7280', lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* 업체 */}
+        <label style={lbl}>업체</label>
+        <div ref={vendorRef} style={{ position: 'relative', marginBottom: 12 }}>
+          <input value={vendorQuery}
+            onChange={e => { setVendorQuery(e.target.value); setVendorOpen(true); if (!e.target.value) { setSelectedVendors([]); setVendorDisplay(''); } }}
+            onFocus={() => setVendorOpen(true)}
+            placeholder="업체명 또는 별칭 검색"
+            style={inputS} />
+          {vendorOpen && (fVendors.length > 0 || fAliases.length > 0) && (
+            <div style={dropS}>
+              {fVendors.length > 0 && (
+                <>
+                  <div style={{ padding: '4px 10px', fontSize: 10, color: '#9ca3af', fontWeight: 700, background: '#fafafa' }}>📦 등록 업체</div>
+                  {fVendors.map(v => (
+                    <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
+                      style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer', background: vendorDisplay === v.name ? '#eef2ff' : undefined }}>
+                      <strong>{v.name}</strong>
+                      {v.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>({v.aliases.join(', ')})</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+              {fAliases.length > 0 && (
+                <>
+                  <div style={{ padding: '4px 10px', fontSize: 10, color: '#9ca3af', fontWeight: 700, background: '#fafafa' }}>🏷️ 화주사 별칭</div>
+                  {fAliases.map(a => (
+                    <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
+                      style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer' }}>
+                      <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{a.canonical}</span>
+                      {a.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>→ {a.aliases.join(', ')}</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 바코드 */}
+        <label style={lbl}>바코드 검색 {barcodeLoading ? '(로딩 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
+        {selectedVendors.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>↑ 업체를 먼저 선택하세요.</div>
+        ) : barcodeLoading ? (
+          <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>바코드 불러오는 중…</div>
+        ) : barcodeResults.length === 0 ? (
+          <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 13 }}>
+            <div style={{ color: '#dc2626', marginBottom: 6 }}>"{vendorDisplay}" 등록 바코드 없음</div>
+            <a href="/journal-settings" target="_blank" rel="noreferrer"
+              style={{ display: 'inline-block', padding: '5px 12px', background: '#4361ee', color: '#fff', borderRadius: 6, fontSize: 12, textDecoration: 'none', fontWeight: 600 }}>
+              + 신규 바코드 등록
+            </a>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>아래에 품명을 직접 입력할 수도 있습니다.</div>
+          </div>
+        ) : (
+          <div ref={barcodeRef} style={{ position: 'relative', marginBottom: 12 }}>
+            {selectedBarcode ? (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div style={{ flex: 1, padding: '8px 10px', background: '#ede9fe', borderRadius: 8, fontSize: 12, color: '#7c3aed', fontWeight: 500 }}>
+                  ✅ {selectedBarcode.바코드} — {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
+                </div>
+                <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }}
+                  style={{ padding: '6px 10px', background: '#f3f4f6', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#6b7280' }}>변경</button>
+              </div>
+            ) : (
+              <>
+                <input value={barcodeQuery}
+                  onChange={e => { setBarcodeQuery(e.target.value); setBarcodeOpen(true); }}
+                  onFocus={() => setBarcodeOpen(true)}
+                  placeholder={`바코드·제품명 검색 (${barcodeResults.length}개 중)`}
+                  style={inputS} />
+                {barcodeOpen && fBarcodes.length > 0 && (
+                  <div style={dropS}>
+                    {fBarcodes.slice(0, 40).map(b => (
+                      <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
+                        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 500 }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
+                            <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{b.바코드}</div>
+                          </div>
+                          <span style={{ fontSize: 11, color: '#7c3aed', flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 품명 */}
+        <label style={lbl}>품명 *</label>
+        <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))}
+          placeholder="예) 타원 백팩" style={{ ...inputS, marginBottom: 12 }} />
+
+        {/* 옵션 */}
+        <label style={lbl}>옵션 (색상·사이즈 등)</label>
+        <input value={form.option_text} onChange={e => setForm(f => ({ ...f, option_text: e.target.value }))}
+          placeholder="예) 블랙, L" style={{ ...inputS, marginBottom: 12 }} />
+
+        {/* 수량 + 단가 */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+          <div style={{ flex: 1 }}>
+            <label style={lbl}>장끼 수량 *</label>
+            <input type="number" inputMode="numeric" min={1} value={form.janggi_qty}
+              onChange={e => setForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
+              style={{ ...inputS, fontSize: 18, fontWeight: 700, textAlign: 'center' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={lbl}>단가 (선택)</label>
+            <input type="number" inputMode="numeric" min={0} value={form.unit_price}
+              onChange={e => setForm(f => ({ ...f, unit_price: e.target.value }))}
+              placeholder="0" style={{ ...inputS, textAlign: 'center' }} />
+          </div>
+        </div>
+
+        {/* 버튼 */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose}
+            style={{ flex: 1, padding: 13, border: '1px solid #e5e7f0', background: '#fff', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer', color: '#6b7280' }}>
+            취소
+          </button>
+          <button onClick={handleAdd} disabled={adding || !form.item_name.trim()}
+            style={{ flex: 2, padding: 13, border: 'none', background: (adding || !form.item_name.trim()) ? '#9ca3af' : '#4361ee', color: '#fff', borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: (adding || !form.item_name.trim()) ? 'not-allowed' : 'pointer' }}>
+            {adding ? '추가 중…' : '추가'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────
 // 메인 페이지
 // ─────────────────────────────────────
 
@@ -470,8 +730,6 @@ export default function InboundWorkPage() {
 
   // 수동 추가 모달
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addForm, setAddForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
-  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     const tok = localStorage.getItem('token') || '';
@@ -538,26 +796,6 @@ export default function InboundWorkPage() {
     }
   }
 
-  async function handleAddItem() {
-    if (!batch || !addForm.item_name.trim()) return;
-    setAdding(true);
-    try {
-      await addInboundItem(token, batch.id, {
-        item_name: addForm.item_name.trim(),
-        option_text: addForm.option_text.trim() || undefined,
-        janggi_qty: addForm.janggi_qty,
-        unit_price: addForm.unit_price ? Number(addForm.unit_price) : undefined,
-        memo: 'manual',
-      });
-      setShowAddModal(false);
-      setAddForm({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
-      await reload(token);
-    } catch {
-      alert('품목 추가 실패');
-    } finally {
-      setAdding(false);
-    }
-  }
 
   // ── 렌더 ──
 
@@ -717,7 +955,20 @@ export default function InboundWorkPage() {
           </div>
         ) : (
           items.map(item => (
-            <ItemCard key={item.id} item={item} token={token} onUpdated={() => reload(token)} />
+            <ItemCard
+              key={item.id}
+              item={item}
+              token={token}
+              onUpdated={() => reload(token)}
+              onDelete={async () => {
+                try {
+                  await deleteInboundItem(token, item.id);
+                  await reload(token);
+                } catch (e) {
+                  alert('삭제 실패: ' + (e instanceof Error ? e.message : String(e)));
+                }
+              }}
+            />
           ))
         )}
       </div>
@@ -763,77 +1014,14 @@ export default function InboundWorkPage() {
       )}
 
       {/* 수동 추가 모달 */}
-      {showAddModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200,
-          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        }}>
-          <div style={{
-            background: '#fff', borderRadius: '16px 16px 0 0',
-            padding: '24px 20px 36px', width: '100%', maxWidth: 480,
-          }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>품목 직접 추가</div>
-
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>품명 *</label>
-            <input
-              value={addForm.item_name}
-              onChange={e => setAddForm(f => ({ ...f, item_name: e.target.value }))}
-              placeholder="예) 타원 백팩"
-              style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }}
-            />
-
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>옵션 (색상·사이즈 등)</label>
-            <input
-              value={addForm.option_text}
-              onChange={e => setAddForm(f => ({ ...f, option_text: e.target.value }))}
-              placeholder="예) 블랙, L"
-              style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }}
-            />
-
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>장끼 수량 *</label>
-                <input
-                  type="number" inputMode="numeric" min={1}
-                  value={addForm.janggi_qty}
-                  onChange={e => setAddForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 18, fontWeight: 700, textAlign: 'center', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>단가 (선택)</label>
-                <input
-                  type="number" inputMode="numeric" min={0}
-                  value={addForm.unit_price}
-                  onChange={e => setAddForm(f => ({ ...f, unit_price: e.target.value }))}
-                  placeholder="0"
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #e5e7f0', borderRadius: 8, fontSize: 14, textAlign: 'center', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setShowAddModal(false)}
-                style={{ flex: 1, padding: '13px', border: '1px solid #e5e7f0', background: '#fff', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer', color: '#6b7280' }}
-              >
-                취소
-              </button>
-              <button
-                onClick={handleAddItem}
-                disabled={adding || !addForm.item_name.trim()}
-                style={{
-                  flex: 2, padding: '13px', border: 'none',
-                  background: adding || !addForm.item_name.trim() ? '#9ca3af' : '#4361ee',
-                  color: '#fff', borderRadius: 10, fontSize: 15, fontWeight: 700,
-                  cursor: adding || !addForm.item_name.trim() ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {adding ? '추가 중…' : '추가'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {showAddModal && batch && (
+        <AddItemModal
+          token={token}
+          batchId={batch.id}
+          batchVendor={batch.vendor}
+          onClose={() => setShowAddModal(false)}
+          onAdded={async () => { setShowAddModal(false); await reload(token); }}
+        />
       )}
 
       {/* ── AM / PM 마감 버튼 ─────────── */}
