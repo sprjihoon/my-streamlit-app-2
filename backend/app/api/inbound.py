@@ -326,27 +326,39 @@ def _get_user(token: Optional[str]) -> dict:
 _KST = _dt.timezone(_dt.timedelta(hours=9))
 
 
-def _update_barcode_master(con, barcode: str, wholesale: str, supplier_location: str, supplier_contact: str) -> None:
-    """매칭 확정 시 repair_barcode 마스터에 도매처·위치·연락처를 갱신한다.
+def _update_barcode_master(
+    con,
+    barcode: str,
+    wholesale: str = "",
+    supplier_location: str = "",
+    supplier_contact: str = "",
+    matched_product: str = "",   # 도매처상품명 → repair_barcode.제품명
+    matched_option: str = "",    # 도매처옵션   → repair_barcode.옵션
+) -> None:
+    """매칭 확정 시 repair_barcode 마스터의 도매처·위치·연락처·상품명·옵션을 갱신한다.
 
     - 해당 바코드 레코드가 없으면 아무 작업도 하지 않는다.
-    - 빈 문자열로 기존 값을 덮어쓰지 않는다.
+    - 빈 문자열은 기존 값을 덮어쓰지 않는다.
     """
-    # 컬럼 없으면 추가 (기존 DB 마이그레이션)
+    # 신규 컬럼 마이그레이션
     for col in ("도매처주소 TEXT", "도매처연락처 TEXT"):
         try:
             con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {col}")
         except Exception:
             pass
 
-    # 업데이트할 필드 수집
+    # 업데이트할 필드 수집 (값이 있는 것만)
+    col_map = [
+        (wholesale,          "도매처"),
+        (supplier_location,  "도매처주소"),
+        (supplier_contact,   "도매처연락처"),
+        (matched_product,    "제품명"),
+        (matched_option,     "옵션"),
+    ]
     sets, vals = [], []
-    if wholesale:
-        sets.append("도매처=?"); vals.append(wholesale)
-    if supplier_location:
-        sets.append("도매처주소=?"); vals.append(supplier_location)
-    if supplier_contact:
-        sets.append("도매처연락처=?"); vals.append(supplier_contact)
+    for val, col in col_map:
+        if val:
+            sets.append(f"{col}=?"); vals.append(val)
 
     if not sets:
         return
@@ -354,7 +366,8 @@ def _update_barcode_master(con, barcode: str, wholesale: str, supplier_location:
     vals.append(barcode)
     try:
         con.execute(f"UPDATE repair_barcode SET {', '.join(sets)} WHERE 바코드=?", vals)
-        logger.info(f"바코드 마스터 업데이트: {barcode} → {dict(zip([s.split('=')[0] for s in sets], vals[:-1]))}")
+        updated = {col_map[i][1]: vals[i] for i in range(len(sets))}
+        logger.info(f"바코드 마스터 업데이트: {barcode} → {updated}")
     except Exception as e:
         logger.warning(f"바코드 마스터 업데이트 실패 ({barcode}): {e}")
 
@@ -1233,16 +1246,21 @@ def update_item(
             _recalc_batch_totals(con, batch_row[0])
 
         # ── 바코드 마스터 자동 갱신 ──────────────────────────────────────
-        # matched_barcode 가 이번 요청에서 설정되거나, supplier 정보가 변경될 때
-        # 해당 바코드 레코드의 도매처·주소·연락처를 repair_barcode 에 반영한다.
-        should_update_master = bool(body.matched_barcode) or bool(body.supplier_location) or bool(body.supplier_contact)
+        # matched_barcode / supplier / 상품명·옵션 중 하나라도 변경될 때
+        # repair_barcode 의 해당 바코드 레코드를 최신 상태로 갱신한다.
+        should_update_master = any([
+            body.matched_barcode, body.supplier_location, body.supplier_contact,
+            body.matched_product, body.matched_option,
+        ])
         if should_update_master:
-            # 현재(업데이트 후) 품목 상태 조회
+            # 업데이트 후 품목 전체 상태 조회
             item_state = con.execute(
                 """SELECT i.matched_barcode,
                           COALESCE(i.item_wholesale, b.wholesale) AS wholesale,
                           i.supplier_location,
-                          i.supplier_contact
+                          i.supplier_contact,
+                          i.matched_product,
+                          i.matched_option
                    FROM inbound_items i
                    JOIN inbound_batches b ON i.batch_id = b.id
                    WHERE i.id=?""",
@@ -1255,6 +1273,8 @@ def update_item(
                     wholesale=item_state[1] or "",
                     supplier_location=item_state[2] or "",
                     supplier_contact=item_state[3] or "",
+                    matched_product=item_state[4] or "",
+                    matched_option=item_state[5] or "",
                 )
 
         con.commit()
