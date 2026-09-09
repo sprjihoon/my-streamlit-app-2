@@ -132,6 +132,10 @@ function ItemRow({ item }: { item: ItemDetail }) {
   const name = item.matched_product || item.item_name || '-';
   const option = item.matched_option || item.option_text || '';
 
+  // 정상수량 = 실수량 - 불량수량합계 (수선건수는 별도)
+  const defectQtySum = item.defect_logs.reduce((s, d) => s + (d.수량 || 0), 0);
+  const normalQtyDisplay = Math.max(0, item.actual_qty - defectQtySum);
+
   return (
     <>
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
@@ -147,14 +151,22 @@ function ItemRow({ item }: { item: ItemDetail }) {
         </td>
         <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', fontWeight: 600 }}>{item.janggi_qty}</td>
         <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', fontWeight: 700, color: C.success }}>{item.actual_qty}</td>
+        {/* 정상수량 = 실수량 - 불량수량합계 */}
+        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', fontWeight: 700, color: defectQtySum > 0 ? C.text : C.success }}>
+          {defectQtySum > 0 ? normalQtyDisplay : item.actual_qty}
+        </td>
+        {/* 불량수량합계 */}
+        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', color: defectQtySum > 0 ? C.danger : C.muted }}>
+          {defectQtySum > 0 ? defectQtySum : '-'}
+        </td>
         <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', color: item.missing_qty > 0 ? C.danger : C.muted }}>
           {item.missing_qty > 0 ? item.missing_qty : '-'}
         </td>
         <td style={{ padding: '0.5rem 0.6rem' }}>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {item.photos.length > 0 && chip('#0284c7', '#e0f2fe', `📷${item.photos.length}`, true)}
-            {item.defect_logs.length > 0 && chip(C.danger, C.dangerLight, `불량${item.defect_logs.length}`, true)}
-            {item.repair_logs.length > 0 && chip(C.purple, C.purpleLight, `수선${item.repair_logs.length}`, true)}
+            {item.defect_logs.length > 0 && chip(C.danger, C.dangerLight, `불량${defectQtySum}개`, true)}
+            {item.repair_logs.length > 0 && chip(C.purple, C.purpleLight, `수선${item.repair_logs.length}건`, true)}
             {item.confirmed_by && chip(C.muted, '#f1f5f9', item.confirmed_by, true)}
           </div>
         </td>
@@ -166,7 +178,7 @@ function ItemRow({ item }: { item: ItemDetail }) {
       {/* 상세 펼침 */}
       {open && (
         <tr style={{ background: '#f8fafc' }}>
-          <td colSpan={7} style={{ padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}` }}>
+          <td colSpan={9} style={{ padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}` }}>
             {/* 품목 사진 */}
             {item.photos.length > 0 && (
               <div style={{ marginBottom: '0.75rem' }}>
@@ -242,22 +254,30 @@ function ItemRow({ item }: { item: ItemDetail }) {
 }
 
 // ─────────────────────────────────────────────
-// 팝업 모달 (통합현황 상세)
+// 불량·수선 세부내역 서브모달
 // ─────────────────────────────────────────────
-function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string; onClose: () => void }) {
-  const [data, setData] = useState<DetailData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+function SubLogModal({
+  type, allItems, onClose,
+}: {
+  type: 'defect' | 'repair';
+  allItems: ItemDetail[];
+  onClose: () => void;
+}) {
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const router = useRouter();
 
-  useEffect(() => {
-    apiFetch<DetailData>(`/inbound/vendor-overview/${encodeURIComponent(vendor)}/${encodeURIComponent(date)}`)
-      .then(d => { setData(d); setLoading(false); })
-      .catch(e => { setError(e.message); setLoading(false); });
-  }, [vendor, date]);
+  // 해당 현황에 속한 로그만 (items에서 추출)
+  const rows: { itemName: string; barcode: string | null; log: DefectEntry | RepairEntry }[] = [];
+  for (const item of allItems) {
+    const name = item.matched_product || item.item_name || '-';
+    const bc = item.matched_barcode;
+    const logs = type === 'defect' ? item.defect_logs : item.repair_logs;
+    for (const log of logs) rows.push({ itemName: name, barcode: bc, log });
+  }
 
-  // ESC 닫기
+  const title = type === 'defect' ? '불량 처리 내역' : '수선 처리 내역';
+  const accentColor = type === 'defect' ? C.danger : C.purple;
+  const lightColor = type === 'defect' ? C.dangerLight : C.purpleLight;
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
@@ -267,6 +287,132 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
   return (
     <>
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', zIndex: 2000, backdropFilter: 'blur(2px)' }} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        width: 'min(96vw, 780px)', maxHeight: '88vh',
+        background: C.card, borderRadius: 14, boxShadow: '0 28px 70px rgba(0,0,0,0.3)',
+        zIndex: 2001, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* 헤더 */}
+        <div style={{ background: lightColor, padding: '0.85rem 1.25rem', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: '1rem', color: accentColor }}>{title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: '0.82rem', color: accentColor, fontWeight: 600 }}>{rows.length}건</span>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.3rem', color: C.muted, lineHeight: 1 }}>✕</button>
+          </div>
+        </div>
+        {/* 바디 */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '0.5rem 0' }}>
+          {rows.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: C.muted }}>내역 없음</div>
+          ) : rows.map(({ itemName, barcode, log }, idx) => {
+            const isDefect = type === 'defect';
+            const d = log as DefectEntry;
+            const r = log as RepairEntry;
+            const before = isDefect ? d.before_image : r.before_image;
+            const after  = isDefect ? d.after_image  : r.after_image;
+            return (
+              <div key={idx} style={{ margin: '0.5rem 1rem', background: lightColor, borderRadius: 8, padding: '0.7rem 0.9rem', border: `1px solid ${accentColor}22` }}>
+                {/* 상단: 상품명 / 바코드 / 날짜 */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: C.text }}>{itemName}</span>
+                  {barcode && <span style={{ fontSize: '0.72rem', color: C.muted, background: '#f1f5f9', borderRadius: 4, padding: '1px 6px' }}>{barcode}</span>}
+                  <span style={{ fontSize: '0.72rem', color: C.muted, marginLeft: 'auto' }}>{log.날짜}</span>
+                </div>
+                {/* 상세 정보 */}
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.82rem', color: C.textSub, marginBottom: 6 }}>
+                  {isDefect ? (
+                    <>
+                      <span>불량: <b style={{ color: accentColor }}>{d.불량명 || '-'}</b></span>
+                      <span>수량: <b>{d.수량}</b></span>
+                      {d.처리결과 && <span>처리: <b>{d.처리결과}</b></span>}
+                      {d.비고 && <span>비고: {d.비고}</span>}
+                      {d.작성자 && <span style={{ color: C.muted }}>작성: {d.작성자}</span>}
+                    </>
+                  ) : (
+                    <>
+                      <span>작업: <b style={{ color: accentColor }}>{r.작업 || '-'}</b></span>
+                      {r.불량명 && <span>불량명: <b>{r.불량명}</b></span>}
+                      <span>수량: <b>{r.수량}</b></span>
+                      {r.비용 != null && r.비용 > 0 && <span>비용: <b>{r.비용?.toLocaleString()}원</b></span>}
+                      {r.비고 && <span>비고: {r.비고}</span>}
+                      {r.작성자 && <span style={{ color: C.muted }}>작성: {r.작성자}</span>}
+                    </>
+                  )}
+                </div>
+                {/* 사진 */}
+                {(before || after) && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {before && (
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: C.muted, marginBottom: 2 }}>이전</div>
+                        <img src={`${IMG_BASE}${before}`} alt="이전" onClick={() => setLightbox(before)}
+                          style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: `1px solid ${C.border}` }} />
+                      </div>
+                    )}
+                    {after && (
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: C.muted, marginBottom: 2 }}>이후</div>
+                        <img src={`${IMG_BASE}${after}`} alt="이후" onClick={() => setLightbox(after)}
+                          style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', border: `1px solid ${C.border}` }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {/* 푸터 */}
+        <div style={{ padding: '0.75rem 1.25rem', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button onClick={onClose} style={{ background: accentColor, color: '#fff', border: 'none', borderRadius: 7, padding: '0.5rem 1.5rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' }}>닫기</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────
+// 팝업 모달 (통합현황 상세)
+// ─────────────────────────────────────────────
+function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string; onClose: () => void }) {
+  const [data, setData] = useState<DetailData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [subModal, setSubModal] = useState<'defect' | 'repair' | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    apiFetch<DetailData>(`/inbound/vendor-overview/${encodeURIComponent(vendor)}/${encodeURIComponent(date)}`)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, [vendor, date]);
+
+  // ESC 닫기 (서브모달 없을 때만)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !subModal) onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose, subModal]);
+
+  // 해당 현황에 속한 전체 품목
+  const allItems = data ? data.batches.flatMap(b => b.items) : [];
+  // 불량수량합계: defect_logs.수량 합산 (수선건수와 무관)
+  const totalDefectQty = allItems.flatMap(i => i.defect_logs).reduce((s, d) => s + (d.수량 || 0), 0);
+  const totalNormalQty = Math.max(0, (data?.summary.total_actual_qty ?? 0) - totalDefectQty);
+
+  return (
+    <>
+      {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
+      {subModal && (
+        <SubLogModal
+          type={subModal}
+          allItems={allItems}
+          onClose={() => setSubModal(null)}
+        />
+      )}
       {/* 배경 오버레이 */}
       <div
         onClick={onClose}
@@ -297,19 +443,31 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
 
           {data && (
             <>
-              {/* 요약 바 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', background: C.bg, borderBottom: `1px solid ${C.border}` }}>
-                {[
-                  { label: '장끼수량', v: data.summary.total_janggi_qty, color: C.text },
-                  { label: '실수량',   v: data.summary.total_actual_qty,  color: C.success },
-                  { label: '누락',     v: data.summary.total_missing_qty, color: data.summary.total_missing_qty > 0 ? C.danger : C.muted },
-                  { label: '입고율',   v: data.summary.total_janggi_qty > 0 ? `${Math.round(data.summary.total_actual_qty/data.summary.total_janggi_qty*100)}%` : '-', color: C.success },
-                  { label: '매칭필요', v: data.summary.needs_matching_count, color: data.summary.needs_matching_count > 0 ? C.warn : C.muted },
-                  { label: '불량건수', v: data.summary.defect_total, color: data.summary.defect_total > 0 ? C.danger : C.muted },
-                  { label: '수선건수', v: data.summary.repair_total, color: data.summary.repair_total > 0 ? C.purple : C.muted },
-                ].map(s => (
-                  <div key={s.label} style={{ padding: '0.65rem 0.5rem', textAlign: 'center', borderRight: `1px solid ${C.border}` }}>
-                    <div style={{ fontSize: '0.68rem', color: C.muted, marginBottom: 2 }}>{s.label}</div>
+              {/* 요약 바: 정상수량 = 실수량 - 불량수량합계 / 수선건수는 별도 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', background: C.bg, borderBottom: `1px solid ${C.border}` }}>
+                {([
+                  { label: '장끼수량', v: data.summary.total_janggi_qty, color: C.text, clickType: null },
+                  { label: '실수량',   v: data.summary.total_actual_qty,  color: C.success, clickType: null },
+                  { label: '정상수량', v: totalNormalQty, color: totalNormalQty < data.summary.total_actual_qty ? C.text : C.success, clickType: null },
+                  { label: '불량수량', v: totalDefectQty, color: totalDefectQty > 0 ? C.danger : C.muted, clickType: totalDefectQty > 0 ? 'defect' : null },
+                  { label: '누락',     v: data.summary.total_missing_qty, color: data.summary.total_missing_qty > 0 ? C.danger : C.muted, clickType: null },
+                  { label: '입고율',   v: data.summary.total_janggi_qty > 0 ? `${Math.round(data.summary.total_actual_qty/data.summary.total_janggi_qty*100)}%` : '-', color: C.success, clickType: null },
+                  { label: '매칭필요', v: data.summary.needs_matching_count, color: data.summary.needs_matching_count > 0 ? C.warn : C.muted, clickType: null },
+                  { label: '수선건수', v: data.summary.repair_total, color: data.summary.repair_total > 0 ? C.purple : C.muted, clickType: data.summary.repair_total > 0 ? 'repair' : null },
+                ] as { label: string; v: number | string; color: string; clickType: 'defect' | 'repair' | null }[]).map(s => (
+                  <div
+                    key={s.label}
+                    onClick={() => s.clickType && setSubModal(s.clickType)}
+                    style={{
+                      padding: '0.65rem 0.5rem', textAlign: 'center', borderRight: `1px solid ${C.border}`,
+                      cursor: s.clickType ? 'pointer' : 'default',
+                      background: s.clickType ? 'rgba(0,0,0,0.02)' : undefined,
+                    }}
+                    title={s.clickType ? `${s.label} 클릭하여 상세 보기` : undefined}
+                  >
+                    <div style={{ fontSize: '0.68rem', color: C.muted, marginBottom: 2 }}>
+                      {s.label}{s.clickType && <span style={{ marginLeft: 2, fontSize: '0.6rem' }}>▶</span>}
+                    </div>
                     <div style={{ fontWeight: 700, fontSize: '1rem', color: s.color }}>{typeof s.v === 'number' ? s.v.toLocaleString() : s.v}</div>
                   </div>
                 ))}
@@ -354,8 +512,8 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                         <thead>
                           <tr style={{ background: '#f1f5f9' }}>
-                            {['#', '상품명/옵션', '장끼', '실수량', '누락', '사진·이력', ''].map((h, i) => (
-                              <th key={i} style={{ padding: '0.4rem 0.6rem', textAlign: i >= 2 && i <= 4 ? 'right' : 'left', color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', fontSize: '0.75rem' }}>{h}</th>
+                            {['#', '상품명/옵션', '장끼', '실수량', '정상', '불량', '누락', '사진·이력', ''].map((h, i) => (
+                              <th key={i} style={{ padding: '0.4rem 0.6rem', textAlign: i >= 2 && i <= 6 ? 'right' : 'left', color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', fontSize: '0.75rem' }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
