@@ -1122,6 +1122,22 @@ export function getRepairLogExportUrl(
   return `${API_BASE}/repair-log/export?${q.toString()}`;
 }
 
+export function getDefectLogExportUrl(
+  startDate: string,
+  endDate: string,
+  vendor?: string,
+  defect?: string,
+  result?: string,
+  author?: string,
+) {
+  const q = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  if (vendor) q.set('vendor', vendor);
+  if (defect) q.set('defect', defect);
+  if (result) q.set('result', result);
+  if (author) q.set('author', author);
+  return `${API_BASE}/defect-log/export?${q.toString()}`;
+}
+
 export async function getOldRepairPhotos(days = 60) {
   return fetchApi<{ cutoff: string; days: number; logs: number; files: number }>(
     `/repair-log/photos/old?days=${days}`
