@@ -131,6 +131,7 @@ class InboundItemUpdate(BaseModel):
     status: Optional[str] = None
     memo: Optional[str] = None
     item_name: Optional[str] = None        # 상품명 직접 수정
+    option_text: Optional[str] = None      # 옵션 직접 수정
     item_wholesale: Optional[str] = None   # 도매처 직접 수정 (배치 wholesale 오버라이드)
     matched_barcode: Optional[str] = None
     matched_vendor: Optional[str] = None
@@ -288,11 +289,17 @@ def ensure_inbound_tables():
             "updated_at DATETIME",
             "confirmed_by TEXT",    # 로그인 없이 접근하는 작업자 이름
             "item_wholesale TEXT",  # 도매처 항목별 오버라이드
+            "normal_qty INTEGER DEFAULT 0",  # 정상처리 수량 (직원 직접 입력)
         ]:
             try:
                 con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
             except Exception:
                 pass
+        # inbound_share_links 에 폐기 컬럼 추가
+        try:
+            con.execute("ALTER TABLE inbound_share_links ADD COLUMN revoked_at DATETIME")
+        except Exception:
+            pass
         con.commit()
 
 
@@ -317,6 +324,40 @@ def _get_user(token: Optional[str]) -> dict:
 
 
 _KST = _dt.timezone(_dt.timedelta(hours=9))
+
+
+def _update_barcode_master(con, barcode: str, wholesale: str, supplier_location: str, supplier_contact: str) -> None:
+    """매칭 확정 시 repair_barcode 마스터에 도매처·위치·연락처를 갱신한다.
+
+    - 해당 바코드 레코드가 없으면 아무 작업도 하지 않는다.
+    - 빈 문자열로 기존 값을 덮어쓰지 않는다.
+    """
+    # 컬럼 없으면 추가 (기존 DB 마이그레이션)
+    for col in ("도매처주소 TEXT", "도매처연락처 TEXT"):
+        try:
+            con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {col}")
+        except Exception:
+            pass
+
+    # 업데이트할 필드 수집
+    sets, vals = [], []
+    if wholesale:
+        sets.append("도매처=?"); vals.append(wholesale)
+    if supplier_location:
+        sets.append("도매처주소=?"); vals.append(supplier_location)
+    if supplier_contact:
+        sets.append("도매처연락처=?"); vals.append(supplier_contact)
+
+    if not sets:
+        return
+
+    vals.append(barcode)
+    try:
+        con.execute(f"UPDATE repair_barcode SET {', '.join(sets)} WHERE 바코드=?", vals)
+        logger.info(f"바코드 마스터 업데이트: {barcode} → {dict(zip([s.split('=')[0] for s in sets], vals[:-1]))}")
+    except Exception as e:
+        logger.warning(f"바코드 마스터 업데이트 실패 ({barcode}): {e}")
+
 
 def _check_link_expiry(inbound_date_str: str) -> None:
     """비로그인 공개 링크 만료 확인 — 당일(KST) 자정 이후이면 410 반환."""
@@ -1039,6 +1080,15 @@ async def run_ocr(
                 match["match_confidence"], int(needs_matching),
                 "OCR", now,
             ))
+            # OCR 자동매칭 성공 시 바코드 마스터에 도매처 정보 갱신
+            if match.get("matched_barcode") and wholesale:
+                _update_barcode_master(
+                    con,
+                    barcode=match["matched_barcode"],
+                    wholesale=wholesale or "",
+                    supplier_location="",
+                    supplier_contact="",
+                )
             created_items.append({
                 "id": item_id,
                 "line_no": i + 1,
@@ -1148,6 +1198,9 @@ def update_item(
     if body.item_name is not None:
         name_val = body.item_name.strip()
         fields.append("item_name=?"); params.append(name_val if name_val else None)
+    if body.option_text is not None:
+        opt_val = body.option_text.strip()
+        fields.append("option_text=?"); params.append(opt_val if opt_val else None)
     if body.item_wholesale is not None:
         ws_val = body.item_wholesale.strip()
         fields.append("item_wholesale=?"); params.append(ws_val if ws_val else None)
@@ -1178,6 +1231,32 @@ def update_item(
         batch_row = con.execute("SELECT batch_id FROM inbound_items WHERE id=?", (item_id,)).fetchone()
         if batch_row:
             _recalc_batch_totals(con, batch_row[0])
+
+        # ── 바코드 마스터 자동 갱신 ──────────────────────────────────────
+        # matched_barcode 가 이번 요청에서 설정되거나, supplier 정보가 변경될 때
+        # 해당 바코드 레코드의 도매처·주소·연락처를 repair_barcode 에 반영한다.
+        should_update_master = bool(body.matched_barcode) or bool(body.supplier_location) or bool(body.supplier_contact)
+        if should_update_master:
+            # 현재(업데이트 후) 품목 상태 조회
+            item_state = con.execute(
+                """SELECT i.matched_barcode,
+                          COALESCE(i.item_wholesale, b.wholesale) AS wholesale,
+                          i.supplier_location,
+                          i.supplier_contact
+                   FROM inbound_items i
+                   JOIN inbound_batches b ON i.batch_id = b.id
+                   WHERE i.id=?""",
+                (item_id,)
+            ).fetchone()
+            if item_state and item_state[0]:  # matched_barcode 있을 때만
+                _update_barcode_master(
+                    con,
+                    barcode=item_state[0],
+                    wholesale=item_state[1] or "",
+                    supplier_location=item_state[2] or "",
+                    supplier_contact=item_state[3] or "",
+                )
+
         con.commit()
     return {"ok": True}
 
@@ -1814,12 +1893,16 @@ def get_share_data(
     """공유 링크 데이터 (인증 불필요, 비밀번호 확인만)"""
     with get_connection() as con:
         row = con.execute(
-            "SELECT batch_id, password, expires_at, allow_excel FROM inbound_share_links WHERE token=?",
+            "SELECT batch_id, password, expires_at, allow_excel, revoked_at FROM inbound_share_links WHERE token=?",
             (token,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
-        batch_id, stored_pw, expires_at, allow_excel = row
+        batch_id, stored_pw, expires_at, allow_excel, revoked_at = row
+
+        # 폐기 확인
+        if revoked_at:
+            raise HTTPException(status_code=410, detail="폐기된 링크입니다.")
 
         # 만료 확인
         if expires_at and datetime.utcnow().strftime("%Y-%m-%d") > expires_at:
@@ -2065,3 +2148,507 @@ async def ocr_preview(
         "items": result.get("items", []),
         "raw": result,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  입고 건별 통합 처리현황 (feat/inbound-unified-overview)
+# ═══════════════════════════════════════════════════════════════
+
+# ── 이미지 URL 헬퍼 (수선/불량일지용) ──────────────────────────
+
+def _image_url_repair(filename: Optional[str]) -> Optional[str]:
+    if not filename:
+        return None
+    return f"/repair-log/image/{filename}"
+
+
+def _image_url_defect(filename: Optional[str]) -> Optional[str]:
+    if not filename:
+        return None
+    return f"/defect-log/image/{filename}"
+
+
+# ── 처리 단계 추론 ──────────────────────────────────────────────
+
+def _infer_phase(
+    *,
+    status: str,
+    pending_qty: int,
+    defect_qty: int,
+    repairing_qty: int,
+    received_qty: int,
+) -> str:
+    """batch 상태 + 수량 현황 → 한국어 처리 단계."""
+    if status in ("ocr_pending", "confirming"):
+        return "입고 확인 중"
+    if status == "done":
+        return "최종 마감 완료"
+    if status == "cancelled":
+        return "취소"
+    # 진행 중
+    if repairing_qty > 0:
+        return "수선 진행 중"
+    if defect_qty > 0:
+        return "불량 확인 중"
+    if pending_qty > 0:
+        return "양품화 진행 중"
+    if received_qty > 0:
+        return "양품화 진행 중"
+    return "입고 확인 중"
+
+
+# ── 배치 통합현황 계산 헬퍼 ─────────────────────────────────────
+
+def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Optional[dict]:
+    """
+    batch_id 기준 통합현황 dict 반환.
+
+    public=True 이면 내부 전용 필드(원가, 직원명, 인증정보)를 제외한 공유 DTO 반환.
+    반환값이 None 이면 배치가 존재하지 않음.
+
+    수량 계산 원칙
+    ─────────────
+    장끼수량 = 실입고수량 + 미입고수량
+    실입고수량 = 미처리 + 정상처리 + 불량판정중 + 수선중 + 수선후정상 + 회생불가
+    최종정상수량 = 정상처리 + 수선후정상
+
+    상태 매핑 (inbound_items.status → 카테고리)
+    ─────────────────────────────────────────
+    pending       → 미처리 (actual_qty - normal_qty)
+    confirmed     → 정상처리 (actual_qty)
+    defect        → 불량판정중 (actual_qty)
+    repair        → 수선중 (actual_qty)
+    done          → 수선후정상 (actual_qty)
+    unrecoverable → 회생불가 (actual_qty)
+    missing       → (missing_qty 컬럼 사용)
+
+    pending 상태 품목의 경우 normal_qty(직원 입력)만큼 정상처리로 먼저 차감한다.
+    중복 집계 방지: status는 해당 품목의 현재 최종 상태 → 이력 기록은 defect/repair_log에만
+    """
+    batch_row = con.execute("""
+        SELECT id, vendor, inbound_date, status, memo,
+               janggi_filename, janggi_date, janggi_no, wholesale,
+               total_janggi_qty, total_actual_qty, total_missing_qty,
+               created_by, closed_by, closed_at, created_at, updated_at, vendor_canonical
+        FROM inbound_batches WHERE id=?
+    """, (batch_id,)).fetchone()
+
+    if not batch_row:
+        return None
+
+    # 품목 조회 (normal_qty 포함)
+    items_raw = con.execute("""
+        SELECT id, batch_id, line_no, item_name, option_text, unit_price,
+               janggi_qty, actual_qty, missing_qty, status,
+               matched_barcode, matched_vendor, matched_product, matched_option,
+               match_confidence, needs_matching, memo,
+               supplier_location, supplier_contact, created_at, updated_at,
+               confirmed_by, item_wholesale,
+               COALESCE(normal_qty, 0) AS normal_qty,
+               inbound_item_id, defect_case_id
+        FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
+    """, (batch_id,)).fetchall()
+
+    item_ids = [r[0] for r in items_raw]
+
+    # 품목 사진
+    photos_map: dict = {}
+    if item_ids:
+        ph_rows = con.execute(
+            f"SELECT item_id, id, filename FROM inbound_item_photos "
+            f"WHERE item_id IN ({','.join('?'*len(item_ids))})",
+            item_ids
+        ).fetchall()
+        for ph in ph_rows:
+            photos_map.setdefault(ph[0], []).append({
+                "id": ph[1],
+                "url": _image_url(ph[2]),
+                "filename": ph[2],
+            })
+
+    # 불량일지 (inbound_item_id 연결)
+    defect_map: dict = {}
+    if item_ids:
+        try:
+            d_rows = con.execute(
+                f"SELECT inbound_item_id, id, 날짜, 불량명, 수량, 비고, 처리결과, "
+                f"before_image, after_image, extra_images "
+                f"FROM defect_log WHERE inbound_item_id IN ({','.join('?'*len(item_ids))})"
+                f" ORDER BY COALESCE(저장시간, 날짜) ASC",
+                item_ids
+            ).fetchall()
+            for dr in d_rows:
+                entry = {
+                    "id": dr[1], "날짜": dr[2], "불량명": dr[3],
+                    "수량": dr[4], "비고": dr[5], "처리결과": dr[6],
+                    "before_image": _image_url_defect(dr[7]),
+                    "after_image": _image_url_defect(dr[8]),
+                }
+                if not public:
+                    entry["extra_images"] = dr[9]
+                defect_map.setdefault(dr[0], []).append(entry)
+        except Exception:
+            pass  # 테이블 없으면 빈 맵
+
+    # 수선일지 (inbound_item_id 연결)
+    repair_map: dict = {}
+    if item_ids:
+        try:
+            r_rows = con.execute(
+                f"SELECT inbound_item_id, id, 날짜, 작업, 불량명, 수량, 비용, 비고, "
+                f"before_image, after_image "
+                f"FROM repair_work_log WHERE inbound_item_id IN ({','.join('?'*len(item_ids))})"
+                f" ORDER BY COALESCE(저장시간, 날짜) ASC",
+                item_ids
+            ).fetchall()
+            for rr in r_rows:
+                entry = {
+                    "id": rr[1], "날짜": rr[2], "작업": rr[3], "불량명": rr[4],
+                    "수량": rr[5], "비고": rr[7],
+                    "before_image": _image_url_repair(rr[8]),
+                    "after_image": _image_url_repair(rr[9]),
+                }
+                if not public:
+                    entry["비용"] = rr[6]
+                repair_map.setdefault(rr[0], []).append(entry)
+        except Exception:
+            pass
+
+    # ── 수량 집계 ──────────────────────────────────────────
+    total_janggi = 0
+    total_actual = 0
+    total_missing = 0
+    agg_pending = 0
+    agg_normal = 0
+    agg_defect = 0
+    agg_repairing = 0
+    agg_repaired_good = 0
+    agg_unrecoverable = 0
+
+    item_list = []
+    for r in items_raw:
+        item_id   = r[0]
+        janggi_qty  = r[6] or 0
+        actual_qty  = r[7] or 0
+        missing_qty = r[8] or 0
+        status      = r[9] or "pending"
+        normal_qty_col = r[23] or 0  # 직원 입력 정상처리 수량
+
+        # 상태별 수량 계산 (중복 집계 없음: 현재 최종 상태만 한 번 반영)
+        if status == "confirmed":
+            i_normal   = actual_qty
+            i_pending  = 0
+        elif status == "pending":
+            i_normal   = min(normal_qty_col, actual_qty)
+            i_pending  = max(actual_qty - i_normal, 0)
+        else:
+            i_normal  = 0
+            i_pending = 0
+
+        i_defect      = actual_qty if status == "defect"        else 0
+        i_repairing   = actual_qty if status == "repair"        else 0
+        i_repaired    = actual_qty if status == "done"          else 0
+        i_unrecov     = actual_qty if status == "unrecoverable" else 0
+
+        total_janggi    += janggi_qty
+        total_actual    += actual_qty
+        total_missing   += missing_qty
+        agg_pending     += i_pending
+        agg_normal      += i_normal
+        agg_defect      += i_defect
+        agg_repairing   += i_repairing
+        agg_repaired_good += i_repaired
+        agg_unrecoverable += i_unrecov
+
+        item_data: dict = {
+            "id":          item_id,
+            "line_no":     r[2],
+            "item_name":   r[3],
+            "option_text": r[4],
+            "janggi_qty":  janggi_qty,
+            "actual_qty":  actual_qty,
+            "missing_qty": missing_qty,
+            "status":      status,
+            "status_label": ITEM_STATUS_LABELS.get(status, status),
+            "matched_barcode": r[10],
+            "matched_vendor":  r[11],
+            "matched_product": r[12],
+            "matched_option":  r[13],
+            "breakdown": {
+                "normal":       i_normal,
+                "pending":      i_pending,
+                "defect":       i_defect,
+                "repairing":    i_repairing,
+                "repaired_good": i_repaired,
+                "unrecoverable": i_unrecov,
+            },
+            "photos":      photos_map.get(item_id, []),
+            "defect_logs": defect_map.get(item_id, []),
+            "repair_logs": repair_map.get(item_id, []),
+        }
+
+        if not public:
+            item_data["unit_price"]       = r[5]
+            item_data["item_wholesale"]   = r[22]
+            item_data["normal_qty_input"] = normal_qty_col
+            item_data["needs_matching"]   = bool(r[15])
+            item_data["match_confidence"] = r[14]
+            item_data["supplier_location"] = r[17]
+            item_data["supplier_contact"]  = r[18]
+            item_data["confirmed_by"]      = r[21]
+            item_data["memo"]              = r[16]
+            item_data["defect_case_id"]    = r[25]
+            item_data["inbound_item_id"]   = r[24]
+
+        item_list.append(item_data)
+
+    # ── 진행률 (0 나누기 안전 처리) ─────────────────────────
+    final_good_qty   = agg_normal + agg_repaired_good
+    received_qty     = total_actual
+    expected_qty     = total_janggi
+
+    inbound_progress = (
+        round((received_qty + total_missing) / expected_qty * 100, 1)
+        if expected_qty > 0 else 0.0
+    )
+    processing_progress = (
+        round((agg_normal + agg_repaired_good + agg_unrecoverable) / received_qty * 100, 1)
+        if received_qty > 0 else 0.0
+    )
+
+    phase = _infer_phase(
+        status=batch_row[3],
+        pending_qty=agg_pending,
+        defect_qty=agg_defect,
+        repairing_qty=agg_repairing,
+        received_qty=received_qty,
+    )
+
+    # ── 처리 이력 타임라인 ─────────────────────────────────
+    timeline: list = []
+    for item_data in item_list:
+        for d in item_data["defect_logs"]:
+            timeline.append({
+                "type": "defect",
+                "date": d.get("날짜"),
+                "item_name": item_data["item_name"],
+                "detail": d.get("불량명"),
+                "qty": d.get("수량"),
+                "result": d.get("처리결과"),
+                "id": d.get("id"),
+            })
+        for rr in item_data["repair_logs"]:
+            timeline.append({
+                "type": "repair",
+                "date": rr.get("날짜"),
+                "item_name": item_data["item_name"],
+                "detail": rr.get("작업"),
+                "qty": rr.get("수량"),
+                "id": rr.get("id"),
+            })
+    timeline.sort(key=lambda e: (e.get("date") or ""), reverse=True)
+
+    janggi_url = _image_url(batch_row[5]) if batch_row[5] else None
+
+    batch_info: dict = {
+        "id":            batch_row[0],
+        "vendor":        batch_row[1],
+        "inbound_date":  batch_row[2],
+        "status":        batch_row[3],
+        "status_label":  STATUS_LABELS.get(batch_row[3], batch_row[3]),
+        "wholesale":     batch_row[8],
+        "janggi_date":   batch_row[6],
+        "janggi_no":     batch_row[7],
+        "janggi_url":    janggi_url,
+        "phase":         phase,
+        "closed_at":     batch_row[14],
+    }
+    if not public:
+        batch_info["memo"]       = batch_row[4]
+        batch_info["created_by"] = batch_row[12]
+        batch_info["closed_by"]  = batch_row[13]
+
+    return {
+        "batch": batch_info,
+        "summary": {
+            "expected_qty":      expected_qty,
+            "received_qty":      received_qty,
+            "missing_qty":       total_missing,
+            "pending_qty":       agg_pending,
+            "normal_qty":        agg_normal,
+            "defect_pending_qty": agg_defect,
+            "repairing_qty":     agg_repairing,
+            "repaired_good_qty": agg_repaired_good,
+            "unrecoverable_qty": agg_unrecoverable,
+            "final_good_qty":    final_good_qty,
+            "inbound_progress":  inbound_progress,
+            "processing_progress": processing_progress,
+        },
+        "items":    item_list,
+        "timeline": timeline[:50],
+        "photos":   {"janggi": janggi_url},
+    }
+
+
+# ── 통합현황 조회 (내부, 인증 필요) ────────────────────────────
+
+@router.get("/batches/{batch_id}/overview")
+def get_batch_overview(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """입고 건별 통합 처리현황 (내부 직원용, 로그인 필요)."""
+    _get_user(authorization)
+    with get_connection() as con:
+        overview = _compute_batch_overview(batch_id, con, public=False)
+    if overview is None:
+        raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+    return overview
+
+
+# ── 정상처리 수량 입력·정정 ────────────────────────────────────
+
+class NormalQtyUpdate(BaseModel):
+    normal_qty: int
+    confirmed_by: Optional[str] = None
+
+
+@router.patch("/items/{item_id}/normal-qty")
+def update_normal_qty(
+    item_id: str,
+    body: NormalQtyUpdate,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    정상처리 수량 입력·정정 (인증 불필요 — 작업자 직접 입력).
+
+    - normal_qty < 0  → 거부
+    - normal_qty > actual_qty  → 거부 (실입고수량 초과 불가)
+    - normal_qty == actual_qty → status 자동 'confirmed'
+    - normal_qty < actual_qty, 현재 confirmed → status 'pending' 으로 복귀
+    """
+    if body.normal_qty < 0:
+        raise HTTPException(status_code=400, detail="수량은 0 이상이어야 합니다.")
+
+    with get_connection() as con:
+        item_row = con.execute(
+            "SELECT id, batch_id, actual_qty, status FROM inbound_items WHERE id=?",
+            (item_id,)
+        ).fetchone()
+        if not item_row:
+            raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+
+        actual_qty = item_row[2] or 0
+        current_status = item_row[3] or "pending"
+
+        if body.normal_qty > actual_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"정상처리 수량({body.normal_qty})이 "
+                    f"실입고수량({actual_qty})을 초과할 수 없습니다."
+                ),
+            )
+
+        # 자동 상태 전환 (중복 집계 방지: pending/confirmed 사이만 자동 전환)
+        if body.normal_qty == actual_qty and actual_qty > 0:
+            new_status = "confirmed"
+        elif body.normal_qty < actual_qty and current_status == "confirmed":
+            new_status = "pending"
+        else:
+            new_status = current_status  # 다른 상태(defect/repair 등)는 유지
+
+        fields = ["normal_qty=?", "status=?", "updated_at=CURRENT_TIMESTAMP"]
+        params: list = [body.normal_qty, new_status]
+        if body.confirmed_by is not None:
+            name = body.confirmed_by.strip()[:50]
+            fields.append("confirmed_by=?")
+            params.append(name if name else None)
+        params.append(item_id)
+
+        con.execute(f"UPDATE inbound_items SET {', '.join(fields)} WHERE id=?", params)
+        _recalc_batch_totals(con, item_row[1])
+        con.commit()
+
+    return {"ok": True, "normal_qty": body.normal_qty, "status": new_status}
+
+
+# ── 공유 링크 폐기 ──────────────────────────────────────────────
+
+@router.delete("/share/{token}")
+def revoke_share_link(
+    token: str,
+    authorization: Optional[str] = Header(None),
+):
+    """공유 링크 폐기 (인증 필요). 이후 해당 링크 접근 불가."""
+    _get_user(authorization)
+
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT token, revoked_at FROM inbound_share_links WHERE token=?",
+            (token,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
+        if row[1]:
+            return {"ok": True, "already_revoked": True, "revoked_at": row[1]}
+
+        con.execute(
+            "UPDATE inbound_share_links SET revoked_at=CURRENT_TIMESTAMP WHERE token=?",
+            (token,)
+        )
+        con.commit()
+
+    return {"ok": True, "revoked": True}
+
+
+# ── 공유 통합현황 (화주사용, 인증 불필요) ──────────────────────
+
+@router.get("/share/{token}/overview")
+def get_share_overview(
+    token: str,
+    password: Optional[str] = None,
+):
+    """
+    공유 링크 토큰으로 통합현황 조회 (화주사용, 인증 불필요).
+
+    보안:
+    - 토큰에 연결된 화주사·batch만 조회 가능
+    - 비밀번호, 만료, 폐기 검증
+    - 다른 batch·화주사 접근 불가
+    - 내부 필드(원가·직원명·인증정보) 제외한 공유 전용 DTO 반환
+    """
+    with get_connection() as con:
+        link_row = con.execute(
+            "SELECT batch_id, password, expires_at, revoked_at FROM inbound_share_links WHERE token=?",
+            (token,)
+        ).fetchone()
+        if not link_row:
+            raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
+
+        batch_id, stored_pw, expires_at, revoked_at = link_row
+
+        # 폐기 확인
+        if revoked_at:
+            raise HTTPException(status_code=410, detail="폐기된 링크입니다.")
+
+        # 만료 확인
+        if expires_at and datetime.utcnow().strftime("%Y-%m-%d") > expires_at:
+            raise HTTPException(status_code=410, detail="링크가 만료되었습니다.")
+
+        # 비밀번호 확인
+        if stored_pw:
+            if not password:
+                return {"needs_password": True}
+            if not _verify_password(password, stored_pw):
+                raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+
+        # 공유 DTO 생성 (public=True → 내부 필드 제외)
+        overview = _compute_batch_overview(batch_id, con, public=True)
+
+    if overview is None:
+        raise HTTPException(status_code=404, detail="입고 데이터를 찾을 수 없습니다.")
+
+    overview["expires_at"] = expires_at
+    overview["updated_at"] = overview["batch"].get("closed_at") or overview["batch"].get("inbound_date")
+    return overview

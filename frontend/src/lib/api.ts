@@ -1903,7 +1903,7 @@ export async function deleteInboundItem(token: string, itemId: string) {
 
 export async function updateInboundItem(token: string, itemId: string, body: Partial<{
   actual_qty: number; missing_qty: number; status: string; memo: string;
-  item_name: string; item_wholesale: string;
+  item_name: string; option_text: string; item_wholesale: string;
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
   supplier_location: string; supplier_contact: string;
   confirmed_by: string;

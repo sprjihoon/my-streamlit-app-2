@@ -162,12 +162,13 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
   const barcodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── 수정 폼 상태 (관리자) ──
+  // 바코드·공급처 관련은 아래 바코드 매칭 섹션에서 처리
   const [editForm, setEditForm] = useState({
-    item_name: item.item_name || '', option_text: item.option_text || '',
-    matched_barcode: item.matched_barcode || '', matched_vendor: item.matched_vendor || '',
-    matched_product: item.matched_product || '', matched_option: item.matched_option || '',
-    supplier_location: item.supplier_location || '', supplier_contact: item.supplier_contact || '',
-    memo: item.memo || '',
+    item_name:        item.item_name        || '',
+    option_text:      item.option_text      || '',
+    supplier_location:item.supplier_location|| '',
+    supplier_contact: item.supplier_contact || '',
+    memo:             item.memo             || '',
   });
   const [editSaving, setEditSaving] = useState(false);
 
@@ -203,13 +204,11 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     setEditSaving(true);
     try {
       await updateInboundItem(token, item.id, {
-        matched_barcode: editForm.matched_barcode || undefined,
-        matched_vendor: editForm.matched_vendor || undefined,
-        matched_product: editForm.matched_product || undefined,
-        matched_option: editForm.matched_option || undefined,
+        item_name:         editForm.item_name         || undefined,
+        option_text:       editForm.option_text       || undefined,
         supplier_location: editForm.supplier_location || undefined,
-        supplier_contact: editForm.supplier_contact || undefined,
-        memo: editForm.memo || undefined,
+        supplier_contact:  editForm.supplier_contact  || undefined,
+        memo:              editForm.memo              || undefined,
       });
       setEditMode(false); onUpdated();
     } catch { alert('수정 저장 실패'); }
@@ -414,45 +413,77 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
 
       {/* ── 관리자 수정 폼 ── */}
       {editMode && (
-        <div style={{ padding: '14px 16px', background: '#f8f9ff', borderBottom: `1px solid ${C.brandBorder}` }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: C.brand, marginBottom: 10 }}>✏️ 품목 정보 수정</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-            {[
-              { label: '바코드',       key: 'matched_barcode',  ph: '바코드번호' },
-              { label: '공급처(업체명)', key: 'matched_vendor',   ph: '업체명' },
-              { label: '공급처 상품명', key: 'matched_product',  ph: '상품명' },
-              { label: '공급처 옵션',  key: 'matched_option',   ph: '옵션' },
-              { label: '공급처 위치',  key: 'supplier_location', ph: '예) 동대문 A동 3층' },
-              { label: '공급처 연락처',key: 'supplier_contact',  ph: '010-0000-0000' },
-            ].map(f => (
-              <div key={f.key}>
-                <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3, fontWeight: 600 }}>{f.label}</div>
-                <input
-                  value={editForm[f.key as keyof typeof editForm]}
-                  onChange={e => setEditForm(p => ({ ...p, [f.key]: e.target.value }))}
-                  placeholder={f.ph}
-                  style={inputBase}
-                />
-              </div>
-            ))}
+        <div style={{ padding: '12px 16px 14px', background: '#f9fafb', borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10 }}>
+            품목 기본 정보 수정
+            <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 6, color: C.textFaint }}>
+              (바코드·공급처는 아래 매칭 섹션에서)
+            </span>
           </div>
+
+          {/* 품명 + 옵션 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>품명</div>
+              <input
+                value={editForm.item_name}
+                onChange={e => setEditForm(p => ({ ...p, item_name: e.target.value }))}
+                placeholder="품명"
+                style={{ ...inputBase, background: '#fff' }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>옵션</div>
+              <input
+                value={editForm.option_text}
+                onChange={e => setEditForm(p => ({ ...p, option_text: e.target.value }))}
+                placeholder="색상·사이즈 등"
+                style={{ ...inputBase, background: '#fff' }}
+              />
+            </div>
+          </div>
+
+          {/* 공급처 위치 + 연락처 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>공급처 위치</div>
+              <input
+                value={editForm.supplier_location}
+                onChange={e => setEditForm(p => ({ ...p, supplier_location: e.target.value }))}
+                placeholder="예) 동대문 A동 3층"
+                style={{ ...inputBase, background: '#fff' }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>공급처 연락처</div>
+              <input
+                value={editForm.supplier_contact}
+                onChange={e => setEditForm(p => ({ ...p, supplier_contact: e.target.value }))}
+                placeholder="010-0000-0000"
+                style={{ ...inputBase, background: '#fff' }}
+              />
+            </div>
+          </div>
+
+          {/* 메모 */}
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: C.textFaint, marginBottom: 3, fontWeight: 600 }}>메모</div>
+            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>메모</div>
             <input
               value={editForm.memo}
               onChange={e => setEditForm(p => ({ ...p, memo: e.target.value }))}
               placeholder="메모"
-              style={inputBase}
+              style={{ ...inputBase, background: '#fff' }}
             />
           </div>
+
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={handleEditSave} disabled={editSaving} style={{
-              flex: 2, height: 42, background: editSaving ? '#d1d5db' : C.brand,
-              color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer',
-            }}>{editSaving ? '저장 중…' : '수정 저장'}</button>
+              flex: 2, height: 40, background: editSaving ? '#d1d5db' : C.brand,
+              color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+            }}>{editSaving ? '저장 중…' : '저장'}</button>
             <button onClick={() => setEditMode(false)} style={{
-              flex: 1, height: 42, background: '#fff', border: `1px solid ${C.border}`,
-              borderRadius: 10, fontSize: 14, color: C.textMuted, cursor: 'pointer',
+              flex: 1, height: 40, background: '#fff', border: `1px solid ${C.border}`,
+              borderRadius: 8, fontSize: 14, color: C.textMuted, cursor: 'pointer',
             }}>취소</button>
           </div>
         </div>
