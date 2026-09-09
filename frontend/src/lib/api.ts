@@ -1759,10 +1759,11 @@ function inboundHeaders(token: string) {
 
 export async function listInboundBatches(
   token: string,
-  filters?: { vendor?: string; status?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }
+  filters?: { vendor?: string; wholesale?: string; status?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }
 ) {
   const params = new URLSearchParams();
   if (filters?.vendor) params.set('vendor', filters.vendor);
+  if (filters?.wholesale) params.set('wholesale', filters.wholesale);
   if (filters?.status) params.set('status', filters.status);
   if (filters?.dateFrom) params.set('date_from', filters.dateFrom);
   if (filters?.dateTo) params.set('date_to', filters.dateTo);

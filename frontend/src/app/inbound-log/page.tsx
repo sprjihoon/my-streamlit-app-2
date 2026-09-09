@@ -1486,6 +1486,7 @@ export default function InboundLogPage() {
   const [editingBatch, setEditingBatch] = useState<InboundBatch | null>(null);
 
   const [filterVendor, setFilterVendor] = useState('');
+  const [filterWholesale, setFilterWholesale] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
@@ -1498,6 +1499,7 @@ export default function InboundLogPage() {
     try {
       const res = await listInboundBatches(tok, {
         vendor: filterVendor || undefined,
+        wholesale: filterWholesale || undefined,
         status: filterStatus || undefined,
         dateFrom: filterDateFrom || undefined,
         dateTo: filterDateTo || undefined,
@@ -1509,7 +1511,7 @@ export default function InboundLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterVendor, filterStatus, filterDateFrom, filterDateTo]);
+  }, [filterVendor, filterWholesale, filterStatus, filterDateFrom, filterDateTo]);
 
   useEffect(() => { if (token) load(token); }, [token, load]);
 
@@ -1563,9 +1565,32 @@ export default function InboundLogPage() {
       {/* 필터 */}
       <Card style={{ marginBottom: '1rem', padding: '0.85rem 1rem' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'flex-end' }}>
+          {/* 화주사 — 업체명·별칭 통합 검색 */}
           <div>
-            <label style={labelStyle}>화주사</label>
-            <input value={filterVendor} onChange={e => setFilterVendor(e.target.value)} placeholder="전체" style={{ ...inputStyle, width: 120 }} />
+            <label style={labelStyle}>
+              화주사
+              <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#9ca3af', marginLeft: 5 }}>
+                (업체명·별칭 모두 검색)
+              </span>
+            </label>
+            <input
+              value={filterVendor}
+              onChange={e => setFilterVendor(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') load(token); }}
+              placeholder="업체명 또는 별칭 입력"
+              style={{ ...inputStyle, width: 160 }}
+            />
+          </div>
+          {/* 도매처 */}
+          <div>
+            <label style={labelStyle}>도매처</label>
+            <input
+              value={filterWholesale}
+              onChange={e => setFilterWholesale(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') load(token); }}
+              placeholder="도매처 이름 입력"
+              style={{ ...inputStyle, width: 140 }}
+            />
           </div>
           <div>
             <label style={labelStyle}>상태</label>
@@ -1591,12 +1616,30 @@ export default function InboundLogPage() {
           </div>
           <button onClick={() => load(token)} style={btn('var(--color-brand)')}>조회</button>
           <button
-            onClick={() => { setFilterVendor(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+            onClick={() => { setFilterVendor(''); setFilterWholesale(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
             style={btnOutline}
           >
             초기화
           </button>
         </div>
+        {/* 활성 필터 칩 표시 */}
+        {(filterVendor || filterWholesale) && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #f3f4f6' }}>
+            <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', alignSelf: 'center' }}>필터:</span>
+            {filterVendor && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#ede9fe', color: '#7c3aed', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
+                🏢 화주사: {filterVendor}
+                <button onClick={() => setFilterVendor('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7c3aed', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            )}
+            {filterWholesale && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#fef9c3', color: '#a16207', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
+                🏪 도매처: {filterWholesale}
+                <button onClick={() => setFilterWholesale('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a16207', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* 결과 수 */}
@@ -1659,6 +1702,13 @@ export default function InboundLogPage() {
                     <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-muted)' }}>{fmt(b.created_at)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => { window.location.href = `/inbound/${b.id}/overview`; }}
+                          style={{ background: 'none', border: '1px solid #c7d2fe', borderRadius: 4, color: '#4f46e5', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem', fontWeight: 600 }}
+                          title="통합 처리현황"
+                        >
+                          통합 현황
+                        </button>
                         <button
                           onClick={() => setEditingBatch(b)}
                           style={{ background: 'none', border: '1px solid #fde68a', borderRadius: 4, color: '#d97706', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
