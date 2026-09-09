@@ -222,6 +222,9 @@ export default function InboundOverviewPage() {
   const [closing, setClosing] = useState(false);
   const [closeMsg, setCloseMsg] = useState('');
 
+  // 입고전표 엑셀 다운로드
+  const [xlsLoading, setXlsLoading] = useState(false);
+
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '';
 
   const load = useCallback(async () => {
@@ -291,6 +294,26 @@ export default function InboundOverviewPage() {
     }
   }
 
+  // 입고전표 엑셀 다운로드
+  async function downloadXls() {
+    setXlsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/inbound/batches/${id}/export-xls`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { alert('다운로드 실패'); return; }
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename\*=UTF-8''(.+)/i);
+      const filename = match ? decodeURIComponent(match[1]) : '입고전표.xls';
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch { alert('다운로드 중 오류가 발생했습니다.'); }
+    finally { setXlsLoading(false); }
+  }
+
   // ── 렌더링 ─────────────────────────────────────────────────────
 
   if (loading) return (
@@ -350,6 +373,13 @@ export default function InboundOverviewPage() {
         </div>
         {/* 액션 버튼 */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <button
+            onClick={downloadXls}
+            disabled={xlsLoading}
+            style={{ padding: '6px 14px', background: xlsLoading ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.15)', color: '#fff',
+              border: 'none', borderRadius: 8, cursor: xlsLoading ? 'not-allowed' : 'pointer', fontSize: 12 }}>
+            {xlsLoading ? '⏳ 생성 중…' : '📥 입고전표 다운로드'}
+          </button>
           <button onClick={() => router.push(`/inbound/${id}`)}
             style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.15)', color: '#fff',
               border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>

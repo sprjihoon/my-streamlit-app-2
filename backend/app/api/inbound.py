@@ -1745,6 +1745,174 @@ def serve_photo(
     return FileResponse(path)
 
 
+# ── 입고전표 엑셀 다운로드 ────────────────────
+
+@router.get("/batches/{batch_id}/export-xls")
+def export_inbound_xls(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    입고전표 형식 엑셀 다운로드.
+    파일명: {vendor_alias}_{YYYYMMDD}.xls → 중복 시 _01, _02 넘버링.
+    포맷:
+      A: 바코드/상품코드   B: 작업수량(실입고)  C: 요청수량(장끼)
+      D: 로케이션         E: 유통기한         F: 로트번호
+      G: 제조번호         H: 재고메모(품명/옵션)
+    """
+    import re as _re
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from fastapi.responses import StreamingResponse
+
+    _get_user(authorization)
+
+    with get_connection() as con:
+        batch_row = con.execute(
+            """SELECT vendor, vendor_canonical, inbound_date, wholesale
+               FROM inbound_batches WHERE id=?""",
+            (batch_id,)
+        ).fetchone()
+        if not batch_row:
+            raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+
+        vendor        = batch_row[0]
+        vendor_canon  = batch_row[1] or batch_row[0]
+        inbound_date  = batch_row[2]          # YYYY-MM-DD
+        date_str      = inbound_date.replace("-", "")  # YYYYMMDD
+
+        # 별칭: vendor_canonical 우선, 없으면 vendor
+        alias = vendor_canon or vendor
+        # 파일명에 안전한 문자로 변환 (공백·슬래시 제거)
+        safe_alias = _re.sub(r'[\\/:*?"<>|]', '_', alias).strip()
+        base_name  = f"{safe_alias}_{date_str}"
+
+        # 중복 넘버링: inbound_batch_exports 테이블 사용
+        try:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS inbound_batch_exports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            con.commit()
+        except Exception:
+            pass
+
+        existing = con.execute(
+            "SELECT COUNT(*) FROM inbound_batch_exports WHERE batch_id=?",
+            (batch_id,)
+        ).fetchone()[0]
+
+        if existing == 0:
+            final_name = f"{base_name}.xls"
+        else:
+            final_name = f"{base_name}_{existing:02d}.xls"
+
+        con.execute(
+            "INSERT INTO inbound_batch_exports (batch_id, filename) VALUES (?, ?)",
+            (batch_id, final_name)
+        )
+        con.commit()
+
+        # 품목 목록 + 로케이션 조회
+        items = con.execute(
+            """SELECT ii.line_no, ii.item_name, ii.option_text,
+                      ii.janggi_qty, ii.actual_qty, ii.missing_qty,
+                      ii.matched_barcode, ii.matched_product, ii.matched_option,
+                      ii.memo,
+                      COALESCE(rb.로케이션, '') AS location
+               FROM inbound_items ii
+               LEFT JOIN repair_barcode rb ON rb.바코드 = ii.matched_barcode
+               WHERE ii.batch_id = ?
+               ORDER BY ii.line_no""",
+            (batch_id,)
+        ).fetchall()
+
+    # ── 엑셀 생성 ──
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "입고전표"
+
+    # 스타일
+    hdr_font  = Font(name="굴림", bold=True, size=10)
+    hdr_fill  = PatternFill("solid", fgColor="CCFFCC")
+    hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell_font = Font(name="굴림", size=10)
+    thin      = Side(style="thin")
+    border    = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    HEADERS = [
+        "상품코드/바코드(택1)", "작업수량", "요청수량",
+        "로케이션", "유통기한", "로트번호", "제조번호", "재고메모",
+    ]
+
+    # 헤더 행
+    for col_idx, h in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font      = hdr_font
+        cell.fill      = hdr_fill
+        cell.alignment = hdr_align
+        cell.border    = border
+
+    # 컬럼 너비
+    col_widths = [22, 10, 10, 14, 12, 12, 12, 30]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.row_dimensions[1].height = 28
+
+    # 데이터 행
+    for row_idx, it in enumerate(items, 2):
+        (line_no, item_name, option_text, janggi_qty, actual_qty,
+         missing_qty, matched_barcode, matched_product, matched_option,
+         memo, location) = it
+
+        barcode  = matched_barcode or ""
+        memo_val = ""
+        if item_name:
+            memo_val = item_name
+        if option_text:
+            memo_val += f" [{option_text}]" if memo_val else option_text
+        if memo:
+            memo_val += f" / {memo}" if memo_val else memo
+
+        row_data = [
+            barcode,
+            actual_qty or 0,
+            janggi_qty or 0,
+            location,
+            "",   # 유통기한
+            "",   # 로트번호
+            "",   # 제조번호
+            memo_val,
+        ]
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.font   = cell_font
+            cell.border = border
+            if col_idx in (2, 3):
+                cell.alignment = Alignment(horizontal="center")
+
+    # 스트리밍 응답
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    from urllib.parse import quote
+    encoded = quote(final_name, safe="")
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+        },
+    )
+
+
 # ── 마감 (AM/PM 분리) ────────────────────
 
 class CloseRequest(BaseModel):
