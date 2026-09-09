@@ -16,7 +16,6 @@ import {
   closeInboundBatch,
   deleteInboundBatch,
   listInboundVendors,
-  downloadInboundBarcodePdf,
   upsertVendorAlias,
   getRepairBarcodes,
   getVendorAliases,
@@ -205,51 +204,6 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
     memo: item.memo || '',
   });
   const [editSaving, setEditSaving] = useState(false);
-
-  // ── 수정폼 바코드 검색 ──
-  const [editBarcodeQ,       setEditBarcodeQ]       = useState('');
-  const [editBarcodeResults, setEditBarcodeResults] = useState<RepairBarcode[]>([]);
-  const [editBarcodeLoading, setEditBarcodeLoading] = useState(false);
-  const [editBarcodeOpen,    setEditBarcodeOpen]    = useState(false);
-  const [editBarcodeSelected, setEditBarcodeSelected] = useState<RepairBarcode | null>(null);
-  const editBarcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const editBarcodeRef   = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function h(e: MouseEvent) {
-      if (editBarcodeRef.current && !editBarcodeRef.current.contains(e.target as Node))
-        setEditBarcodeOpen(false);
-    }
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
-
-  function handleEditBarcodeInput(val: string) {
-    setEditBarcodeQ(val); setEditBarcodeSelected(null); setEditBarcodeOpen(true);
-    if (editBarcodeTimer.current) clearTimeout(editBarcodeTimer.current);
-    if (!val.trim()) { setEditBarcodeResults([]); return; }
-    editBarcodeTimer.current = setTimeout(async () => {
-      setEditBarcodeLoading(true);
-      try {
-        const r = await getRepairBarcodes({ q: val.trim(), limit: 40 });
-        setEditBarcodeResults(r.items);
-      } catch { setEditBarcodeResults([]); }
-      finally { setEditBarcodeLoading(false); }
-    }, 350);
-  }
-
-  function selectEditBarcode(b: RepairBarcode) {
-    setEditBarcodeSelected(b);
-    setEditBarcodeQ(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
-    setEditBarcodeOpen(false);
-    setEditForm(f => ({
-      ...f,
-      matched_barcode:  b.바코드,
-      matched_vendor:   b.업체명 || f.matched_vendor,
-      matched_product:  b.제품명 || f.matched_product,
-      matched_option:   b.옵션  || f.matched_option,
-    }));
-  }
 
   async function save() {
     setSaving(true);
@@ -461,9 +415,6 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [selectedBarcode, setSelectedBarcode] = useState<RepairBarcode | null>(null);
-  const [apiSearchResults, setApiSearchResults] = useState<RepairBarcode[]>([]);
-  const [apiSearchLoading, setApiSearchLoading] = useState(false);
-  const apiSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 폼
   const [form, setForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
   const [adding, setAdding] = useState(false);
@@ -529,34 +480,18 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
   function selectBarcode(b: RepairBarcode) {
     setSelectedBarcode(b);
     setBarcodeQuery(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
-    setBarcodeOpen(false); setApiSearchResults([]);
+    setBarcodeOpen(false);
     setForm(f => ({ ...f, item_name: f.item_name || b.제품명, option_text: f.option_text || (b.옵션 || '') }));
-  }
-
-  function handleBarcodeQueryChange(val: string) {
-    setBarcodeQuery(val); setBarcodeOpen(true);
-    if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
-    if (!val.trim()) { setApiSearchResults([]); return; }
-    // 항상 전체 API 검색 (벤더 별칭 불일치 방지)
-    apiSearchTimerRef.current = setTimeout(async () => {
-      setApiSearchLoading(true);
-      try { const r = await getRepairBarcodes({ q: val.trim(), limit: 40 }); setApiSearchResults(r.items); }
-      catch { setApiSearchResults([]); }
-      finally { setApiSearchLoading(false); }
-    }, 350);
   }
 
   const fvq = vendorQuery.toLowerCase();
   const fVendors = vendorList.filter(v => v.name.toLowerCase().includes(fvq) || v.aliases.some(a => a.toLowerCase().includes(fvq)));
   const fAliases = aliasList.filter(a => a.canonical.toLowerCase().includes(fvq) || a.aliases.some(al => al.toLowerCase().includes(fvq)));
-  const fbq = (selectedBarcode ? '' : barcodeQuery).toLowerCase();
+  const fbq = barcodeQuery.toLowerCase();
   const fBarcodes = barcodeResults.filter(b =>
     b.바코드.toLowerCase().includes(fbq) || b.제품명.toLowerCase().includes(fbq) ||
-    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq) ||
-    (b.상품명 || '').toLowerCase().includes(fbq) || (b.도매처 || '').toLowerCase().includes(fbq)
+    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq)
   );
-  // 타이핑 중이면 API 전체검색 결과 우선
-  const displayBarcodes = barcodeQuery.trim() ? apiSearchResults.slice(0, 40) : fBarcodes.slice(0, 40);
 
   function resetForm() {
     setForm({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
@@ -665,50 +600,53 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
 
         {/* 바코드 검색 */}
         <div ref={barcodeRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
-          <label style={lbl}>
-            바코드 검색{' '}
-            {(barcodeLoading || apiSearchLoading) ? '(검색 중…)' : selectedVendors.length > 0 && barcodeResults.length > 0 ? `(${barcodeResults.length}개 로드됨)` : '(바코드·제품명·도매처 검색)'}
-          </label>
-          {selectedBarcode ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
-                ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
-              </div>
-              <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); setApiSearchResults([]); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
+          <label style={lbl}>바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
+          {selectedVendors.length === 0 ? (
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af', padding: '0.4rem 0' }}>↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
+          ) : barcodeLoading ? (
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>바코드 목록 불러오는 중…</div>
+          ) : barcodeResults.length === 0 ? (
+            <div style={{ padding: '0.6rem 0.8rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: '0.82rem' }}>
+              <span style={{ color: '#dc2626' }}>"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
+              <a href="/journal-settings" target="_blank" style={{ color: '#4361ee', fontWeight: 600 }}>신규 바코드 등록 →</a>
+              <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 3 }}>아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
             </div>
           ) : (
             <>
-              <input
-                value={barcodeQuery}
-                onChange={e => handleBarcodeQueryChange(e.target.value)}
-                onFocus={() => barcodeQuery && setBarcodeOpen(true)}
-                placeholder={selectedVendors.length > 0 && barcodeResults.length > 0
-                  ? `바코드·제품명·도매처 검색 (${barcodeResults.length}개 중)`
-                  : '바코드번호, 제품명, 상품명, 도매처 검색'}
-                style={inp}
-              />
-              {barcodeOpen && displayBarcodes.length > 0 && (
-                <div style={dropBase}>
-                  {displayBarcodes.map(b => (
-                    <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
-                      style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                        {b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}
-                      </div>
-                      {b.상품명 && b.상품명 !== b.제품명 && (
-                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 1 }}>{b.상품명}</div>
-                      )}
-                      <div style={{ fontSize: 11, color: '#9ca3af', display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
-                        <span>{b.바코드}</span>
-                        {b.도매처 && <span style={{ color: '#7c3aed', fontFamily: 'inherit' }}>{b.도매처}</span>}
-                        {b.업체명 && <span style={{ color: '#9ca3af', fontFamily: 'inherit' }}>[{b.업체명}]</span>}
-                      </div>
-                    </div>
-                  ))}
+              {selectedBarcode ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
+                    ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
+                  </div>
+                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
                 </div>
-              )}
-              {!barcodeLoading && !apiSearchLoading && barcodeQuery.trim() && displayBarcodes.length === 0 && (
-                <div style={{ fontSize: '0.78rem', color: '#9ca3af', padding: '4px 2px' }}>검색 결과 없음</div>
+              ) : (
+                <>
+                  <input
+                    value={barcodeQuery}
+                    onChange={e => { setBarcodeQuery(e.target.value); setBarcodeOpen(true); }}
+                    onFocus={() => setBarcodeOpen(true)}
+                    placeholder={`바코드·제품명 검색 (${barcodeResults.length}개 중)`}
+                    style={inp}
+                  />
+                  {barcodeOpen && fBarcodes.length > 0 && (
+                    <div style={dropBase}>
+                      {fBarcodes.slice(0, 50).map(b => (
+                        <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
+                          style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 500 }}>{b.제품명}</span>
+                              {b.옵션 && <span style={{ fontSize: 12, color: '#6b7280' }}> / {b.옵션}</span>}
+                              <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{b.바코드}</div>
+                            </div>
+                            <span style={{ fontSize: 11, color: '#7c3aed', flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -767,19 +705,6 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [warning, setWarning] = useState('');
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [shareLink, setShareLink] = useState('');
-  const [shareLoading, setShareLoading] = useState(false);
-  const [sharePassword, setSharePassword] = useState('');
-  const [sharePasswordOpen, setSharePasswordOpen] = useState(false);
-  // 비밀번호 1회 표시: 생성 직후에만 보이고, 확인 버튼 누르면 소멸
-  const [shownPasswordOnce, setShownPasswordOnce] = useState('');
-  const [closeSummary, setCloseSummary] = useState<{
-    total_janggi_qty: number;
-    정상_qty: number; 수선중_qty: number; 수선후정상_qty: number;
-    회생불가_qty: number; 미입고_qty: number;
-    formula_ok: boolean; formula_str: string; discrepancy: number;
-  } | null>(null);
 
   const reload = useCallback(async () => {
     const data = await getInboundBatch(token, batch.id);
@@ -800,69 +725,18 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
     }
   }
 
-  async function handlePdf() {
-    setPdfLoading(true);
+  async function handleClose() {
+    setCloseLoading(true); setWarning('');
     try {
-      await downloadInboundBarcodePdf(token, batch.id, batch.vendor, batch.inbound_date);
-    } catch (e: unknown) {
-      alert('PDF 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setPdfLoading(false);
-    }
-  }
-
-  async function handleShare() {
-    setShareLoading(true);
-    try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${API_BASE}/inbound/batches/${batch.id}/share`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          expires_days: 14,
-          allow_excel: false,
-          password: sharePassword.trim() || null,
-        }),
-      });
-      const data = await res.json();
-      setShareLink(data.link);
-      // 비밀번호 원문 — 생성 응답에서 한 번만 받아 표시
-      setShownPasswordOnce(data.password_once || '');
-      setSharePassword('');      // 입력창 즉시 초기화
-      setSharePasswordOpen(false);
-    } catch (e: unknown) {
-      alert('공유 링크 생성 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setShareLoading(false);
-    }
-  }
-
-  async function handleClose(closeType: 'am' | 'pm') {
-    setCloseLoading(true); setWarning(''); setCloseSummary(null);
-    try {
-      const res = await closeInboundBatch(token, batch.id, closeType);
+      const res = await closeInboundBatch(token, batch.id, 'am');
       if (!res.ok && res.warning) {
         setWarning(res.warning);
       } else {
-        // PM 마감이면 정산 데이터 저장
-        if (closeType === 'pm' && res.close_type === 'pm') {
-          setCloseSummary({
-            total_janggi_qty: res.total_janggi_qty ?? 0,
-            정상_qty:          res.정상_qty ?? 0,
-            수선중_qty:         res.수선중_qty ?? 0,
-            수선후정상_qty:     res.수선후정상_qty ?? 0,
-            회생불가_qty:       res.회생불가_qty ?? 0,
-            미입고_qty:         res.미입고_qty ?? 0,
-            formula_ok:        res.formula_ok ?? true,
-            formula_str:       res.formula_str ?? '',
-            discrepancy:       res.discrepancy ?? 0,
-          });
-        }
         await reload();
         onUpdated();
       }
     } catch (e: unknown) {
-      alert('마감 실패: ' + (e instanceof Error ? e.message : String(e)));
+      alert('접수완료 처리 실패: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setCloseLoading(false);
     }
@@ -1013,142 +887,15 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
         </div>
       )}
 
-      {/* ── 오후 마감 정산 결과 ─────────── */}
-      {closeSummary && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.9rem 1rem', background: closeSummary.formula_ok ? '#f0f9ff' : '#fff7ed', border: `1px solid ${closeSummary.formula_ok ? '#bae6fd' : '#fed7aa'}`, borderRadius: 8, fontSize: '0.85rem' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>📊 오후 최종 마감 정산</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-            {[
-              { label: '장끼수량',   qty: closeSummary.total_janggi_qty, color: '#1d4ed8', bg: '#dbeafe' },
-              { label: '일반정상',   qty: closeSummary.정상_qty,          color: '#15803d', bg: '#dcfce7' },
-              { label: '수선중',     qty: closeSummary.수선중_qty,         color: '#a16207', bg: '#fef9c3' },
-              { label: '수선후정상', qty: closeSummary.수선후정상_qty,     color: '#166534', bg: '#bbf7d0' },
-              { label: '회생불가',   qty: closeSummary.회생불가_qty,       color: '#991b1b', bg: '#fecaca' },
-              { label: '미입고',     qty: closeSummary.미입고_qty,         color: '#dc2626', bg: '#fee2e2' },
-            ].map(s => (
-              <div key={s.label} style={{ background: s.bg, borderRadius: 8, padding: '6px 12px', textAlign: 'center', minWidth: 68 }}>
-                <div style={{ fontSize: '0.7rem', color: s.color, fontWeight: 700 }}>{s.label}</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: s.color }}>{s.qty}<span style={{ fontSize: '0.68rem' }}>개</span></div>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: '0.78rem', color: closeSummary.formula_ok ? '#0369a1' : '#c2410c', fontFamily: 'monospace', background: closeSummary.formula_ok ? '#e0f2fe' : '#fff7ed', padding: '5px 8px', borderRadius: 5 }}>
-            {closeSummary.formula_str}
-          </div>
-          {!closeSummary.formula_ok && (
-            <div style={{ marginTop: 6, fontSize: '0.8rem', color: '#c2410c', fontWeight: 600 }}>
-              ⚠️ 수량 합계가 맞지 않습니다. 품목 수량을 다시 확인해주세요.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 공유 링크 비밀번호 입력 ─────── */}
-      {sharePasswordOpen && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.85rem 1rem', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 8 }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6, color: '#7c3aed' }}>🔒 공유 링크 비밀번호 (선택)</div>
-          <div style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: 8 }}>
-            비밀번호를 설정하면 화주사가 링크를 열 때 입력해야 합니다.<br />
-            <strong>생성 후 비밀번호는 아래에 딱 한 번만 표시됩니다.</strong>
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              type="text"
-              value={sharePassword}
-              onChange={e => setSharePassword(e.target.value)}
-              placeholder="비밀번호 없으면 비워두세요"
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <button onClick={handleShare} disabled={shareLoading} style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}>
-              {shareLoading ? '생성 중…' : '링크 생성'}
-            </button>
-            <button onClick={() => { setSharePasswordOpen(false); setSharePassword(''); }} style={btnOutline}>취소</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 공유 링크 1회 비밀번호 표시 ─── */}
-      {shareLink && shownPasswordOnce && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.9rem 1rem', background: '#fefce8', border: '2px solid #fde047', borderRadius: 8, fontSize: '0.85rem' }}>
-          <div style={{ fontWeight: 700, color: '#a16207', marginBottom: 6 }}>🔐 비밀번호 (지금만 표시 — 저장해두세요)</div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '0.15em', color: '#92400e', fontFamily: 'monospace', marginBottom: 8 }}>
-            {shownPasswordOnce}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              onClick={() => { navigator.clipboard.writeText(shownPasswordOnce); alert('비밀번호를 클립보드에 복사했습니다.'); }}
-              style={{ ...btn('#a16207'), fontSize: '0.8rem' }}
-            >
-              복사
-            </button>
-            <button
-              onClick={() => setShownPasswordOnce('')}
-              style={{ ...btnOutline, fontSize: '0.8rem', color: '#dc2626', borderColor: '#dc2626' }}
-            >
-              확인했습니다 (닫기)
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 공유 링크 표시 ─────────────── */}
-      {shareLink && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.75rem 1rem', background: '#f0fff4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.85rem' }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>🔗 화주사 공유 링크 (14일 유효)</div>
-          <div style={{ wordBreak: 'break-all', color: '#4361ee', marginBottom: 6 }}>{shareLink}</div>
-          <button onClick={() => { navigator.clipboard.writeText(shareLink); }} style={{ fontSize: '0.78rem', ...btnOutline }}>링크 복사</button>
-        </div>
-      )}
-
-      {/* ── PDF + 공유 버튼 ────────────── */}
-      {(() => {
-        const totalLabels = items.reduce((s, i) => s + (i.actual_qty || 0), 0);
-        const matchedItems = items.filter(i => i.actual_qty > 0 && i.matched_barcode).length;
-        return (
-          <div style={{ marginBottom: '0.75rem' }}>
-            {totalLabels > 0 && (
-              <div style={{ fontSize: '0.8rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 6, padding: '5px 10px', marginBottom: 6 }}>
-                🏷️ 라벨 예상 <strong>{totalLabels}장</strong> (바코드 매칭 품목 {matchedItems}건)
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <button onClick={handlePdf} disabled={pdfLoading} style={{ ...btn('#0f766e'), opacity: pdfLoading ? 0.5 : 1 }}>
-                {pdfLoading ? '생성 중…' : `📄 바코드 PDF${totalLabels > 0 ? ` (${totalLabels}장)` : ''}`}
-              </button>
-              <button
-                onClick={() => { setSharePasswordOpen(true); setShareLink(''); setShownPasswordOnce(''); }}
-                disabled={shareLoading}
-                style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}
-              >
-                🔗 화주사 공유 링크
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── AM / PM 마감 버튼 ─────────── */}
+      {/* ── 접수완료 버튼 ─────────── */}
       <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-        {/* 오전: confirming 상태에서만 */}
         {batch.status === 'confirming' && (
           <button
-            onClick={() => handleClose('am')}
+            onClick={handleClose}
             disabled={closeLoading}
             style={{ ...btn('#0369a1'), opacity: closeLoading ? 0.5 : 1 }}
-            title="수량 확인 완료 후 양품화 단계로 진행"
           >
-            {closeLoading ? '처리 중…' : '☀️ 오전 입고접수 완료'}
-          </button>
-        )}
-        {/* 오후: inbound_done / grading / repairing 상태에서만 */}
-        {['inbound_done', 'grading', 'repairing'].includes(batch.status) && (
-          <button
-            onClick={() => handleClose('pm')}
-            disabled={closeLoading}
-            style={{ ...btn('#7c3aed'), opacity: closeLoading ? 0.5 : 1 }}
-            title="양품화 및 수선 완료 후 최종 수량 확정"
-          >
-            {closeLoading ? '처리 중…' : '🌆 오후 최종 마감'}
+            {closeLoading ? '처리 중…' : '✅ 완료'}
           </button>
         )}
       </div>
