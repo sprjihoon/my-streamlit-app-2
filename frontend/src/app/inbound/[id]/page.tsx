@@ -927,10 +927,26 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
     setBarcodeQuery(val); setBarcodeOpen(true);
     if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
     if (!val.trim()) { setApiSearchResults([]); return; }
-    // 항상 API 전체 검색 (벤더 필터 없음 → 별칭 차이로 검색 누락 방지)
     apiSearchTimerRef.current = setTimeout(async () => {
       setApiSearchLoading(true);
-      try { const r = await getRepairBarcodes({ q: val.trim(), limit: 40 }); setApiSearchResults(r.items); }
+      try {
+        // 현재 선택된 업체(나블리 alias 해석 결과)만 검색
+        const vendorKeys = selectedVendors.length > 0 ? selectedVendors : [];
+        if (vendorKeys.length === 0) {
+          const r = await getRepairBarcodes({ q: val.trim(), limit: 40 });
+          setApiSearchResults(r.items);
+        } else {
+          const results = await Promise.all(
+            vendorKeys.map(v => getRepairBarcodes({ q: val.trim(), vendor: v, limit: 40 }))
+          );
+          const seen = new Set<string>();
+          const merged = results.flatMap(r => r.items).filter(b => {
+            if (seen.has(b.바코드)) return false;
+            seen.add(b.바코드); return true;
+          });
+          setApiSearchResults(merged.slice(0, 40));
+        }
+      }
       catch { setApiSearchResults([]); }
       finally { setApiSearchLoading(false); }
     }, 350);

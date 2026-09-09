@@ -1,0 +1,1 @@
+{"version":1,"functions":{"/api/epost-relay":{"maxDuration":30},"/api/ocr/batch/[batchId]":{"maxDuration":120},"/api/ocr/preview":{"maxDuration":120}}}
