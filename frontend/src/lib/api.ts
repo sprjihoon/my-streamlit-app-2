@@ -972,6 +972,8 @@ export interface RepairBarcode {
   제품명: string;
   옵션: string | null;
   도매처: string | null;
+  도매처주소: string | null;
+  도매처연락처: string | null;
   상품코드: string | null;
   로케이션: string | null;
   상품명: string | null;

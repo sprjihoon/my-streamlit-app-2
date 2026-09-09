@@ -205,6 +205,77 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
   });
   const [editSaving, setEditSaving] = useState(false);
 
+  // 바코드 검색 (수정 폼용) — 업체 사전 로드 후 로컬 필터
+  const [bcQuery, setBcQuery] = useState(item.matched_barcode || '');
+  const [bcAllItems, setBcAllItems] = useState<RepairBarcode[]>([]);  // 업체 전체 바코드
+  const [bcOpen, setBcOpen] = useState(false);
+  const [bcLoading, setBcLoading] = useState(false);
+  const bcRef = useRef<HTMLDivElement>(null);
+
+  // editMode 열릴 때 해당 업체(+ 별칭) 바코드 전체 사전 로드
+  useEffect(() => {
+    if (!editMode || !batchVendor) return;
+    setBcLoading(true);
+    // 별칭 그룹 조회 후 해당 업체의 모든 별칭 포함해서 로드
+    getVendorAliases(token)
+      .then(({ aliases }) => {
+        const group = aliases.find(a =>
+          a.canonical === batchVendor || a.aliases.includes(batchVendor)
+        );
+        const vendors = group
+          ? [group.canonical, ...group.aliases]
+          : [batchVendor];
+        return Promise.all(vendors.map(v => getRepairBarcodes({ vendor: v, limit: 500 })));
+      })
+      .then(results => {
+        const seen = new Set<string>();
+        setBcAllItems(results.flatMap(r => r.items).filter(b => {
+          if (seen.has(b.바코드)) return false;
+          seen.add(b.바코드); return true;
+        }));
+      })
+      .catch(() => setBcAllItems([]))
+      .finally(() => setBcLoading(false));
+  }, [editMode, batchVendor, token]);
+
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (bcRef.current && !bcRef.current.contains(e.target as Node)) setBcOpen(false);
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  // 로컬 필터 (업체 사전 로드된 목록에서 검색)
+  const bcFiltered = bcQuery.length > 0
+    ? bcAllItems.filter(b => {
+        const q = bcQuery.toLowerCase();
+        return b.바코드.toLowerCase().includes(q)
+          || b.제품명.toLowerCase().includes(q)
+          || (b.옵션 || '').toLowerCase().includes(q);
+      }).slice(0, 50)
+    : bcAllItems.slice(0, 50);
+
+  function handleBcInput(v: string) {
+    setBcQuery(v);
+    setEditForm(f => ({ ...f, matched_barcode: v }));
+    setBcOpen(true);
+  }
+
+  function selectBcItem(b: RepairBarcode) {
+    setBcQuery(b.바코드);
+    setBcOpen(false);
+    setEditForm(f => ({
+      ...f,
+      matched_barcode: b.바코드,
+      matched_vendor: b.도매처 || b.업체명 || f.matched_vendor,
+      matched_product: b.제품명 || f.matched_product,
+      matched_option: b.옵션 || f.matched_option,
+      supplier_location: b.도매처주소 || f.supplier_location,
+      supplier_contact: b.도매처연락처 || f.supplier_contact,
+    }));
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -242,6 +313,11 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
   const tdWrap: React.CSSProperties = { ...tdStyle, whiteSpace: 'normal', minWidth: 90 };
   const editInput: React.CSSProperties = { ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '0.3rem 0.5rem' };
   const photoCount = item.photos?.length ?? 0;
+  const bcDropStyle: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 700,
+    background: '#fff', border: '1px solid #c7d2fe', borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 200, overflowY: 'auto', marginTop: 2,
+  };
 
   return (
     <>
@@ -349,9 +425,37 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
           <td colSpan={19} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e0e7ff' }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4361ee', marginBottom: 8 }}>✏️ 품목 정보 수정</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
-              <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>바코드</div>
-                <input value={editForm.matched_barcode} onChange={e => setEditForm(f => ({ ...f, matched_barcode: e.target.value }))} style={editInput} placeholder="바코드" />
+              {/* 바코드 검색 */}
+              <div ref={bcRef} style={{ position: 'relative', gridColumn: '1 / span 2' }}>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>
+                  바코드 검색
+                  {bcLoading && <span style={{ marginLeft: 6, fontSize: '0.65rem', color: '#a5b4fc' }}>검색 중…</span>}
+                </div>
+                <input
+                  value={bcQuery}
+                  onChange={e => handleBcInput(e.target.value)}
+                  onFocus={() => bcAllItems.length > 0 && setBcOpen(true)}
+                  style={editInput}
+                  placeholder="바코드 번호 또는 제품명 입력"
+                />
+                {bcOpen && bcFiltered.length > 0 && (
+                  <div style={bcDropStyle}>
+                    {bcFiltered.map(b => (
+                      <div
+                        key={b.바코드}
+                        onMouseDown={() => selectBcItem(b)}
+                        style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', fontSize: '0.78rem' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#eef2ff')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
+                      >
+                        <span style={{ fontWeight: 600, color: '#4361ee' }}>{b.바코드}</span>
+                        <span style={{ marginLeft: 6, color: '#374151' }}>{b.제품명}</span>
+                        {b.옵션 && <span style={{ marginLeft: 4, color: '#6b7280' }}>/ {b.옵션}</span>}
+                        {b.도매처 && <span style={{ marginLeft: 6, fontSize: '0.72rem', color: '#9ca3af' }}>[{b.도매처}]</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처(업체명)</div>
