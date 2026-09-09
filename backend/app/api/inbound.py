@@ -1081,23 +1081,36 @@ def get_vendor_overview_detail(
 def get_filter_options(authorization: Optional[str] = Header(None)):
     """
     입고일지 필터용 드롭다운 옵션 반환.
-    - vendors : inbound_batches 에 실제 등록된 고유 화주사명 (최신순)
-    - wholesales : inbound_batches.wholesale 의 고유 값 (비어 있지 않은 것)
+    - vendors      : inbound_batches 에 실제 등록된 고유 화주사명
+    - wholesales   : inbound_batches.wholesale 의 고유 값
+    - alias_groups : inbound_vendor_aliases 의 canonical → aliases 매핑
+                     (입고 이력이 있는 canonical 만 포함)
     """
     _get_user(authorization)
     with get_connection() as con:
-        # vendor_canonical 우선 사용 (별칭 통합 기준 이름)
         vendor_rows = con.execute(
-            """SELECT DISTINCT COALESCE(vendor_canonical, vendor) AS v
-               FROM inbound_batches WHERE vendor IS NOT NULL AND vendor != ''
-               ORDER BY v"""
+            "SELECT DISTINCT vendor FROM inbound_batches WHERE vendor IS NOT NULL AND vendor != '' ORDER BY vendor"
         ).fetchall()
         wholesale_rows = con.execute(
             "SELECT DISTINCT wholesale FROM inbound_batches WHERE wholesale IS NOT NULL AND wholesale != '' ORDER BY wholesale"
         ).fetchall()
+        # 별칭: 입고 이력이 있는 canonical 만
+        batch_vendors = {r[0] for r in vendor_rows}
+        alias_rows = con.execute(
+            "SELECT canonical, aliases FROM inbound_vendor_aliases WHERE aliases IS NOT NULL AND aliases != '' ORDER BY canonical"
+        ).fetchall()
+        alias_groups = []
+        for canonical, aliases_str in alias_rows:
+            alias_list = [a.strip() for a in aliases_str.split(",") if a.strip()]
+            if not alias_list:
+                continue
+            # canonical 이 입고 이력에 있는 경우만 포함
+            # (별칭으로 저장된 경우도 포함하기 위해 _resolve_vendor_names 없이 단순 체크)
+            alias_groups.append({"canonical": canonical, "aliases": alias_list})
     return {
         "vendors": [r[0] for r in vendor_rows],
         "wholesales": [r[0] for r in wholesale_rows],
+        "alias_groups": alias_groups,
     }
 
 

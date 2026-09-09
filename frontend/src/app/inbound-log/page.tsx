@@ -21,6 +21,7 @@ import {
   getRepairBarcodes,
   getVendorAliases,
   getInboundFilterOptions,
+  InboundAliasGroup,
   InboundBatch,
   InboundItem,
   InboundRegisteredVendor,
@@ -1493,6 +1494,8 @@ export default function InboundLogPage() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
   const [wholesaleOptions, setWholesaleOptions] = useState<string[]>([]);
+  const [aliasGroups, setAliasGroups] = useState<InboundAliasGroup[]>([]);
+  const [filterAlias, setFilterAlias] = useState('');
 
   useEffect(() => { setToken(localStorage.getItem('token') || ''); }, []);
 
@@ -1501,7 +1504,7 @@ export default function InboundLogPage() {
     setLoading(true);
     try {
       const res = await listInboundBatches(tok, {
-        vendor: filterVendor || undefined,
+        vendor: filterAlias || filterVendor || undefined,
         wholesale: filterWholesale || undefined,
         status: filterStatus || undefined,
         dateFrom: filterDateFrom || undefined,
@@ -1514,12 +1517,12 @@ export default function InboundLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterVendor, filterWholesale, filterStatus, filterDateFrom, filterDateTo]);
+  }, [filterVendor, filterAlias, filterWholesale, filterStatus, filterDateFrom, filterDateTo]);
 
   useEffect(() => {
     if (!token) return;
     getInboundFilterOptions(token)
-      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); })
+      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); setAliasGroups(r.alias_groups ?? []); })
       .catch(() => {});
   }, [token]);
 
@@ -1527,7 +1530,7 @@ export default function InboundLogPage() {
 
   function refreshFilterOptions(tok: string) {
     getInboundFilterOptions(tok)
-      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); })
+      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); setAliasGroups(r.alias_groups ?? []); })
       .catch(() => {});
   }
 
@@ -1583,16 +1586,37 @@ export default function InboundLogPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'flex-end' }}>
           {/* 화주사 셀렉트박스 */}
           <div>
-            <label style={labelStyle}>화주사</label>
+            <label style={labelStyle}>화주사 (업체명)</label>
             <select
               value={filterVendor}
-              onChange={e => setFilterVendor(e.target.value)}
-              style={{ ...inputStyle, width: 160 }}
+              onChange={e => { setFilterVendor(e.target.value); setFilterAlias(''); }}
+              style={{ ...inputStyle, width: 150 }}
             >
               <option value="">전체</option>
               {vendorOptions.map(v => (
                 <option key={v} value={v}>{v}</option>
               ))}
+            </select>
+          </div>
+          {/* 별칭 셀렉트박스 */}
+          <div>
+            <label style={labelStyle}>
+              화주사 (별칭)
+              <span style={{ fontSize: '0.68rem', fontWeight: 400, color: '#9ca3af', marginLeft: 4 }}>일지설정 기준</span>
+            </label>
+            <select
+              value={filterAlias}
+              onChange={e => { setFilterAlias(e.target.value); setFilterVendor(''); }}
+              style={{ ...inputStyle, width: 160 }}
+            >
+              <option value="">전체</option>
+              {aliasGroups.map(g =>
+                g.aliases.map(alias => (
+                  <option key={`${g.canonical}__${alias}`} value={alias}>
+                    {alias} ({g.canonical})
+                  </option>
+                ))
+              )}
             </select>
           </div>
           {/* 도매처 셀렉트박스 */}
@@ -1633,20 +1657,26 @@ export default function InboundLogPage() {
           </div>
           <button onClick={() => load(token)} style={btn('var(--color-brand)')}>조회</button>
           <button
-            onClick={() => { setFilterVendor(''); setFilterWholesale(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+            onClick={() => { setFilterVendor(''); setFilterAlias(''); setFilterWholesale(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
             style={btnOutline}
           >
             초기화
           </button>
         </div>
         {/* 활성 필터 칩 표시 */}
-        {(filterVendor || filterWholesale) && (
+        {(filterVendor || filterAlias || filterWholesale) && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #f3f4f6' }}>
             <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', alignSelf: 'center' }}>필터:</span>
             {filterVendor && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#ede9fe', color: '#7c3aed', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
                 🏢 화주사: {filterVendor}
                 <button onClick={() => setFilterVendor('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7c3aed', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            )}
+            {filterAlias && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#dbeafe', color: '#1d4ed8', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
+                🏷️ 별칭: {filterAlias}
+                <button onClick={() => setFilterAlias('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1d4ed8', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
               </span>
             )}
             {filterWholesale && (

@@ -1971,8 +1971,13 @@ export async function listInboundVendors(token: string) {
   );
 }
 
+export interface InboundAliasGroup {
+  canonical: string;
+  aliases: string[];
+}
+
 export async function getInboundFilterOptions(token: string) {
-  return fetchApi<{ vendors: string[]; wholesales: string[] }>(
+  return fetchApi<{ vendors: string[]; wholesales: string[]; alias_groups: InboundAliasGroup[] }>(
     '/inbound/filter-options', { headers: inboundHeaders(token) }
   );
 }
