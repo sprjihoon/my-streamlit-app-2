@@ -868,6 +868,176 @@ async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
 # 라우터
 # ─────────────────────────────────────
 
+# ── 통합현황: 화주사+날짜 단위 목록 및 상세 ──────
+
+@router.get("/vendor-overview")
+def list_vendor_overviews(
+    vendor: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    화주사+입고일 단위로 묶어 반환한다.
+    각 항목: vendor, inbound_date, batches_count, wholesales[], 수량 합계
+    """
+    _get_user(authorization)
+    where = ["1=1"]
+    params: list = []
+    if vendor:
+        where.append("vendor=?"); params.append(vendor)
+    if date_from:
+        where.append("inbound_date>=?"); params.append(date_from)
+    if date_to:
+        where.append("inbound_date<=?"); params.append(date_to)
+
+    sql = f"""
+        SELECT vendor, inbound_date,
+               COUNT(*) AS batches_count,
+               GROUP_CONCAT(COALESCE(wholesale,''), '|') AS wholesales,
+               SUM(total_janggi_qty) AS total_janggi,
+               SUM(total_actual_qty) AS total_actual,
+               SUM(total_missing_qty) AS total_missing,
+               GROUP_CONCAT(status, '|') AS statuses
+        FROM inbound_batches
+        WHERE {' AND '.join(where)}
+        GROUP BY vendor, inbound_date
+        ORDER BY inbound_date DESC, vendor
+    """
+    with get_connection() as con:
+        rows = con.execute(sql, params).fetchall()
+
+    items = []
+    for r in rows:
+        wholesales = [w for w in (r[3] or "").split("|") if w]
+        statuses = (r[7] or "").split("|")
+        all_closed = all(s == "closed" for s in statuses if s)
+        items.append({
+            "vendor": r[0],
+            "inbound_date": r[1],
+            "batches_count": r[2],
+            "wholesales": wholesales,
+            "total_janggi_qty": r[4] or 0,
+            "total_actual_qty": r[5] or 0,
+            "total_missing_qty": r[6] or 0,
+            "all_closed": all_closed,
+            "statuses": statuses,
+        })
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/vendor-overview/{vendor}/{inbound_date}")
+def get_vendor_overview_detail(
+    vendor: str,
+    inbound_date: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    특정 화주사+입고일의 전체 배치·품목·집계를 반환한다.
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        batch_rows = con.execute(
+            """SELECT id, vendor, inbound_date, status, memo, wholesale,
+                      total_janggi_qty, total_actual_qty, total_missing_qty,
+                      created_by, closed_by, closed_at, created_at
+               FROM inbound_batches
+               WHERE vendor=? AND inbound_date=?
+               ORDER BY wholesale""",
+            (vendor, inbound_date),
+        ).fetchall()
+
+        if not batch_rows:
+            raise HTTPException(status_code=404, detail="해당 화주사/날짜 데이터 없음")
+
+        # 전체 품목 조회
+        batch_ids = [r[0] for r in batch_rows]
+        ph = ",".join("?" * len(batch_ids))
+        item_rows = con.execute(
+            f"""SELECT id, batch_id, line_no, item_name, option_text, unit_price,
+                       janggi_qty, actual_qty, missing_qty, status,
+                       matched_barcode, matched_vendor, matched_product, matched_option,
+                       supplier_location, supplier_contact, needs_matching, normal_qty,
+                       confirmed_by, item_wholesale, memo
+                FROM inbound_items
+                WHERE batch_id IN ({ph})
+                ORDER BY batch_id, line_no""",
+            batch_ids,
+        ).fetchall()
+
+        # 불량/수선 로그 수 집계
+        item_ids = [r[0] for r in item_rows]
+        defect_counts: dict = {}
+        repair_counts: dict = {}
+        if item_ids:
+            idph = ",".join("?" * len(item_ids))
+            for row in con.execute(
+                f"SELECT inbound_item_id, COUNT(*) FROM defect_log WHERE inbound_item_id IN ({idph}) GROUP BY inbound_item_id",
+                item_ids,
+            ).fetchall():
+                defect_counts[row[0]] = row[1]
+            for row in con.execute(
+                f"SELECT inbound_item_id, COUNT(*) FROM repair_work_log WHERE inbound_item_id IN ({idph}) GROUP BY inbound_item_id",
+                item_ids,
+            ).fetchall():
+                repair_counts[row[0]] = row[1]
+
+    # 도매처별 그룹핑
+    from collections import defaultdict
+    batch_map = {}
+    for r in batch_rows:
+        batch_map[r[0]] = {
+            "id": r[0], "vendor": r[1], "inbound_date": r[2], "status": r[3],
+            "memo": r[4], "wholesale": r[5] or "-",
+            "total_janggi_qty": r[6] or 0, "total_actual_qty": r[7] or 0,
+            "total_missing_qty": r[8] or 0,
+            "created_by": r[9], "closed_by": r[10], "closed_at": r[11],
+            "created_at": r[12], "items": [],
+        }
+
+    for r in item_rows:
+        item = {
+            "id": r[0], "batch_id": r[1], "line_no": r[2],
+            "item_name": r[3], "option_text": r[4], "unit_price": r[5],
+            "janggi_qty": r[6] or 0, "actual_qty": r[7] or 0, "missing_qty": r[8] or 0,
+            "status": r[9], "matched_barcode": r[10],
+            "matched_vendor": r[11], "matched_product": r[12], "matched_option": r[13],
+            "supplier_location": r[14], "supplier_contact": r[15],
+            "needs_matching": bool(r[16]), "normal_qty": r[17] or 0,
+            "confirmed_by": r[18], "item_wholesale": r[19], "memo": r[20],
+            "defect_count": defect_counts.get(r[0], 0),
+            "repair_count": repair_counts.get(r[0], 0),
+        }
+        if r[1] in batch_map:
+            batch_map[r[1]]["items"].append(item)
+
+    batches = list(batch_map.values())
+
+    # 전체 집계
+    total_janggi = sum(b["total_janggi_qty"] for b in batches)
+    total_actual = sum(b["total_actual_qty"] for b in batches)
+    total_missing = sum(b["total_missing_qty"] for b in batches)
+    all_items = [i for b in batches for i in b["items"]]
+    needs_matching_count = sum(1 for i in all_items if i["needs_matching"])
+    defect_total = sum(i["defect_count"] for i in all_items)
+
+    return {
+        "vendor": vendor,
+        "inbound_date": inbound_date,
+        "summary": {
+            "batches_count": len(batches),
+            "wholesales_count": len(batches),
+            "total_janggi_qty": total_janggi,
+            "total_actual_qty": total_actual,
+            "total_missing_qty": total_missing,
+            "items_count": len(all_items),
+            "needs_matching_count": needs_matching_count,
+            "defect_total": defect_total,
+        },
+        "batches": batches,
+    }
+
+
 # ── 입고 필터 옵션 (화주사·도매처 목록) ──────
 
 @router.get("/filter-options")
