@@ -1951,10 +1951,10 @@ def close_batch(
         current_status = batch_row[0]
         total_janggi = batch_row[1] or 0
 
-        # ── 오전 마감: confirming → inbound_done ──────────────
+        # ── 오전 마감: confirming / ocr_pending → inbound_done ──────────────
         if close_type == "am":
-            if current_status != "confirming":
-                return {"ok": False, "warning": f"오전 입고접수 완료는 '수량 확인 중' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
+            if current_status not in ("confirming", "ocr_pending"):
+                return {"ok": False, "warning": f"입고처리 완료는 '수량 확인 중' 또는 '장끼 등록 완료' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
 
             pending_count = con.execute(
                 "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='pending'",

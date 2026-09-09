@@ -503,7 +503,7 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
 
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       {/* 당일 입고처리 완료 */}
-                      {batch.status === 'confirming' && (
+                      {['ocr_pending', 'confirming'].includes(batch.status) && (
                         <button
                           onClick={async () => {
                             if (!confirm('당일 입고처리를 완료 처리하시겠습니까?')) return;
@@ -545,10 +545,10 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
                         📥 입고전표
                       </button>
                       <button
-                        onClick={() => router.push(`/inbound/${batch.id}`)}
+                        onClick={() => window.open(`/inbound/${batch.id}`, '_blank')}
                         style={{ background: 'none', border: `1px solid ${C.primary}`, borderRadius: 5, color: C.primary, fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
                       >
-                        입고작업
+                        입고작업 ↗
                       </button>
                     </div>
                   </div>

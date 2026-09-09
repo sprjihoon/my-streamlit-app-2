@@ -190,6 +190,20 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
   const editBarcodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editBarcodeRef = useRef<HTMLDivElement>(null);
 
+  // ── 업체 alias 사전 해석 (편집 바코드 검색 필터용) ──
+  const [resolvedVendors, setResolvedVendors] = useState<string[]>([]);
+  useEffect(() => {
+    if (!batchVendor || !token) return;
+    Promise.all([listInboundVendors(token), getVendorAliases(token)])
+      .then(([v, a]) => {
+        const matched = v.registered.find((r: InboundRegisteredVendor) => r.name === batchVendor || r.aliases.includes(batchVendor));
+        const aliasM  = a.aliases.find((al: VendorAlias) => al.canonical === batchVendor);
+        if (matched) setResolvedVendors([matched.name]);
+        else if (aliasM) setResolvedVendors(aliasM.aliases.length > 0 ? aliasM.aliases : [aliasM.canonical]);
+        else setResolvedVendors([batchVendor]);
+      }).catch(() => setResolvedVendors([batchVendor]));
+  }, [token, batchVendor]);
+
   // 수정 폼 열릴 때 바코드 검색 초기화
   function openEditMode() {
     setEditForm({
@@ -248,9 +262,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     editBarcodeTimerRef.current = setTimeout(async () => {
       setEditBarcodeLoading(true);
       try {
-        // vendor 필터 없이 전체 검색 (alias 불일치 방지)
-        const res = await getRepairBarcodes({ q: val.trim(), limit: 40 });
-        setEditBarcodeResults(res.items);
+        // resolvedVendors 가 있으면 업체별 필터 검색, 없으면 전체 검색
+        const vendorKeys = resolvedVendors.length > 0 ? resolvedVendors : [];
+        if (vendorKeys.length === 0) {
+          const res = await getRepairBarcodes({ q: val.trim(), limit: 40 });
+          setEditBarcodeResults(res.items);
+        } else {
+          const results = await Promise.all(
+            vendorKeys.map(v => getRepairBarcodes({ q: val.trim(), vendor: v, limit: 40 }))
+          );
+          const seen = new Set<string>();
+          const merged = results.flatMap(r => r.items).filter(b => {
+            if (seen.has(b.바코드)) return false;
+            seen.add(b.바코드); return true;
+          });
+          setEditBarcodeResults(merged.slice(0, 40));
+        }
       } catch { setEditBarcodeResults([]); }
       finally { setEditBarcodeLoading(false); }
     }, 350);
