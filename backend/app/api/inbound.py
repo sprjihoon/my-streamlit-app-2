@@ -25,6 +25,7 @@ import os
 import secrets
 import time
 import uuid
+import datetime as _dt
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -313,6 +314,24 @@ def _get_user(token: Optional[str]) -> dict:
     if not row:
         raise HTTPException(status_code=401, detail="인증이 필요합니다.")
     return {"user_id": row[0], "nickname": row[1], "is_admin": bool(row[2])}
+
+
+_KST = _dt.timezone(_dt.timedelta(hours=9))
+
+def _check_link_expiry(inbound_date_str: str) -> None:
+    """비로그인 공개 링크 만료 확인 — 당일(KST) 자정 이후이면 410 반환."""
+    try:
+        batch_date = _dt.date.fromisoformat(inbound_date_str)
+        today_kst  = _dt.datetime.now(_KST).date()
+        if today_kst > batch_date:
+            raise HTTPException(
+                status_code=410,
+                detail=f"링크가 만료되었습니다. (유효일: {inbound_date_str})"
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # 날짜 파싱 실패 시 허용
 
 
 # ─────────────────────────────────────
@@ -865,6 +884,9 @@ def get_batch(
         """, (batch_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+        # 비로그인 공개 접근: 당일 자정 이후 만료
+        if not authorization:
+            _check_link_expiry(row[2])  # row[2] = inbound_date
         batch = _serialize_batch(row)
 
         items = con.execute("""
@@ -1099,6 +1121,18 @@ def update_item(
     authorization: Optional[str] = Header(None),
 ):
     # 실수량 입력은 로그인 없이도 가능 — confirmed_by로 입력자 이름 기록
+    # 비로그인 공개 접근: 당일 자정 이후 만료
+    if not authorization:
+        with get_connection() as con:
+            batch_info = con.execute(
+                """SELECT b.inbound_date FROM inbound_items i
+                   JOIN inbound_batches b ON i.batch_id = b.id
+                   WHERE i.id=?""",
+                (item_id,)
+            ).fetchone()
+        if batch_info:
+            _check_link_expiry(batch_info[0])
+
     fields, params = [], []
 
     if body.actual_qty is not None:
@@ -1182,11 +1216,18 @@ async def upload_item_photo(
     authorization: Optional[str] = Header(None),
 ):
     # 작업자도 사진 업로드 가능 (인증 불필요)
+    # 비로그인 공개 접근: 당일 자정 이후 만료
     with get_connection() as con:
         item_row = con.execute("SELECT batch_id FROM inbound_items WHERE id=?", (item_id,)).fetchone()
         if not item_row:
             raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
         batch_id = item_row[0]
+        if not authorization:
+            date_row = con.execute(
+                "SELECT inbound_date FROM inbound_batches WHERE id=?", (batch_id,)
+            ).fetchone()
+            if date_row:
+                _check_link_expiry(date_row[0])
 
     filename = await _save_upload(file)
     photo_id = uuid.uuid4().hex

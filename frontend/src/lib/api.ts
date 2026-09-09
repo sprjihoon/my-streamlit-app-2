@@ -14,6 +14,13 @@ export function getApiBase(): string {
  * API 요청 헬퍼
  * - 네트워크 실패 시 "Failed to fetch" 대신 안내 메시지 반환
  */
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
@@ -45,7 +52,7 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(error || `API Error: ${response.status}`);
+    throw new ApiError(response.status, error || `API Error: ${response.status}`);
   }
 
   return response.json();

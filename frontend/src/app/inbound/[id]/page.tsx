@@ -12,6 +12,7 @@ import {
   listInboundVendors,
   getRepairBarcodes,
   getVendorAliases,
+  ApiError,
   InboundBatch,
   InboundItem,
   InboundRegisteredVendor,
@@ -1022,8 +1023,9 @@ export default function InboundWorkPage() {
   const { id } = useParams<{ id: string }>();
   const [token,    setToken]   = useState('');
   const [batch,    setBatch]   = useState<InboundBatch | null>(null);
-  const [loading,  setLoading] = useState(true);
-  const [error,    setError]   = useState('');
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
+  const [expired,   setExpired]   = useState(false);
   const [closing,  setClosing] = useState(false);
   const [closeMsg, setCloseMsg] = useState('');
   const [workerName,   setWorkerName]   = useState('');
@@ -1039,7 +1041,13 @@ export default function InboundWorkPage() {
     try {
       const data = await getInboundBatch(tok, id);
       setBatch(data);
-    } catch { setError('입고 정보를 불러오지 못했습니다.'); }
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 410) {
+        setExpired(true);
+      } else {
+        setError('입고 정보를 불러오지 못했습니다.');
+      }
+    }
     finally { setLoading(false); }
   }, [id]);
 
@@ -1083,6 +1091,19 @@ export default function InboundWorkPage() {
   }
 
   // ── 로딩 / 에러 화면 ──
+  if (expired) return (
+    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div style={{ background: '#fff', borderRadius: 20, padding: 32, textAlign: 'center', maxWidth: 340, boxShadow: '0 4px 24px rgba(0,0,0,0.09)' }}>
+        <div style={{ fontSize: 56, marginBottom: 16 }}>🔒</div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.text, marginBottom: 8 }}>링크가 만료되었습니다</div>
+        <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.7 }}>
+          실수량 입력 링크는 <strong>당일 자정</strong>까지만 유효합니다.<br />
+          다음 날 접근이 필요하다면 관리자에게 문의하세요.
+        </div>
+      </div>
+    </div>
+  );
+
   if (error) return (
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div style={{ background: '#fff', borderRadius: 16, padding: 28, textAlign: 'center', maxWidth: 320, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
