@@ -270,17 +270,28 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
     }
   }
 
-  async function onExcel(file: File) {
+  async function onExcel(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
     setUploading(true);
-    try {
-      const res = await uploadRepairBarcodes(file);
-      onMessage({ type: 'success', text: res.message });
-      load();
-    } catch (e) {
-      onMessage({ type: 'error', text: e instanceof Error ? e.message : '업로드 실패' });
-    } finally {
-      setUploading(false);
+    const results: string[] = [];
+    const errors: string[] = [];
+    for (const file of list) {
+      try {
+        const res = await uploadRepairBarcodes(file);
+        results.push(`${file.name}: ${res.message}`);
+      } catch (e) {
+        errors.push(`${file.name}: ${e instanceof Error ? e.message : '업로드 실패'}`);
+      }
     }
+    if (errors.length > 0) {
+      onMessage({ type: 'error', text: errors.join('\n') });
+    }
+    if (results.length > 0) {
+      onMessage({ type: 'success', text: results.join('\n') });
+      load();
+    }
+    setUploading(false);
   }
 
   return (
@@ -326,16 +337,17 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
       <div style={{ marginTop: '1rem' }}>
         <Card title="엑셀 일괄 업로드">
           <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: 12 }}>
-            창고용 전체상품목록(13열, 마지막 열이 공급처=업체명) 또는 간단 양식을 올리면 됩니다. 같은 바코드는 덮어씁니다.
+            창고용 전체상품목록(공급처·공급처 상품명·공급처 옵션·공급처 위치·공급처 연락처 포함) 또는 간단 양식. 여러 파일 동시 선택 가능. 같은 바코드는 덮어씁니다.
           </p>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="file"
               accept=".xls,.xlsx,.html"
+              multiple
               disabled={uploading}
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onExcel(f);
+                const files = e.target.files;
+                if (files && files.length > 0) onExcel(files);
                 e.target.value = '';
               }}
             />
