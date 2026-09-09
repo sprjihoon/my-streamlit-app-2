@@ -110,13 +110,6 @@ interface BatchInfo {
   closed_at: string | null;
 }
 
-interface ShareLink {
-  token: string;
-  link: string;
-  expires_at: string;
-  has_password: boolean;
-  password_once: string | null;
-}
 
 interface OverviewData {
   batch: BatchInfo;
@@ -225,12 +218,9 @@ export default function InboundOverviewPage() {
   const [editNormalQty, setEditNormalQty] = useState<Record<string, string>>({});
   const [savingNormal, setSavingNormal] = useState<Record<string, boolean>>({});
 
-  // 공유 링크
-  const [shareModal, setShareModal] = useState(false);
-  const [sharePassword, setSharePassword] = useState('');
-  const [shareResult, setShareResult] = useState<ShareLink | null>(null);
-  const [shareLinks, setShareLinks] = useState<ShareLink[]>([]);
-  const [copiedToken, setCopiedToken] = useState('');
+  // 당일 입고처리 완료
+  const [closing, setClosing] = useState(false);
+  const [closeMsg, setCloseMsg] = useState('');
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') || '' : '';
 
@@ -277,53 +267,28 @@ export default function InboundOverviewPage() {
     }
   }
 
-  // 공유 링크 생성
-  async function createShare() {
-    const res = await fetch(`${API_BASE}/inbound/batches/${id}/share`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ password: sharePassword || null, expires_days: 7 }),
-    });
-    if (!res.ok) { alert('공유 링크 생성 실패'); return; }
-    const link = await res.json() as ShareLink;
-    setShareResult(link);
-    setShareLinks(p => [link, ...p]);
-  }
-
-  // 공유 링크 폐기
-  async function revokeShare(t: string) {
-    if (!confirm('이 공유 링크를 폐기하시겠습니까?')) return;
-    const res = await fetch(`${API_BASE}/inbound/share/${t}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) { alert('폐기 실패'); return; }
-    setShareLinks(p => p.filter(l => l.token !== t));
-    if (shareResult?.token === t) setShareResult(null);
-  }
-
-  // 복사
-  function copyLink(link: string, t: string) {
-    navigator.clipboard.writeText(link).then(() => {
-      setCopiedToken(t);
-      setTimeout(() => setCopiedToken(''), 2000);
-    });
-  }
-
-  // 바코드 PDF
-  async function downloadBarcodePdf() {
-    const res = await fetch(`${API_BASE}/inbound/batches/${id}/barcode-pdf`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) { alert('PDF 생성 실패'); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `barcode_${id}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // 당일 입고처리 완료
+  async function handleDayClose() {
+    if (!confirm('당일 입고처리를 완료 처리하시겠습니까?')) return;
+    setClosing(true); setCloseMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/inbound/batches/${id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ close_type: 'am' }),
+      });
+      const data = await res.json();
+      if (!data.ok && data.warning) {
+        setCloseMsg('⚠️ ' + data.warning);
+      } else {
+        setCloseMsg('✅ ' + (data.message || '입고처리 완료'));
+        await load();
+      }
+    } catch {
+      setCloseMsg('❌ 처리 중 오류가 발생했습니다.');
+    } finally {
+      setClosing(false);
+    }
   }
 
   // ── 렌더링 ─────────────────────────────────────────────────────
@@ -361,87 +326,6 @@ export default function InboundOverviewPage() {
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Noto Sans KR', sans-serif" }}>
 
-      {/* 공유 링크 모달 */}
-      {shareModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: C.card, borderRadius: 16, padding: 24, width: '100%', maxWidth: 420 }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>🔗 화주사 공유 링크</h3>
-
-            {shareResult ? (
-              <div style={{ background: C.brandLight, borderRadius: 8, padding: 12, marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: C.brand, fontWeight: 600, marginBottom: 6 }}>링크가 생성되었습니다</div>
-                <div style={{ fontSize: 12, wordBreak: 'break-all', marginBottom: 8 }}>{shareResult.link}</div>
-                {shareResult.password_once && (
-                  <div style={{ fontSize: 12, color: C.warning }}>비밀번호: <b>{shareResult.password_once}</b> (1회만 표시)</div>
-                )}
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <button onClick={() => copyLink(shareResult.link, shareResult.token)}
-                    style={{ flex: 1, padding: '8px 0', background: C.brand, color: '#fff', border: 'none',
-                      borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
-                    {copiedToken === shareResult.token ? '✓ 복사됨' : '링크 복사'}
-                  </button>
-                  <button onClick={() => revokeShare(shareResult.token)}
-                    style={{ padding: '8px 14px', background: C.dangerLight, color: C.danger, border: 'none',
-                      borderRadius: 8, cursor: 'pointer', fontSize: 13 }}>
-                    폐기
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 13, color: C.textMuted }}>비밀번호 (선택)</label>
-                <input type="text" value={sharePassword}
-                  onChange={e => setSharePassword(e.target.value)}
-                  placeholder="비어두면 비밀번호 없음"
-                  style={{ width: '100%', marginTop: 4, padding: '8px 10px', border: `1px solid ${C.border}`,
-                    borderRadius: 8, fontSize: 13 }} />
-              </div>
-            )}
-
-            {/* 기존 링크 목록 */}
-            {shareLinks.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 6 }}>생성된 링크</div>
-                {shareLinks.map(l => (
-                  <div key={l.token} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
-                    padding: '6px 10px', background: C.grayLight, borderRadius: 8, fontSize: 12 }}>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {l.link}
-                    </span>
-                    <button onClick={() => copyLink(l.link, l.token)}
-                      style={{ padding: '3px 8px', background: C.brand, color: '#fff', border: 'none',
-                        borderRadius: 6, cursor: 'pointer', fontSize: 11 }}>
-                      {copiedToken === l.token ? '✓' : '복사'}
-                    </button>
-                    <button onClick={() => revokeShare(l.token)}
-                      style={{ padding: '3px 8px', background: C.dangerLight, color: C.danger, border: 'none',
-                        borderRadius: 6, cursor: 'pointer', fontSize: 11 }}>
-                      폐기
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              {!shareResult && (
-                <button onClick={createShare}
-                  style={{ flex: 1, padding: 10, background: C.brand, color: '#fff', border: 'none',
-                    borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
-                  링크 생성
-                </button>
-              )}
-              <button onClick={() => { setShareModal(false); setShareResult(null); setSharePassword(''); }}
-                style={{ flex: 1, padding: 10, background: C.grayLight, color: C.textSub, border: 'none',
-                  borderRadius: 8, cursor: 'pointer' }}>
-                닫기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 헤더 */}
       <div style={{ background: '#1e2140', color: '#fff', padding: '14px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
@@ -466,16 +350,6 @@ export default function InboundOverviewPage() {
         </div>
         {/* 액션 버튼 */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-          <button onClick={downloadBarcodePdf}
-            style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.15)', color: '#fff',
-              border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
-            🏷️ 바코드 PDF
-          </button>
-          <button onClick={() => setShareModal(true)}
-            style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.15)', color: '#fff',
-              border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
-            🔗 공유 링크
-          </button>
           <button onClick={() => router.push(`/inbound/${id}`)}
             style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.15)', color: '#fff',
               border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
@@ -555,6 +429,54 @@ export default function InboundOverviewPage() {
               {summary.final_good_qty}
             </span>
           </div>
+
+          {/* 당일 입고처리 완료 버튼 */}
+          {batch.status === 'confirming' && (
+            <div style={{ marginTop: 14 }}>
+              {closeMsg && (
+                <div style={{
+                  marginBottom: 10, padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                  background: closeMsg.startsWith('✅') ? C.successLight : C.dangerLight,
+                  color: closeMsg.startsWith('✅') ? C.success : (closeMsg.startsWith('⚠️') ? '#92400e' : C.danger),
+                  border: `1px solid ${closeMsg.startsWith('✅') ? '#86efac' : closeMsg.startsWith('⚠️') ? '#fde68a' : '#fecaca'}`,
+                }}>
+                  {closeMsg}
+                </div>
+              )}
+              <button
+                onClick={handleDayClose}
+                disabled={closing}
+                style={{
+                  width: '100%', height: 52, borderRadius: 12,
+                  background: closing ? '#d1d5db' : '#0369a1',
+                  color: '#fff', border: 'none', fontSize: 16, fontWeight: 800,
+                  cursor: closing ? 'not-allowed' : 'pointer',
+                  boxShadow: closing ? 'none' : '0 4px 16px rgba(3,105,161,0.35)',
+                  letterSpacing: '-0.3px',
+                }}
+              >
+                {closing ? '처리 중…' : '✅ 당일 입고처리 완료'}
+              </button>
+            </div>
+          )}
+
+          {batch.status === 'inbound_done' && (
+            <div style={{
+              marginTop: 14, padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+              background: '#dbeafe', color: '#1d4ed8', border: '1px solid #93c5fd', textAlign: 'center',
+            }}>
+              ✅ 입고처리 완료됨
+            </div>
+          )}
+
+          {batch.status === 'done' && (
+            <div style={{
+              marginTop: 14, padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+              background: C.successLight, color: C.success, border: '1px solid #86efac', textAlign: 'center',
+            }}>
+              🎉 최종 완료
+            </div>
+          )}
         </div>
 
         {/* 품목별 표 */}

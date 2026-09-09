@@ -69,18 +69,6 @@ const BATCH_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
   cancelled:    { bg: C.dangerLight,  color: C.danger },
 };
 
-// ─── 품목 상태 ────────────────────────
-// bg / color: 헤더 배지 용 (진한 색)
-// activeBg / activeColor: 칩 선택 시 파스텔 (연한 색)
-const ITEM_STATUS_OPTS = [
-  { value: 'pending',       label: '확인전',   color: '#fff', bg: '#9ca3af', activeBg: '#f3f4f6', activeColor: '#374151' },
-  { value: 'confirmed',     label: '정상',     color: '#fff', bg: '#15803d', activeBg: '#dcfce7', activeColor: '#15803d' },
-  { value: 'missing',       label: '미입고',   color: '#fff', bg: '#dc2626', activeBg: '#fef2f2', activeColor: '#dc2626' },
-  { value: 'defect',        label: '불량',     color: '#fff', bg: '#c2410c', activeBg: '#ffedd5', activeColor: '#c2410c' },
-  { value: 'repair',        label: '수선대기', color: '#fff', bg: '#b45309', activeBg: '#fef9c3', activeColor: '#92400e' },
-  { value: 'unrecoverable', label: '회생불가', color: '#fff', bg: '#7f1d1d', activeBg: '#fee2e2', activeColor: '#991b1b' },
-  { value: 'etc',           label: '기타',     color: '#fff', bg: '#7c3aed', activeBg: '#ede9fe', activeColor: '#7c3aed' },
-];
 
 // ─── 공통 스타일 오브젝트 ──────────────
 const cardStyle: React.CSSProperties = {
@@ -137,7 +125,6 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
 }) {
   const [actualQty,  setActualQty]  = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
-  const [status,     setStatus]     = useState(item.status);
   const [saving,     setSaving]     = useState(false);
   const [saved,      setSaved]      = useState(false);
   const [uploading,  setUploading]  = useState(false);
@@ -176,27 +163,14 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
   async function handleSave() {
     setSaving(true); setSaved(false);
     try {
-      const autoStatus = actualQty > 0 ? 'confirmed' : missingQty > 0 ? 'missing' : status;
       await updateInboundItem(token, item.id, {
-        actual_qty: actualQty, missing_qty: missingQty, status: autoStatus,
+        actual_qty: actualQty, missing_qty: missingQty,
         ...(workerName ? { confirmed_by: workerName } : {}),
       });
-      setStatus(autoStatus); setSaved(true);
+      setSaved(true);
       setTimeout(() => setSaved(false), 2500);
       onUpdated();
     } catch { alert('저장 실패'); }
-    finally { setSaving(false); }
-  }
-
-  async function handleStatusChange(newStatus: string) {
-    setStatus(newStatus); setSaving(true);
-    try {
-      await updateInboundItem(token, item.id, {
-        status: newStatus,
-        ...(workerName ? { confirmed_by: workerName } : {}),
-      });
-      onUpdated();
-    } catch { alert('상태 변경 실패'); }
     finally { setSaving(false); }
   }
 
@@ -315,7 +289,6 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     } catch { alert('삭제 실패'); }
   }
 
-  const statusOpt = ITEM_STATUS_OPTS.find(o => o.value === status);
   const isMatched = !!item.matched_product;
 
   // ── render ──────────────────────────
@@ -352,14 +325,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
             )}
           </div>
 
-          {/* 오른쪽: 상태 배지 + 관리자 버튼 */}
+          {/* 오른쪽: 관리자 버튼 */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
-            <span style={{
-              padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700,
-              background: statusOpt?.bg || '#9ca3af', color: '#fff',
-            }}>
-              {statusOpt?.label || status}
-            </span>
             {isAdmin && (
               <div style={{ display: 'flex', gap: 4 }}>
                 <button onClick={() => setEditMode(m => !m)} style={{
@@ -532,33 +499,6 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
               }}
             />
           </div>
-        </div>
-
-        {/* 상태 칩 — 가로 스크롤, 파스텔 활성 */}
-        <div style={{
-          display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 4,
-          marginBottom: 12, scrollbarWidth: 'none',
-        } as React.CSSProperties}>
-          {ITEM_STATUS_OPTS.map(opt => {
-            const isActive = status === opt.value;
-            return (
-              <button
-                key={opt.value}
-                onClick={() => handleStatusChange(opt.value)}
-                disabled={saving}
-                style={{
-                  flexShrink: 0, padding: '6px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  background: isActive ? opt.activeBg : '#fff',
-                  color:      isActive ? opt.activeColor : C.textFaint,
-                  border:     isActive ? `1.5px solid ${opt.activeColor}44` : `1px solid ${C.border}`,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
         </div>
 
         {/* 이름 미입력 */}
@@ -1152,7 +1092,7 @@ export default function InboundWorkPage() {
   const doneCount  = items.filter(i => i.status !== 'pending').length;
   const progress   = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
   const statusC    = BATCH_STATUS_COLOR[batch.status] || { bg: C.borderLight, color: C.textSub };
-  const canClose   = ['confirming', 'inbound_done', 'grading', 'repairing'].includes(batch.status);
+  const canClose   = ['confirming'].includes(batch.status);
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Noto Sans KR', -apple-system, sans-serif" }}>
@@ -1384,27 +1324,14 @@ export default function InboundWorkPage() {
 
             {batch.status === 'confirming' && (
               <button onClick={() => handleClose('am')} disabled={closing} style={{
-                width: '100%', height: 54, marginBottom: 10,
+                width: '100%', height: 54,
                 background: closing ? '#d1d5db' : '#0369a1', color: '#fff',
                 border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800,
                 cursor: closing ? 'not-allowed' : 'pointer',
                 boxShadow: closing ? 'none' : '0 4px 16px rgba(3,105,161,0.35)',
                 letterSpacing: '-0.3px',
               }}>
-                {closing ? '처리 중…' : '☀️ 오전 입고접수 완료'}
-              </button>
-            )}
-
-            {['inbound_done', 'grading', 'repairing'].includes(batch.status) && (
-              <button onClick={() => handleClose('pm')} disabled={closing} style={{
-                width: '100%', height: 54,
-                background: closing ? '#d1d5db' : C.purple, color: '#fff',
-                border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800,
-                cursor: closing ? 'not-allowed' : 'pointer',
-                boxShadow: closing ? 'none' : `0 4px 16px ${C.purple}55`,
-                letterSpacing: '-0.3px',
-              }}>
-                {closing ? '처리 중…' : '🌆 오후 최종 마감'}
+                {closing ? '처리 중…' : '✅ 완료'}
               </button>
             )}
           </div>
