@@ -1971,6 +1971,12 @@ export async function listInboundVendors(token: string) {
   );
 }
 
+export async function getInboundFilterOptions(token: string) {
+  return fetchApi<{ vendors: string[]; wholesales: string[] }>(
+    '/inbound/filter-options', { headers: inboundHeaders(token) }
+  );
+}
+
 export async function getVendorAliases(token: string) {
   return fetchApi<{ aliases: VendorAlias[] }>('/inbound/vendor-aliases', { headers: inboundHeaders(token) });
 }

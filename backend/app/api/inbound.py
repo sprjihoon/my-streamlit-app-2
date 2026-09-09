@@ -868,6 +868,29 @@ async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
 # 라우터
 # ─────────────────────────────────────
 
+# ── 입고 필터 옵션 (화주사·도매처 목록) ──────
+
+@router.get("/filter-options")
+def get_filter_options(authorization: Optional[str] = Header(None)):
+    """
+    입고일지 필터용 드롭다운 옵션 반환.
+    - vendors : inbound_batches 에 실제 등록된 고유 화주사명 (최신순)
+    - wholesales : inbound_batches.wholesale 의 고유 값 (비어 있지 않은 것)
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        vendor_rows = con.execute(
+            "SELECT DISTINCT vendor FROM inbound_batches WHERE vendor IS NOT NULL AND vendor != '' ORDER BY vendor"
+        ).fetchall()
+        wholesale_rows = con.execute(
+            "SELECT DISTINCT wholesale FROM inbound_batches WHERE wholesale IS NOT NULL AND wholesale != '' ORDER BY wholesale"
+        ).fetchall()
+    return {
+        "vendors": [r[0] for r in vendor_rows],
+        "wholesales": [r[0] for r in wholesale_rows],
+    }
+
+
 # ── 입고 배치 목록 ──────────────────────
 
 @router.get("/batches")

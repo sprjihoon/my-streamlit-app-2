@@ -20,6 +20,7 @@ import {
   upsertVendorAlias,
   getRepairBarcodes,
   getVendorAliases,
+  getInboundFilterOptions,
   InboundBatch,
   InboundItem,
   InboundRegisteredVendor,
@@ -1490,6 +1491,8 @@ export default function InboundLogPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const [wholesaleOptions, setWholesaleOptions] = useState<string[]>([]);
 
   useEffect(() => { setToken(localStorage.getItem('token') || ''); }, []);
 
@@ -1513,7 +1516,20 @@ export default function InboundLogPage() {
     }
   }, [filterVendor, filterWholesale, filterStatus, filterDateFrom, filterDateTo]);
 
+  useEffect(() => {
+    if (!token) return;
+    getInboundFilterOptions(token)
+      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); })
+      .catch(() => {});
+  }, [token]);
+
   useEffect(() => { if (token) load(token); }, [token, load]);
+
+  function refreshFilterOptions(tok: string) {
+    getInboundFilterOptions(tok)
+      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); })
+      .catch(() => {});
+  }
 
   async function openDetail(batch: InboundBatch) {
     try {
@@ -1565,32 +1581,33 @@ export default function InboundLogPage() {
       {/* 필터 */}
       <Card style={{ marginBottom: '1rem', padding: '0.85rem 1rem' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'flex-end' }}>
-          {/* 화주사 — 업체명·별칭 통합 검색 */}
+          {/* 화주사 셀렉트박스 */}
           <div>
-            <label style={labelStyle}>
-              화주사
-              <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#9ca3af', marginLeft: 5 }}>
-                (업체명·별칭 모두 검색)
-              </span>
-            </label>
-            <input
+            <label style={labelStyle}>화주사</label>
+            <select
               value={filterVendor}
               onChange={e => setFilterVendor(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') load(token); }}
-              placeholder="업체명 또는 별칭 입력"
               style={{ ...inputStyle, width: 160 }}
-            />
+            >
+              <option value="">전체</option>
+              {vendorOptions.map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
           </div>
-          {/* 도매처 */}
+          {/* 도매처 셀렉트박스 */}
           <div>
             <label style={labelStyle}>도매처</label>
-            <input
+            <select
               value={filterWholesale}
               onChange={e => setFilterWholesale(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') load(token); }}
-              placeholder="도매처 이름 입력"
-              style={{ ...inputStyle, width: 140 }}
-            />
+              style={{ ...inputStyle, width: 150 }}
+            >
+              <option value="">전체</option>
+              {wholesaleOptions.map(w => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label style={labelStyle}>상태</label>
@@ -1736,7 +1753,7 @@ export default function InboundLogPage() {
         <CreateBatchModal
           token={token}
           onClose={() => setShowCreate(false)}
-          onCreated={batch => { setShowCreate(false); setSelectedBatch(batch); load(token); }}
+          onCreated={batch => { setShowCreate(false); setSelectedBatch(batch); load(token); refreshFilterOptions(token); }}
         />
       )}
       {editingBatch && (
