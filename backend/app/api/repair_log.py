@@ -70,6 +70,8 @@ class BarcodeCreate(BaseModel):
     제품명: str
     옵션: Optional[str] = None
     도매처: Optional[str] = None
+    도매처주소: Optional[str] = None    # 공급처 위치
+    도매처연락처: Optional[str] = None  # 공급처 연락처
     상품코드: Optional[str] = None
     로케이션: Optional[str] = None
     상품명: Optional[str] = None
@@ -81,6 +83,8 @@ class BarcodeUpdate(BaseModel):
     제품명: Optional[str] = None
     옵션: Optional[str] = None
     도매처: Optional[str] = None
+    도매처주소: Optional[str] = None    # 공급처 위치
+    도매처연락처: Optional[str] = None  # 공급처 연락처
     상품코드: Optional[str] = None
     로케이션: Optional[str] = None
     상품명: Optional[str] = None
@@ -136,8 +140,9 @@ def ensure_repair_tables():
                 con.execute(f"ALTER TABLE repair_work_log ADD COLUMN [{col}] {coltype}")
         # repair_barcode 마이그레이션
         bc_cols = [c[1] for c in con.execute("PRAGMA table_info(repair_barcode)")]
-        if "도매처" not in bc_cols:
-            con.execute("ALTER TABLE repair_barcode ADD COLUMN 도매처 TEXT")
+        for _col in ("도매처", "도매처주소", "도매처연락처"):
+            if _col not in bc_cols:
+                con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {_col} TEXT")
         con.execute("""
             CREATE TABLE IF NOT EXISTS repair_photo_inbox (
                 user_id TEXT PRIMARY KEY,
@@ -594,9 +599,11 @@ def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
     wholesale_idx = _find_wholesale_col_idx(cols)
     short_name_idx = _find_col_idx(cols, "공급처 상품명", "제품명")
     long_name_idx = _find_col_idx(cols, "상품명")
-    option_idx = _find_col_idx(cols, "옵션")
+    option_idx = _find_col_idx(cols, "공급처 옵션", "옵션")
     code_idx = _find_col_idx(cols, "상품코드")
     loc_idx = _find_col_idx(cols, "로케이션")
+    sup_loc_idx = _find_col_idx(cols, "공급처 위치", "도매처주소")
+    sup_contact_idx = _find_col_idx(cols, "공급처 연락처", "도매처연락처")
 
     if barcode_idx is None:
         raise HTTPException(status_code=400, detail="바코드 열이 없습니다.")
@@ -619,6 +626,8 @@ def _parse_barcode_rows(df: pd.DataFrame) -> List[dict]:
             "도매처": wholesale,
             "제품명": product,
             "옵션": _strip_option(_clean(r.iloc[option_idx])) if option_idx is not None else None,
+            "도매처주소": _clean(r.iloc[sup_loc_idx]) if sup_loc_idx is not None else None,
+            "도매처연락처": _clean(r.iloc[sup_contact_idx]) if sup_contact_idx is not None else None,
             "상품코드": _clean(r.iloc[code_idx]) if code_idx is not None else None,
             "로케이션": _clean(r.iloc[loc_idx]) if loc_idx is not None else None,
             "상품명": long_name,
@@ -651,7 +660,7 @@ async def list_barcodes(
 
         total = con.execute(f"SELECT COUNT(*) FROM repair_barcode {where}", params).fetchone()[0]
         rows = con.execute(
-            f"""SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간, 도매처
+            f"""SELECT 바코드, 업체명, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간, 도매처, 도매처주소, 도매처연락처
                 FROM repair_barcode {where}
                 ORDER BY 저장시간 DESC, 바코드
                 LIMIT ? OFFSET ?""",
@@ -676,6 +685,8 @@ async def list_barcodes(
             "출처": r[7],
             "저장시간": str(r[8]) if r[8] else None,
             "도매처": r[9] if len(r) > 9 else None,
+            "도매처주소": r[10] if len(r) > 10 else None,
+            "도매처연락처": r[11] if len(r) > 11 else None,
         })
     return {"items": items, "total": total, "filters": {"vendors": vendors}}
 
@@ -693,7 +704,11 @@ async def lookup_barcode(barcode: str):
 @router.get("/barcodes/template")
 async def barcode_template():
     output = io.BytesIO()
-    df = pd.DataFrame(columns=["바코드", "업체명", "제품명", "옵션", "상품코드", "로케이션", "상품명"])
+    df = pd.DataFrame(columns=[
+        "바코드", "업체명", "공급처 상품명", "공급처 옵션",
+        "공급처 위치", "공급처 연락처", "공급처",   # 공급처=도매처(마지막 열)
+        "상품코드", "로케이션", "상품명",
+    ])
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="바코드")
     output.seek(0)
@@ -727,21 +742,24 @@ async def upload_barcodes(file: UploadFile = File(...)):
             ).fetchone()
             con.execute(
                 """INSERT INTO repair_barcode
-                   (바코드, 업체명, 도매처, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'excel', ?)
+                   (바코드, 업체명, 도매처, 제품명, 옵션, 도매처주소, 도매처연락처, 상품코드, 로케이션, 상품명, 출처, 저장시간)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'excel', ?)
                    ON CONFLICT(바코드) DO UPDATE SET
                      업체명=excluded.업체명,
                      도매처=excluded.도매처,
                      제품명=excluded.제품명,
                      옵션=excluded.옵션,
+                     도매처주소=COALESCE(excluded.도매처주소, 도매처주소),
+                     도매처연락처=COALESCE(excluded.도매처연락처, 도매처연락처),
                      상품코드=excluded.상품코드,
                      로케이션=excluded.로케이션,
                      상품명=excluded.상품명,
                      출처='excel',
                      저장시간=excluded.저장시간""",
                 (
-                    row["바코드"], vendor, row.get("도매처"), row["제품명"], row["옵션"],
-                    row["상품코드"], row["로케이션"], row["상품명"], now,
+                    row["바코드"], vendor, row.get("도매처"), row["제품명"], row.get("옵션"),
+                    row.get("도매처주소"), row.get("도매처연락처"),
+                    row.get("상품코드"), row.get("로케이션"), row.get("상품명"), now,
                 ),
             )
             if exists:
@@ -781,10 +799,11 @@ async def create_barcode(data: BarcodeCreate):
             raise HTTPException(status_code=409, detail="이미 등록된 바코드입니다.")
         con.execute(
             """INSERT INTO repair_barcode
-               (바코드, 업체명, 도매처, 제품명, 옵션, 상품코드, 로케이션, 상품명, 출처, 저장시간)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (바코드, 업체명, 도매처, 제품명, 옵션, 도매처주소, 도매처연락처, 상품코드, 로케이션, 상품명, 출처, 저장시간)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 barcode, vendor, _clean(data.도매처), data.제품명.strip(), _strip_option(data.옵션),
+                _clean(data.도매처주소), _clean(data.도매처연락처),
                 _clean(data.상품코드), _clean(data.로케이션), _clean(data.상품명),
                 data.출처, now,
             ),
@@ -825,6 +844,12 @@ async def update_barcode(barcode: str, data: BarcodeUpdate):
         if data.도매처 is not None:
             updates.append("도매처 = ?")
             params.append(_clean(data.도매처))
+        if data.도매처주소 is not None:
+            updates.append("도매처주소 = ?")
+            params.append(_clean(data.도매처주소))
+        if data.도매처연락처 is not None:
+            updates.append("도매처연락처 = ?")
+            params.append(_clean(data.도매처연락처))
         if data.상품코드 is not None:
             updates.append("상품코드 = ?")
             params.append(_clean(data.상품코드))

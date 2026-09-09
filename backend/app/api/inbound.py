@@ -300,6 +300,12 @@ def ensure_inbound_tables():
             con.execute("ALTER TABLE inbound_share_links ADD COLUMN revoked_at DATETIME")
         except Exception:
             pass
+        # repair_barcode 에 도매처주소·도매처연락처 컬럼 추가 (없으면)
+        for _col in ("도매처주소 TEXT", "도매처연락처 TEXT"):
+            try:
+                con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {_col}")
+            except Exception:
+                pass
         con.commit()
 
 
@@ -526,6 +532,8 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
         "matched_vendor": None,
         "matched_product": None,
         "matched_option": None,
+        "supplier_location": None,   # 도매처주소
+        "supplier_contact": None,    # 도매처연락처
         "match_confidence": 0.0,
         "needs_matching": True,
     }
@@ -535,11 +543,26 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
     vendor_names = _resolve_vendor_names(vendor)  # 별칭 포함 후보 업체명 목록
     vendor_ph = ",".join("?" * len(vendor_names))  # IN (?,?,...) 플레이스홀더
 
+    def _row_to_result(row, confidence: float, needs: bool) -> dict:
+        return {
+            **result,
+            "matched_barcode": row[0],
+            "matched_vendor": row[1],
+            "matched_product": row[2] or item_name,
+            "matched_option": row[3],
+            "supplier_location": row[4] if len(row) > 4 else None,
+            "supplier_contact": row[5] if len(row) > 5 else None,
+            "match_confidence": confidence,
+            "needs_matching": needs,
+        }
+
+    _sel = "SELECT 바코드, 업체명, 제품명, 옵션, 도매처주소, 도매처연락처"
+
     with get_connection() as con:
         # 1순위: 화주사(별칭 포함) + 도매처 + 제품명/상품명 + 옵션 정확 매칭
         if wholesale and option_text:
             row = con.execute(f"""
-                SELECT 바코드, 업체명, 제품명, 옵션
+                {_sel}
                 FROM repair_barcode
                 WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
                   AND (제품명=? OR 상품명=?)
@@ -547,48 +570,40 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
                 LIMIT 1
             """, (*vendor_names, wholesale, item_name, item_name, option_text)).fetchone()
             if row:
-                return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                        "matched_product": row[2] or item_name, "matched_option": row[3],
-                        "match_confidence": 1.0, "needs_matching": False}
+                return _row_to_result(row, 1.0, False)
 
         # 2순위: 화주사(별칭 포함) + 도매처 + 제품명/상품명 (옵션 무시)
         if wholesale:
             row = con.execute(f"""
-                SELECT 바코드, 업체명, 제품명, 옵션
+                {_sel}
                 FROM repair_barcode
                 WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
                   AND (제품명=? OR 상품명=?)
                 LIMIT 1
             """, (*vendor_names, wholesale, item_name, item_name)).fetchone()
             if row:
-                return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                        "matched_product": row[2] or item_name, "matched_option": row[3],
-                        "match_confidence": 0.85, "needs_matching": False}
+                return _row_to_result(row, 0.85, False)
 
         # 3순위: 화주사(별칭 포함) + 제품명/상품명
         row = con.execute(f"""
-            SELECT 바코드, 업체명, 제품명, 옵션
+            {_sel}
             FROM repair_barcode
             WHERE 업체명 IN ({vendor_ph}) AND (제품명=? OR 상품명=?)
             LIMIT 1
         """, (*vendor_names, item_name, item_name)).fetchone()
         if row:
-            return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                    "matched_product": row[2] or item_name, "matched_option": row[3],
-                    "match_confidence": 0.7, "needs_matching": False}
+            return _row_to_result(row, 0.7, False)
 
         # 4순위: 부분 일치 (LIKE) — 화주사 별칭 포함
         keyword = f"%{item_name}%"
         row = con.execute(f"""
-            SELECT 바코드, 업체명, 제품명, 옵션
+            {_sel}
             FROM repair_barcode
             WHERE 업체명 IN ({vendor_ph}) AND (제품명 LIKE ? OR 상품명 LIKE ?)
             LIMIT 1
         """, (*vendor_names, keyword, keyword)).fetchone()
         if row:
-            return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                    "matched_product": row[2] or item_name, "matched_option": row[3],
-                    "match_confidence": 0.5, "needs_matching": True}
+            return _row_to_result(row, 0.5, True)
 
     return result
 
@@ -858,6 +873,7 @@ async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
 @router.get("/batches")
 def list_batches(
     vendor: Optional[str] = Query(None),
+    wholesale: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -869,7 +885,13 @@ def list_batches(
     where = ["1=1"]
     params: list = []
     if vendor:
-        where.append("vendor=?"); params.append(vendor)
+        # 별칭 포함 업체명 목록으로 확장 (alias → canonical 포함) + 부분일치
+        vendor_names = _resolve_vendor_names(vendor)
+        ph = ",".join("?" * len(vendor_names))
+        where.append(f"(vendor IN ({ph}) OR vendor LIKE ? OR vendor_canonical IN ({ph}) OR vendor_canonical LIKE ?)")
+        params += vendor_names + [f"%{vendor}%"] + vendor_names + [f"%{vendor}%"]
+    if wholesale:
+        where.append("wholesale LIKE ?"); params.append(f"%{wholesale}%")
     if status:
         where.append("status=?"); params.append(status)
     if date_from:
@@ -1083,14 +1105,17 @@ async def run_ocr(
                     (id, batch_id, line_no, item_name, option_text, unit_price,
                      janggi_qty, actual_qty, missing_qty, status,
                      matched_barcode, matched_vendor, matched_product, matched_option,
-                     match_confidence, needs_matching, memo, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
+                     match_confidence, needs_matching, supplier_location, supplier_contact,
+                     memo, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 item_id, batch_id, i + 1, item_name, combined_option, unit_price,
                 janggi_qty,
                 match["matched_barcode"], match["matched_vendor"],
                 match["matched_product"], match["matched_option"],
                 match["match_confidence"], int(needs_matching),
+                match.get("supplier_location") or "",
+                match.get("supplier_contact") or "",
                 "OCR", now,
             ))
             # OCR 자동매칭 성공 시 바코드 마스터에 도매처 정보 갱신
@@ -1099,8 +1124,10 @@ async def run_ocr(
                     con,
                     barcode=match["matched_barcode"],
                     wholesale=wholesale or "",
-                    supplier_location="",
-                    supplier_contact="",
+                    supplier_location=match.get("supplier_location") or "",
+                    supplier_contact=match.get("supplier_contact") or "",
+                    matched_product=match.get("matched_product") or "",
+                    matched_option=match.get("matched_option") or "",
                 )
             created_items.append({
                 "id": item_id,

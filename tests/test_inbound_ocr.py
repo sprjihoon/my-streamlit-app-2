@@ -508,18 +508,20 @@ import os as _os
 # Test 12–16 – _match_barcode: 실제 repair_barcode 스키마(제품명/상품명) 기반 매칭
 # ─────────────────────────────────────
 
-def _seed_repair_barcode(con, *, barcode, vendor, 제품명, 상품명, option, wholesale):
+def _seed_repair_barcode(con, *, barcode, vendor, 제품명, 상품명, option, wholesale,
+                         도매처주소=None, 도매처연락처=None):
     """repair_barcode 테스트 행 삽입 (운영 스키마: 제품명/상품명/도매처 등)."""
     con.execute("""
         CREATE TABLE IF NOT EXISTS repair_barcode (
             바코드 TEXT, 업체명 TEXT, 제품명 TEXT, 옵션 TEXT,
             상품코드 TEXT, 로케이션 TEXT, 상품명 TEXT,
-            출처 TEXT, 저장시간 TEXT, 도매처 TEXT
+            출처 TEXT, 저장시간 TEXT, 도매처 TEXT,
+            도매처주소 TEXT, 도매처연락처 TEXT
         )
     """)
     con.execute(
-        "INSERT INTO repair_barcode VALUES (?,?,?,?,NULL,NULL,?,NULL,NULL,?)",
-        (barcode, vendor, 제품명, option, 상품명, wholesale),
+        "INSERT OR IGNORE INTO repair_barcode VALUES (?,?,?,?,NULL,NULL,?,NULL,NULL,?,?,?)",
+        (barcode, vendor, 제품명, option, 상품명, wholesale, 도매처주소, 도매처연락처),
     )
     con.commit()
 
