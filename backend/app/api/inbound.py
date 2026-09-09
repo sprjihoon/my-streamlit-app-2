@@ -879,20 +879,22 @@ def list_vendor_overviews(
 ):
     """
     화주사+입고일 단위로 묶어 반환한다.
-    각 항목: vendor, inbound_date, batches_count, wholesales[], 수량 합계
+    vendor_canonical 이 있으면 canonical 기준으로 묶고, 없으면 vendor 사용.
     """
     _get_user(authorization)
     where = ["1=1"]
     params: list = []
     if vendor:
-        where.append("vendor=?"); params.append(vendor)
+        # canonical 또는 raw vendor 어느 쪽이든 일치
+        where.append("COALESCE(vendor_canonical, vendor)=?"); params.append(vendor)
     if date_from:
         where.append("inbound_date>=?"); params.append(date_from)
     if date_to:
         where.append("inbound_date<=?"); params.append(date_to)
 
     sql = f"""
-        SELECT vendor, inbound_date,
+        SELECT COALESCE(vendor_canonical, vendor) AS canonical_vendor,
+               inbound_date,
                COUNT(*) AS batches_count,
                GROUP_CONCAT(COALESCE(wholesale,''), '|') AS wholesales,
                SUM(total_janggi_qty) AS total_janggi,
@@ -901,19 +903,19 @@ def list_vendor_overviews(
                GROUP_CONCAT(status, '|') AS statuses
         FROM inbound_batches
         WHERE {' AND '.join(where)}
-        GROUP BY vendor, inbound_date
-        ORDER BY inbound_date DESC, vendor
+        GROUP BY canonical_vendor, inbound_date
+        ORDER BY inbound_date DESC, canonical_vendor
     """
     with get_connection() as con:
         rows = con.execute(sql, params).fetchall()
 
     items = []
     for r in rows:
-        wholesales = [w for w in (r[3] or "").split("|") if w]
+        wholesales = list(dict.fromkeys(w for w in (r[3] or "").split("|") if w))  # 중복 제거
         statuses = (r[7] or "").split("|")
         all_closed = all(s == "closed" for s in statuses if s)
         items.append({
-            "vendor": r[0],
+            "vendor": r[0],          # canonical 기준 표시명
             "inbound_date": r[1],
             "batches_count": r[2],
             "wholesales": wholesales,
@@ -942,7 +944,7 @@ def get_vendor_overview_detail(
                       total_janggi_qty, total_actual_qty, total_missing_qty,
                       created_by, closed_by, closed_at, created_at, janggi_filename
                FROM inbound_batches
-               WHERE vendor=? AND inbound_date=?
+               WHERE COALESCE(vendor_canonical, vendor)=? AND inbound_date=?
                ORDER BY wholesale""",
             (vendor, inbound_date),
         ).fetchall()
@@ -1084,8 +1086,11 @@ def get_filter_options(authorization: Optional[str] = Header(None)):
     """
     _get_user(authorization)
     with get_connection() as con:
+        # vendor_canonical 우선 사용 (별칭 통합 기준 이름)
         vendor_rows = con.execute(
-            "SELECT DISTINCT vendor FROM inbound_batches WHERE vendor IS NOT NULL AND vendor != '' ORDER BY vendor"
+            """SELECT DISTINCT COALESCE(vendor_canonical, vendor) AS v
+               FROM inbound_batches WHERE vendor IS NOT NULL AND vendor != ''
+               ORDER BY v"""
         ).fetchall()
         wholesale_rows = con.execute(
             "SELECT DISTINCT wholesale FROM inbound_batches WHERE wholesale IS NOT NULL AND wholesale != '' ORDER BY wholesale"
