@@ -384,11 +384,14 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
   const [subModal, setSubModal] = useState<'defect' | 'repair' | null>(null);
   const router = useRouter();
 
-  useEffect(() => {
+  const loadDetail = useCallback(() => {
+    setLoading(true);
     apiFetch<DetailData>(`/inbound/vendor-overview/${encodeURIComponent(vendor)}/${encodeURIComponent(date)}`)
       .then(d => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [vendor, date]);
+
+  useEffect(() => { loadDetail(); }, [loadDetail]);
 
   // ESC 닫기 (서브모달 없을 때만)
   useEffect(() => {
@@ -498,7 +501,29 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
                       </span>
                     )}
 
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {/* 당일 입고처리 완료 */}
+                      {batch.status === 'confirming' && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm('당일 입고처리를 완료 처리하시겠습니까?')) return;
+                            try {
+                              const res = await fetch(`${API_BASE}/inbound/batches/${batch.id}/close`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                                body: JSON.stringify({ close_type: 'am' }),
+                              });
+                              const d = await res.json();
+                              if (d.ok) { alert('✅ ' + (d.message || '입고처리 완료')); loadDetail(); }
+                              else alert('⚠️ ' + (d.warning || '처리 실패'));
+                            } catch { alert('오류가 발생했습니다.'); }
+                          }}
+                          style={{ background: '#0369a1', border: 'none', borderRadius: 5, color: '#fff', fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
+                        >
+                          ✅ 완료
+                        </button>
+                      )}
+                      {/* 입고전표 다운로드 */}
                       <button
                         onClick={async () => {
                           try {
