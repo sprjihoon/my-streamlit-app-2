@@ -70,14 +70,16 @@ const BATCH_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
 };
 
 // ─── 품목 상태 ────────────────────────
+// bg / color: 헤더 배지 용 (진한 색)
+// activeBg / activeColor: 칩 선택 시 파스텔 (연한 색)
 const ITEM_STATUS_OPTS = [
-  { value: 'pending',       label: '확인전',   color: '#fff',    bg: '#6b7280' },
-  { value: 'confirmed',     label: '정상',     color: '#fff',    bg: C.success },
-  { value: 'missing',       label: '미입고',   color: '#fff',    bg: C.danger  },
-  { value: 'defect',        label: '불량',     color: '#fff',    bg: '#c2410c' },
-  { value: 'repair',        label: '수선대기', color: '#fff',    bg: '#b45309' },
-  { value: 'unrecoverable', label: '회생불가', color: '#fff',    bg: '#991b1b' },
-  { value: 'etc',           label: '기타',     color: '#fff',    bg: C.purple  },
+  { value: 'pending',       label: '확인전',   color: '#fff', bg: '#9ca3af', activeBg: '#f3f4f6', activeColor: '#374151' },
+  { value: 'confirmed',     label: '정상',     color: '#fff', bg: '#15803d', activeBg: '#dcfce7', activeColor: '#15803d' },
+  { value: 'missing',       label: '미입고',   color: '#fff', bg: '#dc2626', activeBg: '#fef2f2', activeColor: '#dc2626' },
+  { value: 'defect',        label: '불량',     color: '#fff', bg: '#c2410c', activeBg: '#ffedd5', activeColor: '#c2410c' },
+  { value: 'repair',        label: '수선대기', color: '#fff', bg: '#b45309', activeBg: '#fef9c3', activeColor: '#92400e' },
+  { value: 'unrecoverable', label: '회생불가', color: '#fff', bg: '#7f1d1d', activeBg: '#fee2e2', activeColor: '#991b1b' },
+  { value: 'etc',           label: '기타',     color: '#fff', bg: '#7c3aed', activeBg: '#ede9fe', activeColor: '#7c3aed' },
 ];
 
 // ─── 공통 스타일 오브젝트 ──────────────
@@ -104,17 +106,18 @@ function SectionToggle({ open, label, badge, onToggle }: {
       onClick={onToggle}
       style={{
         width: '100%', padding: '9px 14px',
-        background: open ? C.brandLight : C.borderLight,
-        color: open ? C.brand : C.textMuted,
-        border: `1px solid ${open ? C.brandBorder : C.border}`,
-        borderRadius: 10, fontSize: 13, fontWeight: 600,
+        background: '#fff',
+        color: C.textMuted,
+        border: `1px solid ${C.border}`,
+        borderRadius: 10, fontSize: 13, fontWeight: 500,
         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        transition: 'border-color 0.15s',
       }}
     >
-      <span>{label}</span>
+      <span style={{ color: open ? C.textSub : C.textMuted }}>{label}</span>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
         {badge}
-        <span style={{ opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
+        <span style={{ color: C.textFaint }}>{open ? '▲' : '▼'}</span>
       </span>
     </button>
   );
@@ -313,45 +316,33 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     } catch { alert('삭제 실패'); }
   }
 
-  const statusOpt  = ITEM_STATUS_OPTS.find(o => o.value === status);
-  const isPending  = status === 'pending';
-  const isMatched  = !!item.matched_product;
+  const statusOpt = ITEM_STATUS_OPTS.find(o => o.value === status);
+  const isMatched = !!item.matched_product;
 
   // ── render ──────────────────────────
   return (
-    <div style={{
-      ...cardStyle,
-      border: isPending ? `2px solid ${C.warningBorder}` : `1px solid ${C.border}`,
-    }}>
+    <div style={{ ...cardStyle, border: `1px solid ${C.border}` }}>
+
       {/* ── 카드 헤더 ── */}
-      <div style={{ padding: '14px 16px 12px', borderBottom: `1px solid ${C.borderLight}` }}>
+      <div style={{ padding: '13px 16px 11px', borderBottom: `1px solid ${C.borderLight}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-          {/* 왼쪽: 품명/옵션 */}
+
+          {/* 왼쪽: 품명 */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <span style={{
-                fontSize: 10, fontWeight: 700, color: C.textFaint,
-                background: C.borderLight, padding: '2px 7px', borderRadius: 6,
-              }}>#{item.line_no}</span>
-              {saved && (
-                <span style={{
-                  fontSize: 11, color: C.success, background: C.successLight,
-                  padding: '2px 8px', borderRadius: 10, fontWeight: 700,
-                }}>✓ 저장됨</span>
-              )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: C.textFaint }}>#{item.line_no}</span>
+              {saved && <span style={{ fontSize: 11, color: C.success, fontWeight: 700 }}>✓ 저장됨</span>}
             </div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: C.text, lineHeight: 1.3, wordBreak: 'keep-all' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.text, lineHeight: 1.3, wordBreak: 'keep-all' }}>
               {item.item_name || '(품명 없음)'}
             </div>
             {item.option_text && (
-              <div style={{ fontSize: 13, color: C.textMuted, marginTop: 3 }}>{item.option_text}</div>
+              <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{item.option_text}</div>
             )}
             {(item.confirmed_by || item.updated_at) && (
               <div style={{ display: 'flex', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
                 {item.confirmed_by && (
-                  <span style={{ fontSize: 10, color: C.brand, background: C.brandLight, padding: '2px 7px', borderRadius: 8 }}>
-                    입력: {item.confirmed_by}
-                  </span>
+                  <span style={{ fontSize: 10, color: C.textMuted }}>입력: {item.confirmed_by}</span>
                 )}
                 {item.updated_at && (
                   <span style={{ fontSize: 10, color: C.textFaint }}>
@@ -362,34 +353,32 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
             )}
           </div>
 
-          {/* 오른쪽: 상태 + 관리자 버튼 */}
+          {/* 오른쪽: 상태 배지 + 관리자 버튼 */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
             <span style={{
-              padding: '5px 11px', borderRadius: 20, fontSize: 12, fontWeight: 700,
-              background: statusOpt?.bg || C.textFaint, color: statusOpt?.color || '#fff',
+              padding: '4px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700,
+              background: statusOpt?.bg || '#9ca3af', color: '#fff',
             }}>
               {statusOpt?.label || status}
             </span>
             {isAdmin && (
               <div style={{ display: 'flex', gap: 4 }}>
-                <button
-                  onClick={() => setEditMode(m => !m)}
-                  style={{
-                    fontSize: 11, padding: '4px 10px', borderRadius: 7, fontWeight: 700,
-                    background: editMode ? C.brand : C.borderLight,
-                    color: editMode ? '#fff' : C.textMuted,
-                    border: 'none', cursor: 'pointer',
-                  }}
-                >✏️ {editMode ? '닫기' : '수정'}</button>
+                <button onClick={() => setEditMode(m => !m)} style={{
+                  fontSize: 11, padding: '3px 9px', borderRadius: 6, fontWeight: 600,
+                  background: C.borderLight, color: editMode ? C.brand : C.textMuted,
+                  border: `1px solid ${C.border}`, cursor: 'pointer',
+                }}>
+                  {editMode ? '닫기' : '수정'}
+                </button>
                 {onDelete && (
                   <button
                     onClick={() => { if (confirm(`"${item.item_name || '#' + item.line_no}" 삭제?`)) onDelete?.(); }}
                     style={{
-                      fontSize: 11, padding: '4px 10px', borderRadius: 7, fontWeight: 700,
-                      background: C.dangerLight, color: C.danger,
-                      border: `1px solid ${C.dangerBorder}`, cursor: 'pointer',
+                      fontSize: 11, padding: '3px 9px', borderRadius: 6, fontWeight: 600,
+                      background: C.borderLight, color: C.textMuted,
+                      border: `1px solid ${C.border}`, cursor: 'pointer',
                     }}
-                  >🗑</button>
+                  >삭제</button>
                 )}
               </div>
             )}
@@ -397,28 +386,28 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
         </div>
       </div>
 
-      {/* ── 매칭 정보 바 ── */}
+      {/* ── 매칭 정보 한 줄 ── */}
       {!editMode && (
         isMatched ? (
           <div style={{
-            padding: '8px 16px', borderBottom: `1px solid ${C.successBorder}`,
-            background: '#f0fdf4', display: 'flex', flexWrap: 'wrap', gap: '3px 10px', fontSize: 12,
+            padding: '6px 16px', borderBottom: `1px solid ${C.borderLight}`,
+            background: C.borderLight, fontSize: 12, color: C.textMuted,
+            display: 'flex', flexWrap: 'wrap', gap: '2px 8px', alignItems: 'center',
           }}>
-            <span style={{ color: C.textFaint }}>공급처:</span>
-            <span style={{ color: C.success, fontWeight: 700 }}>{item.matched_vendor}</span>
-            <span style={{ color: C.border }}>|</span>
-            <span style={{ color: C.textSub }}>{item.matched_product}</span>
-            {item.matched_option && <span style={{ color: C.textMuted }}>/ {item.matched_option}</span>}
+            <span style={{ color: C.textFaint }}>공급처</span>
+            <span style={{ color: C.textSub, fontWeight: 600 }}>{item.matched_vendor}</span>
+            {item.matched_product && <><span style={{ color: C.border }}>·</span><span>{item.matched_product}</span></>}
+            {item.matched_option && <span style={{ color: C.textFaint }}>/ {item.matched_option}</span>}
             {item.matched_barcode && (
-              <span style={{ color: C.textFaint, fontFamily: 'monospace', fontSize: 11 }}>{item.matched_barcode}</span>
+              <span style={{ color: C.textFaint, fontFamily: 'monospace', fontSize: 10, marginLeft: 4 }}>{item.matched_barcode}</span>
             )}
           </div>
         ) : (
           <div style={{
-            padding: '7px 16px', borderBottom: `1px solid ${C.warningBorder}`,
-            background: C.warningLight, fontSize: 12, color: C.warning, fontWeight: 600,
+            padding: '6px 16px', borderBottom: `1px solid ${C.borderLight}`,
+            background: '#fffdf5', fontSize: 12, color: '#92400e',
           }}>
-            ⚠️ 미매칭 — 아래에서 바코드를 연결해주세요
+            ⚠ 미매칭
           </div>
         )
       )}
@@ -471,73 +460,79 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
 
       {/* ── 수량 + 상태 + 저장 ── */}
       <div style={{ padding: '14px 16px 10px' }}>
-        {/* 수량 3칸 */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 1.4fr', gap: 8, marginBottom: 14 }}>
-          <div style={{ textAlign: 'center', background: C.brandLight, borderRadius: 12, padding: '10px 6px' }}>
-            <div style={{ fontSize: 10, color: C.brand, fontWeight: 700, letterSpacing: 0.3, marginBottom: 4 }}>장끼</div>
-            <div style={{ fontSize: 26, fontWeight: 900, color: C.brand, lineHeight: 1 }}>{item.janggi_qty}</div>
+
+        {/* 수량 3칸 — 무채색 레이아웃 */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+          {/* 장끼 (표시 전용) */}
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 5, letterSpacing: 0.3 }}>장끼</div>
+            <div style={{
+              background: C.borderLight, borderRadius: 10, padding: '10px 6px',
+              fontSize: 26, fontWeight: 900, color: C.textSub, lineHeight: 1,
+            }}>{item.janggi_qty}</div>
           </div>
+          {/* 실입고 */}
           <div>
-            <div style={{ fontSize: 10, color: C.success, fontWeight: 700, letterSpacing: 0.3, textAlign: 'center', marginBottom: 4 }}>실입고</div>
+            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, textAlign: 'center', marginBottom: 5, letterSpacing: 0.3 }}>실입고</div>
             <input
               type="number" inputMode="numeric" min={0}
               value={actualQty}
               onChange={e => setActualQty(Number(e.target.value))}
               style={{
                 width: '100%', boxSizing: 'border-box', fontSize: 26, fontWeight: 900,
-                textAlign: 'center', padding: '8px 4px',
-                border: `2px solid ${C.successBorder}`, borderRadius: 12,
-                color: C.success, background: C.successLight, outline: 'none',
+                textAlign: 'center', padding: '9px 4px',
+                border: `1.5px solid ${C.border}`, borderRadius: 10,
+                color: C.text, background: '#fff', outline: 'none',
               }}
             />
           </div>
+          {/* 미입고 */}
           <div>
-            <div style={{ fontSize: 10, color: C.danger, fontWeight: 700, letterSpacing: 0.3, textAlign: 'center', marginBottom: 4 }}>미입고</div>
+            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, textAlign: 'center', marginBottom: 5, letterSpacing: 0.3 }}>미입고</div>
             <input
               type="number" inputMode="numeric" min={0}
               value={missingQty}
               onChange={e => setMissingQty(Number(e.target.value))}
               style={{
                 width: '100%', boxSizing: 'border-box', fontSize: 26, fontWeight: 900,
-                textAlign: 'center', padding: '8px 4px',
-                border: `2px solid ${C.dangerBorder}`, borderRadius: 12,
-                color: C.danger, background: C.dangerLight, outline: 'none',
+                textAlign: 'center', padding: '9px 4px',
+                border: `1.5px solid ${C.border}`, borderRadius: 10,
+                color: missingQty > 0 ? C.danger : C.textMuted, background: '#fff', outline: 'none',
               }}
             />
           </div>
         </div>
 
-        {/* 상태 칩: 가로 스크롤 */}
+        {/* 상태 칩 — 가로 스크롤, 파스텔 활성 */}
         <div style={{
-          display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6,
-          marginBottom: 12, msOverflowStyle: 'none', scrollbarWidth: 'none',
+          display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 4,
+          marginBottom: 12, scrollbarWidth: 'none',
         } as React.CSSProperties}>
-          {ITEM_STATUS_OPTS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => handleStatusChange(opt.value)}
-              disabled={saving}
-              style={{
-                flexShrink: 0, padding: '7px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700,
-                border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-                background: status === opt.value ? opt.bg : C.borderLight,
-                color: status === opt.value ? opt.color : C.textMuted,
-                boxShadow: status === opt.value ? `0 2px 6px ${opt.bg}88` : 'none',
-                transition: 'all 0.15s',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+          {ITEM_STATUS_OPTS.map(opt => {
+            const isActive = status === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => handleStatusChange(opt.value)}
+                disabled={saving}
+                style={{
+                  flexShrink: 0, padding: '6px 13px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  background: isActive ? opt.activeBg : '#fff',
+                  color:      isActive ? opt.activeColor : C.textFaint,
+                  border:     isActive ? `1.5px solid ${opt.activeColor}44` : `1px solid ${C.border}`,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* 이름 미입력 경고 */}
+        {/* 이름 미입력 */}
         {!isAdmin && !workerName && (
-          <div style={{
-            marginBottom: 8, padding: '8px 12px', borderRadius: 8,
-            background: C.warningLight, border: `1px solid ${C.warningBorder}`,
-            fontSize: 12, color: C.warning, fontWeight: 600,
-          }}>
+          <div style={{ marginBottom: 8, padding: '7px 12px', borderRadius: 8, background: '#fffdf5', border: `1px solid #fde68a`, fontSize: 12, color: '#92400e' }}>
             ↑ 상단에서 이름을 먼저 입력해주세요
           </div>
         )}
@@ -547,13 +542,11 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
           onClick={handleSave}
           disabled={saving || (!isAdmin && !workerName)}
           style={{
-            width: '100%', height: 50, borderRadius: 12,
-            background: saving ? '#a5b4fc' : (saved ? C.success : (!isAdmin && !workerName) ? '#d1d5db' : C.brand),
-            color: '#fff', border: 'none', fontSize: 16, fontWeight: 800,
+            width: '100%', height: 48, borderRadius: 10,
+            background: saved ? '#15803d' : (saving || (!isAdmin && !workerName)) ? '#d1d5db' : C.brand,
+            color: '#fff', border: 'none', fontSize: 15, fontWeight: 700,
             cursor: (saving || (!isAdmin && !workerName)) ? 'not-allowed' : 'pointer',
-            marginBottom: 12, letterSpacing: '-0.2px',
-            boxShadow: (saving || (!isAdmin && !workerName)) ? 'none' : `0 4px 12px ${saved ? C.success : C.brand}44`,
-            transition: 'all 0.2s',
+            marginBottom: 10, transition: 'background 0.2s',
           }}
         >
           {saving ? '저장 중…' : saved ? '✓ 저장됨' : '수량 저장'}
@@ -582,36 +575,36 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
           {showMatch && (
             <div style={{
               marginTop: 4, padding: 14,
-              background: C.purpleLight, borderRadius: 12,
-              border: `1px solid ${C.purpleBorder}`,
+              background: '#fafafa', borderRadius: 12, border: `1px solid ${C.border}`,
             }}>
               {/* 상품명·도매처 입력 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                 <div>
-                  <div style={{ fontSize: 10, color: C.purple, fontWeight: 700, marginBottom: 3 }}>상품명</div>
+                  <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>상품명</div>
                   <input value={editItemName} onChange={e => setEditItemName(e.target.value)}
-                    placeholder="장끼 상품명" style={{ ...inputBase, border: `1px solid ${C.purpleBorder}`, background: '#fff' }} />
+                    placeholder="장끼 상품명" style={{ ...inputBase, background: '#fff' }} />
                 </div>
                 <div>
-                  <div style={{ fontSize: 10, color: C.purple, fontWeight: 700, marginBottom: 3 }}>도매처</div>
+                  <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>도매처</div>
                   <input value={editWholesale} onChange={e => setEditWholesale(e.target.value)}
-                    placeholder="도매처 (예: NODI)" style={{ ...inputBase, border: `1px solid ${C.purpleBorder}`, background: '#fff' }} />
+                    placeholder="도매처 (예: NODI)" style={{ ...inputBase, background: '#fff' }} />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
                 <button onClick={saveItemFields} disabled={nameSaving} style={{
-                  flex: 1, height: 38, background: nameSaving ? '#d1d5db' : C.brand,
-                  color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                  flex: 1, height: 36, background: nameSaving ? '#d1d5db' : C.brand,
+                  color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
                 }}>
                   {nameSaving ? '…' : nameSaved ? '✓ 저장' : '저장'}
                 </button>
                 <button onClick={() => tryAutoMatch(editItemName, editWholesale)}
                   disabled={barcodeLoading || !editItemName.trim()} style={{
-                    flex: 2, height: 38, background: (!editItemName.trim() || barcodeLoading) ? '#d1d5db' : C.purple,
-                    color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                    flex: 2, height: 36,
+                    background: (!editItemName.trim() || barcodeLoading) ? '#d1d5db' : C.textSub,
+                    color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
                   }}>
-                  {barcodeLoading ? '검색 중…' : '🎯 자동매칭 시도'}
+                  {barcodeLoading ? '검색 중…' : '자동매칭 시도'}
                 </button>
               </div>
 
@@ -619,18 +612,18 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
               {autoMatched && (
                 <div style={{
                   marginBottom: 10, padding: 12,
-                  background: '#f0fdf4', border: `2px solid ${C.successBorder}`, borderRadius: 12,
+                  background: '#fff', border: `1px solid ${C.successBorder}`, borderRadius: 10,
                 }}>
-                  <div style={{ fontSize: 12, color: C.success, fontWeight: 700, marginBottom: 6 }}>✅ 자동매칭 후보 1건</div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>
+                  <div style={{ fontSize: 11, color: C.success, fontWeight: 600, marginBottom: 4 }}>✓ 자동매칭 후보</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>
                     {autoMatched.제품명}{autoMatched.옵션 ? ` / ${autoMatched.옵션}` : ''}
                   </div>
-                  <div style={{ fontSize: 11, color: C.textMuted, margin: '3px 0 10px', fontFamily: 'monospace' }}>
-                    {autoMatched.바코드}{autoMatched.도매처 && ` · 도: ${autoMatched.도매처}`}
+                  <div style={{ fontSize: 11, color: C.textFaint, margin: '2px 0 8px', fontFamily: 'monospace' }}>
+                    {autoMatched.바코드}{autoMatched.도매처 && ` · ${autoMatched.도매처}`}
                   </div>
                   <button onClick={() => handleSelectBarcode(autoMatched)} disabled={matchSaving} style={{
-                    width: '100%', height: 42, background: matchSaving ? '#d1d5db' : C.success,
-                    color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                    width: '100%', height: 38, background: matchSaving ? '#d1d5db' : C.brand,
+                    color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
                   }}>
                     {matchSaving ? '저장 중…' : '이 바코드로 매칭'}
                   </button>
@@ -640,20 +633,19 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
               {/* 후보 다수 */}
               {!autoMatched && barcodeResults.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, color: C.purple, fontWeight: 700, marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 6 }}>
                     후보 {barcodeResults.length}건 — 선택하세요
                   </div>
                   {barcodeResults.map(b => (
                     <button key={b.바코드} onClick={() => handleSelectBarcode(b)} disabled={matchSaving} style={{
-                      width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: 5,
-                      borderRadius: 10, background: '#fff', border: `1px solid ${C.purpleBorder}`,
+                      width: '100%', textAlign: 'left', padding: '9px 12px', marginBottom: 4,
+                      borderRadius: 8, background: '#fff', border: `1px solid ${C.border}`,
                       cursor: matchSaving ? 'not-allowed' : 'pointer', display: 'block',
                     }}>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
                       <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
                         <span>{b.바코드}</span>
-                        {b.도매처 && <span>도: {b.도매처}</span>}
-                        <span>{b.업체명}</span>
+                        {b.도매처 && <span>{b.도매처}</span>}
                       </div>
                     </button>
                   ))}
@@ -661,23 +653,23 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
               )}
 
               {/* 수동 검색 */}
-              <div style={{ borderTop: `1px solid ${C.purpleBorder}`, paddingTop: 10 }}>
+              <div style={{ borderTop: `1px solid ${C.borderLight}`, paddingTop: 10 }}>
                 <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 5 }}>직접 검색</div>
                 <input
                   value={barcodeQuery} onChange={e => handleBarcodeInput(e.target.value)}
                   placeholder="바코드 번호 또는 제품명"
-                  style={{ ...inputBase, border: `1px solid ${C.purpleBorder}`, background: '#fff', marginBottom: 4 }}
+                  style={{ ...inputBase, background: '#fff', marginBottom: 4 }}
                 />
                 {!barcodeLoading && barcodeQuery && barcodeResults.length === 0 && !autoMatched && (
-                  <div style={{ fontSize: 12, color: C.danger, padding: '2px 0' }}>검색 결과 없음</div>
+                  <div style={{ fontSize: 12, color: C.textMuted }}>검색 결과 없음</div>
                 )}
                 {barcodeQuery && barcodeResults.map(b => (
                   <button key={b.바코드} onClick={() => handleSelectBarcode(b)} disabled={matchSaving} style={{
                     width: '100%', textAlign: 'left', padding: '9px 12px', marginBottom: 4,
-                    borderRadius: 10, background: '#fff', border: `1px solid ${C.border}`,
+                    borderRadius: 8, background: '#fff', border: `1px solid ${C.border}`,
                     cursor: 'pointer', display: 'block',
                   }}>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
                     <div style={{ fontSize: 11, color: C.textFaint, fontFamily: 'monospace' }}>{b.바코드}</div>
                   </button>
                 ))}
@@ -1226,13 +1218,13 @@ export default function InboundWorkPage() {
         <div style={{ maxWidth: 640, margin: '0 auto', padding: '12px 16px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
             {[
-              { label: '장끼', value: batch.total_janggi_qty ?? 0, color: C.brand,   bg: C.brandLight },
-              { label: '실입고', value: batch.total_actual_qty ?? 0, color: C.success, bg: C.successLight },
-              { label: '미입고', value: batch.total_missing_qty ?? 0, color: C.danger,  bg: C.dangerLight },
+              { label: '장끼',   value: batch.total_janggi_qty  ?? 0, color: C.textSub  },
+              { label: '실입고', value: batch.total_actual_qty  ?? 0, color: C.success  },
+              { label: '미입고', value: batch.total_missing_qty ?? 0, color: (batch.total_missing_qty ?? 0) > 0 ? C.danger : C.textFaint },
             ].map(s => (
-              <div key={s.label} style={{ textAlign: 'center', padding: '10px 4px', background: s.bg, borderRadius: 12 }}>
-                <div style={{ fontSize: 10, color: s.color, fontWeight: 700, letterSpacing: 0.5, marginBottom: 3, opacity: 0.8 }}>{s.label}</div>
-                <div style={{ fontSize: 26, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
+              <div key={s.label} style={{ textAlign: 'center', padding: '10px 4px', background: C.borderLight, borderRadius: 10 }}>
+                <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, letterSpacing: 0.5, marginBottom: 3 }}>{s.label}</div>
+                <div style={{ fontSize: 24, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
               </div>
             ))}
           </div>
