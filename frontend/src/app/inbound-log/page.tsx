@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
@@ -9,11 +10,8 @@ import {
   createInboundBatch,
   getInboundBatch,
   updateInboundBatch,
-  runInboundOcr,
   updateInboundItem,
   addInboundItem,
-  deleteInboundItem,
-  closeInboundBatch,
   deleteInboundBatch,
   listInboundVendors,
   upsertVendorAlias,
@@ -765,215 +763,6 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
 }
 
 // ─────────────────────────────────────
-// 배치 상세 모달
-// ─────────────────────────────────────
-
-function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
-  batch: InboundBatch; token: string; onClose: () => void; onUpdated: () => void;
-}) {
-  const [batch, setBatch] = useState<InboundBatch>(initialBatch);
-  const [ocrFile, setOcrFile] = useState<File | null>(null);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [closeLoading, setCloseLoading] = useState(false);
-  const [warning, setWarning] = useState('');
-
-  const reload = useCallback(async () => {
-    const data = await getInboundBatch(token, batch.id);
-    setBatch(data);
-  }, [token, batch.id]);
-
-  async function handleOcr() {
-    if (!ocrFile) return;
-    setOcrLoading(true); setWarning('');
-    try {
-      const res = await runInboundOcr(token, batch.id, ocrFile);
-      await reload();
-      alert(`OCR 완료: ${res.item_count}개 품목 (자동매칭 ${res.matched_count}개 / 확인필요 ${res.needs_matching_count}개)`);
-    } catch (e: unknown) {
-      alert('OCR 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setOcrLoading(false);
-    }
-  }
-
-  async function handleClose() {
-    setCloseLoading(true); setWarning('');
-    try {
-      const res = await closeInboundBatch(token, batch.id, 'am');
-      if (!res.ok && res.warning) {
-        setWarning(res.warning);
-      } else {
-        await reload();
-        onUpdated();
-      }
-    } catch (e: unknown) {
-      alert('접수완료 처리 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setCloseLoading(false);
-    }
-  }
-
-  const items = batch.items || [];
-  // AM/PM 버튼은 JSX에서 batch.status 조건으로 직접 분기
-
-  const statBox = (label: string, value: number, color: string) => (
-    <div style={{ textAlign: 'center', padding: '0.5rem 1rem', background: '#f8f9fc', borderRadius: 8 }}>
-      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: '1.3rem', fontWeight: 700, color }}>{value}</div>
-    </div>
-  );
-
-  return (
-    <Modal title={`입고 상세 — ${batch.vendor} / ${batch.inbound_date}`} onClose={onClose} wide>
-      {/* 헤더 요약 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', marginBottom: '1rem' }}>
-        <StatusBadge status={batch.status} label={batch.status_label} map={STATUS_COLOR} />
-        {batch.wholesale && (
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            도매처: <strong>{batch.wholesale}</strong>
-          </span>
-        )}
-        {batch.janggi_no && (
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>장끼번호: {batch.janggi_no}</span>
-        )}
-        {batch.janggi_date && (
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>장끼일자: {batch.janggi_date}</span>
-        )}
-      </div>
-
-      {/* 수량 요약 */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-        {statBox('장끼수량', batch.total_janggi_qty, '#1d4ed8')}
-        {statBox('실입고', batch.total_actual_qty, '#15803d')}
-        {statBox('미입고', batch.total_missing_qty, '#dc2626')}
-      </div>
-
-      {/* 장끼 OCR 영역 */}
-      {['ocr_pending', 'confirming'].includes(batch.status) && (
-        <div style={{
-          marginBottom: '1rem', padding: '0.85rem 1rem',
-          background: '#fef9c3', borderRadius: 8, border: '1px solid #fde047',
-        }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#a16207', marginBottom: '0.5rem' }}>
-            {batch.status === 'ocr_pending' ? '📄 장끼 사진을 업로드해주세요' : '🔄 장끼 재분석'}
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              type="file" accept="image/*"
-              onChange={e => setOcrFile(e.target.files?.[0] || null)}
-              style={{ fontSize: '0.82rem' }}
-            />
-            <button
-              onClick={handleOcr}
-              disabled={!ocrFile || ocrLoading}
-              style={{ ...btn('#a16207'), opacity: (!ocrFile || ocrLoading) ? 0.5 : 1 }}
-            >
-              {ocrLoading ? 'AI 분석 중…' : 'OCR 실행'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 경고 */}
-      {warning && (
-        <div style={{
-          marginBottom: '0.75rem', padding: '0.75rem 1rem',
-          background: '#fef2f2', border: '1px solid #fecaca',
-          borderRadius: 6, fontSize: '0.85rem', color: '#dc2626',
-        }}>
-          ⚠️ {warning}
-        </div>
-      )}
-
-      {/* 품목 직접 추가 섹션 */}
-      <AddItemSection
-        token={token}
-        batchId={batch.id}
-        batchVendor={batch.vendor}
-        onAdded={reload}
-      />
-
-      {/* 품목 테이블 */}
-      {items.length > 0 ? (
-        <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-            <thead>
-              <tr style={{ background: '#f8f9fc' }}>
-                {[
-                  { label: 'No', align: 'center' },
-                  { label: '날짜', align: 'left' },
-                  { label: '업체명', align: 'left' },
-                  { label: '도매처', align: 'left' },
-                  { label: '제품명', align: 'left' },
-                  { label: '옵션', align: 'left' },
-                  { label: '바코드', align: 'left' },
-                  { label: '장끼수량', align: 'center' },
-                  { label: '실입고', align: 'center' },
-                  { label: '미입고', align: 'center' },
-                  { label: '공급처상품명', align: 'left' },
-                  { label: '공급처옵션', align: 'left' },
-                  { label: '공급처위치', align: 'left' },
-                  { label: '공급처연락처', align: 'left' },
-                  { label: '작성자', align: 'left' },
-                  { label: '수정시간', align: 'left' },
-                  { label: '사진', align: 'center' },
-                  { label: '', align: 'center' },
-                ].map(h => (
-                  <th key={h.label} style={{ padding: '0.55rem 0.6rem', fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: h.align as 'left' | 'center', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: '#f8f9fc', position: 'sticky', top: 0, zIndex: 1 }}>
-                    {h.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(item => (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  token={token}
-                  onUpdated={reload}
-                  batchVendor={batch.vendor}
-                  batchDate={batch.inbound_date}
-                  batchWholesale={batch.wholesale}
-                  batchCreatedBy={batch.created_by}
-                  onDelete={async () => {
-                    try {
-                      await deleteInboundItem(token, item.id);
-                      await reload();
-                    } catch (e) {
-                      alert('삭제 실패: ' + (e instanceof Error ? e.message : String(e)));
-                    }
-                  }}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.875rem', background: '#f8f9fc', borderRadius: 8, marginBottom: '1rem' }}>
-          <div style={{ fontSize: '1.5rem', marginBottom: 8 }}>📋</div>
-          <div>품목이 없습니다.</div>
-          <div style={{ fontSize: '0.8rem', color: '#9ca3af', marginTop: 4 }}>위 "품목 직접 추가" 버튼으로 추가하거나, 장끼 사진 OCR을 실행하세요.</div>
-        </div>
-      )}
-
-      {/* ── 접수완료 버튼 ─────────── */}
-      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-        {batch.status === 'confirming' && (
-          <button
-            onClick={handleClose}
-            disabled={closeLoading}
-            style={{ ...btn('#0369a1'), opacity: closeLoading ? 0.5 : 1 }}
-          >
-            {closeLoading ? '처리 중…' : '✅ 완료'}
-          </button>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-// ─────────────────────────────────────
 // 벤더 콤보박스 컴포넌트
 // ─────────────────────────────────────
 
@@ -1356,13 +1145,13 @@ function EditBatchModal({ batch, token, onClose, onUpdated }: {
 // ─────────────────────────────────────
 
 export default function InboundLogPage() {
+  const router = useRouter();
   const [token, setToken] = useState('');
   const [batches, setBatches] = useState<InboundBatch[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedBatch, setSelectedBatch] = useState<InboundBatch | null>(null);
   const [editingBatch, setEditingBatch] = useState<InboundBatch | null>(null);
 
   const [filterVendor, setFilterVendor] = useState('');
@@ -1412,13 +1201,8 @@ export default function InboundLogPage() {
       .catch(() => {});
   }
 
-  async function openDetail(batch: InboundBatch) {
-    try {
-      const detail = await getInboundBatch(token, batch.id);
-      setSelectedBatch(detail);
-    } catch {
-      setMessage({ type: 'error', text: '상세 정보를 불러오지 못했습니다.' });
-    }
+  function openDetail(batch: InboundBatch) {
+    router.push('/inbound-overview/detail?vendor=' + encodeURIComponent(batch.vendor) + '&date=' + batch.inbound_date);
   }
 
   async function handleDelete(id: string) {
@@ -1661,7 +1445,7 @@ export default function InboundLogPage() {
         <CreateBatchModal
           token={token}
           onClose={() => setShowCreate(false)}
-          onCreated={batch => { setShowCreate(false); setSelectedBatch(batch); load(token); refreshFilterOptions(token); }}
+          onCreated={batch => { setShowCreate(false); openDetail(batch); load(token); refreshFilterOptions(token); }}
         />
       )}
       {editingBatch && (
@@ -1670,14 +1454,6 @@ export default function InboundLogPage() {
           token={token}
           onClose={() => setEditingBatch(null)}
           onUpdated={() => { load(token); setEditingBatch(null); }}
-        />
-      )}
-      {selectedBatch && (
-        <BatchDetailModal
-          batch={selectedBatch}
-          token={token}
-          onClose={() => setSelectedBatch(null)}
-          onUpdated={() => load(token)}
         />
       )}
     </div>
