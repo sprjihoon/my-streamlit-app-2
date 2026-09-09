@@ -651,12 +651,31 @@ async def list_barcodes(
         where = "WHERE 1=1"
         params: list = []
         if q:
-            where += " AND (바코드 LIKE ? OR 제품명 LIKE ? OR 상품명 LIKE ? OR 옵션 LIKE ?)"
+            where += " AND (바코드 LIKE ? OR 제품명 LIKE ? OR 상품명 LIKE ? OR 옵션 LIKE ? OR 도매처 LIKE ?)"
             like = f"%{q}%"
-            params.extend([like, like, like, like])
+            params.extend([like, like, like, like, like])
         if vendor:
-            where += " AND 업체명 = ?"
-            params.append(vendor)
+            # 별칭 테이블에서 해당 vendor에 연결된 모든 업체명 수집
+            vendor_names = [vendor]
+            try:
+                alias_row = con.execute(
+                    "SELECT aliases FROM inbound_vendor_aliases WHERE canonical=?", (vendor,)
+                ).fetchone()
+                if alias_row and alias_row[0]:
+                    vendor_names += [a.strip() for a in alias_row[0].split(',') if a.strip()]
+                # vendor가 별칭으로 등록된 경우 canonical도 추가
+                canon_rows = con.execute(
+                    "SELECT canonical FROM inbound_vendor_aliases WHERE ',' || aliases || ',' LIKE ?",
+                    (f"%,{vendor},%",)
+                ).fetchall()
+                for r in canon_rows:
+                    if r[0] and r[0] not in vendor_names:
+                        vendor_names.append(r[0])
+            except Exception:
+                pass
+            ph = ','.join('?' * len(vendor_names))
+            where += f" AND 업체명 IN ({ph})"
+            params.extend(vendor_names)
 
         total = con.execute(f"SELECT COUNT(*) FROM repair_barcode {where}", params).fetchone()[0]
         rows = con.execute(

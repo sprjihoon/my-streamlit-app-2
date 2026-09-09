@@ -498,12 +498,34 @@ function OverviewModal({ vendor, date, onClose }: { vendor: string; date: string
                       </span>
                     )}
 
-                    <button
-                      onClick={() => router.push(`/inbound/${batch.id}`)}
-                      style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${C.primary}`, borderRadius: 5, color: C.primary, fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
-                    >
-                      입고작업
-                    </button>
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`${API_BASE}/inbound/batches/${batch.id}/export-xls`, {
+                              headers: { Authorization: `Bearer ${getToken()}` },
+                            });
+                            if (!res.ok) { alert('엑셀 생성 실패'); return; }
+                            const blob = await res.blob();
+                            const disp = res.headers.get('Content-Disposition') || '';
+                            const match = disp.match(/filename\*=UTF-8''(.+)/i) || disp.match(/filename="?([^"]+)"?/i);
+                            const name = match ? decodeURIComponent(match[1]) : `입고전표_${batch.id}.xls`;
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+                            URL.revokeObjectURL(url);
+                          } catch { alert('다운로드 중 오류가 발생했습니다.'); }
+                        }}
+                        style={{ background: 'none', border: `1px solid #16a34a`, borderRadius: 5, color: '#16a34a', fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
+                      >
+                        📥 입고전표
+                      </button>
+                      <button
+                        onClick={() => router.push(`/inbound/${batch.id}`)}
+                        style={{ background: 'none', border: `1px solid ${C.primary}`, borderRadius: 5, color: C.primary, fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
+                      >
+                        입고작업
+                      </button>
+                    </div>
                   </div>
 
                   {/* 품목 테이블 */}
