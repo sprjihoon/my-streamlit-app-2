@@ -875,11 +875,14 @@ def list_vendor_overviews(
     vendor: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),   # "closed" | "open"
     authorization: Optional[str] = Header(None),
 ):
     """
     화주사+입고일 단위로 묶어 반환한다.
     vendor_canonical 이 있으면 canonical 기준으로 묶고, 없으면 vendor 사용.
+    status="closed" → 해당 날짜 모든 배치가 마감인 그룹만 반환
+    status="open"   → 하나라도 진행중인 그룹만 반환
     """
     _get_user(authorization)
     where = ["1=1"]
@@ -938,6 +941,11 @@ def list_vendor_overviews(
         wholesales = list(dict.fromkeys(w for w in (r[3] or "").split("|") if w))  # 중복 제거
         statuses = (r[7] or "").split("|")
         all_closed = all(s == "closed" for s in statuses if s)
+        # status 필터 적용
+        if status == "closed" and not all_closed:
+            continue
+        if status == "open" and all_closed:
+            continue
         items.append({
             "vendor": r[0],          # canonical 기준 표시명
             "inbound_date": r[1],

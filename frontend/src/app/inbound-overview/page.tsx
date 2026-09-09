@@ -548,19 +548,25 @@ export default function InboundOverviewPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // 필터 상태 (입고일지와 동일, 도매처 제외)
   const [filterVendor, setFilterVendor] = useState('');
+  const [filterAlias, setFilterAlias] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const [aliasGroups, setAliasGroups] = useState<{ canonical: string; aliases: string[] }[]>([]);
   const [modal, setModal] = useState<{ vendor: string; date: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
       const qs = new URLSearchParams();
-      if (filterVendor) qs.set('vendor', filterVendor);
+      const vendorParam = filterAlias || filterVendor;
+      if (vendorParam) qs.set('vendor', vendorParam);
       if (filterDateFrom) qs.set('date_from', filterDateFrom);
       if (filterDateTo) qs.set('date_to', filterDateTo);
+      if (filterStatus) qs.set('status', filterStatus);
       const data = await apiFetch<{ items: OverviewListItem[]; total: number }>(`/inbound/vendor-overview?${qs}`);
       setItems(data.items); setTotal(data.total);
     } catch (e) {
@@ -568,10 +574,12 @@ export default function InboundOverviewPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterVendor, filterDateFrom, filterDateTo]);
+  }, [filterVendor, filterAlias, filterStatus, filterDateFrom, filterDateTo]);
 
   useEffect(() => {
-    apiFetch<{ vendors: string[] }>('/inbound/filter-options').then(d => setVendorOptions(d.vendors)).catch(() => {});
+    apiFetch<{ vendors: string[]; wholesales: string[]; alias_groups?: { canonical: string; aliases: string[] }[] }>('/inbound/filter-options')
+      .then(d => { setVendorOptions(d.vendors); setAliasGroups(d.alias_groups ?? []); })
+      .catch(() => {});
     load();
   }, [load]);
 
@@ -586,29 +594,83 @@ export default function InboundOverviewPage() {
         <p style={{ fontSize: '0.82rem', color: C.muted, marginTop: 3 }}>화주사 × 입고일 단위 · 여러 도매처 일괄 확인</p>
       </div>
 
-      {/* 필터 */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: '1rem', background: C.card, padding: '0.75rem 1rem', borderRadius: 8, border: `1px solid ${C.border}` }}>
-        <select value={filterVendor} onChange={e => setFilterVendor(e.target.value)}
-          style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem', minWidth: 140 }}>
-          <option value="">전체 화주사</option>
-          {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
-          style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }} />
-        <span style={{ alignSelf: 'center', color: C.muted }}>~</span>
-        <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
-          style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }} />
-        <button onClick={load}
-          style={{ background: C.primary, color: '#fff', border: 'none', borderRadius: 6, padding: '0.4rem 1rem', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 600 }}>
-          조회
-        </button>
-        {(filterVendor || filterDateFrom || filterDateTo) && (
-          <button onClick={() => { setFilterVendor(''); setFilterDateFrom(''); setFilterDateTo(''); }}
-            style={{ background: 'none', color: C.muted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.8rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-            초기화
+      {/* 필터 (입고일지와 동일, 도매처 제외) */}
+      <div style={{ background: C.card, padding: '0.85rem 1rem', borderRadius: 8, border: `1px solid ${C.border}`, marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'flex-end' }}>
+          {/* 화주사 (업체명) */}
+          <div>
+            <div style={{ fontSize: '0.72rem', color: C.muted, marginBottom: 3 }}>화주사 (업체명)</div>
+            <select
+              value={filterVendor}
+              onChange={e => { setFilterVendor(e.target.value); setFilterAlias(''); }}
+              style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem', minWidth: 140 }}
+            >
+              <option value="">전체</option>
+              {vendorOptions.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+
+          {/* 화주사 (별칭) */}
+          {aliasGroups.length > 0 && (
+            <div>
+              <div style={{ fontSize: '0.72rem', color: C.muted, marginBottom: 3 }}>
+                화주사 (별칭)
+                <span style={{ fontSize: '0.65rem', color: C.muted, marginLeft: 4 }}>일지설정 기준</span>
+              </div>
+              <select
+                value={filterAlias}
+                onChange={e => { setFilterAlias(e.target.value); setFilterVendor(''); }}
+                style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem', minWidth: 150 }}
+              >
+                <option value="">전체</option>
+                {aliasGroups.map(g => (
+                  <option key={g.canonical} value={g.canonical}>{g.canonical}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* 상태 */}
+          <div>
+            <div style={{ fontSize: '0.72rem', color: C.muted, marginBottom: 3 }}>상태</div>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem', minWidth: 120 }}
+            >
+              <option value="">전체</option>
+              <option value="open">진행중</option>
+              <option value="closed">마감</option>
+            </select>
+          </div>
+
+          {/* 기간 */}
+          <div>
+            <div style={{ fontSize: '0.72rem', color: C.muted, marginBottom: 3 }}>기간</div>
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
+                style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }} />
+              <span style={{ color: C.muted, fontSize: '0.8rem' }}>~</span>
+              <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
+                style={{ border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }} />
+            </div>
+          </div>
+
+          {/* 버튼 */}
+          <button onClick={load}
+            style={{ background: C.primary, color: '#fff', border: 'none', borderRadius: 6, padding: '0.45rem 1.1rem', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 600, alignSelf: 'flex-end' }}>
+            조회
           </button>
-        )}
-        <span style={{ alignSelf: 'center', marginLeft: 'auto', fontSize: '0.8rem', color: C.muted }}>총 {total}건</span>
+          {(filterVendor || filterAlias || filterStatus || filterDateFrom || filterDateTo) && (
+            <button
+              onClick={() => { setFilterVendor(''); setFilterAlias(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+              style={{ background: 'none', color: C.muted, border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.45rem 0.8rem', fontSize: '0.85rem', cursor: 'pointer', alignSelf: 'flex-end' }}
+            >
+              초기화
+            </button>
+          )}
+          <span style={{ alignSelf: 'flex-end', marginLeft: 'auto', fontSize: '0.8rem', color: C.muted, paddingBottom: '0.3rem' }}>총 {total}건</span>
+        </div>
       </div>
 
       {error && <div style={{ background: C.dangerLight, color: C.danger, padding: '0.75rem 1rem', borderRadius: 8, marginBottom: '1rem', fontSize: '0.85rem' }}>{error}</div>}
