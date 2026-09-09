@@ -344,8 +344,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     barcodeTimerRef.current = setTimeout(async () => {
       setBarcodeLoading(true);
       try {
-        // vendor 필터 없이 전체 검색 (alias 불일치 방지)
-        const res = await getRepairBarcodes({ q: val.trim(), limit: 40 });
+        // vendor 필터 적용 — API가 inbound_vendor_aliases 별칭을 자동 해석하므로 안전
+        const res = await getRepairBarcodes({ q: val.trim(), vendor: batchVendor || undefined, limit: 40 });
         setBarcodeResults(res.items);
       } catch { setBarcodeResults([]); }
       finally { setBarcodeLoading(false); }
