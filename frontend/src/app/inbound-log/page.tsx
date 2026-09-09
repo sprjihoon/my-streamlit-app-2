@@ -95,16 +95,6 @@ const ITEM_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
   etc:           { bg: '#ede9fe', color: '#7c3aed' },
 };
 
-const ITEM_STATUS_LABELS: Record<string, string> = {
-  pending: '확인 전',
-  confirmed: '정상',
-  missing: '미입고',
-  defect: '불량',
-  repair: '수선대기',
-  unrecoverable: '회생불가',
-  done: '완료',
-  etc: '기타',
-};
 
 function StatusBadge({ status, label, map }: { status: string; label: string; map: Record<string, { bg: string; color: string }> }) {
   const c = map[status] || { bg: '#f3f4f6', color: '#6b7280' };
@@ -191,7 +181,6 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
 }) {
   const [actualQty, setActualQty] = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
-  const [status, setStatus] = useState(item.status);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -279,7 +268,7 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
   async function save() {
     setSaving(true);
     try {
-      await updateInboundItem(token, item.id, { actual_qty: actualQty, missing_qty: missingQty, status });
+      await updateInboundItem(token, item.id, { actual_qty: actualQty, missing_qty: missingQty });
       onUpdated();
     } catch {
       alert('저장 실패');
@@ -359,18 +348,6 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
             onChange={e => setMissingQty(Number(e.target.value))}
             style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
           />
-        </td>
-        {/* 처리상태 */}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
-          <select
-            value={status}
-            onChange={e => setStatus(e.target.value)}
-            style={{ ...inputStyle, padding: '0.2rem 0.3rem', fontSize: '0.75rem', minWidth: 72 }}
-          >
-            {Object.entries(ITEM_STATUS_LABELS).map(([val, lbl]) => (
-              <option key={val} value={val}>{lbl}</option>
-            ))}
-          </select>
         </td>
         {/* 공급처상품명 */}
         <td style={tdWrap}>
@@ -943,7 +920,6 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
                   { label: '장끼수량', align: 'center' },
                   { label: '실입고', align: 'center' },
                   { label: '미입고', align: 'center' },
-                  { label: '처리상태', align: 'center' },
                   { label: '공급처상품명', align: 'left' },
                   { label: '공급처옵션', align: 'left' },
                   { label: '공급처위치', align: 'left' },
