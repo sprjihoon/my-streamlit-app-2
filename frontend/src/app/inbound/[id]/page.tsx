@@ -149,7 +149,6 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
   const barcodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── 수정 폼 상태 (관리자) ──
-  // 바코드·공급처 관련은 아래 바코드 매칭 섹션에서 처리
   const [editForm, setEditForm] = useState({
     item_name:        item.item_name        || '',
     option_text:      item.option_text      || '',
@@ -158,6 +157,29 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     memo:             item.memo             || '',
   });
   const [editSaving, setEditSaving] = useState(false);
+
+  // ── 수정 폼 바코드 검색 ──
+  const [editBarcodeQuery,   setEditBarcodeQuery]   = useState('');
+  const [editBarcodeResults, setEditBarcodeResults] = useState<RepairBarcode[]>([]);
+  const [editBarcodeLoading, setEditBarcodeLoading] = useState(false);
+  const [editBarcodeOpen,    setEditBarcodeOpen]    = useState(false);
+  const [editSelectedBarcode, setEditSelectedBarcode] = useState<RepairBarcode | null>(null);
+  const editBarcodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editBarcodeRef = useRef<HTMLDivElement>(null);
+
+  // 수정 폼 열릴 때 바코드 검색 초기화
+  function openEditMode() {
+    setEditForm({
+      item_name:        item.item_name        || '',
+      option_text:      item.option_text      || '',
+      supplier_location:item.supplier_location|| '',
+      supplier_contact: item.supplier_contact || '',
+      memo:             item.memo             || '',
+    });
+    setEditBarcodeQuery(''); setEditBarcodeResults([]);
+    setEditSelectedBarcode(null); setEditBarcodeOpen(false);
+    setEditMode(true);
+  }
 
   // ── 핸들러 (로직 동일) ──
   async function handleSave() {
@@ -183,10 +205,41 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
         supplier_location: editForm.supplier_location || undefined,
         supplier_contact:  editForm.supplier_contact  || undefined,
         memo:              editForm.memo              || undefined,
+        ...(editSelectedBarcode ? {
+          matched_barcode: editSelectedBarcode.바코드,
+          matched_vendor:  editSelectedBarcode.업체명,
+          matched_product: editSelectedBarcode.제품명,
+          matched_option:  editSelectedBarcode.옵션 || undefined,
+        } : {}),
       });
       setEditMode(false); onUpdated();
     } catch { alert('수정 저장 실패'); }
     finally { setEditSaving(false); }
+  }
+
+  function handleEditBarcodeInput(val: string) {
+    setEditBarcodeQuery(val); setEditSelectedBarcode(null); setEditBarcodeOpen(true);
+    if (editBarcodeTimerRef.current) clearTimeout(editBarcodeTimerRef.current);
+    if (!val.trim()) { setEditBarcodeResults([]); return; }
+    editBarcodeTimerRef.current = setTimeout(async () => {
+      setEditBarcodeLoading(true);
+      try {
+        const res = await getRepairBarcodes({ q: val.trim(), vendor: batchVendor || undefined, limit: 30 });
+        setEditBarcodeResults(res.items);
+      } catch { setEditBarcodeResults([]); }
+      finally { setEditBarcodeLoading(false); }
+    }, 350);
+  }
+
+  function selectEditBarcode(b: RepairBarcode) {
+    setEditSelectedBarcode(b);
+    setEditBarcodeQuery(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
+    setEditBarcodeOpen(false); setEditBarcodeResults([]);
+    setEditForm(f => ({
+      ...f,
+      item_name:   f.item_name   || b.제품명,
+      option_text: f.option_text || (b.옵션 || ''),
+    }));
   }
 
   async function saveItemFields() {
@@ -329,7 +382,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
             {isAdmin && (
               <div style={{ display: 'flex', gap: 4 }}>
-                <button onClick={() => setEditMode(m => !m)} style={{
+                <button onClick={() => editMode ? setEditMode(false) : openEditMode()} style={{
                   fontSize: 11, padding: '3px 9px', borderRadius: 6, fontWeight: 600,
                   background: C.borderLight, color: editMode ? C.brand : C.textMuted,
                   border: `1px solid ${C.border}`, cursor: 'pointer',
@@ -382,10 +435,54 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
       {editMode && (
         <div style={{ padding: '12px 16px 14px', background: '#f9fafb', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10 }}>
-            품목 기본 정보 수정
-            <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 6, color: C.textFaint }}>
-              (바코드·공급처는 아래 매칭 섹션에서)
-            </span>
+            품목 수정
+          </div>
+
+          {/* 바코드 검색 */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>바코드 검색 (선택 시 품명·옵션 자동입력)</div>
+            <div ref={editBarcodeRef} style={{ position: 'relative' }}>
+              {editSelectedBarcode ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div style={{ flex: 1, padding: '8px 10px', background: C.purpleLight, borderRadius: 8, fontSize: 12, color: C.purple, fontWeight: 600 }}>
+                    ✅ {editSelectedBarcode.바코드} — {editSelectedBarcode.제품명}{editSelectedBarcode.옵션 ? ' / ' + editSelectedBarcode.옵션 : ''}
+                  </div>
+                  <button onClick={() => { setEditSelectedBarcode(null); setEditBarcodeQuery(''); setEditBarcodeResults([]); }}
+                    style={{ padding: '6px 10px', background: C.borderLight, border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 11, color: C.textMuted }}>
+                    변경
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    value={editBarcodeQuery}
+                    onChange={e => handleEditBarcodeInput(e.target.value)}
+                    onFocus={() => setEditBarcodeOpen(true)}
+                    placeholder="바코드번호 또는 제품명 검색"
+                    style={{ ...inputBase, background: '#fff' }}
+                  />
+                  {editBarcodeLoading && <div style={{ fontSize: 11, color: C.textFaint, padding: '3px 2px' }}>검색 중…</div>}
+                  {editBarcodeOpen && editBarcodeResults.length > 0 && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300,
+                      background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8,
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.1)', maxHeight: 200, overflowY: 'auto', marginTop: 2,
+                    }}>
+                      {editBarcodeResults.map(b => (
+                        <div key={b.바코드} onMouseDown={() => selectEditBarcode(b)}
+                          style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}` }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
+                          <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
+                            <span>{b.바코드}</span>
+                            {b.업체명 && <span style={{ color: C.purple }}>{b.업체명}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {/* 품명 + 옵션 */}
