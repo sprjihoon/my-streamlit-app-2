@@ -909,6 +909,30 @@ def list_vendor_overviews(
     with get_connection() as con:
         rows = con.execute(sql, params).fetchall()
 
+        # 각 (vendor, date) 별 수선건수 집계: inbound_item_id 연결 + 바코드 fallback
+        repair_count_map: dict = {}
+        for r in rows:
+            cvendor, idate = r[0], r[1]
+            # ① inbound_item_id 기준
+            cnt_a = con.execute(
+                """SELECT COUNT(*) FROM repair_work_log rw
+                   JOIN inbound_items ii ON rw.inbound_item_id = ii.id
+                   JOIN inbound_batches ib ON ii.batch_id = ib.id
+                   WHERE COALESCE(ib.vendor_canonical, ib.vendor)=? AND ib.inbound_date=?""",
+                (cvendor, idate),
+            ).fetchone()[0] or 0
+            # ② 바코드+날짜 fallback (inbound_item_id 없는 봇 기록)
+            cnt_b = con.execute(
+                """SELECT COUNT(*) FROM repair_work_log rw
+                   JOIN inbound_items ii ON rw.바코드 = ii.matched_barcode
+                   JOIN inbound_batches ib ON ii.batch_id = ib.id
+                   WHERE COALESCE(ib.vendor_canonical, ib.vendor)=? AND ib.inbound_date=?
+                     AND (rw.inbound_item_id IS NULL OR rw.inbound_item_id='')
+                     AND rw.날짜=?""",
+                (cvendor, idate, idate),
+            ).fetchone()[0] or 0
+            repair_count_map[(cvendor, idate)] = cnt_a + cnt_b
+
     items = []
     for r in rows:
         wholesales = list(dict.fromkeys(w for w in (r[3] or "").split("|") if w))  # 중복 제거
@@ -924,6 +948,7 @@ def list_vendor_overviews(
             "total_missing_qty": r[6] or 0,
             "all_closed": all_closed,
             "statuses": statuses,
+            "repair_count": repair_count_map.get((r[0], r[1]), 0),
         })
     return {"items": items, "total": len(items)}
 
@@ -980,8 +1005,16 @@ def get_vendor_overview_detail(
             ).fetchall():
                 photo_map.setdefault(row[0], []).append({"id": row[1], "url": _image_url(row[2])})
 
-        # 불량 로그 전체
+        # 바코드 → item_id 매핑 (fallback용, matched_barcode 기준)
+        barcode_to_item_id: dict = {}
+        for r in item_rows:
+            bc = r[10]  # matched_barcode
+            if bc and bc not in barcode_to_item_id:
+                barcode_to_item_id[bc] = r[0]
+
+        # 불량 로그 전체 ① inbound_item_id 직접 연결
         defect_map: dict = {}
+        defect_seen: set = set()
         if item_ids:
             for row in con.execute(
                 f"""SELECT inbound_item_id, id, 날짜, 불량명, 수량, 비고, 처리결과,
@@ -997,9 +1030,36 @@ def get_vendor_overview_detail(
                     "after_image": _image_url_defect(row[8]),
                     "작성자": row[9],
                 })
+                defect_seen.add(row[1])
 
-        # 수선 로그 전체
+        # 불량 로그 ② 바코드+날짜 fallback (봇 기록 등 inbound_item_id 없는 경우)
+        if barcode_to_item_id:
+            bcph = ",".join("?" * len(barcode_to_item_id))
+            for row in con.execute(
+                f"""SELECT 바코드, id, 날짜, 불량명, 수량, 비고, 처리결과,
+                           before_image, after_image, 작성자
+                    FROM defect_log
+                    WHERE 바코드 IN ({bcph}) AND 날짜=?
+                      AND (inbound_item_id IS NULL OR inbound_item_id='')
+                    ORDER BY 바코드, id""",
+                list(barcode_to_item_id.keys()) + [inbound_date],
+            ).fetchall():
+                if row[1] in defect_seen:
+                    continue
+                item_id = barcode_to_item_id.get(row[0])
+                if item_id:
+                    defect_map.setdefault(item_id, []).append({
+                        "id": row[1], "날짜": row[2], "불량명": row[3],
+                        "수량": row[4], "비고": row[5], "처리결과": row[6],
+                        "before_image": _image_url_defect(row[7]),
+                        "after_image": _image_url_defect(row[8]),
+                        "작성자": row[9],
+                    })
+                    defect_seen.add(row[1])
+
+        # 수선 로그 전체 ① inbound_item_id 직접 연결
         repair_map: dict = {}
+        repair_seen: set = set()
         if item_ids:
             for row in con.execute(
                 f"""SELECT inbound_item_id, id, 날짜, 작업, 불량명, 수량, 비용, 비고,
@@ -1015,6 +1075,32 @@ def get_vendor_overview_detail(
                     "after_image": _image_url_repair(row[9]),
                     "작성자": row[10],
                 })
+                repair_seen.add(row[1])
+
+        # 수선 로그 ② 바코드+날짜 fallback (봇 기록 등 inbound_item_id 없는 경우)
+        if barcode_to_item_id:
+            bcph = ",".join("?" * len(barcode_to_item_id))
+            for row in con.execute(
+                f"""SELECT 바코드, id, 날짜, 작업, 불량명, 수량, 비용, 비고,
+                           before_image, after_image, 작성자
+                    FROM repair_work_log
+                    WHERE 바코드 IN ({bcph}) AND 날짜=?
+                      AND (inbound_item_id IS NULL OR inbound_item_id='')
+                    ORDER BY 바코드, id""",
+                list(barcode_to_item_id.keys()) + [inbound_date],
+            ).fetchall():
+                if row[1] in repair_seen:
+                    continue
+                item_id = barcode_to_item_id.get(row[0])
+                if item_id:
+                    repair_map.setdefault(item_id, []).append({
+                        "id": row[1], "날짜": row[2], "작업": row[3], "불량명": row[4],
+                        "수량": row[5], "비용": row[6], "비고": row[7],
+                        "before_image": _image_url_repair(row[8]),
+                        "after_image": _image_url_repair(row[9]),
+                        "작성자": row[10],
+                    })
+                    repair_seen.add(row[1])
 
     # 도매처별 그룹핑
     batch_map = {}

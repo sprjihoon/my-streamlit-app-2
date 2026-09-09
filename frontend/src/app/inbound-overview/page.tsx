@@ -35,6 +35,7 @@ interface OverviewListItem {
   total_missing_qty: number;
   all_closed: boolean;
   statuses: string[];
+  repair_count: number;
 }
 
 interface PhotoEntry { id: string; url: string; }
@@ -517,6 +518,14 @@ export default function InboundOverviewPage() {
                     </div>
                   )}
                 </div>
+
+                {/* 수선건수 */}
+                {(item.repair_count ?? 0) > 0 && (
+                  <div style={{ textAlign: 'center', minWidth: 48 }}>
+                    <div style={{ fontSize: '0.66rem', color: C.muted }}>수선</div>
+                    <div style={{ fontWeight: 700, color: '#7c3aed', fontSize: '0.95rem' }}>{item.repair_count}</div>
+                  </div>
+                )}
 
                 {/* 상태 */}
                 {statusChip(item.all_closed)}
