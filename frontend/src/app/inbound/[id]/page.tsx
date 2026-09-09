@@ -112,6 +112,29 @@ function SectionToggle({ open, label, badge, onToggle }: {
 }
 
 // ══════════════════════════════════════
+// 바코드 드롭다운 아이템 (공통)
+// ══════════════════════════════════════
+function BarcodeItem({ b }: { b: RepairBarcode }) {
+  return (
+    <>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+        {b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}
+      </div>
+      {b.상품명 && b.상품명 !== b.제품명 && (
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+          {b.상품명}
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
+        <span>{b.바코드}</span>
+        {b.도매처 && <span style={{ color: C.purple, fontFamily: 'inherit' }}>{b.도매처}</span>}
+        {b.업체명 && <span style={{ color: C.textFaint, fontFamily: 'inherit' }}>[{b.업체명}]</span>}
+      </div>
+    </>
+  );
+}
+
+// ══════════════════════════════════════
 // 품목 카드
 // ══════════════════════════════════════
 function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, onDelete }: {
@@ -224,7 +247,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     editBarcodeTimerRef.current = setTimeout(async () => {
       setEditBarcodeLoading(true);
       try {
-        const res = await getRepairBarcodes({ q: val.trim(), vendor: batchVendor || undefined, limit: 30 });
+        // vendor 필터 없이 전체 검색 (alias 불일치 방지)
+        const res = await getRepairBarcodes({ q: val.trim(), limit: 40 });
         setEditBarcodeResults(res.items);
       } catch { setEditBarcodeResults([]); }
       finally { setEditBarcodeLoading(false); }
@@ -292,7 +316,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
     barcodeTimerRef.current = setTimeout(async () => {
       setBarcodeLoading(true);
       try {
-        const res = await getRepairBarcodes({ q: val.trim(), vendor: batchVendor || undefined, limit: 30 });
+        // vendor 필터 없이 전체 검색 (alias 불일치 방지)
+        const res = await getRepairBarcodes({ q: val.trim(), limit: 40 });
         setBarcodeResults(res.items);
       } catch { setBarcodeResults([]); }
       finally { setBarcodeLoading(false); }
@@ -471,11 +496,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
                       {editBarcodeResults.map(b => (
                         <div key={b.바코드} onMouseDown={() => selectEditBarcode(b)}
                           style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}` }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
-                          <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
-                            <span>{b.바코드}</span>
-                            {b.업체명 && <span style={{ color: C.purple }}>{b.업체명}</span>}
-                          </div>
+                          <BarcodeItem b={b} />
                         </div>
                       ))}
                     </div>
@@ -710,11 +731,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
                       borderRadius: 8, background: '#fff', border: `1px solid ${C.border}`,
                       cursor: matchSaving ? 'not-allowed' : 'pointer', display: 'block',
                     }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
-                      <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
-                        <span>{b.바코드}</span>
-                        {b.도매처 && <span>{b.도매처}</span>}
-                      </div>
+                      <BarcodeItem b={b} />
                     </button>
                   ))}
                 </div>
@@ -725,7 +742,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
                 <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 5 }}>직접 검색</div>
                 <input
                   value={barcodeQuery} onChange={e => handleBarcodeInput(e.target.value)}
-                  placeholder="바코드 번호 또는 제품명"
+                  placeholder="바코드 · 제품명 · 도매처 검색"
                   style={{ ...inputBase, background: '#fff', marginBottom: 4 }}
                 />
                 {!barcodeLoading && barcodeQuery && barcodeResults.length === 0 && !autoMatched && (
@@ -737,8 +754,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
                     borderRadius: 8, background: '#fff', border: `1px solid ${C.border}`,
                     cursor: 'pointer', display: 'block',
                   }}>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
-                    <div style={{ fontSize: 11, color: C.textFaint, fontFamily: 'monospace' }}>{b.바코드}</div>
+                    <BarcodeItem b={b} />
                   </button>
                 ))}
                 {matchSaved && <div style={{ fontSize: 12, color: C.success, marginTop: 4 }}>✓ 매칭 저장됨</div>}
@@ -878,16 +894,15 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
   }
   function handleBarcodeQueryChange(val: string) {
     setBarcodeQuery(val); setBarcodeOpen(true);
-    if (selectedVendors.length === 0) {
-      if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
-      if (!val.trim()) { setApiSearchResults([]); return; }
-      apiSearchTimerRef.current = setTimeout(async () => {
-        setApiSearchLoading(true);
-        try { const r = await getRepairBarcodes({ q: val.trim(), limit: 30 }); setApiSearchResults(r.items); }
-        catch { setApiSearchResults([]); }
-        finally { setApiSearchLoading(false); }
-      }, 350);
-    }
+    if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
+    if (!val.trim()) { setApiSearchResults([]); return; }
+    // 항상 API 전체 검색 (벤더 필터 없음 → 별칭 차이로 검색 누락 방지)
+    apiSearchTimerRef.current = setTimeout(async () => {
+      setApiSearchLoading(true);
+      try { const r = await getRepairBarcodes({ q: val.trim(), limit: 40 }); setApiSearchResults(r.items); }
+      catch { setApiSearchResults([]); }
+      finally { setApiSearchLoading(false); }
+    }, 350);
   }
 
   const fvq = vendorQuery.toLowerCase();
@@ -896,9 +911,11 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
   const fbq = (selectedBarcode ? '' : barcodeQuery).toLowerCase();
   const fBarcodes = barcodeResults.filter(b =>
     b.바코드.toLowerCase().includes(fbq) || b.제품명.toLowerCase().includes(fbq) ||
-    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq)
+    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq) ||
+    (b.상품명 || '').toLowerCase().includes(fbq) || (b.도매처 || '').toLowerCase().includes(fbq)
   );
-  const displayBarcodes = selectedVendors.length > 0 ? fBarcodes.slice(0, 40) : apiSearchResults.slice(0, 30);
+  // 타이핑 중이면 API 전체검색 결과 우선, 아니면 벤더 필터 목록
+  const displayBarcodes = barcodeQuery.trim() ? apiSearchResults.slice(0, 40) : fBarcodes.slice(0, 40);
 
   async function handleAdd() {
     if (!form.item_name.trim()) return;
@@ -1015,13 +1032,7 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
                   {displayBarcodes.map(b => (
                     <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
                       style={{ padding: '9px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 600 }}>{b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}</div>
-                          <div style={{ fontSize: 11, color: C.textFaint, fontFamily: 'monospace' }}>{b.바코드}</div>
-                        </div>
-                        <span style={{ fontSize: 11, color: C.purple, flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
-                      </div>
+                      <BarcodeItem b={b} />
                     </div>
                   ))}
                 </div>

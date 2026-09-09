@@ -206,6 +206,51 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
   });
   const [editSaving, setEditSaving] = useState(false);
 
+  // ── 수정폼 바코드 검색 ──
+  const [editBarcodeQ,       setEditBarcodeQ]       = useState('');
+  const [editBarcodeResults, setEditBarcodeResults] = useState<RepairBarcode[]>([]);
+  const [editBarcodeLoading, setEditBarcodeLoading] = useState(false);
+  const [editBarcodeOpen,    setEditBarcodeOpen]    = useState(false);
+  const [editBarcodeSelected, setEditBarcodeSelected] = useState<RepairBarcode | null>(null);
+  const editBarcodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editBarcodeRef   = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (editBarcodeRef.current && !editBarcodeRef.current.contains(e.target as Node))
+        setEditBarcodeOpen(false);
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  function handleEditBarcodeInput(val: string) {
+    setEditBarcodeQ(val); setEditBarcodeSelected(null); setEditBarcodeOpen(true);
+    if (editBarcodeTimer.current) clearTimeout(editBarcodeTimer.current);
+    if (!val.trim()) { setEditBarcodeResults([]); return; }
+    editBarcodeTimer.current = setTimeout(async () => {
+      setEditBarcodeLoading(true);
+      try {
+        const r = await getRepairBarcodes({ q: val.trim(), limit: 40 });
+        setEditBarcodeResults(r.items);
+      } catch { setEditBarcodeResults([]); }
+      finally { setEditBarcodeLoading(false); }
+    }, 350);
+  }
+
+  function selectEditBarcode(b: RepairBarcode) {
+    setEditBarcodeSelected(b);
+    setEditBarcodeQ(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
+    setEditBarcodeOpen(false);
+    setEditForm(f => ({
+      ...f,
+      matched_barcode:  b.바코드,
+      matched_vendor:   b.업체명 || f.matched_vendor,
+      matched_product:  b.제품명 || f.matched_product,
+      matched_option:   b.옵션  || f.matched_option,
+    }));
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -416,6 +461,9 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [selectedBarcode, setSelectedBarcode] = useState<RepairBarcode | null>(null);
+  const [apiSearchResults, setApiSearchResults] = useState<RepairBarcode[]>([]);
+  const [apiSearchLoading, setApiSearchLoading] = useState(false);
+  const apiSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 폼
   const [form, setForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
   const [adding, setAdding] = useState(false);
@@ -481,18 +529,34 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
   function selectBarcode(b: RepairBarcode) {
     setSelectedBarcode(b);
     setBarcodeQuery(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
-    setBarcodeOpen(false);
+    setBarcodeOpen(false); setApiSearchResults([]);
     setForm(f => ({ ...f, item_name: f.item_name || b.제품명, option_text: f.option_text || (b.옵션 || '') }));
+  }
+
+  function handleBarcodeQueryChange(val: string) {
+    setBarcodeQuery(val); setBarcodeOpen(true);
+    if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
+    if (!val.trim()) { setApiSearchResults([]); return; }
+    // 항상 전체 API 검색 (벤더 별칭 불일치 방지)
+    apiSearchTimerRef.current = setTimeout(async () => {
+      setApiSearchLoading(true);
+      try { const r = await getRepairBarcodes({ q: val.trim(), limit: 40 }); setApiSearchResults(r.items); }
+      catch { setApiSearchResults([]); }
+      finally { setApiSearchLoading(false); }
+    }, 350);
   }
 
   const fvq = vendorQuery.toLowerCase();
   const fVendors = vendorList.filter(v => v.name.toLowerCase().includes(fvq) || v.aliases.some(a => a.toLowerCase().includes(fvq)));
   const fAliases = aliasList.filter(a => a.canonical.toLowerCase().includes(fvq) || a.aliases.some(al => al.toLowerCase().includes(fvq)));
-  const fbq = barcodeQuery.toLowerCase();
+  const fbq = (selectedBarcode ? '' : barcodeQuery).toLowerCase();
   const fBarcodes = barcodeResults.filter(b =>
     b.바코드.toLowerCase().includes(fbq) || b.제품명.toLowerCase().includes(fbq) ||
-    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq)
+    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq) ||
+    (b.상품명 || '').toLowerCase().includes(fbq) || (b.도매처 || '').toLowerCase().includes(fbq)
   );
+  // 타이핑 중이면 API 전체검색 결과 우선
+  const displayBarcodes = barcodeQuery.trim() ? apiSearchResults.slice(0, 40) : fBarcodes.slice(0, 40);
 
   function resetForm() {
     setForm({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
@@ -601,53 +665,50 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
 
         {/* 바코드 검색 */}
         <div ref={barcodeRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
-          <label style={lbl}>바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
-          {selectedVendors.length === 0 ? (
-            <div style={{ fontSize: '0.8rem', color: '#9ca3af', padding: '0.4rem 0' }}>↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
-          ) : barcodeLoading ? (
-            <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>바코드 목록 불러오는 중…</div>
-          ) : barcodeResults.length === 0 ? (
-            <div style={{ padding: '0.6rem 0.8rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: '0.82rem' }}>
-              <span style={{ color: '#dc2626' }}>"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
-              <a href="/journal-settings" target="_blank" style={{ color: '#4361ee', fontWeight: 600 }}>신규 바코드 등록 →</a>
-              <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 3 }}>아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
+          <label style={lbl}>
+            바코드 검색{' '}
+            {(barcodeLoading || apiSearchLoading) ? '(검색 중…)' : selectedVendors.length > 0 && barcodeResults.length > 0 ? `(${barcodeResults.length}개 로드됨)` : '(바코드·제품명·도매처 검색)'}
+          </label>
+          {selectedBarcode ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
+                ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
+              </div>
+              <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); setApiSearchResults([]); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
             </div>
           ) : (
             <>
-              {selectedBarcode ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
-                    ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
-                  </div>
-                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
-                </div>
-              ) : (
-                <>
-                  <input
-                    value={barcodeQuery}
-                    onChange={e => { setBarcodeQuery(e.target.value); setBarcodeOpen(true); }}
-                    onFocus={() => setBarcodeOpen(true)}
-                    placeholder={`바코드·제품명 검색 (${barcodeResults.length}개 중)`}
-                    style={inp}
-                  />
-                  {barcodeOpen && fBarcodes.length > 0 && (
-                    <div style={dropBase}>
-                      {fBarcodes.slice(0, 50).map(b => (
-                        <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
-                          style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                              <span style={{ fontSize: 13, fontWeight: 500 }}>{b.제품명}</span>
-                              {b.옵션 && <span style={{ fontSize: 12, color: '#6b7280' }}> / {b.옵션}</span>}
-                              <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{b.바코드}</div>
-                            </div>
-                            <span style={{ fontSize: 11, color: '#7c3aed', flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
-                          </div>
-                        </div>
-                      ))}
+              <input
+                value={barcodeQuery}
+                onChange={e => handleBarcodeQueryChange(e.target.value)}
+                onFocus={() => barcodeQuery && setBarcodeOpen(true)}
+                placeholder={selectedVendors.length > 0 && barcodeResults.length > 0
+                  ? `바코드·제품명·도매처 검색 (${barcodeResults.length}개 중)`
+                  : '바코드번호, 제품명, 상품명, 도매처 검색'}
+                style={inp}
+              />
+              {barcodeOpen && displayBarcodes.length > 0 && (
+                <div style={dropBase}>
+                  {displayBarcodes.map(b => (
+                    <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
+                      style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                        {b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}
+                      </div>
+                      {b.상품명 && b.상품명 !== b.제품명 && (
+                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 1 }}>{b.상품명}</div>
+                      )}
+                      <div style={{ fontSize: 11, color: '#9ca3af', display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
+                        <span>{b.바코드}</span>
+                        {b.도매처 && <span style={{ color: '#7c3aed', fontFamily: 'inherit' }}>{b.도매처}</span>}
+                        {b.업체명 && <span style={{ color: '#9ca3af', fontFamily: 'inherit' }}>[{b.업체명}]</span>}
+                      </div>
                     </div>
-                  )}
-                </>
+                  ))}
+                </div>
+              )}
+              {!barcodeLoading && !apiSearchLoading && barcodeQuery.trim() && displayBarcodes.length === 0 && (
+                <div style={{ fontSize: '0.78rem', color: '#9ca3af', padding: '4px 2px' }}>검색 결과 없음</div>
               )}
             </>
           )}
