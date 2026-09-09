@@ -84,16 +84,6 @@ const STATUS_COLOR: Record<string, { bg: string; color: string }> = {
   cancelled:    { bg: '#fee2e2', color: '#dc2626' },
 };
 
-const ITEM_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
-  pending:       { bg: '#f3f4f6', color: '#6b7280' },
-  confirmed:     { bg: '#dcfce7', color: '#15803d' },
-  missing:       { bg: '#fee2e2', color: '#dc2626' },
-  defect:        { bg: '#ffedd5', color: '#c2410c' },
-  repair:        { bg: '#fef9c3', color: '#a16207' },
-  unrecoverable: { bg: '#fecaca', color: '#991b1b' },
-  done:          { bg: '#bbf7d0', color: '#166534' },
-  etc:           { bg: '#ede9fe', color: '#7c3aed' },
-};
 
 
 function StatusBadge({ status, label, map }: { status: string; label: string; map: Record<string, { bg: string; color: string }> }) {
