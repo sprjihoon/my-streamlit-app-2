@@ -933,14 +933,14 @@ def get_vendor_overview_detail(
     authorization: Optional[str] = Header(None),
 ):
     """
-    특정 화주사+입고일의 전체 배치·품목·집계를 반환한다.
+    특정 화주사+입고일의 전체 배치·품목·사진·불량/수선 로그를 반환한다.
     """
     _get_user(authorization)
     with get_connection() as con:
         batch_rows = con.execute(
             """SELECT id, vendor, inbound_date, status, memo, wholesale,
                       total_janggi_qty, total_actual_qty, total_missing_qty,
-                      created_by, closed_by, closed_at, created_at
+                      created_by, closed_by, closed_at, created_at, janggi_filename
                FROM inbound_batches
                WHERE vendor=? AND inbound_date=?
                ORDER BY wholesale""",
@@ -950,9 +950,10 @@ def get_vendor_overview_detail(
         if not batch_rows:
             raise HTTPException(status_code=404, detail="해당 화주사/날짜 데이터 없음")
 
-        # 전체 품목 조회
         batch_ids = [r[0] for r in batch_rows]
         ph = ",".join("?" * len(batch_ids))
+
+        # 전체 품목 조회
         item_rows = con.execute(
             f"""SELECT id, batch_id, line_no, item_name, option_text, unit_price,
                        janggi_qty, actual_qty, missing_qty, status,
@@ -965,25 +966,55 @@ def get_vendor_overview_detail(
             batch_ids,
         ).fetchall()
 
-        # 불량/수선 로그 수 집계
         item_ids = [r[0] for r in item_rows]
-        defect_counts: dict = {}
-        repair_counts: dict = {}
+        idph = ",".join("?" * len(item_ids)) if item_ids else "NULL"
+
+        # 품목별 사진
+        photo_map: dict = {}
         if item_ids:
-            idph = ",".join("?" * len(item_ids))
             for row in con.execute(
-                f"SELECT inbound_item_id, COUNT(*) FROM defect_log WHERE inbound_item_id IN ({idph}) GROUP BY inbound_item_id",
+                f"SELECT item_id, id, filename FROM inbound_item_photos WHERE item_id IN ({idph}) ORDER BY created_at",
                 item_ids,
             ).fetchall():
-                defect_counts[row[0]] = row[1]
+                photo_map.setdefault(row[0], []).append({"id": row[1], "url": _image_url(row[2])})
+
+        # 불량 로그 전체
+        defect_map: dict = {}
+        if item_ids:
             for row in con.execute(
-                f"SELECT inbound_item_id, COUNT(*) FROM repair_work_log WHERE inbound_item_id IN ({idph}) GROUP BY inbound_item_id",
+                f"""SELECT inbound_item_id, id, 날짜, 불량명, 수량, 비고, 처리결과,
+                           before_image, after_image, 작성자
+                    FROM defect_log WHERE inbound_item_id IN ({idph})
+                    ORDER BY inbound_item_id, id""",
                 item_ids,
             ).fetchall():
-                repair_counts[row[0]] = row[1]
+                defect_map.setdefault(row[0], []).append({
+                    "id": row[1], "날짜": row[2], "불량명": row[3],
+                    "수량": row[4], "비고": row[5], "처리결과": row[6],
+                    "before_image": _image_url_defect(row[7]),
+                    "after_image": _image_url_defect(row[8]),
+                    "작성자": row[9],
+                })
+
+        # 수선 로그 전체
+        repair_map: dict = {}
+        if item_ids:
+            for row in con.execute(
+                f"""SELECT inbound_item_id, id, 날짜, 작업, 불량명, 수량, 비용, 비고,
+                           before_image, after_image, 작성자
+                    FROM repair_work_log WHERE inbound_item_id IN ({idph})
+                    ORDER BY inbound_item_id, id""",
+                item_ids,
+            ).fetchall():
+                repair_map.setdefault(row[0], []).append({
+                    "id": row[1], "날짜": row[2], "작업": row[3], "불량명": row[4],
+                    "수량": row[5], "비용": row[6], "비고": row[7],
+                    "before_image": _image_url_repair(row[8]),
+                    "after_image": _image_url_repair(row[9]),
+                    "작성자": row[10],
+                })
 
     # 도매처별 그룹핑
-    from collections import defaultdict
     batch_map = {}
     for r in batch_rows:
         batch_map[r[0]] = {
@@ -992,12 +1023,15 @@ def get_vendor_overview_detail(
             "total_janggi_qty": r[6] or 0, "total_actual_qty": r[7] or 0,
             "total_missing_qty": r[8] or 0,
             "created_by": r[9], "closed_by": r[10], "closed_at": r[11],
-            "created_at": r[12], "items": [],
+            "created_at": r[12],
+            "janggi_url": _image_url(r[13]) if r[13] else None,  # 장끼 사진
+            "items": [],
         }
 
     for r in item_rows:
+        iid = r[0]
         item = {
-            "id": r[0], "batch_id": r[1], "line_no": r[2],
+            "id": iid, "batch_id": r[1], "line_no": r[2],
             "item_name": r[3], "option_text": r[4], "unit_price": r[5],
             "janggi_qty": r[6] or 0, "actual_qty": r[7] or 0, "missing_qty": r[8] or 0,
             "status": r[9], "matched_barcode": r[10],
@@ -1005,34 +1039,35 @@ def get_vendor_overview_detail(
             "supplier_location": r[14], "supplier_contact": r[15],
             "needs_matching": bool(r[16]), "normal_qty": r[17] or 0,
             "confirmed_by": r[18], "item_wholesale": r[19], "memo": r[20],
-            "defect_count": defect_counts.get(r[0], 0),
-            "repair_count": repair_counts.get(r[0], 0),
+            "photos": photo_map.get(iid, []),
+            "defect_logs": defect_map.get(iid, []),
+            "repair_logs": repair_map.get(iid, []),
         }
         if r[1] in batch_map:
             batch_map[r[1]]["items"].append(item)
 
     batches = list(batch_map.values())
 
-    # 전체 집계
     total_janggi = sum(b["total_janggi_qty"] for b in batches)
     total_actual = sum(b["total_actual_qty"] for b in batches)
     total_missing = sum(b["total_missing_qty"] for b in batches)
     all_items = [i for b in batches for i in b["items"]]
     needs_matching_count = sum(1 for i in all_items if i["needs_matching"])
-    defect_total = sum(i["defect_count"] for i in all_items)
+    defect_total = sum(len(i["defect_logs"]) for i in all_items)
+    repair_total = sum(len(i["repair_logs"]) for i in all_items)
 
     return {
         "vendor": vendor,
         "inbound_date": inbound_date,
         "summary": {
             "batches_count": len(batches),
-            "wholesales_count": len(batches),
             "total_janggi_qty": total_janggi,
             "total_actual_qty": total_actual,
             "total_missing_qty": total_missing,
             "items_count": len(all_items),
             "needs_matching_count": needs_matching_count,
             "defect_total": defect_total,
+            "repair_total": repair_total,
         },
         "batches": batches,
     }
