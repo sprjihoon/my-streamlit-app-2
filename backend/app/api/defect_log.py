@@ -7,13 +7,14 @@ backend/app/api/defect_log.py - 불량일지 API
 
 from __future__ import annotations
 
+import io
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from backend.app.api.logs import add_log
@@ -239,6 +240,67 @@ def insert_defect_log_record(
         "제품명": product,
         "불량명": defect,
     }
+
+
+# ─────────────────────────────────────
+# 엑셀 내보내기
+# ─────────────────────────────────────
+
+@router.get("/export")
+async def export_logs(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    vendor: Optional[str] = None,
+    defect: Optional[str] = None,
+    result: Optional[str] = None,
+    author: Optional[str] = None,
+):
+    from logic.defect_log_excel import EXCEL_LOG_LIMIT, create_defect_log_xlsx
+
+    ensure_defect_tables()
+    where, params = _build_where(start_date, end_date, vendor, defect, author, result)
+
+    with get_connection() as con:
+        total = con.execute(f"SELECT COUNT(*) FROM defect_log {where}", params).fetchone()[0]
+        rows = con.execute(
+            f"""SELECT id, 날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 수량, 비고,
+                       작성자, 저장시간, 출처, before_image, after_image, extra_images,
+                       처리결과, 수정자, 수정시간
+                FROM defect_log {where}
+                ORDER BY 업체명, 날짜, id""",
+            params,
+        ).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="해당 조건의 불량일지가 없습니다.")
+
+    if total > EXCEL_LOG_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"사진 포함 엑셀은 한 번에 {EXCEL_LOG_LIMIT}건까지입니다. 업체나 기간을 더 좁혀 주세요. (현재 {total}건)",
+        )
+
+    logs = []
+    for r in rows:
+        log = {
+            "id": r[0], "날짜": r[1], "업체명": r[2], "제품명": r[3], "옵션": r[4],
+            "바코드": r[5], "불량명": r[6], "수량": r[7], "비고": r[8],
+            "작성자": r[9], "저장시간": str(r[10]) if r[10] else None,
+            "출처": r[11], "before_image": r[12], "after_image": r[13],
+            "extra_images": parse_extra_images(r[14]),
+            "처리결과": r[15], "수정자": r[16], "수정시간": str(r[17]) if r[17] else None,
+        }
+        log["photos"] = _log_photos(log)
+        logs.append(log)
+
+    output = io.BytesIO(create_defect_log_xlsx(logs))
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=defect_log_{start_date}_{end_date}.xlsx"
+        },
+    )
 
 
 # ─────────────────────────────────────

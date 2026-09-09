@@ -227,6 +227,7 @@ const NAV_GROUPS = [
       { href: '/repair-log', label: '수선작업일지', icon: <Scissors {...IC} /> },
       { href: '/defect-log', label: '불량일지', icon: <AlertTriangle {...IC} /> },
       { href: '/inbound-log', label: '입고일지', icon: <Package {...IC} /> },
+      { href: '/inbound-overview', label: '통합현황', icon: <Package {...IC} /> },
       { href: '/journal-settings', label: '일지설정', icon: <Settings {...IC} /> },
     ],
   },

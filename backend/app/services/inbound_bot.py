@@ -150,24 +150,30 @@ def _work_link(batch_id: str) -> str:
 # ─────────────────────────────────────
 
 async def _run_ocr_and_match(batch_id: str, image_data: bytes, filename: str, vendor: str) -> Dict:
-    """이미지 데이터로 OCR 실행 후 품목 매칭."""
-    from pathlib import Path
+    """이미지 데이터로 이미지 정규화 → OCR 실행 → 품목 매칭 → DB 저장.
+
+    실패 시 OcrError 또는 ValueError를 re-raise. DB는 성공 시에만 변경.
+    """
     from backend.app.api.inbound import (
-        UPLOAD_DIR, ensure_inbound_tables, _run_ocr, _match_barcode
+        UPLOAD_DIR, ensure_inbound_tables,
+        _normalize_image, _run_ocr, OcrError, _match_barcode,
     )
     import uuid as _uuid
 
     ensure_inbound_tables()
 
-    # 파일 저장
-    ext = Path(filename).suffix.lower() or ".jpg"
-    janggi_filename = f"{_uuid.uuid4().hex}{ext}"
-    (UPLOAD_DIR / janggi_filename).write_bytes(image_data)
+    # 이미지 정규화 (ValueError → 호출자가 처리)
+    norm_bytes, mime = _normalize_image(image_data)
 
-    # OCR
-    ocr_result = await _run_ocr(UPLOAD_DIR / janggi_filename)
-    receipt_data = (ocr_result or {}).get("receipt", {})
-    items_data = (ocr_result or {}).get("items", [])
+    # OCR 실행 (OcrError → 호출자가 처리, DB 미변경)
+    ocr_result = await _run_ocr(norm_bytes, mime)
+
+    # OCR 성공 → 파일 저장 후 DB 업데이트
+    janggi_filename = f"{_uuid.uuid4().hex}.jpg"
+    (UPLOAD_DIR / janggi_filename).write_bytes(norm_bytes)
+
+    receipt_data = ocr_result.get("receipt", {})
+    items_data = ocr_result.get("items", [])
 
     wholesale = receipt_data.get("storeName")
     janggi_date = receipt_data.get("orderDate")
@@ -177,17 +183,25 @@ async def _run_ocr_and_match(batch_id: str, image_data: bytes, filename: str, ve
     created_items = []
 
     with get_connection() as con:
-        # 기존 OCR 품목 삭제
-        con.execute("DELETE FROM inbound_items WHERE batch_id=? AND memo='OCR'", (batch_id,))
+        # 기존 OCR 품목 삭제 (재시도 교체)
+        con.execute(
+            "DELETE FROM inbound_items WHERE batch_id=? AND (memo LIKE '%OCR%' OR memo IS NULL)",
+            (batch_id,),
+        )
 
         for i, item in enumerate(items_data):
             item_id = _uuid.uuid4().hex
             item_name = item.get("itemName") or ""
-            option_text = item.get("color") or item.get("optionText") or ""
+            color = item.get("color") or ""
+            size_str = item.get("size") or ""
+            option_text = item.get("optionText") or ""
+            combined_option = " ".join(filter(None, [color, size_str, option_text])) or None
             unit_price = item.get("unitPrice")
             janggi_qty = int(item.get("quantity") or 0)
 
-            match = _match_barcode(vendor, item_name, option_text or None, wholesale)
+            match = _match_barcode(vendor, item_name, combined_option, wholesale)
+            needs_review = bool(item.get("needsReview", False))
+            needs_matching = match["needs_matching"] or needs_review
 
             con.execute("""
                 INSERT INTO inbound_items
@@ -197,19 +211,25 @@ async def _run_ocr_and_match(batch_id: str, image_data: bytes, filename: str, ve
                      match_confidence, needs_matching, memo, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'pending', ?, ?, ?, ?, ?, ?, 'OCR', ?)
             """, (
-                item_id, batch_id, i + 1, item_name, option_text or None, unit_price,
+                item_id, batch_id, i + 1, item_name, combined_option, unit_price,
                 janggi_qty,
                 match["matched_barcode"], match["matched_vendor"],
                 match["matched_product"], match["matched_option"],
-                match["match_confidence"], int(match["needs_matching"]),
+                match["match_confidence"], int(needs_matching),
                 now,
             ))
-            created_items.append({**match, "item_name": item_name, "option_text": option_text, "janggi_qty": janggi_qty, "needs_matching": match["needs_matching"]})
+            created_items.append({
+                **match,
+                "item_name": item_name,
+                "option_text": combined_option,
+                "janggi_qty": janggi_qty,
+                "needs_matching": needs_matching,
+            })
 
-        # 배치 업데이트
-        totals = con.execute("""
-            SELECT COALESCE(SUM(janggi_qty),0) FROM inbound_items WHERE batch_id=?
-        """, (batch_id,)).fetchone()
+        totals = con.execute(
+            "SELECT COALESCE(SUM(janggi_qty),0) FROM inbound_items WHERE batch_id=?",
+            (batch_id,),
+        ).fetchone()
         con.execute("""
             UPDATE inbound_batches
             SET janggi_filename=?, janggi_date=?, janggi_no=?, wholesale=?,
@@ -337,13 +357,40 @@ async def handle_image(
     vendor = pending.get("vendor", "")
 
     if step != "wait_janggi" or not batch_id:
+        # 화주사 입력을 아직 안 한 경우
+        if step == "wait_vendor":
+            return "아직 화주사를 입력하지 않았어요. 어느 화주사의 입고인가요?"
         return None  # 입고모드지만 장끼 대기 상태가 아님
 
     try:
         result = await _run_ocr_and_match(batch_id, image_data, filename, vendor)
     except Exception as e:
-        logger.exception("OCR failed")
-        return f"장끼 OCR 중 오류가 발생했어요: {e}\n작업 링크에서 수동으로 입력해주세요.\n{_work_link(batch_id)}"
+        # OcrError: 사용자 친화 메시지 전달, pending → wait_janggi 유지
+        from backend.app.api.inbound import OcrError
+        if isinstance(e, OcrError):
+            return (
+                f"장끼 판독 실패: {e.user_msg}\n"
+                f"다시 촬영해 보내주세요.\n"
+                f"또는 작업 링크에서 직접 입력해주세요:\n{_work_link(batch_id)}"
+            )
+        if isinstance(e, ValueError):
+            return (
+                f"이미지 오류: {e}\n"
+                f"다시 촬영해 보내주세요.\n"
+                f"또는 작업 링크에서 직접 입력해주세요:\n{_work_link(batch_id)}"
+            )
+        logger.exception("OCR unexpected error")
+        return (
+            f"장끼 OCR 중 오류가 발생했어요.\n"
+            f"작업 링크에서 수동으로 입력해주세요.\n{_work_link(batch_id)}"
+        )
+
+    # 품목 0개이면 pending 상태(wait_janggi) 유지, 확인 완료 메시지 금지
+    if result.get("item_count", 0) == 0:
+        return (
+            "품목을 찾지 못했어요. 다시 촬영해 보내주세요.\n"
+            f"또는 작업 링크에서 직접 입력해주세요:\n{_work_link(batch_id)}"
+        )
 
     _set_pending(user_id, channel_id, {
         "step": "active",

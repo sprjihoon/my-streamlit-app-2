@@ -19,6 +19,7 @@ import {
   DefectLogFilters,
   DefectLogStats,
 } from '@/lib/api';
+import { downloadDefectLogExcel } from '@/lib/defectLogExcel';
 
 const RESULT_OPTIONS = ['업체반송', '반품', '기타'] as const;
 
@@ -130,6 +131,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
   const [updatingResult, setUpdatingResult] = useState<number | null>(null);
   const [fillBusy, setFillBusy] = useState(false);
   const [fillResult, setFillResult] = useState<{ updated: number; skipped: number } | null>(null);
+  const [excelExporting, setExcelExporting] = useState(false);
 
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -268,6 +270,34 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             setVendor(''); setDefect(''); setAuthor(''); setResultFilter(''); setUnresolvedOnly(false);
             setCurrentPage(1);
           }} style={btn('#6b7280')}>초기화</button>
+          <button
+            onClick={async () => {
+              if (!periodFrom || !periodTo) {
+                onMessage({ type: 'error', text: '엑셀 보고를 위해 시작일과 종료일을 선택하세요.' });
+                return;
+              }
+              setExcelExporting(true);
+              try {
+                await downloadDefectLogExcel({
+                  period_from: periodFrom,
+                  period_to: periodTo,
+                  vendor: vendor || undefined,
+                  defect: defect || undefined,
+                  result: resultFilter || undefined,
+                  author: author || undefined,
+                });
+                onMessage({ type: 'success', text: '사진 포함 엑셀 보고서를 저장했습니다.' });
+              } catch (e) {
+                onMessage({ type: 'error', text: e instanceof Error ? e.message : '엑셀 생성 실패' });
+              } finally {
+                setExcelExporting(false);
+              }
+            }}
+            disabled={excelExporting}
+            style={btn('#0f766e')}
+          >
+            {excelExporting ? '엑셀 만드는 중...' : '엑셀 다운로드 (사진 포함)'}
+          </button>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.875rem', cursor: 'pointer', userSelect: 'none' }}>
             <input
               type="checkbox"
@@ -286,6 +316,9 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             </select>
           </div>
         </div>
+        <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0.6rem 0 0' }}>
+          엑셀은 현재 선택한 업체·기간·불량명·처리결과 필터의 불량일지와 사진을 담습니다.
+        </p>
       </Card>
 
       {/* 목록 */}

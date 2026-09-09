@@ -14,6 +14,13 @@ export function getApiBase(): string {
  * API 요청 헬퍼
  * - 네트워크 실패 시 "Failed to fetch" 대신 안내 메시지 반환
  */
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
@@ -45,7 +52,7 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(error || `API Error: ${response.status}`);
+    throw new ApiError(response.status, error || `API Error: ${response.status}`);
   }
 
   return response.json();
@@ -965,6 +972,8 @@ export interface RepairBarcode {
   제품명: string;
   옵션: string | null;
   도매처: string | null;
+  도매처주소: string | null;
+  도매처연락처: string | null;
   상품코드: string | null;
   로케이션: string | null;
   상품명: string | null;
@@ -1111,6 +1120,22 @@ export function getRepairLogExportUrl(
   if (defect) q.set('defect', defect);
   if (author) q.set('author', author);
   return `${API_BASE}/repair-log/export?${q.toString()}`;
+}
+
+export function getDefectLogExportUrl(
+  startDate: string,
+  endDate: string,
+  vendor?: string,
+  defect?: string,
+  result?: string,
+  author?: string,
+) {
+  const q = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  if (vendor) q.set('vendor', vendor);
+  if (defect) q.set('defect', defect);
+  if (result) q.set('result', result);
+  if (author) q.set('author', author);
+  return `${API_BASE}/defect-log/export?${q.toString()}`;
 }
 
 export async function getOldRepairPhotos(days = 60) {
@@ -1715,6 +1740,8 @@ export interface InboundItem {
   id: string;
   batch_id: string;
   line_no: number;
+  confirmed_by: string | null;
+  item_wholesale: string | null;
   item_name: string | null;
   option_text: string | null;
   unit_price: number | null;
@@ -1730,7 +1757,10 @@ export interface InboundItem {
   match_confidence: number;
   needs_matching: boolean;
   memo: string | null;
+  supplier_location: string | null;
+  supplier_contact: string | null;
   created_at: string;
+  updated_at: string | null;
   photos?: InboundItemPhoto[];
 }
 
@@ -1747,10 +1777,11 @@ function inboundHeaders(token: string) {
 
 export async function listInboundBatches(
   token: string,
-  filters?: { vendor?: string; status?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }
+  filters?: { vendor?: string; wholesale?: string; status?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }
 ) {
   const params = new URLSearchParams();
   if (filters?.vendor) params.set('vendor', filters.vendor);
+  if (filters?.wholesale) params.set('wholesale', filters.wholesale);
   if (filters?.status) params.set('status', filters.status);
   if (filters?.dateFrom) params.set('date_from', filters.dateFrom);
   if (filters?.dateTo) params.set('date_to', filters.dateTo);
@@ -1771,7 +1802,9 @@ export async function createInboundBatch(token: string, body: { vendor: string; 
 }
 
 export async function getInboundBatch(token: string, batchId: string) {
-  return fetchApi<InboundBatch>(`/inbound/batches/${batchId}`, { headers: inboundHeaders(token) });
+  // 실수량 입력 링크는 토큰 없이도 접근 가능
+  const opts: RequestInit = token ? { headers: inboundHeaders(token) } : {};
+  return fetchApi<InboundBatch>(`/inbound/batches/${batchId}`, opts);
 }
 
 export async function updateInboundBatch(token: string, batchId: string, body: { status?: string; memo?: string; vendor?: string; inbound_date?: string }) {
@@ -1781,18 +1814,118 @@ export async function updateInboundBatch(token: string, batchId: string, body: {
   );
 }
 
-export async function runInboundOcr(token: string, batchId: string, file: File) {
+export interface OcrPreviewReceipt {
+  storeName: string | null;
+  receiptNo: string | null;
+  orderDate: string | null;
+  totalAmount: number | null;
+  isHandwritten: boolean;
+  confidence: number;
+  needsReview: boolean;
+  warnings: string[];
+}
+export interface OcrPreviewItem {
+  lineNo: number;
+  itemName: string;
+  color: string | null;
+  optionText: string | null;
+  unitPrice: number | null;
+  quantity: number | null;
+  amount: number | null;
+  confidence: number;
+  needsReview: boolean;
+  warnings: string[];
+}
+/** 이미지를 maxPx 이하로 리사이즈 후 JPEG 압축 (OCR 속도 개선용) */
+async function compressImageForOcr(file: File, maxPx = 2048, quality = 0.90): Promise<File> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const { width, height } = img;
+      const scale = Math.min(1, maxPx / Math.max(width, height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => resolve(blob ? new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }) : file),
+        'image/jpeg', quality
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
+export async function ocrPreview(token: string, file: File) {
+  const compressed = await compressImageForOcr(file);
   const form = new FormData();
-  form.append('file', file);
-  return fetchApi<{ ok: boolean; item_count: number; matched_count: number; needs_matching_count: number; wholesale: string | null; items: InboundItem[] }>(
-    `/inbound/batches/${batchId}/ocr`,
-    { method: 'POST', headers: inboundHeaders(token), body: form }
+  form.append('file', compressed);
+  // 프록시 경유 (브라우저 → Vercel → Railway) → 장거리 TCP 유지 문제 해결
+  const response = await fetch('/api/ocr/preview', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!response.ok) {
+    const err = await response.text().catch(() => '');
+    throw new Error(err || `OCR 실패 (${response.status})`);
+  }
+  return response.json() as Promise<{ ok: boolean; receipt: OcrPreviewReceipt; items: OcrPreviewItem[]; raw: unknown }>;
+}
+
+export async function runInboundOcr(token: string, batchId: string, file: File) {
+  const compressed = await compressImageForOcr(file);
+  const form = new FormData();
+  form.append('file', compressed);
+  // 프록시 경유 (브라우저 → Vercel → Railway) → 장거리 TCP 유지 문제 해결
+  const response = await fetch(`/api/ocr/batch/${encodeURIComponent(batchId)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!response.ok) {
+    const err = await response.text().catch(() => '');
+    throw new Error(err || `OCR 실패 (${response.status})`);
+  }
+  return response.json() as Promise<{ ok: boolean; item_count: number; matched_count: number; needs_matching_count: number; wholesale: string | null; items: InboundItem[] }>;
+}
+
+export async function addInboundItem(token: string, batchId: string, body: {
+  item_name: string;
+  option_text?: string;
+  janggi_qty: number;
+  unit_price?: number;
+  memo?: string;
+  matched_barcode?: string;
+  matched_vendor?: string;
+  matched_product?: string;
+  matched_option?: string;
+  supplier_location?: string;
+  supplier_contact?: string;
+}) {
+  return fetchApi<{ id: string }>(
+    `/inbound/batches/${batchId}/items`,
+    { method: 'POST', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  );
+}
+
+export async function deleteInboundItem(token: string, itemId: string) {
+  return fetchApi<{ ok: boolean }>(
+    `/inbound/items/${itemId}`,
+    { method: 'DELETE', headers: inboundHeaders(token) }
   );
 }
 
 export async function updateInboundItem(token: string, itemId: string, body: Partial<{
   actual_qty: number; missing_qty: number; status: string; memo: string;
+  item_name: string; option_text: string; item_wholesale: string;
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
+  supplier_location: string; supplier_contact: string;
+  confirmed_by: string;
 }>) {
   return fetchApi<{ ok: boolean }>(
     `/inbound/items/${itemId}`,
@@ -1844,10 +1977,31 @@ export interface InboundRegisteredVendor {
   aliases: string[];
 }
 
+export interface VendorAlias {
+  canonical: string;
+  aliases: string[];
+  memo: string | null;
+}
+
 export async function listInboundVendors(token: string) {
   return fetchApi<{ registered: InboundRegisteredVendor[]; recent: string[] }>(
     '/inbound/vendors', { headers: inboundHeaders(token) }
   );
+}
+
+export interface InboundAliasGroup {
+  canonical: string;
+  aliases: string[];
+}
+
+export async function getInboundFilterOptions(token: string) {
+  return fetchApi<{ vendors: string[]; wholesales: string[]; alias_groups: InboundAliasGroup[] }>(
+    '/inbound/filter-options', { headers: inboundHeaders(token) }
+  );
+}
+
+export async function getVendorAliases(token: string) {
+  return fetchApi<{ aliases: VendorAlias[] }>('/inbound/vendor-aliases', { headers: inboundHeaders(token) });
 }
 
 export async function upsertVendorAlias(token: string, canonical: string, aliases: string[], memo?: string) {

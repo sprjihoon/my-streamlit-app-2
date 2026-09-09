@@ -18,21 +18,28 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import io
 import json
+import logging
 import os
 import secrets
+import time
 import uuid
+import datetime as _dt
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, Form, Header
 from fastapi.responses import FileResponse
+from PIL import Image, ImageOps
 from pydantic import BaseModel
 
 from backend.app.api.logs import add_log
 from backend.app.config import settings
 from logic.db import get_connection
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/inbound", tags=["inbound"])
 
@@ -86,7 +93,7 @@ STATUS_LABELS = {
     "cancelled":   "취소",
 }
 
-ITEM_STATUS_VALUES = ("pending", "confirmed", "missing", "defect", "repair", "unrecoverable", "done")
+ITEM_STATUS_VALUES = ("pending", "confirmed", "missing", "defect", "repair", "unrecoverable", "done", "etc")
 ITEM_STATUS_LABELS = {
     "pending": "확인 전",
     "confirmed": "정상",
@@ -95,6 +102,7 @@ ITEM_STATUS_LABELS = {
     "repair": "수선대기",
     "unrecoverable": "회생불가",
     "done": "완료",
+    "etc": "기타",
 }
 
 
@@ -122,10 +130,16 @@ class InboundItemUpdate(BaseModel):
     missing_qty: Optional[int] = None
     status: Optional[str] = None
     memo: Optional[str] = None
+    item_name: Optional[str] = None        # 상품명 직접 수정
+    option_text: Optional[str] = None      # 옵션 직접 수정
+    item_wholesale: Optional[str] = None   # 도매처 직접 수정 (배치 wholesale 오버라이드)
     matched_barcode: Optional[str] = None
     matched_vendor: Optional[str] = None
     matched_product: Optional[str] = None
     matched_option: Optional[str] = None
+    supplier_location: Optional[str] = None
+    supplier_contact: Optional[str] = None
+    confirmed_by: Optional[str] = None  # 로그인 없이 접근하는 작업자 이름
 
 
 class InboundItemCreate(BaseModel):
@@ -140,6 +154,8 @@ class InboundItemCreate(BaseModel):
     matched_vendor: Optional[str] = None
     matched_product: Optional[str] = None
     matched_option: Optional[str] = None
+    supplier_location: Optional[str] = None
+    supplier_contact: Optional[str] = None
     memo: Optional[str] = None
 
 
@@ -189,10 +205,13 @@ def ensure_inbound_tables():
                 matched_option TEXT,
                 match_confidence REAL DEFAULT 0.0,
                 needs_matching INTEGER DEFAULT 0,
+                supplier_location TEXT,
+                supplier_contact TEXT,
                 memo TEXT,
                 defect_case_id TEXT,
                 inbound_item_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (batch_id) REFERENCES inbound_batches(id)
             )
         """)
@@ -263,6 +282,30 @@ def ensure_inbound_tables():
             con.execute("ALTER TABLE inbound_batches ADD COLUMN vendor_canonical TEXT")
         except Exception:
             pass
+        # inbound_items 에 신규 컬럼 추가 (기존 DB 마이그레이션)
+        for col_def in [
+            "supplier_location TEXT",
+            "supplier_contact TEXT",
+            "updated_at DATETIME",
+            "confirmed_by TEXT",    # 로그인 없이 접근하는 작업자 이름
+            "item_wholesale TEXT",  # 도매처 항목별 오버라이드
+            "normal_qty INTEGER DEFAULT 0",  # 정상처리 수량 (직원 직접 입력)
+        ]:
+            try:
+                con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
+            except Exception:
+                pass
+        # inbound_share_links 에 폐기 컬럼 추가
+        try:
+            con.execute("ALTER TABLE inbound_share_links ADD COLUMN revoked_at DATETIME")
+        except Exception:
+            pass
+        # repair_barcode 에 도매처주소·도매처연락처 컬럼 추가 (없으면)
+        for _col in ("도매처주소 TEXT", "도매처연락처 TEXT"):
+            try:
+                con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {_col}")
+            except Exception:
+                pass
         con.commit()
 
 
@@ -284,6 +327,71 @@ def _get_user(token: Optional[str]) -> dict:
     if not row:
         raise HTTPException(status_code=401, detail="인증이 필요합니다.")
     return {"user_id": row[0], "nickname": row[1], "is_admin": bool(row[2])}
+
+
+_KST = _dt.timezone(_dt.timedelta(hours=9))
+
+
+def _update_barcode_master(
+    con,
+    barcode: str,
+    wholesale: str = "",
+    supplier_location: str = "",
+    supplier_contact: str = "",
+    matched_product: str = "",   # 도매처상품명 → repair_barcode.제품명
+    matched_option: str = "",    # 도매처옵션   → repair_barcode.옵션
+) -> None:
+    """매칭 확정 시 repair_barcode 마스터의 도매처·위치·연락처·상품명·옵션을 갱신한다.
+
+    - 해당 바코드 레코드가 없으면 아무 작업도 하지 않는다.
+    - 빈 문자열은 기존 값을 덮어쓰지 않는다.
+    """
+    # 신규 컬럼 마이그레이션
+    for col in ("도매처주소 TEXT", "도매처연락처 TEXT"):
+        try:
+            con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {col}")
+        except Exception:
+            pass
+
+    # 업데이트할 필드 수집 (값이 있는 것만)
+    col_map = [
+        (wholesale,          "도매처"),
+        (supplier_location,  "도매처주소"),
+        (supplier_contact,   "도매처연락처"),
+        (matched_product,    "제품명"),
+        (matched_option,     "옵션"),
+    ]
+    sets, vals = [], []
+    for val, col in col_map:
+        if val:
+            sets.append(f"{col}=?"); vals.append(val)
+
+    if not sets:
+        return
+
+    vals.append(barcode)
+    try:
+        con.execute(f"UPDATE repair_barcode SET {', '.join(sets)} WHERE 바코드=?", vals)
+        updated = {col_map[i][1]: vals[i] for i in range(len(sets))}
+        logger.info(f"바코드 마스터 업데이트: {barcode} → {updated}")
+    except Exception as e:
+        logger.warning(f"바코드 마스터 업데이트 실패 ({barcode}): {e}")
+
+
+def _check_link_expiry(inbound_date_str: str) -> None:
+    """비로그인 공개 링크 만료 확인 — 당일(KST) 자정 이후이면 410 반환."""
+    try:
+        batch_date = _dt.date.fromisoformat(inbound_date_str)
+        today_kst  = _dt.datetime.now(_KST).date()
+        if today_kst > batch_date:
+            raise HTTPException(
+                status_code=410,
+                detail=f"링크가 만료되었습니다. (유효일: {inbound_date_str})"
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # 날짜 파싱 실패 시 허용
 
 
 # ─────────────────────────────────────
@@ -367,7 +475,12 @@ def _serialize_item(row) -> dict:
         "match_confidence": row[14],
         "needs_matching": bool(row[15]),
         "memo": row[16],
-        "created_at": row[17],
+        "supplier_location": row[17],
+        "supplier_contact": row[18],
+        "created_at": row[19],
+        "updated_at": row[20],
+        "confirmed_by": row[21] if len(row) > 21 else None,
+        "item_wholesale": row[22] if len(row) > 22 else None,
     }
 
 
@@ -419,6 +532,8 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
         "matched_vendor": None,
         "matched_product": None,
         "matched_option": None,
+        "supplier_location": None,   # 도매처주소
+        "supplier_contact": None,    # 도매처연락처
         "match_confidence": 0.0,
         "needs_matching": True,
     }
@@ -428,60 +543,67 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
     vendor_names = _resolve_vendor_names(vendor)  # 별칭 포함 후보 업체명 목록
     vendor_ph = ",".join("?" * len(vendor_names))  # IN (?,?,...) 플레이스홀더
 
+    def _row_to_result(row, confidence: float, needs: bool) -> dict:
+        return {
+            **result,
+            "matched_barcode": row[0],
+            "matched_vendor": row[1],
+            "matched_product": row[2] or item_name,
+            "matched_option": row[3],
+            "supplier_location": row[4] if len(row) > 4 else None,
+            "supplier_contact": row[5] if len(row) > 5 else None,
+            "match_confidence": confidence,
+            "needs_matching": needs,
+        }
+
+    _sel = "SELECT 바코드, 업체명, 제품명, 옵션, 도매처주소, 도매처연락처"
+
     with get_connection() as con:
-        # 1순위: 화주사(별칭 포함) + 도매처 + 공급처상품명/상품명 + 옵션 정확 매칭
+        # 1순위: 화주사(별칭 포함) + 도매처 + 제품명/상품명 + 옵션 정확 매칭
         if wholesale and option_text:
             row = con.execute(f"""
-                SELECT 바코드, 업체명, 공급처상품명, 옵션
+                {_sel}
                 FROM repair_barcode
                 WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
-                  AND (공급처상품명=? OR 상품명=?)
+                  AND (제품명=? OR 상품명=?)
                   AND 옵션=?
                 LIMIT 1
             """, (*vendor_names, wholesale, item_name, item_name, option_text)).fetchone()
             if row:
-                return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                        "matched_product": row[2] or item_name, "matched_option": row[3],
-                        "match_confidence": 1.0, "needs_matching": False}
+                return _row_to_result(row, 1.0, False)
 
-        # 2순위: 화주사(별칭 포함) + 도매처 + 상품명 (옵션 무시)
+        # 2순위: 화주사(별칭 포함) + 도매처 + 제품명/상품명 (옵션 무시)
         if wholesale:
             row = con.execute(f"""
-                SELECT 바코드, 업체명, 공급처상품명, 옵션
+                {_sel}
                 FROM repair_barcode
                 WHERE 업체명 IN ({vendor_ph}) AND 도매처=?
-                  AND (공급처상품명=? OR 상품명=?)
+                  AND (제품명=? OR 상품명=?)
                 LIMIT 1
             """, (*vendor_names, wholesale, item_name, item_name)).fetchone()
             if row:
-                return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                        "matched_product": row[2] or item_name, "matched_option": row[3],
-                        "match_confidence": 0.85, "needs_matching": False}
+                return _row_to_result(row, 0.85, False)
 
-        # 3순위: 화주사(별칭 포함) + 상품명
+        # 3순위: 화주사(별칭 포함) + 제품명/상품명
         row = con.execute(f"""
-            SELECT 바코드, 업체명, 공급처상품명, 옵션
+            {_sel}
             FROM repair_barcode
-            WHERE 업체명 IN ({vendor_ph}) AND (공급처상품명=? OR 상품명=?)
+            WHERE 업체명 IN ({vendor_ph}) AND (제품명=? OR 상품명=?)
             LIMIT 1
         """, (*vendor_names, item_name, item_name)).fetchone()
         if row:
-            return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                    "matched_product": row[2] or item_name, "matched_option": row[3],
-                    "match_confidence": 0.7, "needs_matching": False}
+            return _row_to_result(row, 0.7, False)
 
         # 4순위: 부분 일치 (LIKE) — 화주사 별칭 포함
         keyword = f"%{item_name}%"
         row = con.execute(f"""
-            SELECT 바코드, 업체명, 공급처상품명, 옵션
+            {_sel}
             FROM repair_barcode
-            WHERE 업체명 IN ({vendor_ph}) AND (공급처상품명 LIKE ? OR 상품명 LIKE ?)
+            WHERE 업체명 IN ({vendor_ph}) AND (제품명 LIKE ? OR 상품명 LIKE ?)
             LIMIT 1
         """, (*vendor_names, keyword, keyword)).fetchone()
         if row:
-            return {**result, "matched_barcode": row[0], "matched_vendor": row[1],
-                    "matched_product": row[2] or item_name, "matched_option": row[3],
-                    "match_confidence": 0.5, "needs_matching": True}
+            return _row_to_result(row, 0.5, True)
 
     return result
 
@@ -490,92 +612,608 @@ def _match_barcode(vendor: str, item_name: str, option_text: Optional[str], whol
 # OCR (장끼 이미지 분석)
 # ─────────────────────────────────────
 
-async def _run_ocr(image_path: Path) -> Optional[dict]:
-    """GPT-4o Vision으로 장끼 분석 (receipt.py 동일 로직)"""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        import httpx
-        data = image_path.read_bytes()
-        b64 = base64.b64encode(data).decode()
-        ext = image_path.suffix.lower().lstrip(".")
-        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+OCR_MODEL: str = os.getenv("BOT_OCR_MODEL", "gpt-4o")
 
-        system_prompt = """너는 동대문 장끼/영수증을 분석하는 AI다. 이미지에서 다음을 추출하라.
-
-반드시 아래 JSON 형식만 반환하라:
-{
-  "receipt": {
-    "storeName": "거래처명(발신인/공급자) 또는 null",
-    "receiptNo": "영수증번호 또는 null",
-    "orderDate": "YYYY-MM-DD 또는 null",
-    "totalAmount": 숫자 또는 null,
-    "isHandwritten": true|false,
-    "confidence": 0.0~1.0,
-    "needsReview": true|false,
-    "warnings": []
-  },
-  "items": [
-    {
-      "lineNo": 1,
-      "itemName": "품명(색상/사이즈/옵션 제외)",
-      "color": "색상 또는 null",
-      "optionText": "기타 옵션 또는 null",
-      "unitPrice": 단가 숫자 또는 null,
-      "quantity": 수량 숫자 또는 null,
-      "amount": 금액 숫자 또는 null,
-      "confidence": 0.0~1.0,
-      "needsReview": true|false,
-      "warnings": []
-    }
-  ]
+JANGGI_SCHEMA: dict = {
+    "type": "object",
+    "required": ["receipt", "items"],
+    "additionalProperties": False,
+    "properties": {
+        "receipt": {
+            "type": "object",
+            "required": [
+                "storeName", "receiptNo", "orderDate", "totalAmount",
+                "isHandwritten", "confidence", "needsReview", "warnings",
+            ],
+            "additionalProperties": False,
+            "properties": {
+                "storeName":     {"type": ["string", "null"]},
+                "receiptNo":     {"type": ["string", "null"]},
+                "orderDate":     {"type": ["string", "null"]},
+                "totalAmount":   {"type": ["number", "null"]},
+                "isHandwritten": {"type": "boolean"},
+                "confidence":    {"type": "number"},
+                "needsReview":   {"type": "boolean"},
+                "warnings":      {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "lineNo", "rawText", "itemName", "color", "size", "optionText",
+                    "unitPrice", "quantity", "amount", "confidence", "needsReview", "warnings",
+                ],
+                "additionalProperties": False,
+                "properties": {
+                    "lineNo":     {"type": "integer"},
+                    "rawText":    {"type": ["string", "null"]},
+                    "itemName":   {"type": ["string", "null"]},
+                    "color":      {"type": ["string", "null"]},
+                    "size":       {"type": ["string", "null"]},
+                    "optionText": {"type": ["string", "null"]},
+                    "unitPrice":  {"type": ["number", "null"]},
+                    "quantity":   {"type": ["number", "null"]},
+                    "amount":     {"type": ["number", "null"]},
+                    "confidence": {"type": "number"},
+                    "needsReview":{"type": "boolean"},
+                    "warnings":   {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+    },
 }
 
-규칙:
-- 품명과 색상/옵션을 분리한다
-- 수기 글씨는 isHandwritten=true, needsReview=true
-- confidence < 0.8 이면 needsReview=true
-- 필수값 누락 시 warnings에 기록
-- 숫자는 콤마/원 제거 후 숫자만 반환"""
+SYSTEM_PROMPT: str = (
+    "너는 동대문 장끼(도매 영수증)를 판독하는 전문가다.\n"
+    "규칙:\n"
+    "1. 상호·도매처는 장끼를 발행한 판매처다. 상단에 별도로 손글씨로 쓰인 화주사명·구매자명은 도매처로 오인하지 않는다.\n"
+    "2. 출력일시와 거래일이 함께 있으면 품목 가까이에 표시된 거래일을 orderDate로 사용한다.\n"
+    "3. 품명·색상·사이즈·옵션을 가능한 범위에서 분리한다.\n"
+    "4. 읽을 수 없는 글자를 추측해 확정하지 않는다. 불명확한 값은 rawText에 원문을 남기고 needsReview=true와 경고를 반환한다.\n"
+    "5. unitPrice × quantity = amount 검산. 불일치 시 needsReview=true와 경고.\n"
+    '6. 동대문 수기 장끼에서 "9", "18"처럼 천원 단위가 생략된 경우 수량·금액·총액 문맥이 일치하면 9000, 18000으로 정규화하되 '
+    'needsReview=true와 "천원 단위 추정" 경고를 남긴다.\n'
+    "7. 품목이 보이는데도 빈 배열을 반환하지 않는다. 한 개도 판독하지 못하면 정상 성공으로 처리하지 않는다.\n"
+    "반드시 위 JSON Schema를 정확히 따른다."
+)
 
-        payload = {
-            "model": "gpt-4o",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": [
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"}}
-                ]}
-            ],
-            "max_tokens": 2000,
-            "response_format": {"type": "json_object"},
-        }
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
+
+class OcrError(Exception):
+    """OCR 파이프라인 분류 오류.
+
+    kind: "no_api_key" | "auth" | "model" | "quota" | "image"
+          | "timeout" | "server" | "schema" | "no_items"
+    """
+
+    def __init__(self, kind: str, user_msg: str, log_detail: str = ""):
+        self.kind = kind
+        self.user_msg = user_msg
+        self.log_detail = log_detail
+        super().__init__(user_msg)
+
+
+def _normalize_image(raw: bytes) -> tuple:
+    """Pillow로 이미지를 디코딩·EXIF 회전·RGB JPEG 변환·2048px 리사이즈.
+
+    반환: (정규화된 JPEG bytes, "image/jpeg")
+    실패 시 ValueError 발생 (400으로 매핑됨).
+    base64 내용·원본 bytes는 절대 로그에 남기지 않는다.
+    """
+    _ERR = "이미지를 읽지 못했어요. 사진 방향과 선명도를 확인해 다시 촬영해주세요."
+    if not raw:
+        raise ValueError(_ERR)
+    try:
+        buf = io.BytesIO(raw)
+        img = Image.open(buf)
+        img.verify()          # 포맷 유효성 검사
+        buf.seek(0)
+        img = Image.open(buf)  # verify() 후 재열기
+    except Exception:
+        raise ValueError(_ERR)
+    try:
+        img = ImageOps.exif_transpose(img)  # EXIF 회전 적용
+        img = img.convert("RGB")
+        w, h = img.size
+        max_px = 2048
+        if max(w, h) > max_px:
+            scale = max_px / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        buf_out = io.BytesIO()
+        img.save(buf_out, format="JPEG", quality=90)
+        return buf_out.getvalue(), "image/jpeg"
+    except Exception:
+        raise ValueError(_ERR)
+
+
+async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
+    """GPT Vision Structured Outputs로 장끼 분석.
+
+    성공 시 OCR 결과 dict 반환.
+    실패 시 OcrError 발생.
+    API 키·Authorization·base64·장끼 전문·개인정보는 절대 로그에 남기지 않는다.
+    """
+    import httpx  # 지연 import (테스트 패치 용이)
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise OcrError("no_api_key", "AI 설정을 확인해야 합니다. 관리자에게 알려주세요.")
+
+    b64 = base64.b64encode(image_bytes).decode()
+    img_size = len(image_bytes)
+
+    request_payload = {
+        "model": OCR_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"},
+                }
+            ]},
+        ],
+        "max_tokens": 2000,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "janggi_ocr",
+                "strict": True,
+                "schema": JANGGI_SCHEMA,
+            },
+        },
+    }
+    # Authorization 헤더는 로그에 남기지 않음
+    req_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    max_attempts = 2
+    t_start = time.monotonic()
+
+    for attempt in range(max_attempts):
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers=req_headers,
+                    json=request_payload,
+                )
+        except httpx.TimeoutException:
+            elapsed = time.monotonic() - t_start
+            if attempt < max_attempts - 1:
+                continue  # 1회 재시도
+            logger.info(
+                "OCR err kind=timeout status=None req_id=None model=%s elapsed=%.1fs img_size=%d",
+                OCR_MODEL, elapsed, img_size,
             )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        return json.loads(content)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return None
+            raise OcrError("timeout", "AI 판독 요청이 지연되고 있어요. 잠시 후 다시 시도해주세요.")
+
+        elapsed = time.monotonic() - t_start
+        status_code = resp.status_code
+        req_id = resp.headers.get("x-request-id", "None")
+
+        if status_code in (401, 403):
+            logger.info(
+                "OCR err kind=auth status=%d req_id=%s model=%s elapsed=%.1fs img_size=%d",
+                status_code, req_id, OCR_MODEL, elapsed, img_size,
+            )
+            raise OcrError("auth", "AI 설정을 확인해야 합니다. 관리자에게 알려주세요.")
+
+        if status_code == 404:
+            logger.info(
+                "OCR err kind=model status=%d req_id=%s model=%s elapsed=%.1fs img_size=%d",
+                status_code, req_id, OCR_MODEL, elapsed, img_size,
+            )
+            raise OcrError("model", "AI 설정을 확인해야 합니다. 관리자에게 알려주세요.")
+
+        if status_code == 429:
+            logger.info(
+                "OCR err kind=quota status=%d req_id=%s model=%s elapsed=%.1fs img_size=%d",
+                status_code, req_id, OCR_MODEL, elapsed, img_size,
+            )
+            raise OcrError("quota", "AI 판독 요청이 지연되고 있어요. 잠시 후 다시 시도해주세요.")
+
+        if status_code >= 500:
+            if attempt < max_attempts - 1:
+                continue  # 1회 재시도
+            logger.info(
+                "OCR err kind=server status=%d req_id=%s model=%s elapsed=%.1fs img_size=%d",
+                status_code, req_id, OCR_MODEL, elapsed, img_size,
+            )
+            raise OcrError("server", "AI 판독 요청이 지연되고 있어요. 잠시 후 다시 시도해주세요.")
+
+        # Structured Output 파싱
+        try:
+            resp_json = resp.json()
+            content = resp_json["choices"][0]["message"]["content"]
+            result = json.loads(content)
+            if "receipt" not in result or "items" not in result:
+                raise ValueError("required keys missing")
+        except Exception:
+            logger.info(
+                "OCR err kind=schema status=%d req_id=%s model=%s elapsed=%.1fs img_size=%d",
+                status_code, req_id, OCR_MODEL, elapsed, img_size,
+            )
+            raise OcrError("schema", "이미지를 읽지 못했어요. 사진 방향과 선명도를 확인해 다시 촬영해주세요.")
+
+        items = result.get("items", [])
+        if len(items) == 0:
+            logger.info(
+                "OCR err kind=no_items status=%d req_id=%s model=%s elapsed=%.1fs img_size=%d",
+                status_code, req_id, OCR_MODEL, elapsed, img_size,
+            )
+            raise OcrError("no_items", "품목을 찾지 못했어요. 다시 촬영하거나 직접 입력해주세요.")
+
+        # 정상 성공 로그 (img_size만, base64·원문 제외)
+        try:
+            norm_img = Image.open(io.BytesIO(image_bytes))
+            nw, nh = norm_img.size
+            norm_str = f"{nw}x{nh}"
+        except Exception:
+            norm_str = "?"
+        logger.info(
+            "OCR ok  model=%s elapsed=%.1fs items=%d norm=%s",
+            OCR_MODEL, elapsed, len(items), norm_str,
+        )
+        return result
+
+    # 도달 불가 (안전망)
+    raise OcrError("server", "AI 판독 요청이 지연되고 있어요. 잠시 후 다시 시도해주세요.")
 
 
 # ─────────────────────────────────────
 # 라우터
 # ─────────────────────────────────────
 
+# ── 통합현황: 화주사+날짜 단위 목록 및 상세 ──────
+
+@router.get("/vendor-overview")
+def list_vendor_overviews(
+    vendor: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),   # "closed" | "open"
+    authorization: Optional[str] = Header(None),
+):
+    """
+    화주사+입고일 단위로 묶어 반환한다.
+    vendor_canonical 이 있으면 canonical 기준으로 묶고, 없으면 vendor 사용.
+    status="closed" → 해당 날짜 모든 배치가 마감인 그룹만 반환
+    status="open"   → 하나라도 진행중인 그룹만 반환
+    """
+    _get_user(authorization)
+    where = ["1=1"]
+    params: list = []
+    if vendor:
+        # canonical 또는 raw vendor 어느 쪽이든 일치
+        where.append("COALESCE(vendor_canonical, vendor)=?"); params.append(vendor)
+    if date_from:
+        where.append("inbound_date>=?"); params.append(date_from)
+    if date_to:
+        where.append("inbound_date<=?"); params.append(date_to)
+
+    sql = f"""
+        SELECT COALESCE(vendor_canonical, vendor) AS canonical_vendor,
+               inbound_date,
+               COUNT(*) AS batches_count,
+               GROUP_CONCAT(COALESCE(wholesale,''), '|') AS wholesales,
+               SUM(total_janggi_qty) AS total_janggi,
+               SUM(total_actual_qty) AS total_actual,
+               SUM(total_missing_qty) AS total_missing,
+               GROUP_CONCAT(status, '|') AS statuses
+        FROM inbound_batches
+        WHERE {' AND '.join(where)}
+        GROUP BY canonical_vendor, inbound_date
+        ORDER BY inbound_date DESC, canonical_vendor
+    """
+    with get_connection() as con:
+        rows = con.execute(sql, params).fetchall()
+
+        # 각 (vendor, date) 별 수선건수 집계: inbound_item_id 연결 + 바코드 fallback
+        repair_count_map: dict = {}
+        for r in rows:
+            cvendor, idate = r[0], r[1]
+            # ① inbound_item_id 기준
+            cnt_a = con.execute(
+                """SELECT COUNT(*) FROM repair_work_log rw
+                   JOIN inbound_items ii ON rw.inbound_item_id = ii.id
+                   JOIN inbound_batches ib ON ii.batch_id = ib.id
+                   WHERE COALESCE(ib.vendor_canonical, ib.vendor)=? AND ib.inbound_date=?""",
+                (cvendor, idate),
+            ).fetchone()[0] or 0
+            # ② 바코드+날짜 fallback (inbound_item_id 없는 봇 기록)
+            cnt_b = con.execute(
+                """SELECT COUNT(*) FROM repair_work_log rw
+                   JOIN inbound_items ii ON rw.바코드 = ii.matched_barcode
+                   JOIN inbound_batches ib ON ii.batch_id = ib.id
+                   WHERE COALESCE(ib.vendor_canonical, ib.vendor)=? AND ib.inbound_date=?
+                     AND (rw.inbound_item_id IS NULL OR rw.inbound_item_id='')
+                     AND rw.날짜=?""",
+                (cvendor, idate, idate),
+            ).fetchone()[0] or 0
+            repair_count_map[(cvendor, idate)] = cnt_a + cnt_b
+
+    items = []
+    for r in rows:
+        wholesales = list(dict.fromkeys(w for w in (r[3] or "").split("|") if w))  # 중복 제거
+        statuses = (r[7] or "").split("|")
+        all_closed = all(s == "closed" for s in statuses if s)
+        # status 필터 적용
+        if status == "closed" and not all_closed:
+            continue
+        if status == "open" and all_closed:
+            continue
+        items.append({
+            "vendor": r[0],          # canonical 기준 표시명
+            "inbound_date": r[1],
+            "batches_count": r[2],
+            "wholesales": wholesales,
+            "total_janggi_qty": r[4] or 0,
+            "total_actual_qty": r[5] or 0,
+            "total_missing_qty": r[6] or 0,
+            "all_closed": all_closed,
+            "statuses": statuses,
+            "repair_count": repair_count_map.get((r[0], r[1]), 0),
+        })
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/vendor-overview/{vendor}/{inbound_date}")
+def get_vendor_overview_detail(
+    vendor: str,
+    inbound_date: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    특정 화주사+입고일의 전체 배치·품목·사진·불량/수선 로그를 반환한다.
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        batch_rows = con.execute(
+            """SELECT id, vendor, inbound_date, status, memo, wholesale,
+                      total_janggi_qty, total_actual_qty, total_missing_qty,
+                      created_by, closed_by, closed_at, created_at, janggi_filename
+               FROM inbound_batches
+               WHERE COALESCE(vendor_canonical, vendor)=? AND inbound_date=?
+               ORDER BY wholesale""",
+            (vendor, inbound_date),
+        ).fetchall()
+
+        if not batch_rows:
+            raise HTTPException(status_code=404, detail="해당 화주사/날짜 데이터 없음")
+
+        batch_ids = [r[0] for r in batch_rows]
+        ph = ",".join("?" * len(batch_ids))
+
+        # 전체 품목 조회
+        item_rows = con.execute(
+            f"""SELECT id, batch_id, line_no, item_name, option_text, unit_price,
+                       janggi_qty, actual_qty, missing_qty, status,
+                       matched_barcode, matched_vendor, matched_product, matched_option,
+                       supplier_location, supplier_contact, needs_matching, normal_qty,
+                       confirmed_by, item_wholesale, memo
+                FROM inbound_items
+                WHERE batch_id IN ({ph})
+                ORDER BY batch_id, line_no""",
+            batch_ids,
+        ).fetchall()
+
+        item_ids = [r[0] for r in item_rows]
+        idph = ",".join("?" * len(item_ids)) if item_ids else "NULL"
+
+        # 품목별 사진
+        photo_map: dict = {}
+        if item_ids:
+            for row in con.execute(
+                f"SELECT item_id, id, filename FROM inbound_item_photos WHERE item_id IN ({idph}) ORDER BY created_at",
+                item_ids,
+            ).fetchall():
+                photo_map.setdefault(row[0], []).append({"id": row[1], "url": _image_url(row[2])})
+
+        # 바코드 → item_id 매핑 (fallback용, matched_barcode 기준)
+        barcode_to_item_id: dict = {}
+        for r in item_rows:
+            bc = r[10]  # matched_barcode
+            if bc and bc not in barcode_to_item_id:
+                barcode_to_item_id[bc] = r[0]
+
+        # 불량 로그 전체 ① inbound_item_id 직접 연결
+        defect_map: dict = {}
+        defect_seen: set = set()
+        if item_ids:
+            for row in con.execute(
+                f"""SELECT inbound_item_id, id, 날짜, 불량명, 수량, 비고, 처리결과,
+                           before_image, after_image, 작성자
+                    FROM defect_log WHERE inbound_item_id IN ({idph})
+                    ORDER BY inbound_item_id, id""",
+                item_ids,
+            ).fetchall():
+                defect_map.setdefault(row[0], []).append({
+                    "id": row[1], "날짜": row[2], "불량명": row[3],
+                    "수량": row[4], "비고": row[5], "처리결과": row[6],
+                    "before_image": _image_url_defect(row[7]),
+                    "after_image": _image_url_defect(row[8]),
+                    "작성자": row[9],
+                })
+                defect_seen.add(row[1])
+
+        # 불량 로그 ② 바코드+날짜 fallback (봇 기록 등 inbound_item_id 없는 경우)
+        if barcode_to_item_id:
+            bcph = ",".join("?" * len(barcode_to_item_id))
+            for row in con.execute(
+                f"""SELECT 바코드, id, 날짜, 불량명, 수량, 비고, 처리결과,
+                           before_image, after_image, 작성자
+                    FROM defect_log
+                    WHERE 바코드 IN ({bcph}) AND 날짜=?
+                      AND (inbound_item_id IS NULL OR inbound_item_id='')
+                    ORDER BY 바코드, id""",
+                list(barcode_to_item_id.keys()) + [inbound_date],
+            ).fetchall():
+                if row[1] in defect_seen:
+                    continue
+                item_id = barcode_to_item_id.get(row[0])
+                if item_id:
+                    defect_map.setdefault(item_id, []).append({
+                        "id": row[1], "날짜": row[2], "불량명": row[3],
+                        "수량": row[4], "비고": row[5], "처리결과": row[6],
+                        "before_image": _image_url_defect(row[7]),
+                        "after_image": _image_url_defect(row[8]),
+                        "작성자": row[9],
+                    })
+                    defect_seen.add(row[1])
+
+        # 수선 로그 전체 ① inbound_item_id 직접 연결
+        repair_map: dict = {}
+        repair_seen: set = set()
+        if item_ids:
+            for row in con.execute(
+                f"""SELECT inbound_item_id, id, 날짜, 작업, 불량명, 수량, 비용, 비고,
+                           before_image, after_image, 작성자
+                    FROM repair_work_log WHERE inbound_item_id IN ({idph})
+                    ORDER BY inbound_item_id, id""",
+                item_ids,
+            ).fetchall():
+                repair_map.setdefault(row[0], []).append({
+                    "id": row[1], "날짜": row[2], "작업": row[3], "불량명": row[4],
+                    "수량": row[5], "비용": row[6], "비고": row[7],
+                    "before_image": _image_url_repair(row[8]),
+                    "after_image": _image_url_repair(row[9]),
+                    "작성자": row[10],
+                })
+                repair_seen.add(row[1])
+
+        # 수선 로그 ② 바코드+날짜 fallback (봇 기록 등 inbound_item_id 없는 경우)
+        if barcode_to_item_id:
+            bcph = ",".join("?" * len(barcode_to_item_id))
+            for row in con.execute(
+                f"""SELECT 바코드, id, 날짜, 작업, 불량명, 수량, 비용, 비고,
+                           before_image, after_image, 작성자
+                    FROM repair_work_log
+                    WHERE 바코드 IN ({bcph}) AND 날짜=?
+                      AND (inbound_item_id IS NULL OR inbound_item_id='')
+                    ORDER BY 바코드, id""",
+                list(barcode_to_item_id.keys()) + [inbound_date],
+            ).fetchall():
+                if row[1] in repair_seen:
+                    continue
+                item_id = barcode_to_item_id.get(row[0])
+                if item_id:
+                    repair_map.setdefault(item_id, []).append({
+                        "id": row[1], "날짜": row[2], "작업": row[3], "불량명": row[4],
+                        "수량": row[5], "비용": row[6], "비고": row[7],
+                        "before_image": _image_url_repair(row[8]),
+                        "after_image": _image_url_repair(row[9]),
+                        "작성자": row[10],
+                    })
+                    repair_seen.add(row[1])
+
+    # 도매처별 그룹핑
+    batch_map = {}
+    for r in batch_rows:
+        batch_map[r[0]] = {
+            "id": r[0], "vendor": r[1], "inbound_date": r[2], "status": r[3],
+            "memo": r[4], "wholesale": r[5] or "-",
+            "total_janggi_qty": r[6] or 0, "total_actual_qty": r[7] or 0,
+            "total_missing_qty": r[8] or 0,
+            "created_by": r[9], "closed_by": r[10], "closed_at": r[11],
+            "created_at": r[12],
+            "janggi_url": _image_url(r[13]) if r[13] else None,  # 장끼 사진
+            "items": [],
+        }
+
+    for r in item_rows:
+        iid = r[0]
+        item = {
+            "id": iid, "batch_id": r[1], "line_no": r[2],
+            "item_name": r[3], "option_text": r[4], "unit_price": r[5],
+            "janggi_qty": r[6] or 0, "actual_qty": r[7] or 0, "missing_qty": r[8] or 0,
+            "status": r[9], "matched_barcode": r[10],
+            "matched_vendor": r[11], "matched_product": r[12], "matched_option": r[13],
+            "supplier_location": r[14], "supplier_contact": r[15],
+            "needs_matching": bool(r[16]), "normal_qty": r[17] or 0,
+            "confirmed_by": r[18], "item_wholesale": r[19], "memo": r[20],
+            "photos": photo_map.get(iid, []),
+            "defect_logs": defect_map.get(iid, []),
+            "repair_logs": repair_map.get(iid, []),
+        }
+        if r[1] in batch_map:
+            batch_map[r[1]]["items"].append(item)
+
+    batches = list(batch_map.values())
+
+    total_janggi = sum(b["total_janggi_qty"] for b in batches)
+    total_actual = sum(b["total_actual_qty"] for b in batches)
+    total_missing = sum(b["total_missing_qty"] for b in batches)
+    all_items = [i for b in batches for i in b["items"]]
+    needs_matching_count = sum(1 for i in all_items if i["needs_matching"])
+    defect_total = sum(len(i["defect_logs"]) for i in all_items)
+    repair_total = sum(len(i["repair_logs"]) for i in all_items)
+
+    return {
+        "vendor": vendor,
+        "inbound_date": inbound_date,
+        "summary": {
+            "batches_count": len(batches),
+            "total_janggi_qty": total_janggi,
+            "total_actual_qty": total_actual,
+            "total_missing_qty": total_missing,
+            "items_count": len(all_items),
+            "needs_matching_count": needs_matching_count,
+            "defect_total": defect_total,
+            "repair_total": repair_total,
+        },
+        "batches": batches,
+    }
+
+
+# ── 입고 필터 옵션 (화주사·도매처 목록) ──────
+
+@router.get("/filter-options")
+def get_filter_options(authorization: Optional[str] = Header(None)):
+    """
+    입고일지 필터용 드롭다운 옵션 반환.
+    - vendors      : inbound_batches 에 실제 등록된 고유 화주사명
+    - wholesales   : inbound_batches.wholesale 의 고유 값
+    - alias_groups : inbound_vendor_aliases 의 canonical → aliases 매핑
+                     (입고 이력이 있는 canonical 만 포함)
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        vendor_rows = con.execute(
+            "SELECT DISTINCT vendor FROM inbound_batches WHERE vendor IS NOT NULL AND vendor != '' ORDER BY vendor"
+        ).fetchall()
+        wholesale_rows = con.execute(
+            "SELECT DISTINCT wholesale FROM inbound_batches WHERE wholesale IS NOT NULL AND wholesale != '' ORDER BY wholesale"
+        ).fetchall()
+        # 별칭: 입고 이력이 있는 canonical 만
+        batch_vendors = {r[0] for r in vendor_rows}
+        alias_rows = con.execute(
+            "SELECT canonical, aliases FROM inbound_vendor_aliases WHERE aliases IS NOT NULL AND aliases != '' ORDER BY canonical"
+        ).fetchall()
+        alias_groups = []
+        for canonical, aliases_str in alias_rows:
+            alias_list = [a.strip() for a in aliases_str.split(",") if a.strip()]
+            if not alias_list:
+                continue
+            # canonical 이 입고 이력에 있는 경우만 포함
+            # (별칭으로 저장된 경우도 포함하기 위해 _resolve_vendor_names 없이 단순 체크)
+            alias_groups.append({"canonical": canonical, "aliases": alias_list})
+    return {
+        "vendors": [r[0] for r in vendor_rows],
+        "wholesales": [r[0] for r in wholesale_rows],
+        "alias_groups": alias_groups,
+    }
+
+
 # ── 입고 배치 목록 ──────────────────────
 
 @router.get("/batches")
 def list_batches(
     vendor: Optional[str] = Query(None),
+    wholesale: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
@@ -587,7 +1225,13 @@ def list_batches(
     where = ["1=1"]
     params: list = []
     if vendor:
-        where.append("vendor=?"); params.append(vendor)
+        # 별칭 포함 업체명 목록으로 확장 (alias → canonical 포함) + 부분일치
+        vendor_names = _resolve_vendor_names(vendor)
+        ph = ",".join("?" * len(vendor_names))
+        where.append(f"(vendor IN ({ph}) OR vendor LIKE ? OR vendor_canonical IN ({ph}) OR vendor_canonical LIKE ?)")
+        params += vendor_names + [f"%{vendor}%"] + vendor_names + [f"%{vendor}%"]
+    if wholesale:
+        where.append("wholesale LIKE ?"); params.append(f"%{wholesale}%")
     if status:
         where.append("status=?"); params.append(status)
     if date_from:
@@ -645,7 +1289,7 @@ def get_batch(
     batch_id: str,
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 실수량 입력 링크는 로그인 없이 접근 가능 (배치 ID가 비밀 토큰 역할)
     with get_connection() as con:
         row = con.execute("""
             SELECT id, vendor, inbound_date, status, memo, receipt_id,
@@ -656,13 +1300,18 @@ def get_batch(
         """, (batch_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+        # 비로그인 공개 접근: 당일 자정 이후 만료
+        if not authorization:
+            _check_link_expiry(row[2])  # row[2] = inbound_date
         batch = _serialize_batch(row)
 
         items = con.execute("""
             SELECT id, batch_id, line_no, item_name, option_text, unit_price,
                    janggi_qty, actual_qty, missing_qty, status,
                    matched_barcode, matched_vendor, matched_product, matched_option,
-                   match_confidence, needs_matching, memo, created_at
+                   match_confidence, needs_matching, memo,
+                   supplier_location, supplier_contact, created_at, updated_at,
+                   confirmed_by, item_wholesale
             FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
         """, (batch_id,)).fetchall()
         item_list = []
@@ -707,37 +1356,62 @@ def update_batch(
 
 # ── 장끼 OCR + 자동 매칭 ─────────────────
 
+def _ocr_error_to_http(e: OcrError) -> HTTPException:
+    """OcrError → HTTPException 매핑."""
+    if e.kind in ("no_api_key", "auth", "model", "quota"):
+        return HTTPException(status_code=503, detail=e.user_msg)
+    if e.kind == "image":
+        return HTTPException(status_code=400, detail=e.user_msg)
+    if e.kind in ("timeout", "server"):
+        return HTTPException(status_code=504, detail=e.user_msg)
+    # schema, no_items
+    return HTTPException(status_code=422, detail=e.user_msg)
+
+
 @router.post("/batches/{batch_id}/ocr")
 async def run_ocr(
     batch_id: str,
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None),
 ):
-    """장끼 이미지 업로드 → OCR → repair_barcode 자동 매칭 → inbound_items 생성"""
+    """장끼 이미지 업로드 → OCR → repair_barcode 자동 매칭 → inbound_items 생성.
+
+    실패 시 기존 items, 배치 상태, 장끼 파일을 변경하지 않는다.
+    """
     user = _get_user(authorization)
 
-    # 배치 조회
+    # 1. 배치 조회
     with get_connection() as con:
         batch_row = con.execute(
             "SELECT id, vendor, status, vendor_canonical FROM inbound_batches WHERE id=?", (batch_id,)
         ).fetchone()
     if not batch_row:
         raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+    vendor = batch_row[3] or batch_row[1]  # vendor_canonical 우선
 
-    # vendor_canonical 우선 사용 (없으면 vendor 그대로)
-    vendor = batch_row[3] or batch_row[1]
+    # 2. 파일 읽기 (임시 — OCR 성공 후에만 저장)
+    raw = await file.read()
 
-    # 이미지 저장
-    janggi_filename = await _save_upload(file)
-    image_path = UPLOAD_DIR / janggi_filename
+    # 3. 이미지 정규화 (실패 → 400)
+    try:
+        norm_bytes, mime = _normalize_image(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    # OCR 실행
-    ocr_result = await _run_ocr(image_path)
+    # 4. OCR 실행 (실패 → 적절한 HTTP 오류, DB 변경 없음)
+    try:
+        ocr_result = await _run_ocr(norm_bytes, mime)
+    except OcrError as e:
+        raise _ocr_error_to_http(e)
 
-    receipt_data = ocr_result.get("receipt", {}) if ocr_result else {}
-    items_data = ocr_result.get("items", []) if ocr_result else []
+    # 5. 성공 → 파일 저장 후 트랜잭션 내 기존 OCR 품목 교체
+    janggi_filename = f"{uuid.uuid4().hex}.jpg"
+    (UPLOAD_DIR / janggi_filename).write_bytes(norm_bytes)
 
-    wholesale = receipt_data.get("storeName")  # 장끼의 발신인 = 도매처
+    receipt_data = ocr_result.get("receipt", {})
+    items_data = ocr_result.get("items", [])
+
+    wholesale = receipt_data.get("storeName")
     janggi_date = receipt_data.get("orderDate")
     janggi_no = receipt_data.get("receiptNo")
 
@@ -745,20 +1419,24 @@ async def run_ocr(
     created_items = []
 
     with get_connection() as con:
-        # 기존 OCR 생성 품목 삭제 (재시도 시)
-        con.execute("DELETE FROM inbound_items WHERE batch_id=? AND (memo LIKE '%OCR%' OR memo IS NULL)",
-                    (batch_id,))
+        # 기존 OCR 생성 품목 삭제 (재시도 시 교체)
+        con.execute(
+            "DELETE FROM inbound_items WHERE batch_id=? AND (memo LIKE '%OCR%' OR memo IS NULL)",
+            (batch_id,),
+        )
 
         for i, item in enumerate(items_data):
             item_id = uuid.uuid4().hex
             item_name = item.get("itemName") or ""
-            option_text = item.get("color") or item.get("optionText") or ""
+            color = item.get("color") or ""
+            size_str = item.get("size") or ""
+            option_text = item.get("optionText") or ""
+            # color / size / optionText 합산
+            combined_option = " ".join(filter(None, [color, size_str, option_text])) or None
             unit_price = item.get("unitPrice")
             janggi_qty = int(item.get("quantity") or 0)
 
-            # 자동 매칭
-            match = _match_barcode(vendor, item_name, option_text or None, wholesale)
-
+            match = _match_barcode(vendor, item_name, combined_option, wholesale)
             needs_review = bool(item.get("needsReview", False))
             needs_matching = match["needs_matching"] or needs_review
 
@@ -767,26 +1445,39 @@ async def run_ocr(
                     (id, batch_id, line_no, item_name, option_text, unit_price,
                      janggi_qty, actual_qty, missing_qty, status,
                      matched_barcode, matched_vendor, matched_product, matched_option,
-                     match_confidence, needs_matching, memo, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
+                     match_confidence, needs_matching, supplier_location, supplier_contact,
+                     memo, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                item_id, batch_id, i + 1, item_name, option_text or None, unit_price,
+                item_id, batch_id, i + 1, item_name, combined_option, unit_price,
                 janggi_qty,
                 match["matched_barcode"], match["matched_vendor"],
                 match["matched_product"], match["matched_option"],
                 match["match_confidence"], int(needs_matching),
+                match.get("supplier_location") or "",
+                match.get("supplier_contact") or "",
                 "OCR", now,
             ))
+            # OCR 자동매칭 성공 시 바코드 마스터에 도매처 정보 갱신
+            if match.get("matched_barcode") and wholesale:
+                _update_barcode_master(
+                    con,
+                    barcode=match["matched_barcode"],
+                    wholesale=wholesale or "",
+                    supplier_location=match.get("supplier_location") or "",
+                    supplier_contact=match.get("supplier_contact") or "",
+                    matched_product=match.get("matched_product") or "",
+                    matched_option=match.get("matched_option") or "",
+                )
             created_items.append({
                 "id": item_id,
                 "line_no": i + 1,
                 "item_name": item_name,
-                "option_text": option_text,
+                "option_text": combined_option,
                 "janggi_qty": janggi_qty,
                 **match,
             })
 
-        # 배치 업데이트
         _recalc_batch_totals(con, batch_id)
         con.execute("""
             UPDATE inbound_batches
@@ -799,7 +1490,11 @@ async def run_ocr(
     matched_count = sum(1 for it in created_items if not it["needs_matching"])
     needs_count = len(created_items) - matched_count
 
-    add_log("inbound", "ocr", f"OCR: {vendor} {len(created_items)}개 ({matched_count}매칭/{needs_count}확인필요)", user["user_id"])
+    add_log(
+        "inbound", "ocr",
+        f"OCR: {vendor} {len(created_items)}개 ({matched_count}매칭/{needs_count}확인필요)",
+        user["user_id"],
+    )
     return {
         "ok": True,
         "item_count": len(created_items),
@@ -855,7 +1550,19 @@ def update_item(
     body: InboundItemUpdate,
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 실수량 입력은 로그인 없이도 가능 — confirmed_by로 입력자 이름 기록
+    # 비로그인 공개 접근: 당일 자정 이후 만료
+    if not authorization:
+        with get_connection() as con:
+            batch_info = con.execute(
+                """SELECT b.inbound_date FROM inbound_items i
+                   JOIN inbound_batches b ON i.batch_id = b.id
+                   WHERE i.id=?""",
+                (item_id,)
+            ).fetchone()
+        if batch_info:
+            _check_link_expiry(batch_info[0])
+
     fields, params = [], []
 
     if body.actual_qty is not None:
@@ -868,6 +1575,18 @@ def update_item(
         fields.append("status=?"); params.append(body.status)
     if body.memo is not None:
         fields.append("memo=?"); params.append(body.memo)
+    if body.item_name is not None:
+        name_val = body.item_name.strip()
+        fields.append("item_name=?"); params.append(name_val if name_val else None)
+    if body.option_text is not None:
+        opt_val = body.option_text.strip()
+        fields.append("option_text=?"); params.append(opt_val if opt_val else None)
+    if body.item_wholesale is not None:
+        ws_val = body.item_wholesale.strip()
+        fields.append("item_wholesale=?"); params.append(ws_val if ws_val else None)
+    if body.confirmed_by is not None:
+        name = body.confirmed_by.strip()[:50]  # 최대 50자, 앞뒤 공백 제거
+        fields.append("confirmed_by=?"); params.append(name if name else None)
     if body.matched_barcode is not None:
         fields.append("matched_barcode=?"); params.append(body.matched_barcode)
         fields.append("needs_matching=0")
@@ -877,16 +1596,54 @@ def update_item(
         fields.append("matched_product=?"); params.append(body.matched_product)
     if body.matched_option is not None:
         fields.append("matched_option=?"); params.append(body.matched_option)
+    if body.supplier_location is not None:
+        fields.append("supplier_location=?"); params.append(body.supplier_location)
+    if body.supplier_contact is not None:
+        fields.append("supplier_contact=?"); params.append(body.supplier_contact)
 
     if not fields:
         raise HTTPException(status_code=400, detail="변경할 필드가 없습니다.")
 
+    fields.append("updated_at=CURRENT_TIMESTAMP")
     params.append(item_id)
     with get_connection() as con:
         con.execute(f"UPDATE inbound_items SET {', '.join(fields)} WHERE id=?", params)
         batch_row = con.execute("SELECT batch_id FROM inbound_items WHERE id=?", (item_id,)).fetchone()
         if batch_row:
             _recalc_batch_totals(con, batch_row[0])
+
+        # ── 바코드 마스터 자동 갱신 ──────────────────────────────────────
+        # matched_barcode / supplier / 상품명·옵션 중 하나라도 변경될 때
+        # repair_barcode 의 해당 바코드 레코드를 최신 상태로 갱신한다.
+        should_update_master = any([
+            body.matched_barcode, body.supplier_location, body.supplier_contact,
+            body.matched_product, body.matched_option,
+        ])
+        if should_update_master:
+            # 업데이트 후 품목 전체 상태 조회
+            item_state = con.execute(
+                """SELECT i.matched_barcode,
+                          COALESCE(i.item_wholesale, b.wholesale) AS wholesale,
+                          i.supplier_location,
+                          i.supplier_contact,
+                          i.matched_product,
+                          i.matched_option
+                   FROM inbound_items i
+                   JOIN inbound_batches b ON i.batch_id = b.id
+                   WHERE i.id=?""",
+                (item_id,)
+            ).fetchone()
+            if item_state and item_state[0]:  # matched_barcode 있을 때만
+                _update_barcode_master(
+                    con,
+                    barcode=item_state[0],
+                    wholesale=item_state[1] or "",
+                    supplier_location=item_state[2] or "",
+                    supplier_contact=item_state[3] or "",
+                    matched_product=item_state[4] or "",
+                    matched_option=item_state[5] or "",
+                )
+
         con.commit()
     return {"ok": True}
 
@@ -924,12 +1681,19 @@ async def upload_item_photo(
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 작업자도 사진 업로드 가능 (인증 불필요)
+    # 비로그인 공개 접근: 당일 자정 이후 만료
     with get_connection() as con:
         item_row = con.execute("SELECT batch_id FROM inbound_items WHERE id=?", (item_id,)).fetchone()
         if not item_row:
             raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
         batch_id = item_row[0]
+        if not authorization:
+            date_row = con.execute(
+                "SELECT inbound_date FROM inbound_batches WHERE id=?", (batch_id,)
+            ).fetchone()
+            if date_row:
+                _check_link_expiry(date_row[0])
 
     filename = await _save_upload(file)
     photo_id = uuid.uuid4().hex
@@ -972,13 +1736,181 @@ def serve_photo(
     filename: str,
     authorization: Optional[str] = Header(None),
 ):
-    _get_user(authorization)
+    # 작업자도 사진 조회 가능 (인증 불필요)
     # 경로 탈출 방지
     safe_name = Path(filename).name
     path = UPLOAD_DIR / safe_name
     if not path.exists():
         raise HTTPException(status_code=404, detail="사진을 찾을 수 없습니다.")
     return FileResponse(path)
+
+
+# ── 입고전표 엑셀 다운로드 ────────────────────
+
+@router.get("/batches/{batch_id}/export-xls")
+def export_inbound_xls(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    입고전표 형식 엑셀 다운로드.
+    파일명: {vendor_alias}_{YYYYMMDD}.xls → 중복 시 _01, _02 넘버링.
+    포맷:
+      A: 바코드/상품코드   B: 작업수량(실입고)  C: 요청수량(장끼)
+      D: 로케이션         E: 유통기한         F: 로트번호
+      G: 제조번호         H: 재고메모(품명/옵션)
+    """
+    import re as _re
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from fastapi.responses import StreamingResponse
+
+    _get_user(authorization)
+
+    with get_connection() as con:
+        batch_row = con.execute(
+            """SELECT vendor, vendor_canonical, inbound_date, wholesale
+               FROM inbound_batches WHERE id=?""",
+            (batch_id,)
+        ).fetchone()
+        if not batch_row:
+            raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+
+        vendor        = batch_row[0]
+        vendor_canon  = batch_row[1] or batch_row[0]
+        inbound_date  = batch_row[2]          # YYYY-MM-DD
+        date_str      = inbound_date.replace("-", "")  # YYYYMMDD
+
+        # 별칭: vendor_canonical 우선, 없으면 vendor
+        alias = vendor_canon or vendor
+        # 파일명에 안전한 문자로 변환 (공백·슬래시 제거)
+        safe_alias = _re.sub(r'[\\/:*?"<>|]', '_', alias).strip()
+        base_name  = f"{safe_alias}_{date_str}"
+
+        # 중복 넘버링: inbound_batch_exports 테이블 사용
+        try:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS inbound_batch_exports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            con.commit()
+        except Exception:
+            pass
+
+        existing = con.execute(
+            "SELECT COUNT(*) FROM inbound_batch_exports WHERE batch_id=?",
+            (batch_id,)
+        ).fetchone()[0]
+
+        if existing == 0:
+            final_name = f"{base_name}.xls"
+        else:
+            final_name = f"{base_name}_{existing:02d}.xls"
+
+        con.execute(
+            "INSERT INTO inbound_batch_exports (batch_id, filename) VALUES (?, ?)",
+            (batch_id, final_name)
+        )
+        con.commit()
+
+        # 품목 목록 + 로케이션 조회
+        items = con.execute(
+            """SELECT ii.line_no, ii.item_name, ii.option_text,
+                      ii.janggi_qty, ii.actual_qty, ii.missing_qty,
+                      ii.matched_barcode, ii.matched_product, ii.matched_option,
+                      ii.memo,
+                      COALESCE(rb.로케이션, '') AS location
+               FROM inbound_items ii
+               LEFT JOIN repair_barcode rb ON rb.바코드 = ii.matched_barcode
+               WHERE ii.batch_id = ?
+               ORDER BY ii.line_no""",
+            (batch_id,)
+        ).fetchall()
+
+    # ── 엑셀 생성 ──
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "입고전표"
+
+    # 스타일
+    hdr_font  = Font(name="굴림", bold=True, size=10)
+    hdr_fill  = PatternFill("solid", fgColor="CCFFCC")
+    hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    cell_font = Font(name="굴림", size=10)
+    thin      = Side(style="thin")
+    border    = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    HEADERS = [
+        "상품코드/바코드(택1)", "작업수량", "요청수량",
+        "로케이션", "유통기한", "로트번호", "제조번호", "재고메모",
+    ]
+
+    # 헤더 행
+    for col_idx, h in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font      = hdr_font
+        cell.fill      = hdr_fill
+        cell.alignment = hdr_align
+        cell.border    = border
+
+    # 컬럼 너비
+    col_widths = [22, 10, 10, 14, 12, 12, 12, 30]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.row_dimensions[1].height = 28
+
+    # 데이터 행
+    for row_idx, it in enumerate(items, 2):
+        (line_no, item_name, option_text, janggi_qty, actual_qty,
+         missing_qty, matched_barcode, matched_product, matched_option,
+         memo, location) = it
+
+        barcode  = matched_barcode or ""
+        memo_val = ""
+        if item_name:
+            memo_val = item_name
+        if option_text:
+            memo_val += f" [{option_text}]" if memo_val else option_text
+        if memo:
+            memo_val += f" / {memo}" if memo_val else memo
+
+        row_data = [
+            barcode,
+            actual_qty or 0,
+            janggi_qty or 0,
+            location,
+            "",   # 유통기한
+            "",   # 로트번호
+            "",   # 제조번호
+            memo_val,
+        ]
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.font   = cell_font
+            cell.border = border
+            if col_idx in (2, 3):
+                cell.alignment = Alignment(horizontal="center")
+
+    # 스트리밍 응답
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    from urllib.parse import quote
+    encoded = quote(final_name, safe="")
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
+        },
+    )
 
 
 # ── 마감 (AM/PM 분리) ────────────────────
@@ -1516,12 +2448,16 @@ def get_share_data(
     """공유 링크 데이터 (인증 불필요, 비밀번호 확인만)"""
     with get_connection() as con:
         row = con.execute(
-            "SELECT batch_id, password, expires_at, allow_excel FROM inbound_share_links WHERE token=?",
+            "SELECT batch_id, password, expires_at, allow_excel, revoked_at FROM inbound_share_links WHERE token=?",
             (token,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
-        batch_id, stored_pw, expires_at, allow_excel = row
+        batch_id, stored_pw, expires_at, allow_excel, revoked_at = row
+
+        # 폐기 확인
+        if revoked_at:
+            raise HTTPException(status_code=410, detail="폐기된 링크입니다.")
 
         # 만료 확인
         if expires_at and datetime.utcnow().strftime("%Y-%m-%d") > expires_at:
@@ -1738,3 +2674,536 @@ def link_repair_log(
         con.commit()
 
     return {**result, "repair_log_id": repair_log_id, "inbound_item_id": item_id}
+
+# ── OCR 미리보기 (DB 저장 없이 GPT 결과만 반환) ─────────────────
+
+@router.post("/ocr-preview")
+async def ocr_preview(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """장끼 이미지를 GPT Vision으로 분석해 품목 목록을 반환. DB·업로드 폴더에 저장하지 않음."""
+    _get_user(authorization)
+
+    raw = await file.read()
+
+    try:
+        norm_bytes, mime = _normalize_image(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        result = await _run_ocr(norm_bytes, mime)
+    except OcrError as e:
+        raise _ocr_error_to_http(e)
+
+    return {
+        "ok": True,
+        "receipt": result.get("receipt", {}),
+        "items": result.get("items", []),
+        "raw": result,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  입고 건별 통합 처리현황 (feat/inbound-unified-overview)
+# ═══════════════════════════════════════════════════════════════
+
+# ── 이미지 URL 헬퍼 (수선/불량일지용) ──────────────────────────
+
+def _image_url_repair(filename: Optional[str]) -> Optional[str]:
+    if not filename:
+        return None
+    return f"/repair-log/image/{filename}"
+
+
+def _image_url_defect(filename: Optional[str]) -> Optional[str]:
+    if not filename:
+        return None
+    return f"/defect-log/image/{filename}"
+
+
+# ── 처리 단계 추론 ──────────────────────────────────────────────
+
+def _infer_phase(
+    *,
+    status: str,
+    pending_qty: int,
+    defect_qty: int,
+    repairing_qty: int,
+    received_qty: int,
+) -> str:
+    """batch 상태 + 수량 현황 → 한국어 처리 단계."""
+    if status in ("ocr_pending", "confirming"):
+        return "입고 확인 중"
+    if status == "done":
+        return "최종 마감 완료"
+    if status == "cancelled":
+        return "취소"
+    # 진행 중
+    if repairing_qty > 0:
+        return "수선 진행 중"
+    if defect_qty > 0:
+        return "불량 확인 중"
+    if pending_qty > 0:
+        return "양품화 진행 중"
+    if received_qty > 0:
+        return "양품화 진행 중"
+    return "입고 확인 중"
+
+
+# ── 배치 통합현황 계산 헬퍼 ─────────────────────────────────────
+
+def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Optional[dict]:
+    """
+    batch_id 기준 통합현황 dict 반환.
+
+    public=True 이면 내부 전용 필드(원가, 직원명, 인증정보)를 제외한 공유 DTO 반환.
+    반환값이 None 이면 배치가 존재하지 않음.
+
+    수량 계산 원칙
+    ─────────────
+    장끼수량 = 실입고수량 + 미입고수량
+    실입고수량 = 미처리 + 정상처리 + 불량판정중 + 수선중 + 수선후정상 + 회생불가
+    최종정상수량 = 정상처리 + 수선후정상
+
+    상태 매핑 (inbound_items.status → 카테고리)
+    ─────────────────────────────────────────
+    pending       → 미처리 (actual_qty - normal_qty)
+    confirmed     → 정상처리 (actual_qty)
+    defect        → 불량판정중 (actual_qty)
+    repair        → 수선중 (actual_qty)
+    done          → 수선후정상 (actual_qty)
+    unrecoverable → 회생불가 (actual_qty)
+    missing       → (missing_qty 컬럼 사용)
+
+    pending 상태 품목의 경우 normal_qty(직원 입력)만큼 정상처리로 먼저 차감한다.
+    중복 집계 방지: status는 해당 품목의 현재 최종 상태 → 이력 기록은 defect/repair_log에만
+    """
+    batch_row = con.execute("""
+        SELECT id, vendor, inbound_date, status, memo,
+               janggi_filename, janggi_date, janggi_no, wholesale,
+               total_janggi_qty, total_actual_qty, total_missing_qty,
+               created_by, closed_by, closed_at, created_at, updated_at, vendor_canonical
+        FROM inbound_batches WHERE id=?
+    """, (batch_id,)).fetchone()
+
+    if not batch_row:
+        return None
+
+    # 품목 조회 (normal_qty 포함)
+    items_raw = con.execute("""
+        SELECT id, batch_id, line_no, item_name, option_text, unit_price,
+               janggi_qty, actual_qty, missing_qty, status,
+               matched_barcode, matched_vendor, matched_product, matched_option,
+               match_confidence, needs_matching, memo,
+               supplier_location, supplier_contact, created_at, updated_at,
+               confirmed_by, item_wholesale,
+               COALESCE(normal_qty, 0) AS normal_qty,
+               inbound_item_id, defect_case_id
+        FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
+    """, (batch_id,)).fetchall()
+
+    item_ids = [r[0] for r in items_raw]
+
+    # 품목 사진
+    photos_map: dict = {}
+    if item_ids:
+        ph_rows = con.execute(
+            f"SELECT item_id, id, filename FROM inbound_item_photos "
+            f"WHERE item_id IN ({','.join('?'*len(item_ids))})",
+            item_ids
+        ).fetchall()
+        for ph in ph_rows:
+            photos_map.setdefault(ph[0], []).append({
+                "id": ph[1],
+                "url": _image_url(ph[2]),
+                "filename": ph[2],
+            })
+
+    # 불량일지 (inbound_item_id 연결)
+    defect_map: dict = {}
+    if item_ids:
+        try:
+            d_rows = con.execute(
+                f"SELECT inbound_item_id, id, 날짜, 불량명, 수량, 비고, 처리결과, "
+                f"before_image, after_image, extra_images "
+                f"FROM defect_log WHERE inbound_item_id IN ({','.join('?'*len(item_ids))})"
+                f" ORDER BY COALESCE(저장시간, 날짜) ASC",
+                item_ids
+            ).fetchall()
+            for dr in d_rows:
+                entry = {
+                    "id": dr[1], "날짜": dr[2], "불량명": dr[3],
+                    "수량": dr[4], "비고": dr[5], "처리결과": dr[6],
+                    "before_image": _image_url_defect(dr[7]),
+                    "after_image": _image_url_defect(dr[8]),
+                }
+                if not public:
+                    entry["extra_images"] = dr[9]
+                defect_map.setdefault(dr[0], []).append(entry)
+        except Exception:
+            pass  # 테이블 없으면 빈 맵
+
+    # 수선일지 (inbound_item_id 연결)
+    repair_map: dict = {}
+    if item_ids:
+        try:
+            r_rows = con.execute(
+                f"SELECT inbound_item_id, id, 날짜, 작업, 불량명, 수량, 비용, 비고, "
+                f"before_image, after_image "
+                f"FROM repair_work_log WHERE inbound_item_id IN ({','.join('?'*len(item_ids))})"
+                f" ORDER BY COALESCE(저장시간, 날짜) ASC",
+                item_ids
+            ).fetchall()
+            for rr in r_rows:
+                entry = {
+                    "id": rr[1], "날짜": rr[2], "작업": rr[3], "불량명": rr[4],
+                    "수량": rr[5], "비고": rr[7],
+                    "before_image": _image_url_repair(rr[8]),
+                    "after_image": _image_url_repair(rr[9]),
+                }
+                if not public:
+                    entry["비용"] = rr[6]
+                repair_map.setdefault(rr[0], []).append(entry)
+        except Exception:
+            pass
+
+    # ── 수량 집계 ──────────────────────────────────────────
+    total_janggi = 0
+    total_actual = 0
+    total_missing = 0
+    agg_pending = 0
+    agg_normal = 0
+    agg_defect = 0
+    agg_repairing = 0
+    agg_repaired_good = 0
+    agg_unrecoverable = 0
+
+    item_list = []
+    for r in items_raw:
+        item_id   = r[0]
+        janggi_qty  = r[6] or 0
+        actual_qty  = r[7] or 0
+        missing_qty = r[8] or 0
+        status      = r[9] or "pending"
+        normal_qty_col = r[23] or 0  # 직원 입력 정상처리 수량
+
+        # 상태별 수량 계산 (중복 집계 없음: 현재 최종 상태만 한 번 반영)
+        if status == "confirmed":
+            i_normal   = actual_qty
+            i_pending  = 0
+        elif status == "pending":
+            i_normal   = min(normal_qty_col, actual_qty)
+            i_pending  = max(actual_qty - i_normal, 0)
+        else:
+            i_normal  = 0
+            i_pending = 0
+
+        i_defect      = actual_qty if status == "defect"        else 0
+        i_repairing   = actual_qty if status == "repair"        else 0
+        i_repaired    = actual_qty if status == "done"          else 0
+        i_unrecov     = actual_qty if status == "unrecoverable" else 0
+
+        total_janggi    += janggi_qty
+        total_actual    += actual_qty
+        total_missing   += missing_qty
+        agg_pending     += i_pending
+        agg_normal      += i_normal
+        agg_defect      += i_defect
+        agg_repairing   += i_repairing
+        agg_repaired_good += i_repaired
+        agg_unrecoverable += i_unrecov
+
+        item_data: dict = {
+            "id":          item_id,
+            "line_no":     r[2],
+            "item_name":   r[3],
+            "option_text": r[4],
+            "janggi_qty":  janggi_qty,
+            "actual_qty":  actual_qty,
+            "missing_qty": missing_qty,
+            "status":      status,
+            "status_label": ITEM_STATUS_LABELS.get(status, status),
+            "matched_barcode": r[10],
+            "matched_vendor":  r[11],
+            "matched_product": r[12],
+            "matched_option":  r[13],
+            "breakdown": {
+                "normal":       i_normal,
+                "pending":      i_pending,
+                "defect":       i_defect,
+                "repairing":    i_repairing,
+                "repaired_good": i_repaired,
+                "unrecoverable": i_unrecov,
+            },
+            "photos":      photos_map.get(item_id, []),
+            "defect_logs": defect_map.get(item_id, []),
+            "repair_logs": repair_map.get(item_id, []),
+        }
+
+        if not public:
+            item_data["unit_price"]       = r[5]
+            item_data["item_wholesale"]   = r[22]
+            item_data["normal_qty_input"] = normal_qty_col
+            item_data["needs_matching"]   = bool(r[15])
+            item_data["match_confidence"] = r[14]
+            item_data["supplier_location"] = r[17]
+            item_data["supplier_contact"]  = r[18]
+            item_data["confirmed_by"]      = r[21]
+            item_data["memo"]              = r[16]
+            item_data["defect_case_id"]    = r[25]
+            item_data["inbound_item_id"]   = r[24]
+
+        item_list.append(item_data)
+
+    # ── 진행률 (0 나누기 안전 처리) ─────────────────────────
+    final_good_qty   = agg_normal + agg_repaired_good
+    received_qty     = total_actual
+    expected_qty     = total_janggi
+
+    inbound_progress = (
+        round((received_qty + total_missing) / expected_qty * 100, 1)
+        if expected_qty > 0 else 0.0
+    )
+    processing_progress = (
+        round((agg_normal + agg_repaired_good + agg_unrecoverable) / received_qty * 100, 1)
+        if received_qty > 0 else 0.0
+    )
+
+    phase = _infer_phase(
+        status=batch_row[3],
+        pending_qty=agg_pending,
+        defect_qty=agg_defect,
+        repairing_qty=agg_repairing,
+        received_qty=received_qty,
+    )
+
+    # ── 처리 이력 타임라인 ─────────────────────────────────
+    timeline: list = []
+    for item_data in item_list:
+        for d in item_data["defect_logs"]:
+            timeline.append({
+                "type": "defect",
+                "date": d.get("날짜"),
+                "item_name": item_data["item_name"],
+                "detail": d.get("불량명"),
+                "qty": d.get("수량"),
+                "result": d.get("처리결과"),
+                "id": d.get("id"),
+            })
+        for rr in item_data["repair_logs"]:
+            timeline.append({
+                "type": "repair",
+                "date": rr.get("날짜"),
+                "item_name": item_data["item_name"],
+                "detail": rr.get("작업"),
+                "qty": rr.get("수량"),
+                "id": rr.get("id"),
+            })
+    timeline.sort(key=lambda e: (e.get("date") or ""), reverse=True)
+
+    janggi_url = _image_url(batch_row[5]) if batch_row[5] else None
+
+    batch_info: dict = {
+        "id":            batch_row[0],
+        "vendor":        batch_row[1],
+        "inbound_date":  batch_row[2],
+        "status":        batch_row[3],
+        "status_label":  STATUS_LABELS.get(batch_row[3], batch_row[3]),
+        "wholesale":     batch_row[8],
+        "janggi_date":   batch_row[6],
+        "janggi_no":     batch_row[7],
+        "janggi_url":    janggi_url,
+        "phase":         phase,
+        "closed_at":     batch_row[14],
+    }
+    if not public:
+        batch_info["memo"]       = batch_row[4]
+        batch_info["created_by"] = batch_row[12]
+        batch_info["closed_by"]  = batch_row[13]
+
+    return {
+        "batch": batch_info,
+        "summary": {
+            "expected_qty":      expected_qty,
+            "received_qty":      received_qty,
+            "missing_qty":       total_missing,
+            "pending_qty":       agg_pending,
+            "normal_qty":        agg_normal,
+            "defect_pending_qty": agg_defect,
+            "repairing_qty":     agg_repairing,
+            "repaired_good_qty": agg_repaired_good,
+            "unrecoverable_qty": agg_unrecoverable,
+            "final_good_qty":    final_good_qty,
+            "inbound_progress":  inbound_progress,
+            "processing_progress": processing_progress,
+        },
+        "items":    item_list,
+        "timeline": timeline[:50],
+        "photos":   {"janggi": janggi_url},
+    }
+
+
+# ── 통합현황 조회 (내부, 인증 필요) ────────────────────────────
+
+@router.get("/batches/{batch_id}/overview")
+def get_batch_overview(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """입고 건별 통합 처리현황 (내부 직원용, 로그인 필요)."""
+    _get_user(authorization)
+    with get_connection() as con:
+        overview = _compute_batch_overview(batch_id, con, public=False)
+    if overview is None:
+        raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+    return overview
+
+
+# ── 정상처리 수량 입력·정정 ────────────────────────────────────
+
+class NormalQtyUpdate(BaseModel):
+    normal_qty: int
+    confirmed_by: Optional[str] = None
+
+
+@router.patch("/items/{item_id}/normal-qty")
+def update_normal_qty(
+    item_id: str,
+    body: NormalQtyUpdate,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    정상처리 수량 입력·정정 (인증 불필요 — 작업자 직접 입력).
+
+    - normal_qty < 0  → 거부
+    - normal_qty > actual_qty  → 거부 (실입고수량 초과 불가)
+    - normal_qty == actual_qty → status 자동 'confirmed'
+    - normal_qty < actual_qty, 현재 confirmed → status 'pending' 으로 복귀
+    """
+    if body.normal_qty < 0:
+        raise HTTPException(status_code=400, detail="수량은 0 이상이어야 합니다.")
+
+    with get_connection() as con:
+        item_row = con.execute(
+            "SELECT id, batch_id, actual_qty, status FROM inbound_items WHERE id=?",
+            (item_id,)
+        ).fetchone()
+        if not item_row:
+            raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+
+        actual_qty = item_row[2] or 0
+        current_status = item_row[3] or "pending"
+
+        if body.normal_qty > actual_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"정상처리 수량({body.normal_qty})이 "
+                    f"실입고수량({actual_qty})을 초과할 수 없습니다."
+                ),
+            )
+
+        # 자동 상태 전환 (중복 집계 방지: pending/confirmed 사이만 자동 전환)
+        if body.normal_qty == actual_qty and actual_qty > 0:
+            new_status = "confirmed"
+        elif body.normal_qty < actual_qty and current_status == "confirmed":
+            new_status = "pending"
+        else:
+            new_status = current_status  # 다른 상태(defect/repair 등)는 유지
+
+        fields = ["normal_qty=?", "status=?", "updated_at=CURRENT_TIMESTAMP"]
+        params: list = [body.normal_qty, new_status]
+        if body.confirmed_by is not None:
+            name = body.confirmed_by.strip()[:50]
+            fields.append("confirmed_by=?")
+            params.append(name if name else None)
+        params.append(item_id)
+
+        con.execute(f"UPDATE inbound_items SET {', '.join(fields)} WHERE id=?", params)
+        _recalc_batch_totals(con, item_row[1])
+        con.commit()
+
+    return {"ok": True, "normal_qty": body.normal_qty, "status": new_status}
+
+
+# ── 공유 링크 폐기 ──────────────────────────────────────────────
+
+@router.delete("/share/{token}")
+def revoke_share_link(
+    token: str,
+    authorization: Optional[str] = Header(None),
+):
+    """공유 링크 폐기 (인증 필요). 이후 해당 링크 접근 불가."""
+    _get_user(authorization)
+
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT token, revoked_at FROM inbound_share_links WHERE token=?",
+            (token,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
+        if row[1]:
+            return {"ok": True, "already_revoked": True, "revoked_at": row[1]}
+
+        con.execute(
+            "UPDATE inbound_share_links SET revoked_at=CURRENT_TIMESTAMP WHERE token=?",
+            (token,)
+        )
+        con.commit()
+
+    return {"ok": True, "revoked": True}
+
+
+# ── 공유 통합현황 (화주사용, 인증 불필요) ──────────────────────
+
+@router.get("/share/{token}/overview")
+def get_share_overview(
+    token: str,
+    password: Optional[str] = None,
+):
+    """
+    공유 링크 토큰으로 통합현황 조회 (화주사용, 인증 불필요).
+
+    보안:
+    - 토큰에 연결된 화주사·batch만 조회 가능
+    - 비밀번호, 만료, 폐기 검증
+    - 다른 batch·화주사 접근 불가
+    - 내부 필드(원가·직원명·인증정보) 제외한 공유 전용 DTO 반환
+    """
+    with get_connection() as con:
+        link_row = con.execute(
+            "SELECT batch_id, password, expires_at, revoked_at FROM inbound_share_links WHERE token=?",
+            (token,)
+        ).fetchone()
+        if not link_row:
+            raise HTTPException(status_code=404, detail="링크를 찾을 수 없습니다.")
+
+        batch_id, stored_pw, expires_at, revoked_at = link_row
+
+        # 폐기 확인
+        if revoked_at:
+            raise HTTPException(status_code=410, detail="폐기된 링크입니다.")
+
+        # 만료 확인
+        if expires_at and datetime.utcnow().strftime("%Y-%m-%d") > expires_at:
+            raise HTTPException(status_code=410, detail="링크가 만료되었습니다.")
+
+        # 비밀번호 확인
+        if stored_pw:
+            if not password:
+                return {"needs_password": True}
+            if not _verify_password(password, stored_pw):
+                raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+
+        # 공유 DTO 생성 (public=True → 내부 필드 제외)
+        overview = _compute_batch_overview(batch_id, con, public=True)
+
+    if overview is None:
+        raise HTTPException(status_code=404, detail="입고 데이터를 찾을 수 없습니다.")
+
+    overview["expires_at"] = expires_at
+    overview["updated_at"] = overview["batch"].get("closed_at") or overview["batch"].get("inbound_date")
+    return overview

@@ -5,6 +5,7 @@ libsql-client
 fastapi
 uvicorn[standard]
 python-multipart
+Pillow>=10.0
 
 # 네이버 웍스 봇 연동
 httpx

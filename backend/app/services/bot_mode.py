@@ -245,6 +245,11 @@ def apply_mode_command(user_id: str, channel_id: Optional[str], command: dict) -
         mgr.clear_state(uid, cid)
         mgr.clear_query_context(uid, cid)
         clear_photo_inbox(uid, cid)
+        # 입고모드 시작 시 대화 상태를 초기화해서 화주사 대기 단계로 진입
+        if command["mode"] == MODE_INBOUND:
+            from backend.app.services.inbound_bot import _set_pending
+            _set_pending(uid, cid, {"step": "wait_vendor"}, "어느 화주사의 입고인가요?")
+            return "입고모드를 시작했어요.\n어느 화주사의 입고인가요?"
         return f"{MODE_LABELS[command['mode']]}를 시작했어요."
     if action == "end":
         current = get_mode(uid, cid)

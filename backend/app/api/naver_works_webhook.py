@@ -452,6 +452,7 @@ async def process_image_upload(
                 )
                 if reply:
                     await _send_prefixed(nw_client, user_id, channel_id, reply, channel_type)
+                # reply가 None이면 현재 단계에서 사진이 불필요 → 별도 안내 없음
             else:
                 await _send_prefixed(nw_client, user_id, channel_id, "입고모드에서 장끼 사진을 받으려면 먼저 `입고`를 입력해 화주사를 설정해주세요.", channel_type)
             return

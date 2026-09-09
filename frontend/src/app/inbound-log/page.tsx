@@ -8,16 +8,24 @@ import {
   listInboundBatches,
   createInboundBatch,
   getInboundBatch,
+  updateInboundBatch,
   runInboundOcr,
   updateInboundItem,
+  addInboundItem,
+  deleteInboundItem,
   closeInboundBatch,
   deleteInboundBatch,
   listInboundVendors,
-  downloadInboundBarcodePdf,
   upsertVendorAlias,
+  getRepairBarcodes,
+  getVendorAliases,
+  getInboundFilterOptions,
+  InboundAliasGroup,
   InboundBatch,
   InboundItem,
   InboundRegisteredVendor,
+  VendorAlias,
+  RepairBarcode,
 } from '@/lib/api';
 
 // ─────────────────────────────────────
@@ -76,15 +84,7 @@ const STATUS_COLOR: Record<string, { bg: string; color: string }> = {
   cancelled:    { bg: '#fee2e2', color: '#dc2626' },
 };
 
-const ITEM_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
-  pending:       { bg: '#f3f4f6', color: '#6b7280' },
-  confirmed:     { bg: '#dcfce7', color: '#15803d' },
-  missing:       { bg: '#fee2e2', color: '#dc2626' },
-  defect:        { bg: '#ffedd5', color: '#c2410c' },
-  repair:        { bg: '#fef9c3', color: '#a16207' },
-  unrecoverable: { bg: '#fecaca', color: '#991b1b' },
-  done:          { bg: '#bbf7d0', color: '#166534' },
-};
+
 
 function StatusBadge({ status, label, map }: { status: string; label: string; map: Record<string, { bg: string; color: string }> }) {
   const c = map[status] || { bg: '#f3f4f6', color: '#6b7280' };
@@ -159,16 +159,106 @@ function Modal({ title, onClose, children, wide }: {
 // 품목 행 컴포넌트
 // ─────────────────────────────────────
 
-function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string; onUpdated: () => void }) {
+function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, batchWholesale, batchCreatedBy }: {
+  item: InboundItem;
+  token: string;
+  onUpdated: () => void;
+  onDelete?: () => void;
+  batchVendor?: string;
+  batchDate?: string;
+  batchWholesale?: string | null;
+  batchCreatedBy?: string | null;
+}) {
   const [actualQty, setActualQty] = useState(item.actual_qty);
   const [missingQty, setMissingQty] = useState(item.missing_qty);
   const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({
+    matched_barcode: item.matched_barcode || '',
+    matched_vendor: item.matched_vendor || '',
+    matched_product: item.matched_product || '',
+    matched_option: item.matched_option || '',
+    supplier_location: item.supplier_location || '',
+    supplier_contact: item.supplier_contact || '',
+    memo: item.memo || '',
+  });
+  const [editSaving, setEditSaving] = useState(false);
+
+  // 바코드 검색 (수정 폼용) — 업체 사전 로드 후 로컬 필터
+  const [bcQuery, setBcQuery] = useState(item.matched_barcode || '');
+  const [bcAllItems, setBcAllItems] = useState<RepairBarcode[]>([]);  // 업체 전체 바코드
+  const [bcOpen, setBcOpen] = useState(false);
+  const [bcLoading, setBcLoading] = useState(false);
+  const bcRef = useRef<HTMLDivElement>(null);
+
+  // editMode 열릴 때 해당 업체(+ 별칭) 바코드 전체 사전 로드
+  useEffect(() => {
+    if (!editMode || !batchVendor) return;
+    setBcLoading(true);
+    // 별칭 그룹 조회 후 해당 업체의 모든 별칭 포함해서 로드
+    getVendorAliases(token)
+      .then(({ aliases }) => {
+        const group = aliases.find(a =>
+          a.canonical === batchVendor || a.aliases.includes(batchVendor)
+        );
+        const vendors = group
+          ? [group.canonical, ...group.aliases]
+          : [batchVendor];
+        return Promise.all(vendors.map(v => getRepairBarcodes({ vendor: v, limit: 500 })));
+      })
+      .then(results => {
+        const seen = new Set<string>();
+        setBcAllItems(results.flatMap(r => r.items).filter(b => {
+          if (seen.has(b.바코드)) return false;
+          seen.add(b.바코드); return true;
+        }));
+      })
+      .catch(() => setBcAllItems([]))
+      .finally(() => setBcLoading(false));
+  }, [editMode, batchVendor, token]);
+
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (bcRef.current && !bcRef.current.contains(e.target as Node)) setBcOpen(false);
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  // 로컬 필터 (업체 사전 로드된 목록에서 검색)
+  const bcFiltered = bcQuery.length > 0
+    ? bcAllItems.filter(b => {
+        const q = bcQuery.toLowerCase();
+        return b.바코드.toLowerCase().includes(q)
+          || b.제품명.toLowerCase().includes(q)
+          || (b.옵션 || '').toLowerCase().includes(q);
+      }).slice(0, 50)
+    : bcAllItems.slice(0, 50);
+
+  function handleBcInput(v: string) {
+    setBcQuery(v);
+    setEditForm(f => ({ ...f, matched_barcode: v }));
+    setBcOpen(true);
+  }
+
+  function selectBcItem(b: RepairBarcode) {
+    setBcQuery(b.바코드);
+    setBcOpen(false);
+    setEditForm(f => ({
+      ...f,
+      matched_barcode: b.바코드,
+      matched_vendor: b.도매처 || b.업체명 || f.matched_vendor,
+      matched_product: b.제품명 || f.matched_product,
+      matched_option: b.옵션 || f.matched_option,
+      supplier_location: b.도매처주소 || f.supplier_location,
+      supplier_contact: b.도매처연락처 || f.supplier_contact,
+    }));
+  }
 
   async function save() {
     setSaving(true);
     try {
-      const newStatus = actualQty > 0 ? 'confirmed' : missingQty > 0 ? 'missing' : 'pending';
-      await updateInboundItem(token, item.id, { actual_qty: actualQty, missing_qty: missingQty, status: newStatus });
+      await updateInboundItem(token, item.id, { actual_qty: actualQty, missing_qty: missingQty });
       onUpdated();
     } catch {
       alert('저장 실패');
@@ -177,51 +267,500 @@ function ItemRow({ item, token, onUpdated }: { item: InboundItem; token: string;
     }
   }
 
-  const tdStyle: React.CSSProperties = { padding: '0.55rem 0.75rem', fontSize: '0.82rem', verticalAlign: 'middle', borderBottom: '1px solid #f3f4f6' };
+  async function saveEdit() {
+    setEditSaving(true);
+    try {
+      await updateInboundItem(token, item.id, {
+        matched_barcode: editForm.matched_barcode || undefined,
+        matched_vendor: editForm.matched_vendor || undefined,
+        matched_product: editForm.matched_product || undefined,
+        matched_option: editForm.matched_option || undefined,
+        supplier_location: editForm.supplier_location || undefined,
+        supplier_contact: editForm.supplier_contact || undefined,
+        memo: editForm.memo || undefined,
+      });
+      setEditMode(false);
+      onUpdated();
+    } catch {
+      alert('수정 저장 실패');
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  const tdStyle: React.CSSProperties = { padding: '0.5rem 0.6rem', fontSize: '0.8rem', verticalAlign: 'middle', borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' };
+  const tdWrap: React.CSSProperties = { ...tdStyle, whiteSpace: 'normal', minWidth: 90 };
+  const editInput: React.CSSProperties = { ...inputStyle, width: '100%', fontSize: '0.8rem', padding: '0.3rem 0.5rem' };
+  const photoCount = item.photos?.length ?? 0;
+  const bcDropStyle: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 700,
+    background: '#fff', border: '1px solid #c7d2fe', borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 200, overflowY: 'auto', marginTop: 2,
+  };
 
   return (
-    <tr style={{ background: '#fff' }}>
-      <td style={{ ...tdStyle, color: '#9ca3af', textAlign: 'center' }}>{item.line_no}</td>
-      <td style={tdStyle}>
-        <div style={{ fontWeight: 500 }}>{item.item_name || '-'}</div>
-        {item.option_text && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.option_text}</div>}
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#1d4ed8' }}>{item.janggi_qty}</td>
-      <td style={tdStyle}>
-        {item.matched_product ? (
-          <div style={{ fontSize: '0.78rem' }}>
-            <div style={{ color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor}</div>
-            <div>{item.matched_product}</div>
-            {item.matched_option && <div style={{ color: 'var(--text-secondary)' }}>{item.matched_option}</div>}
-            <div style={{ color: '#9ca3af', fontFamily: 'monospace' }}>{item.matched_barcode}</div>
+    <>
+      <tr style={{ background: '#fff' }}>
+        {/* No */}
+        <td style={{ ...tdStyle, color: '#9ca3af', textAlign: 'center' }}>{item.line_no}</td>
+        {/* 날짜 */}
+        <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{batchDate || '-'}</td>
+        {/* 업체명 */}
+        <td style={{ ...tdStyle, fontWeight: 500 }}>{batchVendor || '-'}</td>
+        {/* 도매처 */}
+        <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{batchWholesale || '-'}</td>
+        {/* 제품명 */}
+        <td style={tdWrap}>
+          <div style={{ fontWeight: 500 }}>{item.item_name || '-'}</div>
+        </td>
+        {/* 옵션 */}
+        <td style={tdWrap}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>{item.option_text || '-'}</div>
+        </td>
+        {/* 바코드 */}
+        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '0.75rem', color: '#6b7280' }}>
+          {item.matched_barcode || '-'}
+        </td>
+        {/* 장끼수량 */}
+        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#1d4ed8' }}>{item.janggi_qty}</td>
+        {/* 실입고 */}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <input
+            type="number" min={0} value={actualQty}
+            onChange={e => setActualQty(Number(e.target.value))}
+            style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
+          />
+        </td>
+        {/* 미입고 */}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <input
+            type="number" min={0} value={missingQty}
+            onChange={e => setMissingQty(Number(e.target.value))}
+            style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
+          />
+        </td>
+        {/* 공급처상품명 */}
+        <td style={tdWrap}>
+          <div style={{ fontSize: '0.78rem', color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor || '-'}</div>
+          <div style={{ fontSize: '0.78rem' }}>{item.matched_product || '-'}</div>
+        </td>
+        {/* 공급처옵션 */}
+        <td style={{ ...tdStyle, color: 'var(--text-secondary)', fontSize: '0.78rem' }}>{item.matched_option || '-'}</td>
+        {/* 공급처위치 */}
+        <td style={{ ...tdStyle, fontSize: '0.78rem', color: '#374151' }}>{item.supplier_location || '-'}</td>
+        {/* 공급처연락처 */}
+        <td style={{ ...tdStyle, fontSize: '0.78rem', color: '#374151' }}>{item.supplier_contact || '-'}</td>
+        {/* 작성자 */}
+        <td style={{ ...tdStyle, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{batchCreatedBy || '-'}</td>
+        {/* 수정시간 */}
+        <td style={{ ...tdStyle, fontSize: '0.73rem', color: '#9ca3af' }}>
+          {item.updated_at ? item.updated_at.slice(0, 16).replace('T', ' ') : '-'}
+        </td>
+        {/* 사진 */}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          {photoCount > 0
+            ? <span style={{ fontSize: '0.78rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, padding: '2px 6px' }}>📷 {photoCount}</span>
+            : <span style={{ fontSize: '0.75rem', color: '#d1d5db' }}>-</span>
+          }
+        </td>
+        {/* 액션 */}
+        <td style={{ ...tdStyle, textAlign: 'center' }}>
+          <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
+            <button onClick={save} disabled={saving} style={{ ...btn('#4361ee'), fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}>
+              {saving ? '…' : '저장'}
+            </button>
+            <button
+              onClick={() => setEditMode(m => !m)}
+              style={{ ...btn(editMode ? '#6b7280' : '#f59e0b'), fontSize: '0.73rem', padding: '0.2rem 0.5rem' }}
+            >
+              ✏️
+            </button>
+            {onDelete && (
+              <button
+                onClick={() => { if (confirm(`품목 "${item.item_name || item.line_no + '번'}"을 삭제하시겠습니까?`)) onDelete(); }}
+                style={{ ...btn('#ef4444'), fontSize: '0.73rem', padding: '0.2rem 0.5rem' }}
+              >
+                🗑
+              </button>
+            )}
           </div>
-        ) : (
-          <span style={{ fontSize: '0.78rem', color: '#dc2626' }}>미매칭</span>
-        )}
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <input
-          type="number" min={0} value={actualQty}
-          onChange={e => setActualQty(Number(e.target.value))}
-          style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
-        />
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <input
-          type="number" min={0} value={missingQty}
-          onChange={e => setMissingQty(Number(e.target.value))}
-          style={{ width: 56, ...inputStyle, textAlign: 'center', padding: '0.25rem 0.3rem' }}
-        />
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <StatusBadge status={item.status} label={item.status_label} map={ITEM_STATUS_COLOR} />
-      </td>
-      <td style={{ ...tdStyle, textAlign: 'center' }}>
-        <button onClick={save} disabled={saving} style={btn('#4361ee')}>
-          {saving ? '…' : '저장'}
+        </td>
+      </tr>
+      {/* 수정 폼 인라인 */}
+      {editMode && (
+        <tr style={{ background: '#f0f4ff' }}>
+          <td colSpan={19} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e0e7ff' }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4361ee', marginBottom: 8 }}>✏️ 품목 정보 수정</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
+              {/* 바코드 검색 */}
+              <div ref={bcRef} style={{ position: 'relative', gridColumn: '1 / span 2' }}>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>
+                  바코드 검색
+                  {bcLoading && <span style={{ marginLeft: 6, fontSize: '0.65rem', color: '#a5b4fc' }}>검색 중…</span>}
+                </div>
+                <input
+                  value={bcQuery}
+                  onChange={e => handleBcInput(e.target.value)}
+                  onFocus={() => bcAllItems.length > 0 && setBcOpen(true)}
+                  style={editInput}
+                  placeholder="바코드 번호 또는 제품명 입력"
+                />
+                {bcOpen && bcFiltered.length > 0 && (
+                  <div style={bcDropStyle}>
+                    {bcFiltered.map(b => (
+                      <div
+                        key={b.바코드}
+                        onMouseDown={() => selectBcItem(b)}
+                        style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', fontSize: '0.78rem' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#eef2ff')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
+                      >
+                        <span style={{ fontWeight: 600, color: '#4361ee' }}>{b.바코드}</span>
+                        <span style={{ marginLeft: 6, color: '#374151' }}>{b.제품명}</span>
+                        {b.옵션 && <span style={{ marginLeft: 4, color: '#6b7280' }}>/ {b.옵션}</span>}
+                        {b.도매처 && <span style={{ marginLeft: 6, fontSize: '0.72rem', color: '#9ca3af' }}>[{b.도매처}]</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처(업체명)</div>
+                <input value={editForm.matched_vendor} onChange={e => setEditForm(f => ({ ...f, matched_vendor: e.target.value }))} style={editInput} placeholder="공급처" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 상품명</div>
+                <input value={editForm.matched_product} onChange={e => setEditForm(f => ({ ...f, matched_product: e.target.value }))} style={editInput} placeholder="공급처 상품명" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 옵션</div>
+                <input value={editForm.matched_option} onChange={e => setEditForm(f => ({ ...f, matched_option: e.target.value }))} style={editInput} placeholder="공급처 옵션" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 위치</div>
+                <input value={editForm.supplier_location} onChange={e => setEditForm(f => ({ ...f, supplier_location: e.target.value }))} style={editInput} placeholder="예) A동 3층" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 연락처</div>
+                <input value={editForm.supplier_contact} onChange={e => setEditForm(f => ({ ...f, supplier_contact: e.target.value }))} style={editInput} placeholder="010-0000-0000" />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>메모</div>
+                <input value={editForm.memo} onChange={e => setEditForm(f => ({ ...f, memo: e.target.value }))} style={editInput} placeholder="메모" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={saveEdit} disabled={editSaving} style={{ ...btn('#4361ee'), opacity: editSaving ? 0.5 : 1 }}>
+                {editSaving ? '저장 중…' : '수정 저장'}
+              </button>
+              <button onClick={() => setEditMode(false)} style={btnOutline}>취소</button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// ─────────────────────────────────────
+// 품목 직접 추가 섹션 (BatchDetailModal 내부용)
+// ─────────────────────────────────────
+
+function AddItemSection({ token, batchId, batchVendor, onAdded }: {
+  token: string;
+  batchId: string;
+  batchVendor: string;
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  // 업체 선택
+  const [vendorList, setVendorList] = useState<InboundRegisteredVendor[]>([]);
+  const [aliasList, setAliasList] = useState<VendorAlias[]>([]);
+  const [vendorQuery, setVendorQuery] = useState('');
+  const [vendorOpen, setVendorOpen] = useState(false);
+  const [selectedVendors, setSelectedVendors] = useState<string[]>([]);
+  const [vendorDisplay, setVendorDisplay] = useState('');
+  // 바코드 검색
+  const [barcodeResults, setBarcodeResults] = useState<RepairBarcode[]>([]);
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [selectedBarcode, setSelectedBarcode] = useState<RepairBarcode | null>(null);
+  // 폼
+  const [form, setForm] = useState({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+  const [adding, setAdding] = useState(false);
+
+  const vendorRef = useRef<HTMLDivElement>(null);
+  const barcodeRef = useRef<HTMLDivElement>(null);
+
+  // 업체/별칭 목록 로드
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([listInboundVendors(token), getVendorAliases(token)])
+      .then(([v, a]) => {
+        setVendorList(v.registered);
+        setAliasList(a.aliases);
+        // batch 업체와 일치하는 등록업체 자동 선택
+        const matched = v.registered.find(r => r.name === batchVendor || r.aliases.includes(batchVendor));
+        const aliasMatched = a.aliases.find(al => al.canonical === batchVendor);
+        if (matched && !vendorDisplay) {
+          setVendorDisplay(matched.name);
+          setVendorQuery(matched.name);
+          setSelectedVendors([matched.name]);
+        } else if (aliasMatched && !vendorDisplay) {
+          setVendorDisplay(aliasMatched.canonical);
+          setVendorQuery(aliasMatched.canonical);
+          setSelectedVendors(aliasMatched.aliases.length > 0 ? aliasMatched.aliases : [aliasMatched.canonical]);
+        }
+      })
+      .catch(() => {});
+  }, [open, token, batchVendor]);
+
+  // 바코드 목록 로드
+  useEffect(() => {
+    if (selectedVendors.length === 0) { setBarcodeResults([]); return; }
+    setBarcodeLoading(true);
+    Promise.all(selectedVendors.map(v => getRepairBarcodes({ vendor: v, limit: 300 })))
+      .then(results => {
+        const seen = new Set<string>();
+        setBarcodeResults(results.flatMap(r => r.items).filter(b => {
+          if (seen.has(b.바코드)) return false;
+          seen.add(b.바코드); return true;
+        }));
+      })
+      .catch(() => setBarcodeResults([]))
+      .finally(() => setBarcodeLoading(false));
+  }, [selectedVendors]);
+
+  // 외부 클릭 닫기
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (vendorRef.current && !vendorRef.current.contains(e.target as Node)) setVendorOpen(false);
+      if (barcodeRef.current && !barcodeRef.current.contains(e.target as Node)) setBarcodeOpen(false);
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  function selectVendor(name: string, members: string[]) {
+    setVendorDisplay(name); setVendorQuery(name);
+    setSelectedVendors(members.length > 0 ? members : [name]);
+    setVendorOpen(false); setSelectedBarcode(null); setBarcodeQuery('');
+  }
+
+  function selectBarcode(b: RepairBarcode) {
+    setSelectedBarcode(b);
+    setBarcodeQuery(`${b.바코드} — ${b.제품명}${b.옵션 ? ' / ' + b.옵션 : ''}`);
+    setBarcodeOpen(false);
+    setForm(f => ({ ...f, item_name: f.item_name || b.제품명, option_text: f.option_text || (b.옵션 || '') }));
+  }
+
+  const fvq = vendorQuery.toLowerCase();
+  const fVendors = vendorList.filter(v => v.name.toLowerCase().includes(fvq) || v.aliases.some(a => a.toLowerCase().includes(fvq)));
+  const fAliases = aliasList.filter(a => a.canonical.toLowerCase().includes(fvq) || a.aliases.some(al => al.toLowerCase().includes(fvq)));
+  const fbq = barcodeQuery.toLowerCase();
+  const fBarcodes = barcodeResults.filter(b =>
+    b.바코드.toLowerCase().includes(fbq) || b.제품명.toLowerCase().includes(fbq) ||
+    (b.옵션 || '').toLowerCase().includes(fbq) || b.업체명.toLowerCase().includes(fbq)
+  );
+
+  function resetForm() {
+    setForm({ item_name: '', option_text: '', janggi_qty: 1, unit_price: '' });
+    setSelectedBarcode(null); setBarcodeQuery('');
+  }
+
+  async function handleAdd() {
+    if (!form.item_name.trim()) return;
+    setAdding(true);
+    try {
+      await addInboundItem(token, batchId, {
+        item_name: form.item_name.trim(),
+        option_text: form.option_text.trim() || undefined,
+        janggi_qty: form.janggi_qty,
+        unit_price: form.unit_price ? Number(form.unit_price) : undefined,
+        memo: 'manual',
+        matched_barcode: selectedBarcode?.바코드,
+        matched_vendor: selectedBarcode?.업체명,
+        matched_product: selectedBarcode?.제품명,
+        matched_option: selectedBarcode?.옵션 || undefined,
+      });
+      resetForm();
+      onAdded();
+    } catch (e) {
+      alert('품목 추가 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const inp: React.CSSProperties = { ...inputStyle, width: '100%' };
+  const lbl: React.CSSProperties = { fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 3, display: 'block' };
+  const dropBase: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 600,
+    background: '#fff', border: '1px solid var(--border)', borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto', marginTop: 2,
+  };
+  const grpLbl: React.CSSProperties = {
+    padding: '4px 10px', fontSize: 10, color: '#9ca3af', fontWeight: 700,
+    textTransform: 'uppercase', background: '#fafafa', borderBottom: '1px solid #f3f4f6',
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '0.5rem 1rem', border: '2px dashed #c7d2fe',
+          background: '#eef2ff', color: '#4361ee', borderRadius: 6,
+          fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', marginBottom: '0.75rem',
+        }}
+      >
+        ➕ 품목 직접 추가
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: '1rem', border: '1px solid #c7d2fe', borderRadius: 8, background: '#f8faff', padding: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#4361ee' }}>➕ 품목 직접 추가</span>
+        <button onClick={() => { setOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '1.1rem' }}>×</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
+        {/* 업체 선택 */}
+        <div ref={vendorRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
+          <label style={lbl}>업체 (등록업체·별칭 검색)</label>
+          <input
+            value={vendorQuery}
+            onChange={e => { setVendorQuery(e.target.value); setVendorOpen(true); if (!e.target.value) { setSelectedVendors([]); setVendorDisplay(''); } }}
+            onFocus={() => setVendorOpen(true)}
+            placeholder="업체명 또는 별칭 검색…"
+            style={inp}
+          />
+          {vendorOpen && (fVendors.length > 0 || fAliases.length > 0) && (
+            <div style={dropBase}>
+              {fVendors.length > 0 && (
+                <>
+                  <div style={grpLbl}>📦 등록 업체</div>
+                  {fVendors.map(v => (
+                    <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
+                      style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13, background: vendorDisplay === v.name ? '#eef2ff' : undefined }}>
+                      <strong>{v.name}</strong>
+                      {v.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>({v.aliases.join(', ')})</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+              {fAliases.length > 0 && (
+                <>
+                  <div style={grpLbl}>🏷️ 화주사 별칭</div>
+                  {fAliases.map(a => (
+                    <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
+                      style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}>
+                      <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{a.canonical}</span>
+                      {a.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>→ {a.aliases.join(', ')}</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 바코드 검색 */}
+        <div ref={barcodeRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
+          <label style={lbl}>바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
+          {selectedVendors.length === 0 ? (
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af', padding: '0.4rem 0' }}>↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
+          ) : barcodeLoading ? (
+            <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>바코드 목록 불러오는 중…</div>
+          ) : barcodeResults.length === 0 ? (
+            <div style={{ padding: '0.6rem 0.8rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: '0.82rem' }}>
+              <span style={{ color: '#dc2626' }}>"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
+              <a href="/journal-settings" target="_blank" style={{ color: '#4361ee', fontWeight: 600 }}>신규 바코드 등록 →</a>
+              <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 3 }}>아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
+            </div>
+          ) : (
+            <>
+              {selectedBarcode ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
+                    ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
+                  </div>
+                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    value={barcodeQuery}
+                    onChange={e => { setBarcodeQuery(e.target.value); setBarcodeOpen(true); }}
+                    onFocus={() => setBarcodeOpen(true)}
+                    placeholder={`바코드·제품명 검색 (${barcodeResults.length}개 중)`}
+                    style={inp}
+                  />
+                  {barcodeOpen && fBarcodes.length > 0 && (
+                    <div style={dropBase}>
+                      {fBarcodes.slice(0, 50).map(b => (
+                        <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
+                          style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 500 }}>{b.제품명}</span>
+                              {b.옵션 && <span style={{ fontSize: 12, color: '#6b7280' }}> / {b.옵션}</span>}
+                              <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{b.바코드}</div>
+                            </div>
+                            <span style={{ fontSize: 11, color: '#7c3aed', flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 품명 */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={lbl}>품명 *</label>
+          <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))} placeholder="예) 타원 백팩" style={inp} />
+        </div>
+
+        {/* 옵션 */}
+        <div>
+          <label style={lbl}>옵션</label>
+          <input value={form.option_text} onChange={e => setForm(f => ({ ...f, option_text: e.target.value }))} placeholder="블랙, L" style={inp} />
+        </div>
+
+        {/* 장끼 수량 */}
+        <div>
+          <label style={lbl}>장끼 수량 *</label>
+          <input type="number" min={1} value={form.janggi_qty} onChange={e => setForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
+            style={{ ...inp, textAlign: 'center', fontWeight: 700, fontSize: '1rem' }} />
+        </div>
+
+        {/* 단가 */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={lbl}>단가 (선택)</label>
+          <input type="number" min={0} value={form.unit_price} onChange={e => setForm(f => ({ ...f, unit_price: e.target.value }))}
+            placeholder="0" style={{ ...inp, maxWidth: 160 }} />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => { setOpen(false); resetForm(); }} style={btnOutline}>취소</button>
+        <button
+          onClick={handleAdd}
+          disabled={adding || !form.item_name.trim()}
+          style={{ ...btn('#4361ee'), opacity: (adding || !form.item_name.trim()) ? 0.5 : 1 }}
+        >
+          {adding ? '추가 중…' : '➕ 추가'}
         </button>
-      </td>
-    </tr>
+      </div>
+    </div>
   );
 }
 
@@ -237,19 +776,6 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [closeLoading, setCloseLoading] = useState(false);
   const [warning, setWarning] = useState('');
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [shareLink, setShareLink] = useState('');
-  const [shareLoading, setShareLoading] = useState(false);
-  const [sharePassword, setSharePassword] = useState('');
-  const [sharePasswordOpen, setSharePasswordOpen] = useState(false);
-  // 비밀번호 1회 표시: 생성 직후에만 보이고, 확인 버튼 누르면 소멸
-  const [shownPasswordOnce, setShownPasswordOnce] = useState('');
-  const [closeSummary, setCloseSummary] = useState<{
-    total_janggi_qty: number;
-    정상_qty: number; 수선중_qty: number; 수선후정상_qty: number;
-    회생불가_qty: number; 미입고_qty: number;
-    formula_ok: boolean; formula_str: string; discrepancy: number;
-  } | null>(null);
 
   const reload = useCallback(async () => {
     const data = await getInboundBatch(token, batch.id);
@@ -270,69 +796,18 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
     }
   }
 
-  async function handlePdf() {
-    setPdfLoading(true);
+  async function handleClose() {
+    setCloseLoading(true); setWarning('');
     try {
-      await downloadInboundBarcodePdf(token, batch.id, batch.vendor, batch.inbound_date);
-    } catch (e: unknown) {
-      alert('PDF 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setPdfLoading(false);
-    }
-  }
-
-  async function handleShare() {
-    setShareLoading(true);
-    try {
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${API_BASE}/inbound/batches/${batch.id}/share`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          expires_days: 14,
-          allow_excel: false,
-          password: sharePassword.trim() || null,
-        }),
-      });
-      const data = await res.json();
-      setShareLink(data.link);
-      // 비밀번호 원문 — 생성 응답에서 한 번만 받아 표시
-      setShownPasswordOnce(data.password_once || '');
-      setSharePassword('');      // 입력창 즉시 초기화
-      setSharePasswordOpen(false);
-    } catch (e: unknown) {
-      alert('공유 링크 생성 실패: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setShareLoading(false);
-    }
-  }
-
-  async function handleClose(closeType: 'am' | 'pm') {
-    setCloseLoading(true); setWarning(''); setCloseSummary(null);
-    try {
-      const res = await closeInboundBatch(token, batch.id, closeType);
+      const res = await closeInboundBatch(token, batch.id, 'am');
       if (!res.ok && res.warning) {
         setWarning(res.warning);
       } else {
-        // PM 마감이면 정산 데이터 저장
-        if (closeType === 'pm' && res.close_type === 'pm') {
-          setCloseSummary({
-            total_janggi_qty: res.total_janggi_qty ?? 0,
-            정상_qty:          res.정상_qty ?? 0,
-            수선중_qty:         res.수선중_qty ?? 0,
-            수선후정상_qty:     res.수선후정상_qty ?? 0,
-            회생불가_qty:       res.회생불가_qty ?? 0,
-            미입고_qty:         res.미입고_qty ?? 0,
-            formula_ok:        res.formula_ok ?? true,
-            formula_str:       res.formula_str ?? '',
-            discrepancy:       res.discrepancy ?? 0,
-          });
-        }
         await reload();
         onUpdated();
       }
     } catch (e: unknown) {
-      alert('마감 실패: ' + (e instanceof Error ? e.message : String(e)));
+      alert('접수완료 처리 실패: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setCloseLoading(false);
     }
@@ -410,168 +885,87 @@ function BatchDetailModal({ batch: initialBatch, token, onClose, onUpdated }: {
         </div>
       )}
 
+      {/* 품목 직접 추가 섹션 */}
+      <AddItemSection
+        token={token}
+        batchId={batch.id}
+        batchVendor={batch.vendor}
+        onAdded={reload}
+      />
+
       {/* 품목 테이블 */}
       {items.length > 0 ? (
         <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
             <thead>
               <tr style={{ background: '#f8f9fc' }}>
-                {['No', '품명/옵션', '장끼수량', '매칭 상품', '실입고', '미입고', '상태', ''].map(h => (
-                  <th key={h} style={{ padding: '0.6rem 0.75rem', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: h === '품명/옵션' || h === '매칭 상품' ? 'left' : 'center', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                    {h}
+                {[
+                  { label: 'No', align: 'center' },
+                  { label: '날짜', align: 'left' },
+                  { label: '업체명', align: 'left' },
+                  { label: '도매처', align: 'left' },
+                  { label: '제품명', align: 'left' },
+                  { label: '옵션', align: 'left' },
+                  { label: '바코드', align: 'left' },
+                  { label: '장끼수량', align: 'center' },
+                  { label: '실입고', align: 'center' },
+                  { label: '미입고', align: 'center' },
+                  { label: '공급처상품명', align: 'left' },
+                  { label: '공급처옵션', align: 'left' },
+                  { label: '공급처위치', align: 'left' },
+                  { label: '공급처연락처', align: 'left' },
+                  { label: '작성자', align: 'left' },
+                  { label: '수정시간', align: 'left' },
+                  { label: '사진', align: 'center' },
+                  { label: '', align: 'center' },
+                ].map(h => (
+                  <th key={h.label} style={{ padding: '0.55rem 0.6rem', fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600, textAlign: h.align as 'left' | 'center', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: '#f8f9fc', position: 'sticky', top: 0, zIndex: 1 }}>
+                    {h.label}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {items.map(item => (
-                <ItemRow key={item.id} item={item} token={token} onUpdated={reload} />
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  token={token}
+                  onUpdated={reload}
+                  batchVendor={batch.vendor}
+                  batchDate={batch.inbound_date}
+                  batchWholesale={batch.wholesale}
+                  batchCreatedBy={batch.created_by}
+                  onDelete={async () => {
+                    try {
+                      await deleteInboundItem(token, item.id);
+                      await reload();
+                    } catch (e) {
+                      alert('삭제 실패: ' + (e instanceof Error ? e.message : String(e)));
+                    }
+                  }}
+                />
               ))}
             </tbody>
           </table>
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)', fontSize: '0.875rem', background: '#f8f9fc', borderRadius: 8, marginBottom: '1rem' }}>
-          장끼 OCR을 실행하면 품목이 표시됩니다.
+        <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.875rem', background: '#f8f9fc', borderRadius: 8, marginBottom: '1rem' }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: 8 }}>📋</div>
+          <div>품목이 없습니다.</div>
+          <div style={{ fontSize: '0.8rem', color: '#9ca3af', marginTop: 4 }}>위 "품목 직접 추가" 버튼으로 추가하거나, 장끼 사진 OCR을 실행하세요.</div>
         </div>
       )}
 
-      {/* ── 오후 마감 정산 결과 ─────────── */}
-      {closeSummary && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.9rem 1rem', background: closeSummary.formula_ok ? '#f0f9ff' : '#fff7ed', border: `1px solid ${closeSummary.formula_ok ? '#bae6fd' : '#fed7aa'}`, borderRadius: 8, fontSize: '0.85rem' }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>📊 오후 최종 마감 정산</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-            {[
-              { label: '장끼수량',   qty: closeSummary.total_janggi_qty, color: '#1d4ed8', bg: '#dbeafe' },
-              { label: '일반정상',   qty: closeSummary.정상_qty,          color: '#15803d', bg: '#dcfce7' },
-              { label: '수선중',     qty: closeSummary.수선중_qty,         color: '#a16207', bg: '#fef9c3' },
-              { label: '수선후정상', qty: closeSummary.수선후정상_qty,     color: '#166534', bg: '#bbf7d0' },
-              { label: '회생불가',   qty: closeSummary.회생불가_qty,       color: '#991b1b', bg: '#fecaca' },
-              { label: '미입고',     qty: closeSummary.미입고_qty,         color: '#dc2626', bg: '#fee2e2' },
-            ].map(s => (
-              <div key={s.label} style={{ background: s.bg, borderRadius: 8, padding: '6px 12px', textAlign: 'center', minWidth: 68 }}>
-                <div style={{ fontSize: '0.7rem', color: s.color, fontWeight: 700 }}>{s.label}</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: s.color }}>{s.qty}<span style={{ fontSize: '0.68rem' }}>개</span></div>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: '0.78rem', color: closeSummary.formula_ok ? '#0369a1' : '#c2410c', fontFamily: 'monospace', background: closeSummary.formula_ok ? '#e0f2fe' : '#fff7ed', padding: '5px 8px', borderRadius: 5 }}>
-            {closeSummary.formula_str}
-          </div>
-          {!closeSummary.formula_ok && (
-            <div style={{ marginTop: 6, fontSize: '0.8rem', color: '#c2410c', fontWeight: 600 }}>
-              ⚠️ 수량 합계가 맞지 않습니다. 품목 수량을 다시 확인해주세요.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 공유 링크 비밀번호 입력 ─────── */}
-      {sharePasswordOpen && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.85rem 1rem', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 8 }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6, color: '#7c3aed' }}>🔒 공유 링크 비밀번호 (선택)</div>
-          <div style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: 8 }}>
-            비밀번호를 설정하면 화주사가 링크를 열 때 입력해야 합니다.<br />
-            <strong>생성 후 비밀번호는 아래에 딱 한 번만 표시됩니다.</strong>
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              type="text"
-              value={sharePassword}
-              onChange={e => setSharePassword(e.target.value)}
-              placeholder="비밀번호 없으면 비워두세요"
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <button onClick={handleShare} disabled={shareLoading} style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}>
-              {shareLoading ? '생성 중…' : '링크 생성'}
-            </button>
-            <button onClick={() => { setSharePasswordOpen(false); setSharePassword(''); }} style={btnOutline}>취소</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 공유 링크 1회 비밀번호 표시 ─── */}
-      {shareLink && shownPasswordOnce && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.9rem 1rem', background: '#fefce8', border: '2px solid #fde047', borderRadius: 8, fontSize: '0.85rem' }}>
-          <div style={{ fontWeight: 700, color: '#a16207', marginBottom: 6 }}>🔐 비밀번호 (지금만 표시 — 저장해두세요)</div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '0.15em', color: '#92400e', fontFamily: 'monospace', marginBottom: 8 }}>
-            {shownPasswordOnce}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              onClick={() => { navigator.clipboard.writeText(shownPasswordOnce); alert('비밀번호를 클립보드에 복사했습니다.'); }}
-              style={{ ...btn('#a16207'), fontSize: '0.8rem' }}
-            >
-              복사
-            </button>
-            <button
-              onClick={() => setShownPasswordOnce('')}
-              style={{ ...btnOutline, fontSize: '0.8rem', color: '#dc2626', borderColor: '#dc2626' }}
-            >
-              확인했습니다 (닫기)
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 공유 링크 표시 ─────────────── */}
-      {shareLink && (
-        <div style={{ marginBottom: '0.75rem', padding: '0.75rem 1rem', background: '#f0fff4', border: '1px solid #bbf7d0', borderRadius: 6, fontSize: '0.85rem' }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>🔗 화주사 공유 링크 (14일 유효)</div>
-          <div style={{ wordBreak: 'break-all', color: '#4361ee', marginBottom: 6 }}>{shareLink}</div>
-          <button onClick={() => { navigator.clipboard.writeText(shareLink); }} style={{ fontSize: '0.78rem', ...btnOutline }}>링크 복사</button>
-        </div>
-      )}
-
-      {/* ── PDF + 공유 버튼 ────────────── */}
-      {(() => {
-        const totalLabels = items.reduce((s, i) => s + (i.actual_qty || 0), 0);
-        const matchedItems = items.filter(i => i.actual_qty > 0 && i.matched_barcode).length;
-        return (
-          <div style={{ marginBottom: '0.75rem' }}>
-            {totalLabels > 0 && (
-              <div style={{ fontSize: '0.8rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 6, padding: '5px 10px', marginBottom: 6 }}>
-                🏷️ 라벨 예상 <strong>{totalLabels}장</strong> (바코드 매칭 품목 {matchedItems}건)
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <button onClick={handlePdf} disabled={pdfLoading} style={{ ...btn('#0f766e'), opacity: pdfLoading ? 0.5 : 1 }}>
-                {pdfLoading ? '생성 중…' : `📄 바코드 PDF${totalLabels > 0 ? ` (${totalLabels}장)` : ''}`}
-              </button>
-              <button
-                onClick={() => { setSharePasswordOpen(true); setShareLink(''); setShownPasswordOnce(''); }}
-                disabled={shareLoading}
-                style={{ ...btn('#7c3aed'), opacity: shareLoading ? 0.5 : 1 }}
-              >
-                🔗 화주사 공유 링크
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── AM / PM 마감 버튼 ─────────── */}
+      {/* ── 접수완료 버튼 ─────────── */}
       <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-        {/* 오전: confirming 상태에서만 */}
         {batch.status === 'confirming' && (
           <button
-            onClick={() => handleClose('am')}
+            onClick={handleClose}
             disabled={closeLoading}
             style={{ ...btn('#0369a1'), opacity: closeLoading ? 0.5 : 1 }}
-            title="수량 확인 완료 후 양품화 단계로 진행"
           >
-            {closeLoading ? '처리 중…' : '☀️ 오전 입고접수 완료'}
-          </button>
-        )}
-        {/* 오후: inbound_done / grading / repairing 상태에서만 */}
-        {['inbound_done', 'grading', 'repairing'].includes(batch.status) && (
-          <button
-            onClick={() => handleClose('pm')}
-            disabled={closeLoading}
-            style={{ ...btn('#7c3aed'), opacity: closeLoading ? 0.5 : 1 }}
-            title="양품화 및 수선 완료 후 최종 수량 확정"
-          >
-            {closeLoading ? '처리 중…' : '🌆 오후 최종 마감'}
+            {closeLoading ? '처리 중…' : '✅ 완료'}
           </button>
         )}
       </div>
@@ -885,6 +1279,79 @@ function CreateBatchModal({ token, onClose, onCreated }: {
 }
 
 // ─────────────────────────────────────
+// 배치 수정 모달
+// ─────────────────────────────────────
+
+function EditBatchModal({ batch, token, onClose, onUpdated }: {
+  batch: InboundBatch; token: string; onClose: () => void; onUpdated: () => void;
+}) {
+  const [vendor, setVendor] = useState(batch.vendor);
+  const [inboundDate, setInboundDate] = useState(batch.inbound_date);
+  const [memo, setMemo] = useState(batch.memo || '');
+  const [wholesale, setWholesale] = useState(batch.wholesale || '');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await updateInboundBatch(token, batch.id, {
+        vendor: vendor.trim(),
+        inbound_date: inboundDate,
+        memo: memo.trim() || undefined,
+      });
+      onUpdated();
+      onClose();
+    } catch (e: unknown) {
+      alert('수정 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fRow: React.CSSProperties = { marginBottom: '1rem' };
+
+  return (
+    <Modal title="입고 정보 수정" onClose={onClose}>
+      <div>
+        <div style={fRow}>
+          <label style={labelStyle}>화주사</label>
+          <input
+            value={vendor} onChange={e => setVendor(e.target.value)}
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </div>
+        <div style={fRow}>
+          <label style={labelStyle}>입고일</label>
+          <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={inputStyle} />
+        </div>
+        <div style={fRow}>
+          <label style={labelStyle}>도매처</label>
+          <input
+            value={wholesale} onChange={e => setWholesale(e.target.value)}
+            placeholder="도매처 이름"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </div>
+        <div style={fRow}>
+          <label style={labelStyle}>메모</label>
+          <input
+            value={memo} onChange={e => setMemo(e.target.value)}
+            placeholder="메모"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '0.5rem' }}>
+          <button onClick={onClose} style={btnOutline}>취소</button>
+          <button onClick={handleSave} disabled={saving} style={{ ...btn('#f59e0b'), opacity: saving ? 0.5 : 1 }}>
+            {saving ? '저장 중…' : '수정 저장'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────
 // 메인 페이지
 // ─────────────────────────────────────
 
@@ -896,11 +1363,17 @@ export default function InboundLogPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<InboundBatch | null>(null);
+  const [editingBatch, setEditingBatch] = useState<InboundBatch | null>(null);
 
   const [filterVendor, setFilterVendor] = useState('');
+  const [filterWholesale, setFilterWholesale] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const [wholesaleOptions, setWholesaleOptions] = useState<string[]>([]);
+  const [aliasGroups, setAliasGroups] = useState<InboundAliasGroup[]>([]);
+  const [filterAlias, setFilterAlias] = useState('');
 
   useEffect(() => { setToken(localStorage.getItem('token') || ''); }, []);
 
@@ -909,7 +1382,8 @@ export default function InboundLogPage() {
     setLoading(true);
     try {
       const res = await listInboundBatches(tok, {
-        vendor: filterVendor || undefined,
+        vendor: filterAlias || filterVendor || undefined,
+        wholesale: filterWholesale || undefined,
         status: filterStatus || undefined,
         dateFrom: filterDateFrom || undefined,
         dateTo: filterDateTo || undefined,
@@ -921,9 +1395,22 @@ export default function InboundLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterVendor, filterStatus, filterDateFrom, filterDateTo]);
+  }, [filterVendor, filterAlias, filterWholesale, filterStatus, filterDateFrom, filterDateTo]);
+
+  useEffect(() => {
+    if (!token) return;
+    getInboundFilterOptions(token)
+      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); setAliasGroups(r.alias_groups ?? []); })
+      .catch(() => {});
+  }, [token]);
 
   useEffect(() => { if (token) load(token); }, [token, load]);
+
+  function refreshFilterOptions(tok: string) {
+    getInboundFilterOptions(tok)
+      .then(r => { setVendorOptions(r.vendors); setWholesaleOptions(r.wholesales); setAliasGroups(r.alias_groups ?? []); })
+      .catch(() => {});
+  }
 
   async function openDetail(batch: InboundBatch) {
     try {
@@ -975,9 +1462,54 @@ export default function InboundLogPage() {
       {/* 필터 */}
       <Card style={{ marginBottom: '1rem', padding: '0.85rem 1rem' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'flex-end' }}>
+          {/* 화주사 셀렉트박스 */}
           <div>
-            <label style={labelStyle}>화주사</label>
-            <input value={filterVendor} onChange={e => setFilterVendor(e.target.value)} placeholder="전체" style={{ ...inputStyle, width: 120 }} />
+            <label style={labelStyle}>화주사 (업체명)</label>
+            <select
+              value={filterVendor}
+              onChange={e => { setFilterVendor(e.target.value); setFilterAlias(''); }}
+              style={{ ...inputStyle, width: 150 }}
+            >
+              <option value="">전체</option>
+              {vendorOptions.map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+          {/* 별칭 셀렉트박스 */}
+          <div>
+            <label style={labelStyle}>
+              화주사 (별칭)
+              <span style={{ fontSize: '0.68rem', fontWeight: 400, color: '#9ca3af', marginLeft: 4 }}>일지설정 기준</span>
+            </label>
+            <select
+              value={filterAlias}
+              onChange={e => { setFilterAlias(e.target.value); setFilterVendor(''); }}
+              style={{ ...inputStyle, width: 160 }}
+            >
+              <option value="">전체</option>
+              {aliasGroups.map(g =>
+                g.aliases.map(alias => (
+                  <option key={`${g.canonical}__${alias}`} value={alias}>
+                    {alias} ({g.canonical})
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          {/* 도매처 셀렉트박스 */}
+          <div>
+            <label style={labelStyle}>도매처</label>
+            <select
+              value={filterWholesale}
+              onChange={e => setFilterWholesale(e.target.value)}
+              style={{ ...inputStyle, width: 150 }}
+            >
+              <option value="">전체</option>
+              {wholesaleOptions.map(w => (
+                <option key={w} value={w}>{w}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label style={labelStyle}>상태</label>
@@ -990,6 +1522,7 @@ export default function InboundLogPage() {
               <option value="repairing">수선 중</option>
               <option value="done">최종완료</option>
               <option value="cancelled">취소</option>
+              <option value="etc">기타</option>
             </select>
           </div>
           <div>
@@ -1002,12 +1535,36 @@ export default function InboundLogPage() {
           </div>
           <button onClick={() => load(token)} style={btn('var(--color-brand)')}>조회</button>
           <button
-            onClick={() => { setFilterVendor(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+            onClick={() => { setFilterVendor(''); setFilterAlias(''); setFilterWholesale(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
             style={btnOutline}
           >
             초기화
           </button>
         </div>
+        {/* 활성 필터 칩 표시 */}
+        {(filterVendor || filterAlias || filterWholesale) && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #f3f4f6' }}>
+            <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', alignSelf: 'center' }}>필터:</span>
+            {filterVendor && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#ede9fe', color: '#7c3aed', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
+                🏢 화주사: {filterVendor}
+                <button onClick={() => setFilterVendor('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7c3aed', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            )}
+            {filterAlias && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#dbeafe', color: '#1d4ed8', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
+                🏷️ 별칭: {filterAlias}
+                <button onClick={() => setFilterAlias('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1d4ed8', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            )}
+            {filterWholesale && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#fef9c3', color: '#a16207', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
+                🏪 도매처: {filterWholesale}
+                <button onClick={() => setFilterWholesale('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a16207', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              </span>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* 결과 수 */}
@@ -1069,12 +1626,27 @@ export default function InboundLogPage() {
                     <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{b.created_by || '-'}</td>
                     <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-muted)' }}>{fmt(b.created_at)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleDelete(b.id)}
-                        style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, color: '#dc2626', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
-                      >
-                        삭제
-                      </button>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => { window.location.href = `/inbound/${b.id}/overview`; }}
+                          style={{ background: 'none', border: '1px solid #c7d2fe', borderRadius: 4, color: '#4f46e5', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem', fontWeight: 600 }}
+                          title="통합 처리현황"
+                        >
+                          통합 현황
+                        </button>
+                        <button
+                          onClick={() => setEditingBatch(b)}
+                          style={{ background: 'none', border: '1px solid #fde68a', borderRadius: 4, color: '#d97706', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
+                        >
+                          수정
+                        </button>
+                        <button
+                          onClick={() => handleDelete(b.id)}
+                          style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, color: '#dc2626', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
+                        >
+                          삭제
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1089,7 +1661,15 @@ export default function InboundLogPage() {
         <CreateBatchModal
           token={token}
           onClose={() => setShowCreate(false)}
-          onCreated={batch => { setShowCreate(false); setSelectedBatch(batch); load(token); }}
+          onCreated={batch => { setShowCreate(false); setSelectedBatch(batch); load(token); refreshFilterOptions(token); }}
+        />
+      )}
+      {editingBatch && (
+        <EditBatchModal
+          batch={editingBatch}
+          token={token}
+          onClose={() => setEditingBatch(null)}
+          onUpdated={() => { load(token); setEditingBatch(null); }}
         />
       )}
       {selectedBatch && (

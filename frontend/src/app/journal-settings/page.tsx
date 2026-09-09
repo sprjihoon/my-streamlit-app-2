@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import {
@@ -15,9 +15,17 @@ import {
   deleteRepairWorkType,
   saveRepairDefect,
   deleteRepairDefect,
+  getVendorAliases,
+  upsertVendorAlias,
+  deleteVendorAlias,
+  listInboundVendors,
+  ocrPreview,
+  OcrPreviewItem,
+  OcrPreviewReceipt,
   RepairBarcode,
   RepairWorkType,
   RepairDefect,
+  VendorAlias,
 } from '@/lib/api';
 
 const inputStyle: React.CSSProperties = {
@@ -68,6 +76,133 @@ function ConfirmModal({ text, onCancel, onConfirm }: { text: string; onCancel: (
         <button onClick={onConfirm} style={btn('#ef4444')}>삭제</button>
       </div>
     </Modal>
+  );
+}
+
+// ─── 업체명 멀티셀렉 컴포넌트 ────────────────────────────────────────
+function VendorMultiSelect({
+  selected,
+  onChange,
+  options,
+  placeholder,
+}: {
+  selected: string[];
+  onChange: (v: string[]) => void;
+  options: string[];
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // 외부 클릭 시 드롭다운 닫기
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  const filtered = options.filter(
+    (o) => !selected.includes(o) && o.toLowerCase().includes(query.toLowerCase()),
+  );
+  // 직접 입력(DB에 없는 이름)도 추가 가능
+  const canAddCustom = query.trim() && !selected.includes(query.trim()) && !options.includes(query.trim());
+
+  function add(v: string) {
+    onChange([...selected, v]);
+    setQuery('');
+  }
+  function remove(v: string) {
+    onChange(selected.filter((x) => x !== v));
+  }
+
+  const containerStyle: React.CSSProperties = {
+    border: '1px solid #ddd',
+    borderRadius: 4,
+    padding: '4px 6px',
+    minHeight: 40,
+    cursor: 'text',
+    backgroundColor: '#fff',
+    position: 'relative',
+  };
+  const tagStyle: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    background: '#ede9fe', color: '#7c3aed',
+    borderRadius: 12, padding: '2px 8px', fontSize: '0.8rem', fontWeight: 500,
+    margin: '2px',
+  };
+  const dropStyle: React.CSSProperties = {
+    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 999,
+    background: '#fff', border: '1px solid #ddd', borderRadius: 4,
+    maxHeight: 220, overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+    marginTop: 2,
+  };
+  const optStyle = (hover: boolean): React.CSSProperties => ({
+    padding: '0.45rem 0.75rem', cursor: 'pointer', fontSize: '0.875rem',
+    backgroundColor: hover ? '#f3f0ff' : 'transparent',
+    borderBottom: '1px solid #f5f5f5',
+  });
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div style={containerStyle} onClick={() => { setOpen(true); }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2 }}>
+          {selected.map((v) => (
+            <span key={v} style={tagStyle}>
+              {v}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); remove(v); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7c3aed', padding: 0, lineHeight: 1, fontSize: '0.9rem' }}
+              >×</button>
+            </span>
+          ))}
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && query.trim()) { e.preventDefault(); add(query.trim()); }
+              if (e.key === 'Backspace' && !query && selected.length > 0) remove(selected[selected.length - 1]);
+            }}
+            placeholder={selected.length === 0 ? (placeholder ?? '업체명 검색 또는 입력…') : ''}
+            style={{ border: 'none', outline: 'none', flex: 1, minWidth: 120, fontSize: '0.875rem', padding: '2px 4px' }}
+          />
+        </div>
+      </div>
+      {open && (filtered.length > 0 || canAddCustom) && (
+        <div style={dropStyle}>
+          {filtered.map((o) => (
+            <HoverItem key={o} label={o} onSelect={() => add(o)} style={optStyle} />
+          ))}
+          {canAddCustom && (
+            <HoverItem
+              label={`+ "${query.trim()}" 직접 추가`}
+              onSelect={() => add(query.trim())}
+              style={(h) => ({ ...optStyle(h), color: '#2563eb', fontStyle: 'italic' })}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HoverItem({ label, onSelect, style }: {
+  label: string;
+  onSelect: () => void;
+  style: (hover: boolean) => React.CSSProperties;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      style={style(hover)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onMouseDown={(e) => { e.preventDefault(); onSelect(); }}
+    >{label}</div>
   );
 }
 
@@ -135,17 +270,28 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
     }
   }
 
-  async function onExcel(file: File) {
+  async function onExcel(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
     setUploading(true);
-    try {
-      const res = await uploadRepairBarcodes(file);
-      onMessage({ type: 'success', text: res.message });
-      load();
-    } catch (e) {
-      onMessage({ type: 'error', text: e instanceof Error ? e.message : '업로드 실패' });
-    } finally {
-      setUploading(false);
+    const results: string[] = [];
+    const errors: string[] = [];
+    for (const file of list) {
+      try {
+        const res = await uploadRepairBarcodes(file);
+        results.push(`${file.name}: ${res.message}`);
+      } catch (e) {
+        errors.push(`${file.name}: ${e instanceof Error ? e.message : '업로드 실패'}`);
+      }
     }
+    if (errors.length > 0) {
+      onMessage({ type: 'error', text: errors.join('\n') });
+    }
+    if (results.length > 0) {
+      onMessage({ type: 'success', text: results.join('\n') });
+      load();
+    }
+    setUploading(false);
   }
 
   return (
@@ -191,16 +337,17 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
       <div style={{ marginTop: '1rem' }}>
         <Card title="엑셀 일괄 업로드">
           <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: 12 }}>
-            창고용 전체상품목록(13열, 마지막 열이 공급처=업체명) 또는 간단 양식을 올리면 됩니다. 같은 바코드는 덮어씁니다.
+            창고용 전체상품목록(공급처·공급처 상품명·공급처 옵션·공급처 위치·공급처 연락처 포함) 또는 간단 양식. 여러 파일 동시 선택 가능. 같은 바코드는 덮어씁니다.
           </p>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="file"
               accept=".xls,.xlsx,.html"
+              multiple
               disabled={uploading}
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onExcel(f);
+                const files = e.target.files;
+                if (files && files.length > 0) onExcel(files);
                 e.target.value = '';
               }}
             />
@@ -282,6 +429,259 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
 }
 
 // ─── 작업/불량 설정 탭 ────────────────────────────────────────────
+// ─────────────────────────────────────
+// 화주사 별칭 관리 탭
+// ─────────────────────────────────────
+
+function VendorAliasTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; text: string } | null) => void }) {
+  const [token, setToken] = useState('');
+  const [aliases, setAliases] = useState<VendorAlias[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const [editing, setEditing] = useState<VendorAlias | null>(null);
+  const [newCanonical, setNewCanonical] = useState('');
+  const [newSelectedVendors, setNewSelectedVendors] = useState<string[]>([]);
+  const [newMemo, setNewMemo] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const tok = localStorage.getItem('token') || '';
+    setToken(tok);
+    if (tok) {
+      load(tok);
+      loadVendorOptions(tok);
+    }
+  }, []);
+
+  async function load(tok: string) {
+    setLoading(true);
+    try {
+      const r = await getVendorAliases(tok);
+      setAliases(r.aliases);
+    } catch {
+      onMessage({ type: 'error', text: '별칭 목록 불러오기 실패' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadVendorOptions(tok: string) {
+    try {
+      const r = await listInboundVendors(tok);
+      setVendorOptions(r.registered.map((v) => v.name));
+    } catch {
+      // 실패해도 직접 입력 가능
+    }
+  }
+
+  async function handleSave(canonical: string, vendors: string[], memo: string) {
+    if (!canonical.trim()) { onMessage({ type: 'error', text: '별칭명을 입력하세요.' }); return; }
+    setSaving(true);
+    try {
+      await upsertVendorAlias(token, canonical, vendors, memo || undefined);
+      onMessage({ type: 'success', text: `"${canonical}" 별칭 저장됨` });
+      setEditing(null);
+      setNewCanonical(''); setNewSelectedVendors([]); setNewMemo('');
+      load(token);
+    } catch {
+      onMessage({ type: 'error', text: '저장 실패' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(canonical: string) {
+    if (!confirm(`"${canonical}" 별칭을 삭제할까요?`)) return;
+    try {
+      await deleteVendorAlias(token, canonical);
+      onMessage({ type: 'success', text: '삭제됨' });
+      load(token);
+    } catch {
+      onMessage({ type: 'error', text: '삭제 실패' });
+    }
+  }
+
+  const thStyle: React.CSSProperties = {
+    padding: '0.5rem 0.75rem', textAlign: 'left',
+    borderBottom: '2px solid #e5e7eb', fontSize: '0.82rem',
+    color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap',
+  };
+  const tdStyle: React.CSSProperties = {
+    padding: '0.6rem 0.75rem', borderBottom: '1px solid #f3f4f6',
+    fontSize: '0.875rem', verticalAlign: 'middle',
+  };
+
+  return (
+    <div>
+      {/* 설명 */}
+      <Card title="화주사 별칭이란?">
+        <p style={{ fontSize: '0.875rem', color: '#374151', lineHeight: 1.7, margin: 0 }}>
+          <strong>별칭명</strong>을 만들고, 그 별칭에 포함할 <strong>업체명</strong>을 선택해서 묶어 등록합니다.<br />
+          예: 별칭 <code>베으그룹</code> → 업체명 <code>자체제작_베으</code>, <code>베으샵</code>, <code>BEEU공식</code><br />
+          하나의 별칭에 여러 업체를 담을 수 있으며, 입고 OCR 매칭 시 별칭 → 소속 업체 전체를 검색합니다.
+        </p>
+      </Card>
+
+      {/* 신규 등록 폼 */}
+      <Card title="+ 별칭 새로 등록">
+        <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr 180px auto', gap: 12, alignItems: 'end' }}>
+          <Field label="별칭명 *">
+            <input
+              value={newCanonical}
+              onChange={e => setNewCanonical(e.target.value)}
+              placeholder="예) 베으그룹"
+              style={inputStyle}
+            />
+          </Field>
+          <Field label="포함 업체명 (DB에서 선택하거나 직접 입력)">
+            <VendorMultiSelect
+              selected={newSelectedVendors}
+              onChange={setNewSelectedVendors}
+              options={vendorOptions}
+              placeholder="업체명 검색 또는 입력…"
+            />
+          </Field>
+          <Field label="메모">
+            <input
+              value={newMemo}
+              onChange={e => setNewMemo(e.target.value)}
+              placeholder="선택 메모"
+              style={inputStyle}
+            />
+          </Field>
+          <button
+            onClick={() => handleSave(newCanonical.trim(), newSelectedVendors, newMemo)}
+            disabled={saving || !newCanonical.trim()}
+            style={{ ...btn('#2563eb'), opacity: (saving || !newCanonical.trim()) ? 0.5 : 1, whiteSpace: 'nowrap' }}
+          >
+            {saving ? '저장 중…' : '등록'}
+          </button>
+        </div>
+      </Card>
+
+      {/* 목록 */}
+      <Card title="등록된 별칭 목록">
+        {loading ? <Loading /> : aliases.length === 0 ? (
+          <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>등록된 별칭이 없습니다. 위에서 추가하세요.</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ background: '#f9fafb' }}>
+                  <th style={thStyle}>별칭명</th>
+                  <th style={thStyle}>포함 업체명</th>
+                  <th style={thStyle}>메모</th>
+                  <th style={thStyle}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {aliases.map(a => (
+                  <tr key={a.canonical}>
+                    <td style={{ ...tdStyle, fontWeight: 700, color: '#1d4ed8', whiteSpace: 'nowrap' }}>{a.canonical}</td>
+                    <td style={tdStyle}>
+                      {a.aliases.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {a.aliases.map(al => (
+                            <span key={al} style={{
+                              background: '#ede9fe', color: '#7c3aed',
+                              borderRadius: 12, padding: '2px 10px', fontSize: '0.78rem', fontWeight: 500,
+                            }}>{al}</span>
+                          ))}
+                        </div>
+                      ) : <span style={{ color: '#9ca3af' }}>업체 없음</span>}
+                    </td>
+                    <td style={{ ...tdStyle, color: '#6b7280' }}>{a.memo || '-'}</td>
+                    <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => setEditing({ ...a })}
+                        style={{ ...btn('#6b7280'), padding: '0.25rem 0.6rem', fontSize: '0.78rem', marginRight: 4 }}
+                      >수정</button>
+                      <button
+                        onClick={() => handleDelete(a.canonical)}
+                        style={{ ...btn('#dc2626'), padding: '0.25rem 0.6rem', fontSize: '0.78rem' }}
+                      >삭제</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* 수정 모달 */}
+      {editing && (
+        <EditAliasModal
+          initial={editing}
+          vendorOptions={vendorOptions}
+          saving={saving}
+          onClose={() => setEditing(null)}
+          onSave={(vendors, memo) => handleSave(editing.canonical, vendors, memo)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditAliasModal({ initial, vendorOptions, saving, onClose, onSave }: {
+  initial: VendorAlias;
+  vendorOptions: string[];
+  saving: boolean;
+  onClose: () => void;
+  onSave: (vendors: string[], memo: string) => void;
+}) {
+  const [selectedVendors, setSelectedVendors] = useState<string[]>(initial.aliases);
+  const [memo, setMemo] = useState(initial.memo || '');
+
+  const overlay: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 500,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(0,0,0,0.45)',
+  };
+  const box: React.CSSProperties = {
+    background: '#fff', borderRadius: 10, padding: '1.5rem',
+    width: 520, maxWidth: '96vw', boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+  };
+
+  return (
+    <div style={overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={box} onMouseDown={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '1rem' }}>
+          ✎ &quot;{initial.canonical}&quot; 포함 업체 수정
+        </div>
+        <Field label="포함 업체명 (DB에서 선택하거나 직접 입력)">
+          <VendorMultiSelect
+            selected={selectedVendors}
+            onChange={setSelectedVendors}
+            options={vendorOptions}
+            placeholder="업체명 검색 또는 입력…"
+          />
+        </Field>
+        <div style={{ marginTop: 10 }}>
+          <Field label="메모">
+            <input value={memo} onChange={e => setMemo(e.target.value)} style={inputStyle} />
+          </Field>
+        </div>
+        <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 8 }}>
+          별칭 <strong>{initial.canonical}</strong>으로 입고 시 위에 선택된 업체들의 바코드 전체를 매칭합니다.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={{ ...btn('#9ca3af') }}>취소</button>
+          <button
+            onClick={() => onSave(selectedVendors, memo)}
+            disabled={saving}
+            style={{ ...btn('#2563eb'), opacity: saving ? 0.6 : 1 }}
+          >{saving ? '저장 중…' : '저장'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────
+// 작업/불량 설정 탭
+// ─────────────────────────────────────
+
 function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; text: string } | null) => void }) {
   const [workTypes, setWorkTypes] = useState<RepairWorkType[]>([]);
   const [defects, setDefects] = useState<RepairDefect[]>([]);
@@ -444,14 +844,189 @@ function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error';
   );
 }
 
+// ─────────────────────────────────────
+// OCR 테스트 탭
+// ─────────────────────────────────────
+
+function OcrTestTab() {
+  const [token, setToken] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ receipt: OcrPreviewReceipt; items: OcrPreviewItem[] } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setToken(localStorage.getItem('token') || '');
+  }, []);
+
+  function handleFile(f: File) {
+    setFile(f);
+    setResult(null);
+    setError('');
+    const reader = new FileReader();
+    reader.onload = e => setPreview(e.target?.result as string);
+    reader.readAsDataURL(f);
+  }
+
+  async function handleAnalyze() {
+    if (!file || !token) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    try {
+      const r = await ocrPreview(token, file);
+      setResult({ receipt: r.receipt, items: r.items });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'GPT 분석 실패');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const confColor = (c: number) => c >= 0.9 ? '#15803d' : c >= 0.7 ? '#a16207' : '#dc2626';
+  const confLabel = (c: number) => `${Math.round(c * 100)}%`;
+
+  return (
+    <div>
+      <Card title="GPT 장끼 분석 테스트">
+        <p style={{ fontSize: '0.85rem', color: '#6b7280', marginBottom: 12 }}>
+          장끼(영수증) 사진을 올리면 GPT-4o가 품목을 읽어 결과를 보여줍니다. DB에 저장하지 않습니다.
+        </p>
+
+        {/* 파일 선택 */}
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '0.75rem 1rem', border: '2px dashed #d1d5db', borderRadius: 8,
+          cursor: loading ? 'not-allowed' : 'pointer', backgroundColor: '#f9fafb', marginBottom: 12,
+        }}>
+          <span style={{ fontSize: '1.5rem' }}>📷</span>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+              {file ? file.name : '장끼 사진 선택 (클릭 또는 드래그)'}
+            </div>
+            {file && <div style={{ fontSize: '0.78rem', color: '#9ca3af' }}>{(file.size / 1024).toFixed(0)} KB</div>}
+          </div>
+          <input
+            type="file" accept="image/*" style={{ display: 'none' }} disabled={loading}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+          />
+        </label>
+
+        {/* 미리보기 이미지 */}
+        {preview && (
+          <div style={{ marginBottom: 12 }}>
+            <img src={preview} alt="미리보기" style={{ maxWidth: '100%', maxHeight: 280, borderRadius: 8, border: '1px solid #e5e7eb', objectFit: 'contain' }} />
+          </div>
+        )}
+
+        <button
+          onClick={handleAnalyze}
+          disabled={!file || loading}
+          style={{
+            ...btn('#7c3aed'),
+            opacity: (!file || loading) ? 0.5 : 1,
+            fontSize: '1rem',
+            padding: '0.65rem 1.5rem',
+          }}
+        >
+          {loading ? '⏳ GPT 분석 중… (10~40초)' : '🤖 GPT로 분석하기'}
+        </button>
+      </Card>
+
+      {/* 오류 */}
+      {error && (
+        <div style={{ marginTop: 12, padding: '0.75rem 1rem', borderRadius: 8, background: '#fee2e2', color: '#991b1b', fontSize: '0.875rem' }}>
+          ❌ {error}
+        </div>
+      )}
+
+      {/* 결과 */}
+      {result && (
+        <>
+          {/* 영수증 정보 */}
+          <Card title="📋 영수증 정보">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, fontSize: '0.875rem' }}>
+              {[
+                ['거래처명', result.receipt.storeName ?? '인식 불가'],
+                ['영수증번호', result.receipt.receiptNo ?? '-'],
+                ['날짜', result.receipt.orderDate ?? '-'],
+                ['합계금액', result.receipt.totalAmount != null ? result.receipt.totalAmount.toLocaleString() + '원' : '-'],
+                ['수기여부', result.receipt.isHandwritten ? '✋ 수기' : '🖨 인쇄'],
+                ['신뢰도', confLabel(result.receipt.confidence)],
+              ].map(([label, value]) => (
+                <div key={label} style={{ background: '#f9fafb', padding: '0.5rem 0.75rem', borderRadius: 6 }}>
+                  <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontWeight: 600 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+            {result.receipt.warnings?.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: '0.8rem', color: '#a16207' }}>
+                ⚠️ {result.receipt.warnings.join(' / ')}
+              </div>
+            )}
+            {result.receipt.needsReview && (
+              <div style={{ marginTop: 6, fontSize: '0.8rem', color: '#dc2626', fontWeight: 600 }}>
+                🔴 검토 필요 — 신뢰도가 낮거나 필수값이 없습니다.
+              </div>
+            )}
+          </Card>
+
+          {/* 품목 목록 */}
+          <Card title={`📦 인식된 품목 (${result.items.length}개)`}>
+            {result.items.length === 0 ? (
+              <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>인식된 품목이 없습니다.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb' }}>
+                      {['#', '품명', '색상/옵션', '단가', '수량', '금액', '신뢰도', '검토'].map(h => (
+                        <th key={h} style={{ padding: '0.5rem 0.6rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontSize: '0.8rem', color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.items.map(item => (
+                      <tr key={item.lineNo} style={{ borderBottom: '1px solid #f3f4f6', background: item.needsReview ? '#fffbeb' : 'transparent' }}>
+                        <td style={{ padding: '0.5rem 0.6rem', color: '#9ca3af' }}>{item.lineNo}</td>
+                        <td style={{ padding: '0.5rem 0.6rem', fontWeight: 600 }}>{item.itemName || '-'}</td>
+                        <td style={{ padding: '0.5rem 0.6rem', color: '#7c3aed' }}>{[item.color, item.optionText].filter(Boolean).join(' / ') || '-'}</td>
+                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right' }}>{item.unitPrice != null ? item.unitPrice.toLocaleString() : '-'}</td>
+                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center', fontWeight: 700 }}>{item.quantity ?? '-'}</td>
+                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right' }}>{item.amount != null ? item.amount.toLocaleString() : '-'}</td>
+                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center' }}>
+                          <span style={{ color: confColor(item.confidence), fontWeight: 600 }}>{confLabel(item.confidence)}</span>
+                        </td>
+                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center' }}>
+                          {item.needsReview
+                            ? <span style={{ color: '#dc2626', fontSize: '0.78rem' }}>🔴 요망</span>
+                            : <span style={{ color: '#15803d', fontSize: '0.78rem' }}>✅ OK</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── 메인 페이지 ──────────────────────────────────────────────────
 export default function JournalSettingsPage() {
-  const [tab, setTab] = useState<'barcodes' | 'catalog'>('barcodes');
+  const [tab, setTab] = useState<'barcodes' | 'catalog' | 'vendor-aliases' | 'ocr-test'>('barcodes');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const tabs: [string, string][] = [
     ['barcodes', '바코드 등록'],
     ['catalog', '작업/불량 설정'],
+    ['vendor-aliases', '화주사 별칭 관리'],
+    ['ocr-test', '🤖 OCR 정확도 테스트'],
   ];
 
   return (
@@ -497,6 +1072,12 @@ export default function JournalSettingsPage() {
       </div>
       <div style={{ display: tab === 'catalog' ? 'block' : 'none' }}>
         <CatalogTab onMessage={setMessage} />
+      </div>
+      <div style={{ display: tab === 'vendor-aliases' ? 'block' : 'none' }}>
+        <VendorAliasTab onMessage={setMessage} />
+      </div>
+      <div style={{ display: tab === 'ocr-test' ? 'block' : 'none' }}>
+        <OcrTestTab />
       </div>
     </div>
   );
