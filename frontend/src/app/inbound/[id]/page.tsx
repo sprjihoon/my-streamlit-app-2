@@ -231,7 +231,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
         ...(editSelectedBarcode ? {
           matched_barcode: editSelectedBarcode.바코드,
           matched_vendor:  editSelectedBarcode.업체명,
-          matched_product: editSelectedBarcode.제품명,
+          // OCR/입력된 상품명을 바코드 마스터에 반영; 없으면 바코드 DB 이름 폴백
+          matched_product: (editForm.item_name || '').trim() || editSelectedBarcode.제품명,
           matched_option:  editSelectedBarcode.옵션 || undefined,
         } : {}),
       });
@@ -327,9 +328,12 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
   async function handleSelectBarcode(b: RepairBarcode) {
     setMatchSaving(true);
     try {
+      // OCR로 판독된 상품명(item_name)을 matched_product로 사용 → 바코드 마스터에 반영
+      // item_name이 없을 경우에만 바코드 DB의 제품명을 폴백으로 사용
+      const productName = (item.item_name || '').trim() || b.제품명;
       await updateInboundItem(token, item.id, {
         matched_barcode: b.바코드, matched_vendor: b.업체명,
-        matched_product: b.제품명, matched_option: b.옵션 || undefined,
+        matched_product: productName, matched_option: b.옵션 || undefined,
         ...(workerName ? { confirmed_by: workerName } : {}),
       });
       setMatchSaved(true); setTimeout(() => setMatchSaved(false), 2500);
