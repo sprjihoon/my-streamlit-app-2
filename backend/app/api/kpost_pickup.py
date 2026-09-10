@@ -776,10 +776,14 @@ def _sync_pickup_like_infront(item: dict[str, Any]) -> dict[str, Any]:
             _apply_tracking_info(item, info)
         except Exception:
             pass
-    # '03'(배달완료)만 최종 상태 — 수거완료(01) 이후에도 이동중·배달중·배달완료 추적을 계속한다
+    # '03'(배달완료)만 최종 상태 — 수거완료(01) 이후에도 이동중·배달중·배달완료 추적을 계속한다.
+    # track_regi_no 실패는 조용히 무시: GetResInfo 결과만으로도 DB를 갱신해야 하기 때문.
     if item.get("treat_status") not in {"03"} and item.get("tracking_no"):
-        tracked = track_regi_no(item["tracking_no"])
-        _apply_tracking_info(item, tracked)
+        try:
+            tracked = track_regi_no(item["tracking_no"])
+            _apply_tracking_info(item, tracked)
+        except Exception:
+            pass  # 공개 종적조회 실패 시 GetResInfo 결과 그대로 유지
     return item
 
 
@@ -851,7 +855,10 @@ def refresh_pickup_statuses(token: str):
         "checked": checked,
         "completed": completed,
         "failed": failed,
-        "message": f"송장 {checked}건을 조회했습니다. 수거완료 {completed}건",
+        "message": (
+            f"송장 {checked}건 조회. 수거완료 {completed}건"
+            + (f" / 조회실패 {failed}건" if failed else "")
+        ),
     }
 
 
