@@ -87,30 +87,63 @@ def treat_status_code(code: str | None) -> str:
 
 
 def treat_status_from_tracking_text(text: str | None) -> str | None:
-    """우체국 공개 종적조회 HTML/텍스트에서 처리상태코드를 추론한다.
-    
-    우선순위: 최종상태(배달완료) → 집하완료 → 배달중 → 이동중 → 수거준비 → 운송장출력
+    """우체국 공개 종적조회 HTML에서 현재 처리상태코드를 추출한다.
+
+    ⚠ 주의: service.epost.go.kr 추적 페이지 HTML에는 진행 단계 UI 레이블로
+    '배달완료' 같은 문자열이 항상 포함된다. 전체 blob 검색 시 오탐(거짓 "03")이
+    발생하므로, 아래 3단계로 신뢰도를 구분한다.
+
+    1단계 (최우선): 날짜/시간 패턴이 있는 이력 <tr> 행만 파싱 — 실제 이력 데이터
+    2단계 (중간): 전체 <td> 셀 검색, 단 '배달완료'는 제외 — 단계 레이블 오탐 방지
+    3단계 (마지막): HTML 없는 텍스트 모드 fallback — 전체 blob 검색
     """
     blob = text or ""
-    # 최종 배달 완료
-    if any(token in blob for token in ("배달완료", "배달 완료")):
-        return "03"
-    # 집하(수거) 완료 — "집하" 단독 토큰은 추적 페이지 레이블에도 등장하므로 반드시 "완료" 포함
-    if any(token in blob for token in ("집하완료", "집하 완료", "수거완료", "수거 완료")):
-        return "01"
-    # 배달 진행
-    if "배달중" in blob:
-        return "07"
-    if "배달준비" in blob:
-        return "06"
-    # 이동 / 간선 수송
-    if any(token in blob for token in ("이동중", "수거중", "발송")):
-        return "02"
-    # 수거 전 단계
-    if any(token in blob for token in ("수거준비", "접수확인")):
-        return "05"
-    if "운송장출력" in blob:
-        return "04"
+    if not blob:
+        return None
+
+    _STATUS_RULES: list[tuple[list[str], str]] = [
+        (["배달완료", "배달 완료"], "03"),
+        # 집하(수거) 완료 — "집하" 단독은 레이블에도 등장하므로 "완료" 포함 패턴만
+        (["집하완료", "집하 완료", "수거완료", "수거 완료"], "01"),
+        (["배달중"], "07"),
+        (["배달준비"], "06"),
+        (["이동중", "수거중", "발송"], "02"),
+        (["수거준비", "접수확인"], "05"),
+        (["운송장출력"], "04"),
+    ]
+
+    def _match_cell(cell: str) -> str | None:
+        for keywords, code in _STATUS_RULES:
+            if any(kw in cell for kw in keywords):
+                return code
+        return None
+
+    # ── 1단계: 날짜/시간이 포함된 이력 <tr> 에서만 상태 추출 ──────────────
+    # service.epost.go.kr 형식: "YYYY.MM.DD HH:MM" 또는 "YYYY-MM-DD HH:MM"
+    _DATE_RE = re.compile(r'\d{4}[.\-]\d{2}[.\-]\d{2}\s+\d{2}:\d{2}')
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', blob, re.IGNORECASE | re.DOTALL)
+    for row in rows:
+        if not _DATE_RE.search(row):
+            continue  # 날짜 없는 행(헤더·단계 레이블 등) 건너뜀
+        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
+        for cell in cells:
+            cell_text = re.sub(r'<[^>]+>', '', cell).strip()
+            code = _match_cell(cell_text)
+            if code:
+                return code
+
+    # ── 2단계: <td> 전체 검색 — '배달완료' 제외(단계 레이블 오탐 방지) ─────
+    for m in re.finditer(r'<td[^>]*>(.*?)</td>', blob, re.IGNORECASE | re.DOTALL):
+        cell_text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+        for keywords, code in _STATUS_RULES[1:]:   # "03" 스킵
+            if any(kw in cell_text for kw in keywords):
+                return code
+
+    # ── 3단계: HTML 없는 텍스트 fallback — 전체 blob 검색 ──────────────────
+    for keywords, code in _STATUS_RULES:
+        if any(kw in blob for kw in keywords):
+            return code
+
     return None
 
 
