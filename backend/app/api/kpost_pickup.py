@@ -991,6 +991,40 @@ def debug_track(regi_no: str, token: str):
     return results
 
 
+@router.get("/maintenance/inspect")
+def maintenance_inspect(secret: str, tracking_no: str):
+    """유지보수 전용: 특정 송장의 DB 레코드 + insert_snapshot 조회."""
+    relay_secret = os.getenv("EPOST_RELAY_SECRET", "").strip()
+    if not relay_secret or secret != relay_secret:
+        raise HTTPException(status_code=403, detail="인증 실패")
+    ensure_pickup_tables()
+    with get_connection() as con:
+        row = con.execute(
+            """SELECT id, order_no, tracking_no, treat_status, treat_status_name,
+                      box_size, box_quantity, status, created_at, recipient_name,
+                      insert_snapshot
+               FROM kpost_pickup_requests
+               WHERE tracking_no=? ORDER BY id DESC LIMIT 1""",
+            (tracking_no,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 송장 없음")
+    cols = ["id","order_no","tracking_no","treat_status","treat_status_name",
+            "box_size","box_quantity","status","created_at","recipient_name","insert_snapshot"]
+    d = dict(zip(cols, row))
+    snap = {}
+    if d.get("insert_snapshot"):
+        import json as _json
+        try:
+            snap = _json.loads(d["insert_snapshot"])
+        except Exception:
+            snap = {"raw": d["insert_snapshot"]}
+    return {
+        "db": {k: v for k, v in d.items() if k != "insert_snapshot"},
+        "insert_snapshot": snap,
+    }
+
+
 @router.post("/maintenance/reset-status")
 def maintenance_reset_status(secret: str, body: dict):
     """유지보수 전용: EPOST_RELAY_SECRET 인증으로 특정 송장 상태를 직접 수정.
