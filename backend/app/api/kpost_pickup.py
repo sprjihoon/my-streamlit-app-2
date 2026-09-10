@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +28,7 @@ from backend.app.services.epost.client import (
 )
 from backend.app.services.epost.fields import (
     PICKUP_BOX_SIZES,
+    TREAT_STATUS_ORDER,
     build_return_pickup_params,
     default_ret_visit_iso,
     format_pickup_order_no,
@@ -42,6 +44,7 @@ from backend.app.services.epost.fields import (
     resolve_office_ser,
     split_pickup_address,
     today_kst,
+    treat_status_code,
     treat_status_label,
     validate_pickup_address_detail,
 )
@@ -758,10 +761,21 @@ def _pickup_req_ymd(item: dict[str, Any]) -> str:
 
 
 def _apply_tracking_info(item: dict[str, Any], info: dict[str, str]) -> dict[str, Any]:
-    item["treat_status"] = info.get("treatStusCd") or item.get("treat_status")
-    item["treat_status_name"] = treat_status_label(
-        item["treat_status"], info.get("treatStusNm") or item.get("treat_status_name")
-    )
+    """API 응답을 item dict에 반영한다.
+    
+    상태는 앞으로만 진행한다(no-downgrade).
+    GetResInfo가 수거완료(01)를 반환해도 이미 배달준비(06)인 항목을 덮어쓰지 않는다.
+    """
+    new_code = treat_status_code(info.get("treatStusCd") or "")
+    if new_code:
+        cur_code = treat_status_code(item.get("treat_status") or "00")
+        cur_order = TREAT_STATUS_ORDER.get(cur_code, 0)
+        new_order = TREAT_STATUS_ORDER.get(new_code, 0)
+        if new_order >= cur_order:  # 더 진행된 상태이거나 같은 상태일 때만 업데이트
+            item["treat_status"] = new_code
+            item["treat_status_name"] = treat_status_label(
+                new_code, info.get("treatStusNm") or item.get("treat_status_name")
+            )
     if info.get("regiNo"):
         item["tracking_no"] = info["regiNo"]
     return item
@@ -814,42 +828,50 @@ def refresh_pickup_statuses(token: str):
     checked = 0
     completed = 0
     failed = 0
-    for item in items:
+
+    def _process(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """단일 항목 API 조회 (스레드에서 실행). DB 쓰기는 호출자가 처리."""
         pickup_ymd = re.sub(r"\D", "", item.get("pickup_date") or "")[:8]
-        # 수거 희망일이 아직 오지 않은 건 처리
         if pickup_ymd and pickup_ymd > today_ymd:
-            # 수거일이 미래인데 '수거완료'로 잘못 저장된 경우 → 신청접수로 되돌림
             if item.get("treat_status") == "01":
+                return "reset", item
+            return "skip", item
+        if item.get("treat_status") in {"03"}:
+            return "skip", item
+        try:
+            _sync_pickup_like_infront(item)
+            return "checked", item
+        except Exception:
+            return "failed", item
+
+    # HTTP 호출은 병렬(최대 8 스레드), DB 쓰기는 메인 스레드에서 직렬 처리
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_map = {executor.submit(_process, item): item for item in items}
+        for future in as_completed(future_map):
+            status, item = future.result()
+            if status == "reset":
+                with get_connection() as con:
+                    con.execute(
+                        "UPDATE kpost_pickup_requests SET treat_status='00', treat_status_name='신청접수' WHERE id=?",
+                        (item["id"],),
+                    )
+                    con.commit()
+            elif status == "checked":
                 with get_connection() as con:
                     con.execute(
                         """
                         UPDATE kpost_pickup_requests
-                        SET treat_status='00', treat_status_name='신청접수'
+                        SET treat_status=?, treat_status_name=?, tracking_no=?
                         WHERE id=?
                         """,
-                        (item["id"],),
+                        (item["treat_status"], item["treat_status_name"], item["tracking_no"], item["id"]),
                     )
                     con.commit()
-            continue
-        if item.get("treat_status") in {"03"}:
-            continue
-        try:
-            _sync_pickup_like_infront(item)
-            with get_connection() as con:
-                con.execute(
-                    """
-                    UPDATE kpost_pickup_requests
-                    SET treat_status=?, treat_status_name=?, tracking_no=?
-                    WHERE id=?
-                    """,
-                    (item["treat_status"], item["treat_status_name"], item["tracking_no"], item["id"]),
-                )
-                con.commit()
-            checked += 1
-            if item.get("treat_status") == "01":
-                completed += 1
-        except Exception:
-            failed += 1
+                checked += 1
+                if item.get("treat_status") == "01":
+                    completed += 1
+            elif status == "failed":
+                failed += 1
     return {
         "success": True,
         "checked": checked,

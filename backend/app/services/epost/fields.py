@@ -65,6 +65,19 @@ TREAT_STATUS_LABELS = {
 # 최종 상태(더 이상 조회 불필요)
 FINAL_TREAT_STATUSES = {"03"}
 
+# 배송 단계 진행 순서 — 숫자가 클수록 더 진행된 상태.
+# _apply_tracking_info 에서 상태가 뒤로 가는 것을 방지할 때 사용.
+TREAT_STATUS_ORDER: dict[str, int] = {
+    "00": 0,  # 신청접수
+    "04": 1,  # 운송장출력
+    "05": 2,  # 수거준비
+    "01": 3,  # 수거완료 (집하완료)
+    "02": 4,  # 이동중
+    "06": 5,  # 배달준비
+    "07": 6,  # 배달중
+    "03": 7,  # 배달완료 (최종)
+}
+
 
 def treat_status_code(code: str | None) -> str:
     raw = (code or "").strip()
