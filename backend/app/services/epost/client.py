@@ -433,7 +433,20 @@ def _track_via_epost_trace(regi_no: str) -> dict[str, str] | None:
         )
     if resp.status_code >= 400:
         return None
-    html = resp.text
+
+    # 우체국 레거시 서버는 EUC-KR 응답이 많다.
+    # httpx 자동감지가 실패해 UTF-8로 오인하면 한글이 깨져서 상태 텍스트를 찾지 못함.
+    # 1) Content-Type charset 힌트 우선 → 없으면 2) EUC-KR 시도 → 깨지면 3) UTF-8 fallback
+    raw = resp.content
+    detected_enc = (resp.charset_encoding or "").lower().replace("-", "")
+    if detected_enc in ("utf8", "utf-8"):
+        html = raw.decode("utf-8", errors="replace")
+    else:
+        try:
+            html = raw.decode("euc-kr")
+        except (UnicodeDecodeError, LookupError):
+            html = raw.decode("utf-8", errors="replace")
+
     treat = treat_status_from_tracking_text(html)
     if not treat:
         return None

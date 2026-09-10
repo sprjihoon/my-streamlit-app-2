@@ -862,6 +862,35 @@ def refresh_pickup_statuses(token: str):
     }
 
 
+@router.get("/debug-track/{regi_no}")
+def debug_track(regi_no: str, token: str):
+    """특정 송장번호의 종적조회 결과를 직접 반환 (관리자 전용 디버그)."""
+    user = _get_user(token)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자만 사용할 수 있습니다.")
+    from backend.app.services.epost.client import (
+        _track_via_epost_trace,
+        _track_via_tracker_delivery,
+    )
+    results: dict[str, Any] = {}
+    try:
+        r = _track_via_tracker_delivery(regi_no)
+        results["tracker_delivery"] = r or "None (자격증명 없음 또는 매핑 실패)"
+    except Exception as e:
+        results["tracker_delivery_error"] = str(e)
+    try:
+        r2 = _track_via_epost_trace(regi_no)
+        results["epost_trace"] = r2 or "None (텍스트 매핑 실패)"
+    except Exception as e:
+        results["epost_trace_error"] = str(e)
+    try:
+        final = track_regi_no(regi_no)
+        results["final"] = final
+    except Exception as e:
+        results["final_error"] = str(e)
+    return results
+
+
 @router.get("/{pickup_id}")
 def get_pickup(pickup_id: int, token: str, refresh: bool = False):
     _get_user(token)
