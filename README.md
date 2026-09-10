@@ -49,10 +49,11 @@ cd frontend && npm run dev
 ## 변경 이력
 
 ### 2026-09-10
-- **feat(kpost-pickup): 회수신청 목록 접수자 필터 추가**
+- **feat(kpost-pickup): 회수신청 목록 수취인·접수자 콤보박스 필터 추가** (`5dcaaa10`)
+  - `GET /kpost-pickup/filter-options` 엔드포인트 추가 (접수자 전체·수취인 최근 200명 고유값 반환)
+  - 수취인·접수자 입력 필드에 `<datalist>` 연결 — 드롭다운 선택 + 직접 입력 모두 가능
   - 백엔드 `GET /kpost-pickup` 에 `created_by` 쿼리 파라미터 추가 (부분 일치 LIKE 검색)
-  - `api.ts` `listKpostPickups` 필터에 `createdBy` 추가
-  - 회수신청 목록 페이지 필터 바에 접수자 입력 필드 추가 (수거일·수취인·접수자 4열 그리드)
+  - 회수신청 목록 필터 바 4열 그리드 (수거일 시작·종료·수취인·접수자)
 
 ### 2026-09-07
 - **fix: MICRO 박스 접수 시 microYn=Y 누락 수정** (`d267a6d5`)
