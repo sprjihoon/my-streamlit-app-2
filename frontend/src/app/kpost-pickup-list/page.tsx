@@ -57,6 +57,7 @@ export default function KpostPickupListPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [recipientFilter, setRecipientFilter] = useState('');
+  const [createdByFilter, setCreatedByFilter] = useState('');
 
   const loadList = useCallback(
     async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }) => {
@@ -71,6 +72,7 @@ export default function KpostPickupListPage() {
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
       recipientName: recipientFilter || undefined,
+      createdBy: createdByFilter || undefined,
     };
   }
 
@@ -108,6 +110,7 @@ export default function KpostPickupListPage() {
     setDateFrom('');
     setDateTo('');
     setRecipientFilter('');
+    setCreatedByFilter('');
     setError(null);
     try {
       await loadList(token);
@@ -169,7 +172,7 @@ export default function KpostPickupListPage() {
           style={{
             marginBottom: '1rem',
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr auto auto auto',
+            gridTemplateColumns: '1fr 1fr 1fr 1fr auto auto auto',
             gap: '0.5rem',
             alignItems: 'end',
           }}
@@ -189,6 +192,15 @@ export default function KpostPickupListPage() {
               value={recipientFilter}
               onChange={(e) => setRecipientFilter(e.target.value)}
               placeholder="수취인 이름 검색"
+            />
+          </label>
+          <label>
+            접수자
+            <input
+              style={inputStyle}
+              value={createdByFilter}
+              onChange={(e) => setCreatedByFilter(e.target.value)}
+              placeholder="접수자 검색"
             />
           </label>
           <button type="button" className="btn btn-secondary" onClick={handleFilter}>

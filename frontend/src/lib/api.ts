@@ -1590,7 +1590,7 @@ export async function previewKpostPickup(token: string, payload: KpostPickupPayl
 
 export async function listKpostPickups(
   token: string,
-  filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }
+  filters?: { dateFrom?: string; dateTo?: string; recipientName?: string; createdBy?: string }
 ) {
   let url = `/kpost-pickup${pickupQuery(token)}`;
   if (filters) {
@@ -1598,6 +1598,7 @@ export async function listKpostPickups(
     if (filters.dateFrom) params.set('date_from', filters.dateFrom);
     if (filters.dateTo) params.set('date_to', filters.dateTo);
     if (filters.recipientName) params.set('recipient_name', filters.recipientName);
+    if (filters.createdBy) params.set('created_by', filters.createdBy);
     if (params.toString()) url += `&${params.toString()}`;
   }
   return fetchApi<{ items: KpostPickupItem[] }>(url);
@@ -1768,6 +1769,16 @@ export interface InboundItemPhoto {
   id: string;
   url: string;
   filename: string;
+  created_at: string;
+}
+
+export interface InboundInboxPhoto {
+  id: string;
+  sha256: string;
+  filename: string | null;
+  url: string | null;
+  item_id: string | null;
+  matched: boolean;
   created_at: string;
 }
 
@@ -2013,6 +2024,13 @@ export async function upsertVendorAlias(token: string, canonical: string, aliase
 
 export async function deleteVendorAlias(token: string, canonical: string) {
   return fetchApi<{ ok: boolean }>(`/inbound/vendor-aliases/${encodeURIComponent(canonical)}`, { method: 'DELETE', headers: inboundHeaders(token) });
+}
+
+export async function listInboundInboxPhotos(token: string, batchId: string) {
+  return fetchApi<{ batch_id: string; photos: InboundInboxPhoto[]; total: number; unmatched: number }>(
+    `/inbound/batches/${batchId}/inbox`,
+    { headers: inboundHeaders(token) }
+  );
 }
 
 export async function downloadInboundBarcodePdf(token: string, batchId: string, vendor: string, date: string) {

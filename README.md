@@ -43,3 +43,19 @@ cd backend && uvicorn app.main:app --reload --port 8000
 # 프론트엔드 (개발 서버만 — 빌드 아님)
 cd frontend && npm run dev
 ```
+
+---
+
+## 변경 이력
+
+### 2026-09-10
+- **feat(kpost-pickup): 회수신청 목록 접수자 필터 추가**
+  - 백엔드 `GET /kpost-pickup` 에 `created_by` 쿼리 파라미터 추가 (부분 일치 LIKE 검색)
+  - `api.ts` `listKpostPickups` 필터에 `createdBy` 추가
+  - 회수신청 목록 페이지 필터 바에 접수자 입력 필드 추가 (수거일·수취인·접수자 4열 그리드)
+
+### 2026-09-07
+- **fix: MICRO 박스 접수 시 microYn=Y 누락 수정** (`d267a6d5`)
+  - `PICKUP_BOX_SIZES` MICRO 항목에 `"micro": True` 플래그 추가
+  - 누락 시 `microYn=N` 으로 전송되어 우체국이 표준 5kg(5,500원)으로 처리하던 버그 수정
+- **fix: 극소(MICRO) 사이즈 기본 선택으로 변경** (`e50c5c69`)

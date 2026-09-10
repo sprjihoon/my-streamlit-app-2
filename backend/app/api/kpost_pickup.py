@@ -345,6 +345,7 @@ def list_pickups(
     date_from: str | None = None,
     date_to: str | None = None,
     recipient_name: str | None = None,
+    created_by: str | None = None,
 ):
     _get_user(token)
     ensure_pickup_tables()
@@ -360,6 +361,9 @@ def list_pickups(
     if recipient_name and recipient_name.strip():
         conditions.append("recipient_name LIKE ?")
         params.append(f"%{recipient_name.strip()}%")
+    if created_by and created_by.strip():
+        conditions.append("created_by LIKE ?")
+        params.append(f"%{created_by.strip()}%")
     
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     params.append(max(1, min(limit, 5000)))
@@ -396,7 +400,27 @@ def create_pickup(req: PickupSubmitRequest, token: str):
     except ValueError as exc:
         raise _http_error(exc) from exc
 
-    # 중복 방지 로직 제거: 같은 주소·날짜라도 재접수 허용
+    # 중복 방지: 같은 사용자, 같은 수령인 전화번호, 같은 수거일에 'requested' 상태가 이미 있으면 guard 반환
+    _pickup_visit_iso = (
+        f"{validated.get('visit_ymd','')[:4]}-"
+        f"{validated.get('visit_ymd','')[4:6]}-"
+        f"{validated.get('visit_ymd','')[6:8]}"
+    )
+    with get_connection() as _dup_con:
+        _existing = _dup_con.execute(
+            """SELECT id, tracking_no FROM kpost_pickup_requests
+               WHERE created_by=? AND recipient_phone=? AND pickup_date=?
+                 AND status='requested'
+               ORDER BY id DESC LIMIT 1""",
+            (user["nickname"], validated["phone"], _pickup_visit_iso),
+        ).fetchone()
+    if _existing:
+        return {
+            "duplicate_guard": True,
+            "id": _existing[0],
+            "tracking_no": _existing[1],
+            "success": True,
+        }
 
     env = _env()
     order_no = format_pickup_order_no()
