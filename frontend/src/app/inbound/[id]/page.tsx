@@ -12,6 +12,8 @@ import {
   runInboundOcr,
   listInboundVendors,
   listInboundInboxPhotos,
+  linkInboxPhotoToItem,
+  unlinkInboxPhotoFromItem,
   getRepairBarcodes,
   getVendorAliases,
   ApiError,
@@ -140,12 +142,13 @@ function BarcodeItem({ b }: { b: RepairBarcode }) {
 // ══════════════════════════════════════
 // 품목 카드
 // ══════════════════════════════════════
-function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, onDelete }: {
+function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, onUpdated, onDelete }: {
   item: InboundItem;
   token: string;
   workerName: string;
   isAdmin: boolean;
   batchVendor: string;
+  inboxPhotos: InboundInboxPhoto[];  // 배치 전체 inbox 사진 목록
   onUpdated: () => void;
   onDelete?: () => void;
 }) {
@@ -403,9 +406,58 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
 
   const isMatched = !!item.matched_product;
 
+  // ── photo_decision 상태 ──
+  const [photoDecision, setPhotoDecision] = useState<'photo'|'existing'|'new'|'none'|null>(item.photo_decision ?? null);
+  const [pdSaving, setPdSaving] = useState(false);
+
+  async function handlePhotoDecision(val: 'photo'|'existing'|'new'|'none') {
+    setPdSaving(true);
+    try {
+      await updateInboundItem(token, item.id, { photo_decision: val });
+      setPhotoDecision(val);
+      onUpdated();
+    } catch { alert('사진처리결정 저장 실패'); }
+    finally { setPdSaving(false); }
+  }
+
+  // ── inbox 사진 연결 ──
+  const [showInboxPicker, setShowInboxPicker] = useState(false);
+  const [inboxLinking, setInboxLinking] = useState<string | null>(null);  // 링크 중인 photo id
+
+  async function handleLinkInboxPhoto(inboxPhotoId: string) {
+    setInboxLinking(inboxPhotoId);
+    try {
+      await linkInboxPhotoToItem(token, item.id, inboxPhotoId);
+      setPhotoDecision('photo');
+      onUpdated();
+    } catch (e) {
+      alert('사진 연결 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setInboxLinking(null);
+    }
+  }
+
+  async function handleUnlinkInboxPhoto(inboxPhotoId: string) {
+    setInboxLinking(inboxPhotoId);
+    try {
+      await unlinkInboxPhotoFromItem(token, item.id, inboxPhotoId);
+      onUpdated();
+    } catch (e) {
+      alert('사진 연결 해제 실패: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setInboxLinking(null);
+    }
+  }
+
+  // ── 품목 미확인 상태 계산 ──
+  const needsQtyConfirm = !item.actual_qty_confirmed;
+  const needsPhotoDecision = (item.actual_qty >= 1) && (photoDecision === null);
+  const hasIssue = needsQtyConfirm || needsPhotoDecision;
+  const borderColor = needsQtyConfirm ? '#fb923c' : needsPhotoDecision ? '#ef4444' : C.border;
+
   // ── render ──────────────────────────
   return (
-    <div style={{ ...cardStyle, border: `1px solid ${C.border}` }}>
+    <div style={{ ...cardStyle, border: `1px solid ${borderColor}`, borderLeftWidth: hasIssue ? 4 : 1 }}>
 
       {/* ── 카드 헤더 ── */}
       <div style={{ padding: '13px 16px 11px', borderBottom: `1px solid ${C.borderLight}` }}>
@@ -416,6 +468,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: C.textFaint }}>#{item.line_no}</span>
               {saved && <span style={{ fontSize: 11, color: C.success, fontWeight: 700 }}>✓ 저장됨</span>}
+              {needsQtyConfirm && <span style={{ fontSize: 10, fontWeight: 700, color: '#ea580c', background: '#fff7ed', border: '1px solid #fb923c', borderRadius: 5, padding: '1px 5px' }}>수량미확인</span>}
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, color: C.text, lineHeight: 1.3, wordBreak: 'keep-all' }}>
               {item.item_name || '(품명 없음)'}
@@ -853,6 +906,118 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, onUpdated, on
             </div>
           </div>
         )}
+
+        {/* ── Inbox 사진 선택 연결 (배치 inbox 사진 전체 표시) ── */}
+        {inboxPhotos.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => setShowInboxPicker(v => !v)}
+              style={{
+                width: '100%', padding: '7px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+                background: showInboxPicker ? '#f0f9ff' : '#f9fafb',
+                color: '#0284c7', border: '1px solid #bae6fd',
+                cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              📦 봇 inbox 사진 ({inboxPhotos.length}장 전체 · 이 품목 연결 {photos.filter(p => inboxPhotos.some(ip => ip.stored_filename && p.filename === ip.stored_filename)).length}장)
+              {showInboxPicker ? ' ▲' : ' ▼'}
+            </button>
+            {showInboxPicker && (
+              <div style={{ marginTop: 4, padding: 10, background: '#f0f9ff', borderRadius: 10, border: '1px solid #bae6fd' }}>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+                  ✅ 이 품목에 연결됨 · 🔗 다른 품목에 연결됨 · 미연결은 클릭하여 연결
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+                  {inboxPhotos.map(photo => {
+                    // 이 품목에 연결됐는지 (item.photos 와 stored_filename 비교)
+                    const linkedToThis = photos.some(p => photo.stored_filename && p.filename === photo.stored_filename);
+                    // 다른 품목에 연결됐는지 (matched=true 이지만 이 품목에는 없는 경우)
+                    const linkedToOther = photo.matched && !linkedToThis;
+                    return (
+                      <div
+                        key={photo.id}
+                        style={{
+                          position: 'relative', borderRadius: 8, overflow: 'hidden',
+                          border: linkedToThis ? '2px solid #22c55e' : linkedToOther ? '2px solid #f59e0b' : '2px solid #bae6fd',
+                          cursor: linkedToThis ? 'default' : inboxLinking ? 'wait' : 'pointer',
+                          opacity: inboxLinking === photo.id ? 0.6 : 1,
+                          transition: 'opacity 0.15s',
+                        }}
+                      >
+                        <div onClick={() => !inboxLinking && !linkedToThis && handleLinkInboxPhoto(photo.id)}>
+                          {photo.url ? (
+                            <img
+                              src={`${API_BASE}${photo.url}`}
+                              alt={photo.filename || ''}
+                              style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }}
+                            />
+                          ) : (
+                            <div style={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, background: '#e0f2fe' }}>📷</div>
+                          )}
+                          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: linkedToThis ? 'rgba(34,197,94,0.8)' : linkedToOther ? 'rgba(245,158,11,0.8)' : 'rgba(0,0,0,0.5)', padding: '2px 4px', fontSize: 9, color: '#fff', textAlign: 'center' }}>
+                            {inboxLinking === photo.id ? '연결 중…' : linkedToThis ? '✅ 연결됨' : linkedToOther ? '🔗 다른품목' : '선택'}
+                          </div>
+                        </div>
+                        {/* 연결 해제 버튼 (이 품목에 연결됐을 때만) */}
+                        {linkedToThis && (
+                          <button
+                            onClick={() => handleUnlinkInboxPhoto(photo.id)}
+                            disabled={!!inboxLinking}
+                            style={{
+                              position: 'absolute', top: 2, right: 2,
+                              width: 18, height: 18, borderRadius: '50%',
+                              background: '#ef4444', color: '#fff', border: 'none',
+                              fontSize: 11, cursor: 'pointer', lineHeight: 1,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            title="연결 해제"
+                          >×</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── 사진 처리결정 ── (실입고 1개 이상인 품목에만 표시) */}
+        {item.actual_qty >= 1 && (
+          <div style={{
+            marginTop: 8, padding: '10px 12px',
+            background: needsPhotoDecision ? '#fff7ed' : '#f9fafb',
+            borderRadius: 12,
+            border: `1px solid ${needsPhotoDecision ? '#fb923c' : C.border}`,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: needsPhotoDecision ? '#ea580c' : C.textMuted, marginBottom: 6 }}>
+              {needsPhotoDecision ? '⚠️ 사진 처리결정 필요' : '📸 사진 처리결정'}
+              {photoDecision && <span style={{ marginLeft: 6, fontWeight: 400 }}>
+                ({photoDecision === 'photo' ? '업로드사진' : photoDecision === 'existing' ? '기존상품' : photoDecision === 'new' ? '신상품' : '사진없음'})
+              </span>}
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(['photo', 'existing', 'new', 'none'] as const).map(v => {
+                const labels: Record<string, string> = { photo: '📷 업로드사진', existing: '🔗 기존상품', new: '🆕 신상품', none: '🚫 사진없음' };
+                const isActive = photoDecision === v;
+                return (
+                  <button
+                    key={v}
+                    disabled={pdSaving}
+                    onClick={() => handlePhotoDecision(v)}
+                    style={{
+                      fontSize: 11, padding: '4px 10px', borderRadius: 8, fontWeight: 600,
+                      background: isActive ? C.brand : '#fff',
+                      color: isActive ? '#fff' : C.textMuted,
+                      border: `1px solid ${isActive ? C.brand : C.border}`,
+                      cursor: pdSaving ? 'wait' : 'pointer',
+                    }}
+                  >{labels[v]}</button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1206,7 +1371,19 @@ export default function InboundWorkPage() {
     setClosing(true); setCloseMsg('');
     try {
       const res = await closeInboundBatch(token, batch.id, closeType);
-      if (!res.ok && res.warning) { setCloseMsg('⚠️ ' + res.warning); }
+      if (!res.ok && res.warning) {
+        let msg = '⚠️ ' + res.warning;
+        if (res.unconfirmed_items && res.unconfirmed_items.length > 0) {
+          msg += '\n미확인 품목: ' + res.unconfirmed_items.map(i => `${i.line_no}번 ${i.item_name || ''}`).join(', ');
+        }
+        if (res.undecided_photo_items && res.undecided_photo_items.length > 0) {
+          msg += '\n사진미결 품목: ' + res.undecided_photo_items.map(i => `${i.line_no}번 ${i.item_name || ''}`).join(', ');
+        }
+        if (res.defect_qty || res.repair_qty) {
+          msg += `\n불량판정중 ${res.defect_qty ?? 0}개, 수선중 ${res.repair_qty ?? 0}개`;
+        }
+        setCloseMsg(msg);
+      }
       else {
         await reload(token);
         if (closeType === 'pm' && res.formula_str) setCloseMsg(`✅ ${res.status_label || '완료'}\n${res.formula_str}`);
@@ -1524,6 +1701,7 @@ export default function InboundWorkPage() {
               workerName={workerName}
               isAdmin={isAdmin}
               batchVendor={batch?.vendor || ''}
+              inboxPhotos={inboxPhotos}
               onUpdated={() => reload(token)}
               onDelete={isAdmin ? async () => {
                 try { await deleteInboundItem(token, item.id); await reload(token); }

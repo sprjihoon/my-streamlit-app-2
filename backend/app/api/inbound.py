@@ -125,6 +125,119 @@ class InboundBatchUpdate(BaseModel):
     inbound_date: Optional[str] = None
 
 
+_PHOTO_DECISION_VALUES = {'photo', 'existing', 'new', 'none'}
+
+# ── 부분수량 상태 컬럼 매핑 ────────────────────────────────────
+# 각 상태 이름 → inbound_items 컬럼명 (pending 은 computed 이므로 None)
+_QTY_STATE_COL: dict = {
+    "pending":       None,
+    "normal":        "normal_qty",
+    "defect":        "defect_pending_qty",
+    "repairing":     "repairing_qty",
+    "repair_done":   "repair_done_qty",
+    "unrecoverable": "unrecoverable_qty",
+}
+
+
+def _item_pending_qty(actual: int, normal: int, defect: int, repairing: int,
+                      repair_done: int, unrecov: int) -> int:
+    """품목의 현재 미처리(pending) 수량 = actual - 모든 확정 수량."""
+    return max(0, actual - normal - defect - repairing - repair_done - unrecov)
+
+
+def move_item_qty(
+    con,
+    item_id: str,
+    from_state: str,
+    to_state: str,
+    qty: int,
+    *,
+    actor: str = "system",
+    ref_id: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> dict:
+    """
+    단일 transaction 안에서 품목의 부분수량을 from_state → to_state 로 이동한다.
+
+    ◆ 불변식 보장
+      - qty > 0
+      - from_state 의 현재 수량 >= qty
+      - 이동 후 모든 부분수량 합 == actual_qty
+    ◆ ref_id 로 idempotency: 같은 ref_id+item_id 조합이 이미 이력에 있으면 skip
+    ◆ caller 가 commit 책임 (이 함수는 commit 하지 않음)
+    """
+    if qty <= 0:
+        raise ValueError(f"이동수량은 1 이상이어야 합니다. qty={qty}")
+    if from_state not in _QTY_STATE_COL or to_state not in _QTY_STATE_COL:
+        raise ValueError(f"유효하지 않은 상태값. from={from_state}, to={to_state}")
+    if from_state == to_state:
+        raise ValueError(f"출발·도착 상태가 동일합니다: {from_state}")
+
+    # idempotency
+    if ref_id:
+        if con.execute(
+            "SELECT 1 FROM inbound_item_qty_transitions WHERE ref_id=? AND item_id=? LIMIT 1",
+            (ref_id, item_id)
+        ).fetchone():
+            return {"skipped": True, "reason": "already_moved", "ref_id": ref_id}
+
+    # 현재 수량 조회
+    row = con.execute(
+        """SELECT actual_qty, normal_qty, defect_pending_qty,
+                  repairing_qty, repair_done_qty, unrecoverable_qty
+           FROM inbound_items WHERE id=?""",
+        (item_id,)
+    ).fetchone()
+    if not row:
+        raise ValueError(f"품목을 찾을 수 없습니다: {item_id}")
+
+    actual, normal, defect, repairing, repair_done, unrecov = [v or 0 for v in row]
+    pending = _item_pending_qty(actual, normal, defect, repairing, repair_done, unrecov)
+
+    cur = {
+        "pending":       pending,
+        "normal":        normal,
+        "defect":        defect,
+        "repairing":     repairing,
+        "repair_done":   repair_done,
+        "unrecoverable": unrecov,
+    }
+
+    if cur[from_state] < qty:
+        raise ValueError(
+            f"이동수량({qty})이 현재 {from_state} 수량({cur[from_state]})을 초과합니다."
+        )
+
+    # atomic UPDATE (pending 은 computed 이므로 컬럼 없음 → 차이로 표현)
+    set_parts = ["updated_at=CURRENT_TIMESTAMP"]
+    from_col = _QTY_STATE_COL[from_state]
+    to_col   = _QTY_STATE_COL[to_state]
+    if from_col:
+        set_parts.append(f"{from_col}={from_col}-{qty}")
+    if to_col:
+        set_parts.append(f"{to_col}={to_col}+{qty}")
+
+    con.execute(f"UPDATE inbound_items SET {','.join(set_parts)} WHERE id=?", (item_id,))
+
+    # 이력 기록
+    hist_id = uuid.uuid4().hex
+    con.execute(
+        """INSERT INTO inbound_item_qty_transitions
+               (id, item_id, from_state, to_state, qty, actor, ref_id, reason, moved_at)
+           VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+        (hist_id, item_id, from_state, to_state, qty, actor, ref_id, reason)
+    )
+
+    return {
+        "moved": True,
+        "from": from_state,
+        "to": to_state,
+        "qty": qty,
+        "after": {k: (cur[k] - qty if k == from_state else cur[k] + qty if k == to_state else cur[k])
+                  for k in cur},
+    }
+
+
 class InboundItemUpdate(BaseModel):
     actual_qty: Optional[int] = None
     missing_qty: Optional[int] = None
@@ -140,6 +253,7 @@ class InboundItemUpdate(BaseModel):
     supplier_location: Optional[str] = None
     supplier_contact: Optional[str] = None
     confirmed_by: Optional[str] = None  # 로그인 없이 접근하는 작업자 이름
+    photo_decision: Optional[str] = None   # 'photo'|'existing'|'new'|'none'
 
 
 class InboundItemCreate(BaseModel):
@@ -290,11 +404,32 @@ def ensure_inbound_tables():
             "confirmed_by TEXT",    # 로그인 없이 접근하는 작업자 이름
             "item_wholesale TEXT",  # 도매처 항목별 오버라이드
             "normal_qty INTEGER DEFAULT 0",  # 정상처리 수량 (직원 직접 입력)
+            "actual_qty_confirmed INTEGER DEFAULT 0",  # 0=미확인, 1=직원이 수량 확인 완료
+            "photo_decision TEXT",  # null=미결정, 'photo'=업로드사진, 'existing'=바코드연결, 'new'=신상품, 'none'=사진없음
         ]:
             try:
                 con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
             except Exception:
                 pass
+        # 기존 inbound_done/done 배치 품목 → actual_qty_confirmed=1 backfill
+        try:
+            con.execute("""
+                UPDATE inbound_items SET actual_qty_confirmed=1
+                WHERE actual_qty_confirmed=0
+                  AND batch_id IN (
+                      SELECT id FROM inbound_batches WHERE status IN ('inbound_done','done','grading','repairing')
+                  )
+            """)
+        except Exception:
+            pass
+        # 기존 matched_barcode 있는 품목 → photo_decision='existing' backfill
+        try:
+            con.execute("""
+                UPDATE inbound_items SET photo_decision='existing'
+                WHERE photo_decision IS NULL AND matched_barcode IS NOT NULL
+            """)
+        except Exception:
+            pass
         # inbound_share_links 에 폐기 컬럼 추가
         try:
             con.execute("ALTER TABLE inbound_share_links ADD COLUMN revoked_at DATETIME")
@@ -380,6 +515,59 @@ def ensure_inbound_tables():
         ]:
             try:
                 con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
+            except Exception:
+                pass
+
+        # ── 부분수량 상태전환 이력 테이블 (move_item_qty 전용) ──
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_item_qty_transitions (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL,
+                from_state TEXT NOT NULL,
+                to_state TEXT NOT NULL,
+                qty INTEGER NOT NULL,
+                actor TEXT,
+                ref_id TEXT,
+                reason TEXT,
+                moved_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # ref_id 인덱스 (idempotency 조회 속도)
+        try:
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_qty_trans_ref ON inbound_item_qty_transitions(ref_id, item_id)"
+            )
+        except Exception:
+            pass
+
+        # ── 수량 컬럼 backfill: status 기반 → qty 컬럼 (idempotent) ──────────
+        # 모든 부분수량이 0 인 기존 행을 status 에 맞게 초기화한다.
+        # 이미 부분수량이 설정된 행은 건드리지 않는다.
+        _backfill_qty_sql = [
+            # confirmed → normal_qty
+            ("normal_qty=actual_qty",
+             "status='confirmed' AND actual_qty>0 "
+             "AND (normal_qty+defect_pending_qty+repairing_qty+repair_done_qty+unrecoverable_qty)=0"),
+            # defect → defect_pending_qty
+            ("defect_pending_qty=actual_qty",
+             "status='defect' AND actual_qty>0 "
+             "AND (normal_qty+defect_pending_qty+repairing_qty+repair_done_qty+unrecoverable_qty)=0"),
+            # repair → repairing_qty
+            ("repairing_qty=actual_qty",
+             "status='repair' AND actual_qty>0 "
+             "AND (normal_qty+defect_pending_qty+repairing_qty+repair_done_qty+unrecoverable_qty)=0"),
+            # done → repair_done_qty
+            ("repair_done_qty=actual_qty",
+             "status='done' AND actual_qty>0 "
+             "AND (normal_qty+defect_pending_qty+repairing_qty+repair_done_qty+unrecoverable_qty)=0"),
+            # unrecoverable → unrecoverable_qty
+            ("unrecoverable_qty=actual_qty",
+             "status='unrecoverable' AND actual_qty>0 "
+             "AND (normal_qty+defect_pending_qty+repairing_qty+repair_done_qty+unrecoverable_qty)=0"),
+        ]
+        for set_clause, where_clause in _backfill_qty_sql:
+            try:
+                con.execute(f"UPDATE inbound_items SET {set_clause} WHERE {where_clause}")
             except Exception:
                 pass
 
@@ -558,6 +746,8 @@ def _serialize_item(row) -> dict:
         "updated_at": row[20],
         "confirmed_by": row[21] if len(row) > 21 else None,
         "item_wholesale": row[22] if len(row) > 22 else None,
+        "actual_qty_confirmed": bool(row[23]) if len(row) > 23 and row[23] is not None else False,
+        "photo_decision": row[24] if len(row) > 24 else None,
     }
 
 
@@ -1071,7 +1261,8 @@ def get_vendor_overview_detail(
                        janggi_qty, actual_qty, missing_qty, status,
                        matched_barcode, matched_vendor, matched_product, matched_option,
                        supplier_location, supplier_contact, needs_matching, normal_qty,
-                       confirmed_by, item_wholesale, memo
+                       confirmed_by, item_wholesale, memo,
+                       actual_qty_confirmed, photo_decision
                 FROM inbound_items
                 WHERE batch_id IN ({ph})
                 ORDER BY batch_id, line_no""",
@@ -1212,6 +1403,8 @@ def get_vendor_overview_detail(
             "supplier_location": r[14], "supplier_contact": r[15],
             "needs_matching": bool(r[16]), "normal_qty": r[17] or 0,
             "confirmed_by": r[18], "item_wholesale": r[19], "memo": r[20],
+            "actual_qty_confirmed": bool(r[21]) if r[21] is not None else False,
+            "photo_decision": r[22],
             "photos": photo_map.get(iid, []),
             "defect_logs": defect_map.get(iid, []),
             "repair_logs": repair_map.get(iid, []),
@@ -1388,7 +1581,8 @@ def get_batch(
                    matched_barcode, matched_vendor, matched_product, matched_option,
                    match_confidence, needs_matching, memo,
                    supplier_location, supplier_contact, created_at, updated_at,
-                   confirmed_by, item_wholesale
+                   confirmed_by, item_wholesale,
+                   actual_qty_confirmed, photo_decision
             FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
         """, (batch_id,)).fetchall()
         item_list = []
@@ -1644,6 +1838,8 @@ def update_item(
 
     if body.actual_qty is not None:
         fields.append("actual_qty=?"); params.append(body.actual_qty)
+        # 직원이 수량을 명시적으로 입력했으면 확인 완료 처리
+        fields.append("actual_qty_confirmed=1")
     if body.missing_qty is not None:
         fields.append("missing_qty=?"); params.append(body.missing_qty)
     if body.status is not None:
@@ -1664,9 +1860,16 @@ def update_item(
     if body.confirmed_by is not None:
         name = body.confirmed_by.strip()[:50]  # 최대 50자, 앞뒤 공백 제거
         fields.append("confirmed_by=?"); params.append(name if name else None)
+    if body.photo_decision is not None:
+        if body.photo_decision not in _PHOTO_DECISION_VALUES:
+            raise HTTPException(status_code=400, detail=f"photo_decision 허용값: {_PHOTO_DECISION_VALUES}")
+        fields.append("photo_decision=?"); params.append(body.photo_decision)
     if body.matched_barcode is not None:
         fields.append("matched_barcode=?"); params.append(body.matched_barcode)
         fields.append("needs_matching=0")
+        # 바코드 연결 시 사진 처리결정도 자동 설정 (명시 입력 없을 때)
+        if body.photo_decision is None:
+            fields.append("photo_decision=COALESCE(photo_decision,'existing')")
     if body.matched_vendor is not None:
         fields.append("matched_vendor=?"); params.append(body.matched_vendor)
     if body.matched_product is not None:
@@ -1817,6 +2020,11 @@ async def upload_item_photo(
             "INSERT INTO inbound_item_photos (id, item_id, batch_id, filename) VALUES (?, ?, ?, ?)",
             (photo_id, item_id, batch_id, filename)
         )
+        # 사진 업로드 시 photo_decision을 'photo'로 자동 설정 (이미 결정됐으면 유지)
+        con.execute(
+            "UPDATE inbound_items SET photo_decision=COALESCE(photo_decision,'photo') WHERE id=?",
+            (item_id,)
+        )
         con.commit()
     return {"id": photo_id, "url": _image_url(filename)}
 
@@ -1889,19 +2097,157 @@ def list_inbox_photos(
         "batch_id": batch_id,
         "photos": [
             {
-                "id":              r[0],
-                "sha256":          r[1],
-                "filename":        r[2],
-                "url":             _image_url(r[3]) if r[3] else None,
-                "item_id":         r[4],
-                "matched":         r[4] is not None,
-                "created_at":      r[6],
+                "id":               r[0],
+                "sha256":           r[1],
+                "filename":         r[2],
+                "stored_filename":  r[3],              # 멀티아이템 링크 비교용
+                "url":              _image_url(r[3]) if r[3] else None,
+                "item_id":          r[4],
+                "matched":          r[4] is not None,  # 어느 품목이든 연결됐으면 True
+                "created_at":       r[6],
             }
             for r in rows
         ],
         "total": len(rows),
         "unmatched": sum(1 for r in rows if r[4] is None),
     }
+
+
+# ── 봇 inbox 사진을 특정 품목에 연결 ────────────────────────────
+
+class InboxPhotoLink(BaseModel):
+    inbox_photo_id: str
+
+
+@router.post("/items/{item_id}/photos/from-inbox", status_code=201)
+def link_inbox_photo_to_item(
+    item_id: str,
+    body: InboxPhotoLink,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    봇 inbox 사진을 특정 품목에 연결한다.
+
+    ◆ 파일 복제 없음: stored_filename 을 inbound_item_photos 에서 공유
+    ◆ 같은 inbox 사진을 여러 품목(옵션 등)에 연결 가능
+    ◆ 같은 (item_id, stored_filename) 중복은 기존 ID 반환 (idempotent)
+    ◆ 연결 성공 후에만 photo_decision='photo' 설정
+    ◆ inbox 사진과 품목이 다른 배치이면 거부
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        # inbox 사진 조회
+        inbox = con.execute(
+            "SELECT id, batch_id, stored_filename, is_deleted FROM inbound_product_photo_inbox WHERE id=?",
+            (body.inbox_photo_id,)
+        ).fetchone()
+        if not inbox:
+            raise HTTPException(status_code=404, detail="inbox 사진을 찾을 수 없습니다.")
+        if inbox[3]:
+            raise HTTPException(status_code=400, detail="삭제된 사진입니다.")
+        inbox_batch_id = inbox[1]
+        stored_filename = inbox[2]
+        if not stored_filename:
+            raise HTTPException(status_code=400, detail="저장된 파일 경로가 없는 사진입니다.")
+
+        # 품목 조회
+        item = con.execute(
+            "SELECT id, batch_id FROM inbound_items WHERE id=?", (item_id,)
+        ).fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+
+        # 다른 배치 사진 연결 차단
+        if inbox_batch_id != item[1]:
+            raise HTTPException(status_code=400, detail="다른 입고건의 사진은 연결할 수 없습니다.")
+
+        # 중복 연결 방지 (같은 품목 + 같은 파일)
+        existing = con.execute(
+            "SELECT id FROM inbound_item_photos WHERE item_id=? AND filename=?",
+            (item_id, stored_filename)
+        ).fetchone()
+        if existing:
+            return {
+                "ok": True,
+                "id": existing[0],
+                "url": _image_url(stored_filename),
+                "duplicated": True,
+            }
+
+        # 관계 생성 (파일 복사 없음)
+        photo_id = uuid.uuid4().hex
+        con.execute(
+            "INSERT INTO inbound_item_photos (id, item_id, batch_id, filename, created_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (photo_id, item_id, item[1], stored_filename)
+        )
+        # inbox 사진에 item_id 기록 (최종 연결 항목 추적용)
+        con.execute(
+            "UPDATE inbound_product_photo_inbox SET item_id=? WHERE id=?",
+            (item_id, body.inbox_photo_id)
+        )
+        # 연결 성공 후에만 photo_decision='photo'
+        con.execute(
+            "UPDATE inbound_items SET photo_decision=COALESCE(photo_decision,'photo'), updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (item_id,)
+        )
+        con.commit()
+
+    return {
+        "ok": True,
+        "id": photo_id,
+        "url": _image_url(stored_filename),
+        "duplicated": False,
+    }
+
+
+# ── inbox 사진-품목 연결 해제 ─────────────────────────────────────
+
+@router.delete("/items/{item_id}/photos/from-inbox/{inbox_photo_id}", status_code=200)
+def unlink_inbox_photo_from_item(
+    item_id: str,
+    inbox_photo_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    from-inbox 으로 연결된 inbox 사진을 품목에서 해제한다.
+
+    ◆ inbound_item_photos 에서 해당 관계 행만 삭제 (파일·inbox 행은 유지)
+    ◆ 해당 inbox 사진을 이 품목 외 다른 품목도 쓰지 않으면 inbox 행의 item_id → NULL
+    ◆ 해제 후 다른 inbox 사진 연결 또는 업로드 사진 사용 가능
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        inbox = con.execute(
+            "SELECT stored_filename FROM inbound_product_photo_inbox WHERE id=?",
+            (inbox_photo_id,)
+        ).fetchone()
+        if not inbox:
+            raise HTTPException(status_code=404, detail="inbox 사진을 찾을 수 없습니다.")
+        stored_fn = inbox[0]
+
+        # inbound_item_photos 에서 해당 관계 삭제
+        con.execute(
+            "DELETE FROM inbound_item_photos WHERE item_id=? AND filename=?",
+            (item_id, stored_fn)
+        )
+
+        # 이 파일이 다른 품목에도 연결되어 있는지 확인
+        other_links = con.execute(
+            "SELECT COUNT(*) FROM inbound_item_photos WHERE filename=?",
+            (stored_fn,)
+        ).fetchone()[0]
+
+        # 다른 품목에도 연결이 없으면 inbox 행의 item_id → NULL (다시 미매칭 상태)
+        if other_links == 0:
+            con.execute(
+                "UPDATE inbound_product_photo_inbox SET item_id=NULL WHERE id=?",
+                (inbox_photo_id,)
+            )
+
+        con.commit()
+
+    return {"ok": True, "unlinked": True, "inbox_photo_id": inbox_photo_id, "item_id": item_id}
 
 
 # ── 입고전표 엑셀 다운로드 ────────────────────
@@ -2116,13 +2462,107 @@ def close_batch(
             if current_status not in ("confirming", "ocr_pending"):
                 return {"ok": False, "warning": f"입고처리 완료는 '수량 확인 중' 또는 '장끼 등록 완료' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
 
-            # 수량 미입력 품목 경고 (actual_qty=0 이고 janggi_qty>0 이면 입력 누락 가능성)
-            # 정책: 차단하지 않고 경고만 반환 (missing만 있는 경우도 정상)
-            zero_unconfirmed = con.execute(
-                "SELECT COUNT(*) FROM inbound_items "
-                "WHERE batch_id=? AND actual_qty=0 AND janggi_qty>0 AND confirmed_by IS NULL",
+            # ── 수량 미확인 품목 차단 ────────────────────────────────────────
+            # actual_qty_confirmed=0 인 품목: 직원이 한 번도 수량을 확인하지 않은 상태
+            unconfirmed_rows = con.execute(
+                """SELECT id, line_no, item_name, janggi_qty
+                   FROM inbound_items
+                   WHERE batch_id=? AND actual_qty_confirmed=0
+                   ORDER BY line_no""",
                 (batch_id,)
-            ).fetchone()[0]
+            ).fetchall()
+            if unconfirmed_rows:
+                return {
+                    "ok": False,
+                    "warning": (
+                        f"수량 미확인 품목이 {len(unconfirmed_rows)}개 있습니다. "
+                        "각 품목의 실입고수량을 입력하거나 '수량 전부 장끼와 동일' 버튼을 사용해주세요."
+                    ),
+                    "unconfirmed_count": len(unconfirmed_rows),
+                    "unconfirmed_items": [
+                        {"id": r[0], "line_no": r[1], "item_name": r[2], "janggi_qty": r[3]}
+                        for r in unconfirmed_rows
+                    ],
+                }
+
+            # ── 사진 처리결정 미완료 차단 ─────────────────────────────────────
+            # actual_qty >= 1 이면서 photo_decision 이 NULL 인 품목
+            undecided_photo_rows = con.execute(
+                """SELECT id, line_no, item_name, actual_qty
+                   FROM inbound_items
+                   WHERE batch_id=? AND actual_qty >= 1 AND photo_decision IS NULL
+                   ORDER BY line_no""",
+                (batch_id,)
+            ).fetchall()
+            if undecided_photo_rows:
+                return {
+                    "ok": False,
+                    "warning": (
+                        f"사진 처리결정이 없는 품목이 {len(undecided_photo_rows)}개 있습니다. "
+                        "각 품목에 사진 연결·신상품·사진없음 중 하나를 선택해주세요."
+                    ),
+                    "undecided_photo_count": len(undecided_photo_rows),
+                    "undecided_photo_items": [
+                        {"id": r[0], "line_no": r[1], "item_name": r[2], "actual_qty": r[3]}
+                        for r in undecided_photo_rows
+                    ],
+                }
+
+            # ── photo_decision 실제 연결관계 검증 ─────────────────────────────
+            # 'photo': 실제 연결된 사진이 최소 1장 있어야 함
+            photo_no_file_rows = con.execute(
+                """SELECT i.id, i.line_no, i.item_name
+                   FROM inbound_items i
+                   WHERE i.batch_id=? AND i.photo_decision='photo' AND i.actual_qty >= 1
+                     AND NOT EXISTS (
+                         SELECT 1 FROM inbound_item_photos p WHERE p.item_id = i.id
+                     )
+                   ORDER BY i.line_no""",
+                (batch_id,)
+            ).fetchall()
+            if photo_no_file_rows:
+                return {
+                    "ok": False,
+                    "warning": (
+                        f"사진 연결로 표시됐지만 실제 사진이 없는 품목이 {len(photo_no_file_rows)}개 있습니다. "
+                        "사진을 업로드하거나 처리결정을 변경해주세요."
+                    ),
+                    "photo_no_file_count": len(photo_no_file_rows),
+                    "photo_no_file_items": [
+                        {"id": r[0], "line_no": r[1], "item_name": r[2]}
+                        for r in photo_no_file_rows
+                    ],
+                }
+
+            # 'existing': 실제 상품마스터(repair_barcode) 연결이 있어야 함
+            # matched_barcode 가 없거나 repair_barcode 에 존재하지 않으면 차단
+            existing_no_product_rows = con.execute(
+                """SELECT i.id, i.line_no, i.item_name
+                   FROM inbound_items i
+                   WHERE i.batch_id=? AND i.photo_decision='existing' AND i.actual_qty >= 1
+                     AND (
+                       i.matched_barcode IS NULL
+                       OR i.matched_barcode = ''
+                       OR NOT EXISTS (
+                           SELECT 1 FROM repair_barcode rb WHERE rb.바코드 = i.matched_barcode
+                       )
+                     )
+                   ORDER BY i.line_no""",
+                (batch_id,)
+            ).fetchall()
+            if existing_no_product_rows:
+                return {
+                    "ok": False,
+                    "warning": (
+                        f"기존상품 연결로 표시됐지만 상품마스터에 없는 품목이 {len(existing_no_product_rows)}개 있습니다. "
+                        "바코드를 연결하거나 처리결정을 변경해주세요."
+                    ),
+                    "existing_no_product_count": len(existing_no_product_rows),
+                    "existing_no_product_items": [
+                        {"id": r[0], "line_no": r[1], "item_name": r[2]}
+                        for r in existing_no_product_rows
+                    ],
+                }
 
             next_status = "inbound_done"
             now = datetime.utcnow().isoformat()
@@ -2138,7 +2578,7 @@ def close_batch(
                 "status": next_status,
                 "status_label": STATUS_LABELS[next_status],
                 "message": "오전 입고접수 완료 — 양품화를 진행해주세요",
-                "zero_qty_count": zero_unconfirmed,  # 0 이면 전원 수량 입력
+                "zero_qty_count": 0,  # 수량 미확인 품목은 이미 위에서 차단됨
             }
 
         # ── 오후 마감: inbound_done / grading / repairing → done ──
@@ -2148,21 +2588,29 @@ def close_batch(
         if current_status not in ("inbound_done", "grading", "repairing"):
             return {"ok": False, "warning": f"오후 최종 마감은 '양품화 중' 또는 '수선 중' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
 
-        # 미결 불량 품목은 차단 (defect 상태는 명시적 처리 필요)
+        # ── 미해결 부분수량 차단: qty 컬럼 기준 (통합현황과 동일 source) ──────
         defect_count = con.execute(
-            "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='defect'",
+            "SELECT COALESCE(SUM(defect_pending_qty), 0) FROM inbound_items WHERE batch_id=?",
             (batch_id,)
         ).fetchone()[0]
-        if defect_count > 0:
+        repair_count = con.execute(
+            "SELECT COALESCE(SUM(repairing_qty), 0) FROM inbound_items WHERE batch_id=?",
+            (batch_id,)
+        ).fetchone()[0]
+        if defect_count > 0 or repair_count > 0:
             return {
                 "ok": False,
-                "warning": f"불량판정중 품목이 {defect_count}개 있습니다. 수선/회생불가 처리 후 마감해주세요.",
-                "defect_count": defect_count,
+                "warning": (
+                    f"미해결 수량이 있어 최종 마감할 수 없습니다. "
+                    f"불량판정중 {defect_count}개, 수선중 {repair_count}개를 처리해주세요."
+                ),
+                "defect_qty": defect_count,
+                "repair_qty": repair_count,
             }
 
-        # 검품·양품화 완료: 남은 미처리(pending) 품목을 정상처리(confirmed)로 이동
-        # idempotent: 이미 confirmed 인 항목은 건드리지 않음
+        # ── 검품·양품화 완료 + 수량 정산 + 배치 종결 ─ 단일 transaction ──
         now = datetime.utcnow().isoformat()
+        # 미처리(pending) 품목 → 정상처리(confirmed) 자동 이동 (idempotent)
         moved_count = con.execute(
             "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='pending'",
             (batch_id,)
@@ -2187,24 +2635,23 @@ def close_batch(
         """, (batch_id,)).fetchall()
         sd: dict[str, dict] = {r[0]: {"actual": r[1], "missing": r[2], "janggi": r[3]} for r in rows}
 
-        # 각 카테고리 수량 (개수 기준)
+        # 각 카테고리 수량 (개수 기준) — moved_count 반영 후이므로 repair=0, defect=0 보장
         정상_qty     = sd.get("confirmed",     {}).get("actual", 0)
-        수선중_qty    = sd.get("repair",        {}).get("actual", 0)
+        수선중_qty    = sd.get("repair",        {}).get("actual", 0)   # 위에서 차단됐으므로 0
         수선후정상_qty = sd.get("done",          {}).get("actual", 0)
         회생불가_qty  = sd.get("unrecoverable", {}).get("actual", 0)
-        # 미입고: 전체 품목의 missing_qty 합계 (어떤 status든 missing_qty가 있으면 미입고)
         미입고_qty = sum(v["missing"] for v in sd.values())
 
         formula_total = 미입고_qty + 정상_qty + 수선중_qty + 수선후정상_qty + 회생불가_qty
-        discrepancy = total_janggi - formula_total  # 0이면 정상
+        discrepancy = total_janggi - formula_total
 
-        now2 = datetime.utcnow().isoformat()
+        # 배치 상태 변경을 같은 transaction 안에서 처리
         con.execute("""
             UPDATE inbound_batches
             SET status='done', closed_by=?, closed_at=?, updated_at=?
             WHERE id=?
-        """, (user["nickname"], now2, now2, batch_id))
-        con.commit()
+        """, (user["nickname"], now, now, batch_id))
+        con.commit()  # ← 여기서 단일 commit: item UPDATE + batch UPDATE 모두 포함
 
     add_log("inbound", "pm_close",
             f"오후 최종 마감: {batch_id} | 정상{정상_qty}/수선중{수선중_qty}/수선후{수선후정상_qty}/회생불가{회생불가_qty}/미입고{미입고_qty} (자동정상처리:{moved_count})",
@@ -2264,21 +2711,42 @@ def grade_complete(
         if batch_row[0] == "done":
             return {"ok": True, "moved": 0, "message": "이미 최종 마감된 배치입니다."}
 
+        # 부분수량 모델: pending_qty > 0 인 품목 조회
+        # pending_qty = actual - normal - defect - repairing - repair_done - unrecov
         pending_items = con.execute(
-            "SELECT id, actual_qty FROM inbound_items WHERE batch_id=? AND status='pending'",
+            """SELECT id, actual_qty,
+                      COALESCE(normal_qty,0), COALESCE(defect_pending_qty,0),
+                      COALESCE(repairing_qty,0), COALESCE(repair_done_qty,0),
+                      COALESCE(unrecoverable_qty,0)
+               FROM inbound_items
+               WHERE batch_id=?
+                 AND (actual_qty
+                      - COALESCE(normal_qty,0) - COALESCE(defect_pending_qty,0)
+                      - COALESCE(repairing_qty,0) - COALESCE(repair_done_qty,0)
+                      - COALESCE(unrecoverable_qty,0)) > 0""",
             (batch_id,)
         ).fetchall()
 
         if not pending_items:
-            return {"ok": True, "moved": 0, "message": "미처리 품목이 없습니다. 이미 완료 상태입니다."}
+            return {"ok": True, "moved": 0, "message": "미처리 수량이 없습니다. 이미 완료 상태입니다."}
 
         now = datetime.utcnow().isoformat()
+        # pending_qty 를 normal_qty 로 이동 (qty 컬럼 기반)
+        # 최종 normal_qty = actual_qty - defect_pending - repairing - repair_done - unrecov
         con.execute(
             """UPDATE inbound_items
-               SET status='confirmed',
+               SET normal_qty = actual_qty - COALESCE(defect_pending_qty,0)
+                                           - COALESCE(repairing_qty,0)
+                                           - COALESCE(repair_done_qty,0)
+                                           - COALESCE(unrecoverable_qty,0),
+                   actual_qty_confirmed = 1,
                    confirmed_by = COALESCE(confirmed_by, ?),
                    updated_at   = ?
-               WHERE batch_id=? AND status='pending'""",
+               WHERE batch_id=?
+                 AND (actual_qty
+                      - COALESCE(normal_qty,0) - COALESCE(defect_pending_qty,0)
+                      - COALESCE(repairing_qty,0) - COALESCE(repair_done_qty,0)
+                      - COALESCE(unrecoverable_qty,0)) > 0""",
             (user["nickname"], now, batch_id)
         )
         _recalc_batch_totals(con, batch_id)
@@ -2781,6 +3249,16 @@ class DefectLogLink(BaseModel):
     작성자: Optional[str] = None
 
 
+# ── 수선일지 연결: 허용된 업무액션 → 수량전환 매핑 ──────────────
+# 입고품목 연결 수선일지는 서버가 결정하는 (from, to) 전환을 사용한다.
+_REPAIR_ACTION_TRANSITIONS: dict = {
+    "수선접수":   ("defect", "repairing"),      # 불량판정중 → 수선중
+    "수선완료":   ("repairing", "repair_done"),  # 수선중 → 수선후정상
+    "회생불가":   ("repairing", "unrecoverable"),# 수선중 → 회생불가
+    "재판정정상": ("defect", "normal"),           # 불량판정중 → 정상 (재판정)
+}
+
+
 class RepairLogLink(BaseModel):
     불량명: Optional[str] = None
     작업: str
@@ -2788,6 +3266,10 @@ class RepairLogLink(BaseModel):
     비용: int = 0
     비고: Optional[str] = None
     작성자: Optional[str] = None
+    repair_action: Optional[str] = None  # 허용값: _REPAIR_ACTION_TRANSITIONS 키
+    # 하위 호환: repair_action 없을 때 명시적 지정 (기존 클라이언트용)
+    qty_from: Optional[str] = None
+    qty_to: Optional[str] = None
 
 
 @router.post("/items/{item_id}/defect-log", status_code=201)
@@ -2797,56 +3279,95 @@ def link_defect_log(
     authorization: Optional[str] = Header(None),
 ):
     """
-    입고 품목에서 불량일지 생성 + inbound_items.defect_case_id 연결.
-    item의 matched_barcode / matched_vendor / matched_product 를 자동 사용.
+    입고 품목에서 불량일지 생성 (원자 트랜잭션).
+
+    ◆ pending_qty 확인 → defect_log INSERT → pending→defect 수량이동 → commit
+    ◆ 어느 단계든 실패하면 전체 rollback (불량로그·수량이력 모두 저장 안 됨)
+    ◆ pending 부족 시 409 (INSUFFICIENT_PENDING) 반환
     """
-    from backend.app.api.defect_log import insert_defect_log_record, ensure_defect_tables
+    from backend.app.api.defect_log import ensure_defect_tables
     ensure_defect_tables()
     user = _get_user(authorization)
 
+    if body.수량 < 1:
+        raise HTTPException(status_code=400, detail="수량은 1 이상이어야 합니다.")
+
     with get_connection() as con:
-        item = con.execute("""
-            SELECT id, batch_id, item_name, option_text,
-                   matched_barcode, matched_vendor, matched_product, matched_option
-            FROM inbound_items WHERE id=?
-        """, (item_id,)).fetchone()
+        # 1. 품목 + 부분수량 조회
+        item = con.execute(
+            """SELECT id, batch_id, item_name, option_text,
+                      matched_barcode, matched_vendor, matched_product, matched_option,
+                      actual_qty,
+                      COALESCE(normal_qty,0), COALESCE(defect_pending_qty,0),
+                      COALESCE(repairing_qty,0), COALESCE(repair_done_qty,0),
+                      COALESCE(unrecoverable_qty,0)
+               FROM inbound_items WHERE id=?""",
+            (item_id,)
+        ).fetchone()
         if not item:
             raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+
         batch = con.execute(
             "SELECT inbound_date, vendor FROM inbound_batches WHERE id=?", (item[1],)
         ).fetchone()
 
-    inbound_date = batch[0] if batch else datetime.utcnow().strftime("%Y-%m-%d")
-    vendor = item[5] or (batch[1] if batch else None)
-    product = item[6] or item[2]
-    option = item[7] or item[3]
-    barcode = item[4]
+        # 2. pending_qty 검증 (409 → 전체 미저장)
+        actual, normal, defect, repairing, repair_done, unrecov = (item[8] or 0), (item[9] or 0), (item[10] or 0), (item[11] or 0), (item[12] or 0), (item[13] or 0)
+        pending = _item_pending_qty(actual, normal, defect, repairing, repair_done, unrecov)
 
-    result = insert_defect_log_record(
-        날짜=inbound_date,
-        업체명=vendor,
-        제품명=product,
-        옵션=option,
-        바코드=barcode,
-        불량명=body.불량명,
-        수량=body.수량,
-        비고=body.비고,
-        작성자=body.작성자 or user["nickname"],
-        출처="inbound",
-        inbound_item_id=item_id,
-    )
+        if pending < body.수량:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "INSUFFICIENT_PENDING",
+                    "message": f"미처리 수량({pending})이 불량 등록 수량({body.수량})보다 적습니다.",
+                    "pending_qty": pending,
+                    "requested_qty": body.수량,
+                },
+            )
 
-    defect_log_id = result["id"]
+        # 3. defect_log INSERT (같은 connection, 아직 commit 안 함)
+        inbound_date = (batch[0] if batch else None) or datetime.utcnow().strftime("%Y-%m-%d")
+        vendor  = item[5] or (batch[1] if batch else "") or ""
+        product = item[6] or item[2] or ""
+        option  = item[7] or item[3]
+        barcode = item[4]
+        now_str = datetime.utcnow().isoformat()
+        actor   = body.작성자 or user["nickname"]
 
-    # inbound_items에 defect_case_id 기록
-    with get_connection() as con:
+        cur = con.execute(
+            """INSERT INTO defect_log
+               (날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 수량, 비고,
+                작성자, 저장시간, 출처, inbound_item_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'inbound', ?)""",
+            (inbound_date, vendor, product, option, barcode,
+             body.불량명, body.수량, body.비고, actor, now_str, item_id),
+        )
+        defect_log_id = cur.lastrowid
+
+        # 4. pending → defect 수량 이동 (같은 connection)
+        move_item_qty(
+            con, item_id, "pending", "defect", body.수량,
+            actor=actor,
+            ref_id=f"defect:{defect_log_id}",
+            reason=body.불량명,
+        )
+
+        # 5. defect_case_id 기록
         con.execute(
             "UPDATE inbound_items SET defect_case_id=? WHERE id=?",
             (str(defect_log_id), item_id)
         )
+
+        # 6. 단일 commit (모두 성공해야 저장됨)
         con.commit()
 
-    return {**result, "defect_log_id": defect_log_id, "inbound_item_id": item_id}
+    return {
+        "id": defect_log_id,
+        "defect_log_id": defect_log_id,
+        "inbound_item_id": item_id,
+        "qty_moved": {"from": "pending", "to": "defect", "qty": body.수량},
+    }
 
 
 @router.post("/items/{item_id}/repair-log", status_code=201)
@@ -2856,57 +3377,137 @@ def link_repair_log(
     authorization: Optional[str] = Header(None),
 ):
     """
-    입고 품목에서 수선일지 생성 + inbound_items.defect_case_id 연결.
+    입고 품목에서 수선일지 생성 (원자 트랜잭션).
+
+    ◆ repair_action ('수선접수'|'수선완료'|'회생불가'|'재판정정상') 으로 수량전환 결정
+    ◆ repair_action 이 없으면 qty_from + qty_to 명시 필요 (둘 다 있어야 함)
+    ◆ repair_action 이 없고 qty_from/qty_to 도 없으면 400 반환
+    ◆ 수량 부족 시 409 → 수선로그·수량이력 모두 rollback
+    ◆ 입고품목 미연결(item_id 없음) 수선일지는 독립 기록 — 이 엔드포인트는 항상 연결
     """
-    from backend.app.api.repair_log import insert_repair_log_record, ensure_repair_tables
+    from backend.app.api.repair_log import ensure_repair_tables
     ensure_repair_tables()
     user = _get_user(authorization)
 
+    if body.수량 < 1:
+        raise HTTPException(status_code=400, detail="수량은 1 이상이어야 합니다.")
+
+    # ── 수량 전환 결정 ──────────────────────────────────────────────
+    # repair_action 우선, 없으면 명시적 qty_from/qty_to, 없으면 오류
+    qty_transition: Optional[tuple] = None
+    if body.repair_action:
+        if body.repair_action not in _REPAIR_ACTION_TRANSITIONS:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "INVALID_REPAIR_ACTION",
+                    "message": f"허용되지 않은 repair_action: '{body.repair_action}'. "
+                               f"허용값: {list(_REPAIR_ACTION_TRANSITIONS.keys())}",
+                },
+            )
+        qty_transition = _REPAIR_ACTION_TRANSITIONS[body.repair_action]
+    elif body.qty_from and body.qty_to:
+        if body.qty_from not in _QTY_STATE_COL or body.qty_to not in _QTY_STATE_COL:
+            raise HTTPException(status_code=400, detail="유효하지 않은 qty_from / qty_to 상태값.")
+        qty_transition = (body.qty_from, body.qty_to)
+    else:
+        # 입고품목 연결 수선일지인데 전환 정보 없음 → 명확한 오류
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "MISSING_QTY_TRANSITION",
+                "message": (
+                    "입고품목 연결 수선일지는 repair_action 또는 qty_from+qty_to 가 필요합니다. "
+                    f"허용 repair_action: {list(_REPAIR_ACTION_TRANSITIONS.keys())}"
+                ),
+            },
+        )
+
+    from_state, to_state = qty_transition
+
     with get_connection() as con:
-        item = con.execute("""
-            SELECT id, batch_id, item_name, option_text,
-                   matched_barcode, matched_vendor, matched_product, matched_option
-            FROM inbound_items WHERE id=?
-        """, (item_id,)).fetchone()
+        # 1. 품목 + 부분수량 조회
+        item = con.execute(
+            """SELECT id, batch_id, item_name, option_text,
+                      matched_barcode, matched_vendor, matched_product, matched_option,
+                      actual_qty,
+                      COALESCE(normal_qty,0), COALESCE(defect_pending_qty,0),
+                      COALESCE(repairing_qty,0), COALESCE(repair_done_qty,0),
+                      COALESCE(unrecoverable_qty,0)
+               FROM inbound_items WHERE id=?""",
+            (item_id,)
+        ).fetchone()
         if not item:
             raise HTTPException(status_code=404, detail="품목을 찾을 수 없습니다.")
+
         batch = con.execute(
             "SELECT inbound_date, vendor FROM inbound_batches WHERE id=?", (item[1],)
         ).fetchone()
 
-    inbound_date = batch[0] if batch else datetime.utcnow().strftime("%Y-%m-%d")
-    vendor = item[5] or (batch[1] if batch else None)
-    product = item[6] or item[2]
-    option = item[7] or item[3]
-    barcode = item[4]
+        # 2. 출발 상태 수량 검증 (409 → 전체 미저장)
+        actual, normal, defect, repairing, repair_done, unrecov = \
+            (item[8] or 0), (item[9] or 0), (item[10] or 0), (item[11] or 0), (item[12] or 0), (item[13] or 0)
+        pending = _item_pending_qty(actual, normal, defect, repairing, repair_done, unrecov)
+        cur_qty = {
+            "pending": pending, "normal": normal, "defect": defect,
+            "repairing": repairing, "repair_done": repair_done, "unrecoverable": unrecov,
+        }
 
-    result = insert_repair_log_record(
-        날짜=inbound_date,
-        업체명=vendor,
-        제품명=product,
-        옵션=option,
-        바코드=barcode,
-        불량명=body.불량명,
-        작업=body.작업,
-        수량=body.수량,
-        비용=body.비용,
-        비고=body.비고,
-        작성자=body.작성자 or user["nickname"],
-        출처="inbound",
-        inbound_item_id=item_id,
-    )
+        if cur_qty[from_state] < body.수량:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "INSUFFICIENT_QTY",
+                    "message": f"{from_state} 수량({cur_qty[from_state]})이 이동 수량({body.수량})보다 적습니다.",
+                    "from_state": from_state,
+                    "available_qty": cur_qty[from_state],
+                    "requested_qty": body.수량,
+                },
+            )
 
-    repair_log_id = result["id"]
+        # 3. repair_work_log INSERT (같은 connection, 아직 commit 안 함)
+        inbound_date = (batch[0] if batch else None) or datetime.utcnow().strftime("%Y-%m-%d")
+        vendor  = item[5] or (batch[1] if batch else "") or ""
+        product = item[6] or item[2] or ""
+        option  = item[7] or item[3]
+        barcode = item[4]
+        now_str = datetime.utcnow().isoformat()
+        actor   = body.작성자 or user["nickname"]
 
-    # inbound_items에 defect_case_id 기록 (수선일지 ID)
-    with get_connection() as con:
+        cur = con.execute(
+            """INSERT INTO repair_work_log
+               (날짜, 업체명, 제품명, 옵션, 바코드, 불량명, 작업, 수량, 비용, 비고,
+                작성자, 저장시간, 출처, inbound_item_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'inbound', ?)""",
+            (inbound_date, vendor, product, option, barcode,
+             body.불량명, body.작업, body.수량, body.비용, body.비고,
+             actor, now_str, item_id),
+        )
+        repair_log_id = cur.lastrowid
+
+        # 4. 수량 이동 (같은 connection)
+        move_item_qty(
+            con, item_id, from_state, to_state, body.수량,
+            actor=actor,
+            ref_id=f"repair:{repair_log_id}",
+            reason=body.작업,
+        )
+
+        # 5. defect_case_id 기록
         con.execute(
             "UPDATE inbound_items SET defect_case_id=? WHERE id=?",
             (f"repair:{repair_log_id}", item_id)
         )
+
+        # 6. 단일 commit
         con.commit()
 
-    return {**result, "repair_log_id": repair_log_id, "inbound_item_id": item_id}
+    return {
+        "id": repair_log_id,
+        "repair_log_id": repair_log_id,
+        "inbound_item_id": item_id,
+        "qty_moved": {"from": from_state, "to": to_state, "qty": body.수량},
+    }
 
 # ── OCR 미리보기 (DB 저장 없이 GPT 결과만 반환) ─────────────────
 
@@ -2994,24 +3595,20 @@ def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Opti
     public=True 이면 내부 전용 필드(원가, 직원명, 인증정보)를 제외한 공유 DTO 반환.
     반환값이 None 이면 배치가 존재하지 않음.
 
-    수량 계산 원칙
-    ─────────────
-    장끼수량 = 실입고수량 + 미입고수량
-    실입고수량 = 미처리 + 정상처리 + 불량판정중 + 수선중 + 수선후정상 + 회생불가
-    최종정상수량 = 정상처리 + 수선후정상
+    수량 계산 원칙 (부분수량 모델, v2)
+    ────────────────────────────────
+    각 inbound_item 은 동일 품목 안에서 여러 상태의 수량을 동시에 가질 수 있다.
 
-    상태 매핑 (inbound_items.status → 카테고리)
-    ─────────────────────────────────────────
-    pending       → 미처리 (actual_qty - normal_qty)
-    confirmed     → 정상처리 (actual_qty)
-    defect        → 불량판정중 (actual_qty)
-    repair        → 수선중 (actual_qty)
-    done          → 수선후정상 (actual_qty)
-    unrecoverable → 회생불가 (actual_qty)
-    missing       → (missing_qty 컬럼 사용)
+    source of truth: qty 컬럼 (status 는 화면용 대표상태)
+      actual_qty       = 실총입고수량
+      normal_qty       = 정상처리 부분수량
+      defect_pending_qty = 불량판정중 부분수량
+      repairing_qty    = 수선중 부분수량
+      repair_done_qty  = 수선후정상 부분수량
+      unrecoverable_qty= 회생불가 부분수량
+      pending_qty (computed) = actual_qty - 위 모든 합
 
-    pending 상태 품목의 경우 normal_qty(직원 입력)만큼 정상처리로 먼저 차감한다.
-    중복 집계 방지: status는 해당 품목의 현재 최종 상태 → 이력 기록은 defect/repair_log에만
+    불변식: actual_qty == pending + normal + defect + repairing + repair_done + unrecov
     """
     batch_row = con.execute("""
         SELECT id, vendor, inbound_date, status, memo,
@@ -3024,20 +3621,29 @@ def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Opti
     if not batch_row:
         return None
 
-    # 품목 조회 (normal_qty 포함)
-    items_raw = con.execute("""
+    # 품목 조회 (모든 부분수량 컬럼 포함, named alias 로 안전한 접근)
+    _items_cur = con.execute("""
         SELECT id, batch_id, line_no, item_name, option_text, unit_price,
                janggi_qty, actual_qty, missing_qty, status,
                matched_barcode, matched_vendor, matched_product, matched_option,
                match_confidence, needs_matching, memo,
                supplier_location, supplier_contact, created_at, updated_at,
                confirmed_by, item_wholesale,
-               COALESCE(normal_qty, 0) AS normal_qty,
-               inbound_item_id, defect_case_id
+               COALESCE(normal_qty,        0) AS col_normal,
+               inbound_item_id, defect_case_id,
+               COALESCE(defect_pending_qty, 0) AS col_defect,
+               COALESCE(repairing_qty,      0) AS col_repairing,
+               COALESCE(repair_done_qty,    0) AS col_repair_done,
+               COALESCE(unrecoverable_qty,  0) AS col_unrecov,
+               COALESCE(actual_qty_confirmed, 0) AS col_qty_confirmed,
+               photo_decision
         FROM inbound_items WHERE batch_id=? ORDER BY line_no, created_at
-    """, (batch_id,)).fetchall()
+    """, (batch_id,))
+    # dict 변환: 컬럼명으로 안전하게 접근
+    _cols = [d[0] for d in _items_cur.description]
+    items_raw = [dict(zip(_cols, row)) for row in _items_cur.fetchall()]
 
-    item_ids = [r[0] for r in items_raw]
+    item_ids = [r["id"] for r in items_raw]
 
     # 품목 사진
     photos_map: dict = {}
@@ -3115,28 +3721,20 @@ def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Opti
 
     item_list = []
     for r in items_raw:
-        item_id   = r[0]
-        janggi_qty  = r[6] or 0
-        actual_qty  = r[7] or 0
-        missing_qty = r[8] or 0
-        status      = r[9] or "pending"
-        normal_qty_col = r[23] or 0  # 직원 입력 정상처리 수량
+        # ── named dict 접근 (tuple magic index 사용 금지) ──────────
+        item_id     = r["id"]
+        janggi_qty  = r["janggi_qty"] or 0
+        actual_qty  = r["actual_qty"] or 0
+        missing_qty = r["missing_qty"] or 0
+        status      = r["status"] or "pending"
 
-        # 상태별 수량 계산 (중복 집계 없음: 현재 최종 상태만 한 번 반영)
-        if status == "confirmed":
-            i_normal   = actual_qty
-            i_pending  = 0
-        elif status == "pending":
-            i_normal   = min(normal_qty_col, actual_qty)
-            i_pending  = max(actual_qty - i_normal, 0)
-        else:
-            i_normal  = 0
-            i_pending = 0
-
-        i_defect      = actual_qty if status == "defect"        else 0
-        i_repairing   = actual_qty if status == "repair"        else 0
-        i_repaired    = actual_qty if status == "done"          else 0
-        i_unrecov     = actual_qty if status == "unrecoverable" else 0
+        # ── 부분수량 source of truth: qty 컬럼 named 접근 ────────────
+        i_normal    = r["col_normal"]
+        i_defect    = r["col_defect"]
+        i_repairing = r["col_repairing"]
+        i_repaired  = r["col_repair_done"]
+        i_unrecov   = r["col_unrecov"]
+        i_pending   = _item_pending_qty(actual_qty, i_normal, i_defect, i_repairing, i_repaired, i_unrecov)
 
         total_janggi    += janggi_qty
         total_actual    += actual_qty
@@ -3150,23 +3748,23 @@ def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Opti
 
         item_data: dict = {
             "id":          item_id,
-            "line_no":     r[2],
-            "item_name":   r[3],
-            "option_text": r[4],
+            "line_no":     r["line_no"],
+            "item_name":   r["item_name"],
+            "option_text": r["option_text"],
             "janggi_qty":  janggi_qty,
             "actual_qty":  actual_qty,
             "missing_qty": missing_qty,
             "status":      status,
             "status_label": ITEM_STATUS_LABELS.get(status, status),
-            "matched_barcode": r[10],
-            "matched_vendor":  r[11],
-            "matched_product": r[12],
-            "matched_option":  r[13],
+            "matched_barcode": r["matched_barcode"],
+            "matched_vendor":  r["matched_vendor"],
+            "matched_product": r["matched_product"],
+            "matched_option":  r["matched_option"],
             "breakdown": {
-                "normal":       i_normal,
-                "pending":      i_pending,
-                "defect":       i_defect,
-                "repairing":    i_repairing,
+                "normal":        i_normal,
+                "pending":       i_pending,
+                "defect":        i_defect,
+                "repairing":     i_repairing,
                 "repaired_good": i_repaired,
                 "unrecoverable": i_unrecov,
             },
@@ -3176,17 +3774,19 @@ def _compute_batch_overview(batch_id: str, con, *, public: bool = False) -> Opti
         }
 
         if not public:
-            item_data["unit_price"]       = r[5]
-            item_data["item_wholesale"]   = r[22]
-            item_data["normal_qty_input"] = normal_qty_col
-            item_data["needs_matching"]   = bool(r[15])
-            item_data["match_confidence"] = r[14]
-            item_data["supplier_location"] = r[17]
-            item_data["supplier_contact"]  = r[18]
-            item_data["confirmed_by"]      = r[21]
-            item_data["memo"]              = r[16]
-            item_data["defect_case_id"]    = r[25]
-            item_data["inbound_item_id"]   = r[24]
+            item_data["unit_price"]        = r["unit_price"]
+            item_data["item_wholesale"]    = r["item_wholesale"]
+            item_data["normal_qty_input"]  = i_normal
+            item_data["needs_matching"]    = bool(r["needs_matching"])
+            item_data["match_confidence"]  = r["match_confidence"]
+            item_data["supplier_location"] = r["supplier_location"]
+            item_data["supplier_contact"]  = r["supplier_contact"]
+            item_data["confirmed_by"]      = r["confirmed_by"]
+            item_data["memo"]              = r["memo"]
+            item_data["defect_case_id"]    = r["defect_case_id"]
+            item_data["inbound_item_id"]   = r["inbound_item_id"]
+            item_data["actual_qty_confirmed"] = bool(r["col_qty_confirmed"])
+            item_data["photo_decision"]    = r["photo_decision"]
 
         item_list.append(item_data)
 

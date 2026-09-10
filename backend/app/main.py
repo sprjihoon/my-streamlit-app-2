@@ -98,6 +98,37 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     """앱 시작 시 DB 테이블 확인 및 스케줄러 시작."""
+    import logging as _logging
+    import os as _os
+    from pathlib import Path as _Path
+    from backend.app.config import settings as _settings
+
+    _log = _logging.getLogger("startup")
+
+    # ── UPLOAD_DIR 쓰기 가능 여부 확인 ──────────────────────────────
+    _upload_dir = _Path(_settings.UPLOAD_DIR)
+    try:
+        _upload_dir.mkdir(parents=True, exist_ok=True)
+        _probe = _upload_dir / ".write_probe"
+        _probe.write_text("ok")
+        _probe.unlink()
+        _log.info("[UPLOAD_DIR] OK — 쓰기 가능: %s", _upload_dir)
+    except Exception as _e:
+        _log.error("[UPLOAD_DIR] 쓰기 불가 — %s: %s", _upload_dir, _e)
+
+    # ── Railway 영구 볼륨 경고 ───────────────────────────────────────
+    _data_dir = _upload_dir.parent  # /app/data
+    _is_ephemeral = not _os.path.ismount(str(_data_dir))
+    if _is_ephemeral:
+        _log.warning(
+            "[UPLOAD_DIR] 경고: %s 가 마운트된 영구 볼륨이 아닌 것으로 보입니다. "
+            "Railway에서 재시작 시 파일이 삭제될 수 있습니다. "
+            "Railway Dashboard > Service > Volumes > Add Volume (Mount: /app/data) 설정을 확인하세요.",
+            _data_dir,
+        )
+    else:
+        _log.info("[UPLOAD_DIR] 영구 볼륨 마운트 감지: %s", _data_dir)
+
     from logic import ensure_tables
     ensure_tables()
     # 연차 테이블 초기화

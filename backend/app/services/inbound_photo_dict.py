@@ -182,16 +182,23 @@ def inbound_photo_cleanup_plan(
             }
 
             # 2. 미연결 inbox 사진 7일 경과
+            #    ◆ item_id IS NULL: 직접 연결 없음
+            #    ◆ inbound_item_photos 에도 없음: from-inbox 공유 연결도 없음
+            #    → 두 조건 모두 충족해야 삭제 후보
             unlinked = con.execute(
-                """SELECT id, stored_filename, created_at
-                   FROM inbound_product_photo_inbox
-                   WHERE item_id IS NULL
-                     AND is_deleted = 0
-                     AND DATE(created_at, '+7 days') < ?""",
+                """SELECT inp.id, inp.stored_filename, inp.created_at
+                   FROM inbound_product_photo_inbox inp
+                   WHERE inp.item_id IS NULL
+                     AND inp.is_deleted = 0
+                     AND DATE(inp.created_at, '+7 days') < ?
+                     AND NOT EXISTS (
+                         SELECT 1 FROM inbound_item_photos iip
+                         WHERE iip.filename = inp.stored_filename
+                     )""",
                 (today,)
             ).fetchall()
             plan["categories"]["unlinked_inbox_7d"] = {
-                "description": "미연결 inbox 사진 7일 경과",
+                "description": "미연결 inbox 사진 7일 경과 (품목연결 없음)",
                 "count": len(unlinked),
                 "sample_filenames": [r[1] for r in unlinked[:5]],
             }

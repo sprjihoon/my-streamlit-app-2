@@ -94,70 +94,81 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
     """우체국 공개 종적조회 HTML에서 현재 처리상태코드를 추출한다.
 
     ※ service.epost.go.kr HTML 실제 구조 (2026 기준):
-      - 날짜와 시간이 별도 TD: <td>2026.09.10</td><td>07:55</td><td>위치</td><td>상태</td>
-      - 이력이 오래된 순(오름차순) → 마지막 이력 행이 가장 최신 상태
-      - 진행 단계 UI 레이블로 '배달완료' 등이 HTML 어디에나 존재 → 오탐 방지 필수
+      - 날짜·시간이 별도 TD: <td>2026.09.10</td><td>07:55</td><td>위치</td><td>상태</td>
+      - 이력은 오름차순 (오래된 순) — 마지막 행이 최신
+      - 진행 단계 UI 레이블로 '배달완료' 등이 항상 포함 → 부분일치 탐색 오탐 위험
 
-    3단계 파싱:
-      1단계: 날짜 TD(YYYY.MM.DD 형식)가 포함된 이력 <tr>에서만 추출,
-             마지막 매칭 행이 최신 상태 (오름차순이므로 역순 탐색)
-      2단계: 전체 <td> 역순 검색 — '배달완료' 제외 (단계 레이블 오탐 방지)
-      3단계: HTML 없는 텍스트 fallback — 전체 blob 정방향 검색
+    정확한 텍스트 → 코드 딕셔너리 조회 방식으로 오탐 방지:
+      각 TD 셀의 첫 줄(실제 상태 텍스트)을 추출해 _EXACT_MAP 에서 정확히 매핑.
+
+    3단계:
+      1단계: 날짜 TD(YYYY.MM.DD) 포함 이력 <tr> 역순, 셀도 역순 → 최신 상태 정확 추출
+      2단계: 전체 <td> 역순 exact 조회 — 배달완료(03) 제외 (단계 레이블 오탐 방지)
+      3단계: HTML 없는 텍스트 fallback — 우선순위 순서 부분일치
     """
     blob = text or ""
     if not blob:
         return None
 
-    _STATUS_RULES: list[tuple[list[str], str]] = [
-        (["배달완료", "배달 완료"], "03"),
-        # 집하(수거) 완료 — "집하" 단독은 레이블에도 등장하므로 "완료" 포함 패턴만
-        (["집하완료", "집하 완료", "수거완료", "수거 완료"], "01"),
-        (["배달중"], "07"),
-        (["배달준비"], "06"),
-        (["이동중", "수거중", "발송"], "02"),
-        (["배차신청"], "09"),         # 수거 차량 배정
-        (["수거준비"], "05"),          # 수거 일정 확정
-        (["접수확인"], "08"),          # 우체국 접수 확인
-        (["운송장출력"], "04"),
+    # ── 정확한 상태 텍스트 → 코드 (우체국 페이지 실제 텍스트 기준) ─────────
+    _EXACT_MAP: dict[str, str] = {
+        "배달완료": "03", "배달 완료": "03",
+        "집하완료": "01", "집하 완료": "01", "수거완료": "01", "수거 완료": "01",
+        "배달중":   "07",
+        "배달준비": "06",
+        "이동중":   "02", "수거중": "02", "발송": "02",
+        "배차신청": "09",
+        "수거준비": "05",
+        "접수확인": "08",
+        "운송장출력": "04",
+        "신청접수": "00",
+    }
+    # fallback 우선순위 (최신 단계 → 초기 단계 순)
+    _PRIORITY: list[tuple[str, str]] = [
+        ("배달완료", "03"), ("배달 완료", "03"),
+        ("집하완료", "01"), ("집하 완료", "01"), ("수거완료", "01"), ("수거 완료", "01"),
+        ("배달중",   "07"),
+        ("배달준비", "06"),
+        ("이동중",   "02"), ("수거중", "02"), ("발송", "02"),
+        ("배차신청", "09"),
+        ("수거준비", "05"),
+        ("접수확인", "08"),
+        ("운송장출력", "04"),
+        ("신청접수", "00"),
     ]
 
-    def _match_cell(cell: str) -> str | None:
-        for keywords, code in _STATUS_RULES:
-            if any(kw in cell for kw in keywords):
-                return code
-        return None
+    def _first_line(cell_html: str) -> str:
+        """TD 내부 HTML 태그 제거 후 첫 줄(실제 상태 텍스트) 반환."""
+        raw = re.sub(r'<[^>]+>', '', cell_html).strip()
+        return raw.split('\n')[0].strip()
 
-    # ── 1단계: 날짜 TD가 포함된 이력 <tr>만 추출 → 역순(최신 우선) 탐색 ──
-    # 실제 HTML: <td>2026.09.10</td><td>07:55</td> 처럼 날짜·시간 TD 분리
+    # ── 1단계: 날짜 TD 포함 이력 <tr> — 역순(최신 행 먼저), 셀도 역순 ───────
     _DATE_TD_RE = re.compile(r'^\d{4}[.\-]\d{2}[.\-]\d{2}$')
     rows = re.findall(r'<tr[^>]*>(.*?)</tr>', blob, re.IGNORECASE | re.DOTALL)
     event_rows: list[str] = []
     for row in rows:
         cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
-        cell_texts = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
-        if any(_DATE_TD_RE.match(t) for t in cell_texts):
+        texts = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+        if any(_DATE_TD_RE.match(t) for t in texts):
             event_rows.append(row)
 
-    # 역순 탐색 — 마지막 이력 행(가장 최신)부터 상태 추출
     for row in reversed(event_rows):
         cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
-        for cell in cells:
-            cell_text = re.sub(r'<[^>]+>', '', cell).strip()
-            code = _match_cell(cell_text)
+        for cell in reversed(cells):
+            code = _EXACT_MAP.get(_first_line(cell))
             if code:
                 return code
 
-    # ── 2단계: 전체 <td> 역순 검색 — '배달완료' 제외(단계 레이블 오탐 방지) ─
+    # ── 2단계: 전체 <td> 역순 exact 조회 — 배달완료 제외 ─────────────────────
     all_tds = re.findall(r'<td[^>]*>(.*?)</td>', blob, re.IGNORECASE | re.DOTALL)
-    for raw_td in reversed(all_tds):
-        cell_text = re.sub(r'<[^>]+>', '', raw_td).strip()
-        for keywords, code in _STATUS_RULES[1:]:   # "03" 스킵
-            if any(kw in cell_text for kw in keywords):
-                return code
+    for cell in reversed(all_tds):
+        code = _EXACT_MAP.get(_first_line(cell))
+        if code and code != "03":   # 진행 단계 레이블 '배달완료' 오탐 방지
+            return code
 
-    # ── 3단계: HTML 없는 텍스트 fallback — 전체 blob 정방향 검색 ────────────
-    for keywords, code in _STATUS_RULES:
-        if any(kw in blob for kw in keywords):
+    # ── 3단계: 텍스트 fallback — 우선순위 순서 부분일치 ──────────────────────
+    for keyword, code in _PRIORITY:
+        if keyword in blob:
             return code
 
     return None

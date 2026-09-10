@@ -82,7 +82,20 @@ CREATE TABLE IF NOT EXISTS inbound_items (
     defect_pending_qty INTEGER DEFAULT 0,
     repairing_qty INTEGER DEFAULT 0,
     repair_done_qty INTEGER DEFAULT 0,
-    unrecoverable_qty INTEGER DEFAULT 0
+    unrecoverable_qty INTEGER DEFAULT 0,
+    actual_qty_confirmed INTEGER DEFAULT 0,
+    photo_decision TEXT
+);
+CREATE TABLE IF NOT EXISTS inbound_item_qty_transitions (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL,
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    actor TEXT,
+    ref_id TEXT,
+    reason TEXT,
+    moved_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS inbound_item_photos (
     id TEXT PRIMARY KEY,
@@ -153,6 +166,8 @@ CREATE TABLE IF NOT EXISTS defect_log (
     날짜 TEXT,
     업체명 TEXT,
     제품명 TEXT,
+    옵션 TEXT,
+    바코드 TEXT,
     불량명 TEXT,
     수량 INTEGER DEFAULT 1,
     비고 TEXT,
@@ -162,6 +177,9 @@ CREATE TABLE IF NOT EXISTS defect_log (
     extra_images TEXT,
     작성자 TEXT,
     저장시간 TIMESTAMP,
+    출처 TEXT DEFAULT 'manual',
+    수정자 TEXT,
+    수정시간 TIMESTAMP,
     inbound_item_id TEXT,
     defect_case_id TEXT
 );

@@ -126,7 +126,8 @@ def test_treat_status_from_tracking_text_granular():
     assert treat_status_from_tracking_text("배달완료") == "03"
     assert treat_status_from_tracking_text("운송장출력") == "04"
     assert treat_status_from_tracking_text("수거준비 중") == "05"
-    assert treat_status_from_tracking_text("접수확인 완료") == "05"
+    assert treat_status_from_tracking_text("접수확인 완료") == "08"   # 우체국 접수확인은 08로 분리
+    assert treat_status_from_tracking_text("배차신청 완료") == "09"   # 배차신청은 09로 분리
     assert treat_status_from_tracking_text("이동중") == "02"
     assert treat_status_from_tracking_text("발송 처리") == "02"
     assert treat_status_from_tracking_text("배달중") == "07"
