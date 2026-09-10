@@ -218,16 +218,10 @@ export default function ReturnRequestPage() {
         }
       }
       if (result.duplicate_guard) {
-        const existing = result.tracking_nos?.length
-          ? result.tracking_nos.join(', ')
-          : result.tracking_no;
-        setSuccess((result.message || `이미 접수된 송장: ${existing}`) + extra);
+        setSuccess((result.message || `기존 송장 ${result.tracking_no} 를 반환했습니다.`) + extra);
       } else {
         const mode = result.is_test ? '테스트 접수' : '우체국 접수';
-        const tnos = result.tracking_nos?.length ? result.tracking_nos : [result.tracking_no];
-        const tnoStr = tnos.join(', ');
-        const partialNote = result.partial ? ` (일부 박스만 접수됨: ${tnos.length}/${form.box_quantity}개)` : '';
-        setSuccess(`${mode} 완료. 송장 ${tnoStr}${partialNote}${extra}`);
+        setSuccess(`${mode} 완료. 송장 ${result.tracking_no}${extra}`);
       }
       setSelectedSavedId('');
       setSaveAddress(false);
