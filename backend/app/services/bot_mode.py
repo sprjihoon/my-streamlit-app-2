@@ -241,15 +241,34 @@ def apply_mode_command(user_id: str, channel_id: Optional[str], command: dict) -
     action = command.get("action")
     mgr = get_conversation_manager()
     if action == "start":
+        # 입고모드: 기존 진행중 입고 확인을 clear 이전에 수행
+        if command["mode"] == MODE_INBOUND:
+            from backend.app.services.inbound_bot import _set_pending, _active_batch_for_user, _work_link
+            existing = _active_batch_for_user(uid, cid)
+            set_mode(uid, cid, command["mode"])
+            if existing:
+                # 충돌: 기존 상태를 유지하되 선택 대기로 전환 (clear 없이)
+                _set_pending(uid, cid, {
+                    "step": "wait_conflict_choice",
+                    "active_batch_id": existing["id"],
+                }, "기존 입고 계속 / 새 입고 선택")
+                return (
+                    f"진행 중인 입고가 있어요.\n"
+                    f"화주사: {existing['vendor']} / 상태: {existing['status']}\n"
+                    f"작업 링크: {_work_link(existing['id'])}\n\n"
+                    f"1. 기존 입고 계속\n"
+                    f"2. 새 입고 시작"
+                )
+            mgr.clear_state(uid, cid)
+            mgr.clear_query_context(uid, cid)
+            clear_photo_inbox(uid, cid)
+            _set_pending(uid, cid, {"step": "wait_vendor"}, "어느 화주사의 입고인가요?")
+            return "입고모드를 시작했어요.\n어느 화주사의 입고인가요?"
+
         set_mode(uid, cid, command["mode"])
         mgr.clear_state(uid, cid)
         mgr.clear_query_context(uid, cid)
         clear_photo_inbox(uid, cid)
-        # 입고모드 시작 시 대화 상태를 초기화해서 화주사 대기 단계로 진입
-        if command["mode"] == MODE_INBOUND:
-            from backend.app.services.inbound_bot import _set_pending
-            _set_pending(uid, cid, {"step": "wait_vendor"}, "어느 화주사의 입고인가요?")
-            return "입고모드를 시작했어요.\n어느 화주사의 입고인가요?"
         return f"{MODE_LABELS[command['mode']]}를 시작했어요."
     if action == "end":
         current = get_mode(uid, cid)

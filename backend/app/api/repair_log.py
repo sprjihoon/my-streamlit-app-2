@@ -135,6 +135,8 @@ def ensure_repair_tables():
             ("수정자", "TEXT"),
             ("수정시간", "TIMESTAMP"),
             ("extra_images", "TEXT"),
+            ("inbound_item_id", "TEXT"),   # 입고 품목 연결 (additive)
+            ("defect_case_id", "TEXT"),    # 입고 결함 케이스 (additive)
         ]:
             if col not in existing_cols:
                 con.execute(f"ALTER TABLE repair_work_log ADD COLUMN [{col}] {coltype}")

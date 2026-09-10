@@ -2,19 +2,21 @@
 backend/app/services/inbound_bot.py - 입고모드 봇 흐름
 ──────────────────────────────────────────────────────
 대화 흐름:
-  1. 입고 → 화주사 묻기
-  2. 화주사 입력 → 배치 생성 → 장끼 사진 요청
-  3. 장끼 사진 수신 → OCR + 매칭 → 작업 링크 전송
-  4. 후속 명령 처리 (미입고, 마감 등)
+  1. 입고 → 진행중 입고 충돌 확인 → 화주사 묻기
+  2. 화주사 입력 → 후보 매칭 → 선택 → 배치 생성 → 장끼 사진 요청
+  3. 장끼 사진 수신 → OCR + 매칭 → 제품사진 inbox 수집
+  4. 사진 끝 → 링크 제공
+  5. 후속 명령 처리 (미입고, 마감, 현황 등)
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import uuid
 from datetime import datetime
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.app.config import settings
 from backend.app.services.conversation_state import get_conversation_manager
@@ -30,6 +32,9 @@ YES_RE = re.compile(r"^(네|넵|예|응|어|맞아|맞아요|그래|좋아|ㅇ�
 CLOSE_RE = re.compile(r"(입고\s*마감|마감\s*해|마감\s*할게|완료\s*해|작업\s*끝)")
 MISSING_RE = re.compile(r"(\d+)\s*번\s*(미입고|안왔어|없어|못받았어)")
 CANCEL_RE = re.compile(r"^(취소|그만|아니야|아니)$")
+PHOTO_END_RE = re.compile(r"^(사진\s*끝|사진\s*완료|사진\s*다\s*보냈어|사진\s*다\s*올렸어)$")
+# "1" or "1번" 선택 응답
+SELECT_RE = re.compile(r"^(\d+)번?$")
 
 EXPIRED_MSG = "입고 작업이 만료됐어요. `입고`를 다시 입력해 새로 시작해주세요."
 
@@ -70,6 +75,183 @@ def pending_is_inbound(user_id: str, channel_id: Optional[str]) -> bool:
         and not state.get("expired")
         and (state.get("pending_data") or {}).get("entry_type") == "inbound"
     )
+
+
+# ─────────────────────────────────────
+# 화주사 후보 검색
+# ─────────────────────────────────────
+
+def _find_vendor_candidates(text: str) -> List[Dict]:
+    """입력 텍스트와 유사한 화주사 후보 최대 5개를 반환한다."""
+    norm = text.strip().lower()
+    with get_connection() as con:
+        rows = con.execute(
+            "SELECT vendor, name FROM vendors WHERE active IS NULL OR active != 'N' ORDER BY vendor"
+        ).fetchall()
+        # 별칭도 포함
+        alias_rows = con.execute(
+            "SELECT alias, vendor FROM aliases WHERE file_type='work_log'"
+        ).fetchall()
+
+    alias_map: Dict[str, str] = {}
+    for alias, vendor in alias_rows:
+        alias_map[alias.lower()] = vendor
+
+    candidates = []
+    for (vendor, name) in rows:
+        v_lower = (vendor or "").lower()
+        n_lower = (name or "").lower()
+        # 완전 일치 우선
+        if norm in (v_lower, n_lower):
+            candidates.insert(0, {"vendor": vendor, "name": name or vendor, "match": "exact"})
+        elif norm in v_lower or v_lower in norm or norm in n_lower or n_lower in norm:
+            candidates.append({"vendor": vendor, "name": name or vendor, "match": "partial"})
+
+    # 별칭 일치
+    matched_alias = alias_map.get(norm)
+    if matched_alias:
+        for c in candidates:
+            if c["vendor"] == matched_alias:
+                c["match"] = "alias"
+                break
+        else:
+            # vendor 테이블에서 찾기
+            with get_connection() as con:
+                row = con.execute("SELECT vendor, name FROM vendors WHERE vendor=?", (matched_alias,)).fetchone()
+            if row:
+                candidates.insert(0, {"vendor": row[0], "name": row[1] or row[0], "match": "alias"})
+
+    return candidates[:5]
+
+
+def _exact_vendor_match(text: str) -> Optional[str]:
+    """완전 일치 화주사 1개 반환 (별칭 포함). 없으면 None."""
+    norm = text.strip().lower()
+    with get_connection() as con:
+        rows = con.execute(
+            "SELECT vendor FROM vendors WHERE LOWER(vendor)=? OR LOWER(name)=?",
+            (norm, norm)
+        ).fetchall()
+        if rows:
+            return rows[0][0]
+        # 별칭 확인
+        alias_row = con.execute(
+            "SELECT vendor FROM aliases WHERE LOWER(alias)=? AND file_type='work_log' LIMIT 1",
+            (norm,)
+        ).fetchone()
+        if alias_row:
+            return alias_row[0]
+    return None
+
+
+# ─────────────────────────────────────
+# 진행중 입고 충돌 감지
+# ─────────────────────────────────────
+
+def _active_batch_for_user(user_id: str, channel_id: Optional[str]) -> Optional[Dict]:
+    """현재 사용자·채팅방에서 진행 중인 입고 배치를 반환한다."""
+    pending = _get_pending(user_id, channel_id)
+    batch_id = pending.get("batch_id")
+    if not batch_id:
+        return None
+    batch = _get_batch(batch_id)
+    if not batch:
+        return None
+    # 완료/마감된 배치는 진행 중으로 보지 않음
+    if batch["status"] in ("done", "inbound_done") and pending.get("step") == "active":
+        return None
+    return batch
+
+
+# ─────────────────────────────────────
+# 제품사진 inbox (SHA-256 기반 중복 체크)
+# ─────────────────────────────────────
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _inbox_photo_count(batch_id: str) -> int:
+    """입고 전용 제품사진 inbox의 현재 장수."""
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT COUNT(*) FROM inbound_product_photo_inbox WHERE batch_id=? AND is_deleted=0",
+            (batch_id,)
+        ).fetchone()
+    return row[0] if row else 0
+
+
+def _add_inbox_photo(
+    batch_id: str,
+    user_id: str,
+    channel_id: str,
+    image_data: bytes,
+    filename: str,
+) -> Dict:
+    """
+    제품사진 inbox에 사진을 추가한다.
+    - SHA-256 중복이면 {'duplicate': True, 'count': N} 반환
+    - 성공이면 {'added': True, 'count': N} 반환
+    """
+    from backend.app.api.inbound import UPLOAD_DIR, ensure_inbound_tables
+    ensure_inbound_tables()
+    _ensure_inbox_table()
+
+    sha = _sha256(image_data)
+
+    with get_connection() as con:
+        existing = con.execute(
+            "SELECT id FROM inbound_product_photo_inbox WHERE batch_id=? AND sha256=? AND is_deleted=0",
+            (batch_id, sha)
+        ).fetchone()
+        if existing:
+            count = con.execute(
+                "SELECT COUNT(*) FROM inbound_product_photo_inbox WHERE batch_id=? AND is_deleted=0",
+                (batch_id,)
+            ).fetchone()[0]
+            return {"duplicate": True, "count": count}
+
+        # 파일 저장
+        ext = (filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg")[:4]
+        photo_id = uuid.uuid4().hex
+        stored_name = f"inbound_product_{batch_id}_{photo_id}.{ext}"
+        dest = UPLOAD_DIR / stored_name
+        dest.write_bytes(image_data)
+
+        now = datetime.utcnow().isoformat()
+        con.execute("""
+            INSERT INTO inbound_product_photo_inbox
+                (id, batch_id, user_id, channel_id, sha256, filename, stored_filename, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (photo_id, batch_id, user_id, channel_id, sha, filename, stored_name, now))
+        con.commit()
+
+        count = con.execute(
+            "SELECT COUNT(*) FROM inbound_product_photo_inbox WHERE batch_id=? AND is_deleted=0",
+            (batch_id,)
+        ).fetchone()[0]
+
+    return {"added": True, "count": count, "id": photo_id}
+
+
+def _ensure_inbox_table() -> None:
+    """inbound_product_photo_inbox 테이블 생성 (없을 경우)."""
+    with get_connection() as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_product_photo_inbox (
+                id TEXT PRIMARY KEY,
+                batch_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                filename TEXT,
+                stored_filename TEXT,
+                item_id TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        con.commit()
 
 
 # ─────────────────────────────────────
@@ -267,33 +449,61 @@ async def handle_user_text(
     step = pending.get("step", "")
     batch_id = pending.get("batch_id")
 
-    # 취소
+    # ── 취소 ──
     if CANCEL_RE.match(text):
         _clear_pending(user_id, channel_id)
         return "입고 작업을 취소했어요."
 
+    # ── Step: 진행중 입고 충돌 — 기존 계속 / 새 입고 선택 대기 ──
+    if step == "wait_conflict_choice":
+        sel = SELECT_RE.match(text)
+        active_batch_id = pending.get("active_batch_id")
+        if sel:
+            choice = int(sel.group(1))
+            if choice == 1 and active_batch_id:
+                # 기존 계속
+                batch = _get_batch(active_batch_id)
+                _set_pending(user_id, channel_id, {
+                    "step": "active",
+                    "batch_id": active_batch_id,
+                    "vendor": batch["vendor"] if batch else "",
+                }, "")
+                return f"기존 입고를 계속 진행합니다.\n작업 링크:\n{_work_link(active_batch_id)}"
+            elif choice == 2:
+                # 새 입고 시작 — 기존 pending 초기화 후 화주사 대기
+                _set_pending(user_id, channel_id, {"step": "wait_vendor"}, "어느 화주사의 입고인가요?")
+                return "새 입고를 시작합니다.\n어느 화주사의 입고인가요?"
+        return "1 또는 2로 선택해주세요.\n1. 기존 입고 계속\n2. 새 입고 시작"
+
+    # ── Step: 화주사 후보 선택 대기 ──
+    if step == "wait_vendor_choice":
+        candidates = pending.get("vendor_candidates", [])
+        sel = SELECT_RE.match(text)
+        if sel:
+            idx = int(sel.group(1)) - 1
+            if 0 <= idx < len(candidates):
+                vendor = candidates[idx]["vendor"]
+                new_batch_id = _create_batch(vendor, user_name or user_id)
+                _set_pending(user_id, channel_id, {
+                    "step": "wait_janggi",
+                    "batch_id": new_batch_id,
+                    "vendor": vendor,
+                }, "장끼 사진을 보내주세요.")
+                return (
+                    f"✅ {vendor} 입고를 시작했어요.\n"
+                    f"장끼(납품서) 사진을 보내주세요."
+                )
+            return f"1~{len(candidates)} 중에서 선택해주세요."
+        # 새 입력으로 다시 검색
+        return await _handle_vendor_input(user_id, channel_id, text, user_name)
+
     # ── Step 1: 화주사 대기 중 ──
     if step == "wait_vendor":
-        vendor = text.strip()
-        if not vendor:
-            return "화주사 이름을 입력해주세요."
-        # 배치 생성
-        new_batch_id = _create_batch(vendor, user_name or user_id)
-        _set_pending(user_id, channel_id, {
-            "step": "wait_janggi",
-            "batch_id": new_batch_id,
-            "vendor": vendor,
-        }, "장끼 사진을 보내주세요.")
-        link = _work_link(new_batch_id)
-        return (
-            f"✅ {vendor} 입고 등록됐어요.\n"
-            f"장끼 사진을 이 채팅에 보내주세요.\n\n"
-            f"작업 링크 (직원 공유용):\n{link}"
-        )
+        return await _handle_vendor_input(user_id, channel_id, text, user_name)
 
     # ── Step 2: 장끼 이미지 대기 중 (텍스트가 오면 안내) ──
     if step == "wait_janggi":
-        return "장끼 사진을 보내주세요. (이미지 파일을 첨부해주세요)"
+        return "장끼(납품서) 사진을 보내주세요. (이미지 파일을 첨부해주세요)"
 
     # ── 배치 있는 상태에서 후속 명령 처리 ──
     if batch_id:
@@ -301,6 +511,10 @@ async def handle_user_text(
         if not batch:
             _clear_pending(user_id, channel_id)
             return "입고 배치를 찾을 수 없어요. `입고`를 다시 입력해 새로 시작해주세요."
+
+        # 사진 끝 → 매칭 링크 제공
+        if PHOTO_END_RE.match(text):
+            return _handle_photo_end(batch_id, user_id, channel_id)
 
         # 미입고 처리: "3번 미입고", "2번 안왔어"
         m = MISSING_RE.search(text)
@@ -327,16 +541,96 @@ async def handle_user_text(
 
         return (
             f"입고모드 진행 중이에요. ({batch['vendor']} / {batch['status']})\n"
-            f"• 장끼 사진 보내기\n"
+            f"• 제품사진 보내기 (순서 무관)\n"
+            f"• `사진 끝` — 매칭 링크 받기\n"
             f"• N번 미입고\n"
             f"• 현황\n"
             f"• 입고 마감\n"
             f"• 취소"
         )
 
-    # ── 초기 진입 (화주사 없음) ──
+    # ── 초기 진입: 진행 중인 입고 충돌 확인 ──
+    # (이미 pending이 없는 경우 — apply_mode_command에서 설정된 wait_vendor와 다름)
     _set_pending(user_id, channel_id, {"step": "wait_vendor"}, "어느 화주사의 입고인가요?")
     return "입고모드를 시작했어요.\n어느 화주사의 입고인가요?"
+
+
+async def _handle_vendor_input(
+    user_id: str,
+    channel_id: str,
+    text: str,
+    user_name: Optional[str],
+) -> str:
+    """화주사 입력 처리 — 완전 일치 시 즉시 생성, 불명확 시 후보 제시."""
+    vendor = text.strip()
+    if not vendor:
+        return "화주사 이름을 입력해주세요."
+
+    # 완전 일치 확인
+    exact = _exact_vendor_match(vendor)
+    if exact:
+        new_batch_id = _create_batch(exact, user_name or user_id)
+        _set_pending(user_id, channel_id, {
+            "step": "wait_janggi",
+            "batch_id": new_batch_id,
+            "vendor": exact,
+        }, "장끼 사진을 보내주세요.")
+        return (
+            f"✅ {exact} 입고를 시작했어요.\n"
+            f"장끼(납품서) 사진을 보내주세요."
+        )
+
+    # 부분 일치 후보
+    candidates = _find_vendor_candidates(vendor)
+    if candidates:
+        lines = ["어느 화주사인가요? 번호로 선택해주세요."]
+        for i, c in enumerate(candidates, 1):
+            lines.append(f"{i}. {c['name']} ({c['vendor']})")
+        lines.append(f"\n다른 화주사라면 이름을 다시 입력해주세요.")
+        _set_pending(user_id, channel_id, {
+            "step": "wait_vendor_choice",
+            "vendor_candidates": candidates,
+        }, "화주사를 선택해주세요.")
+        return "\n".join(lines)
+
+    # 후보도 없으면 그냥 이름 그대로 생성
+    new_batch_id = _create_batch(vendor, user_name or user_id)
+    _set_pending(user_id, channel_id, {
+        "step": "wait_janggi",
+        "batch_id": new_batch_id,
+        "vendor": vendor,
+    }, "장끼 사진을 보내주세요.")
+    return (
+        f"✅ {vendor} 입고를 시작했어요.\n"
+        f"장끼(납품서) 사진을 보내주세요."
+    )
+
+
+def _handle_photo_end(batch_id: str, user_id: str, channel_id: str) -> str:
+    """사진 끝 명령 처리 — 장끼 판독 상태 확인 후 매칭 링크 제공."""
+    batch = _get_batch(batch_id)
+    if not batch:
+        return "입고 배치를 찾을 수 없어요."
+
+    if batch["status"] == "ocr_pending":
+        return "아직 장끼 판독이 완료되지 않았어요. 장끼(납품서) 사진을 먼저 보내주세요."
+
+    _ensure_inbox_table()
+    count = _inbox_photo_count(batch_id)
+
+    if count == 0:
+        return (
+            f"아직 제품사진을 받지 못했어요.\n"
+            f"사진을 보내거나 매칭 링크에서 직접 작업해주세요.\n"
+            f"매칭 링크:\n{_work_link(batch_id)}"
+        )
+
+    link = _work_link(batch_id)
+    return (
+        f"📸 제품사진 {count}장 접수 완료!\n\n"
+        f"아래 링크에서 사진을 품목에 연결해주세요.\n"
+        f"🔗 {link}"
+    )
 
 
 # ─────────────────────────────────────
@@ -350,22 +644,46 @@ async def handle_image(
     filename: str,
     user_name: Optional[str] = None,
 ) -> Optional[str]:
-    """장끼 이미지 수신 → OCR + 매칭 → 결과 응답"""
+    """
+    입고모드 이미지 수신 핸들러.
+    - wait_janggi 단계: 장끼(납품서) OCR + 매칭
+    - active 단계: 제품사진 inbox 수집 (SHA-256 중복 체크)
+    """
     pending = _get_pending(user_id, channel_id)
     step = pending.get("step", "")
     batch_id = pending.get("batch_id")
     vendor = pending.get("vendor", "")
 
-    if step != "wait_janggi" or not batch_id:
-        # 화주사 입력을 아직 안 한 경우
-        if step == "wait_vendor":
-            return "아직 화주사를 입력하지 않았어요. 어느 화주사의 입고인가요?"
-        return None  # 입고모드지만 장끼 대기 상태가 아님
+    # 화주사 대기 중
+    if step in ("wait_vendor", "wait_vendor_choice", "wait_conflict_choice"):
+        return "먼저 화주사를 선택해주세요."
 
+    # 장끼 대기 단계
+    if step == "wait_janggi":
+        if not batch_id:
+            return "입고 배치가 없어요. `입고`를 다시 입력해주세요."
+        return await _handle_janggi_image(user_id, channel_id, batch_id, vendor, image_data, filename, user_name)
+
+    # active 단계 — 제품사진 수집
+    if step == "active" and batch_id:
+        return await _handle_product_photo(user_id, channel_id, batch_id, image_data, filename)
+
+    return None
+
+
+async def _handle_janggi_image(
+    user_id: str,
+    channel_id: str,
+    batch_id: str,
+    vendor: str,
+    image_data: bytes,
+    filename: str,
+    user_name: Optional[str],
+) -> str:
+    """장끼(납품서) 사진 OCR 처리."""
     try:
         result = await _run_ocr_and_match(batch_id, image_data, filename, vendor)
     except Exception as e:
-        # OcrError: 사용자 친화 메시지 전달, pending → wait_janggi 유지
         from backend.app.api.inbound import OcrError
         if isinstance(e, OcrError):
             return (
@@ -376,8 +694,7 @@ async def handle_image(
         if isinstance(e, ValueError):
             return (
                 f"이미지 오류: {e}\n"
-                f"다시 촬영해 보내주세요.\n"
-                f"또는 작업 링크에서 직접 입력해주세요:\n{_work_link(batch_id)}"
+                f"다시 촬영해 보내주세요."
             )
         logger.exception("OCR unexpected error")
         return (
@@ -385,7 +702,6 @@ async def handle_image(
             f"작업 링크에서 수동으로 입력해주세요.\n{_work_link(batch_id)}"
         )
 
-    # 품목 0개이면 pending 상태(wait_janggi) 유지, 확인 완료 메시지 금지
     if result.get("item_count", 0) == 0:
         return (
             "품목을 찾지 못했어요. 다시 촬영해 보내주세요.\n"
@@ -405,17 +721,31 @@ async def handle_image(
     wholesale = result.get("wholesale") or ""
 
     lines = [
-        f"📄 장끼 분석 완료!",
-        f"{'도매처: ' + wholesale if wholesale else ''}",
+        "📄 장끼 분석 완료!",
+        (f"도매처: {wholesale}" if wholesale else ""),
         f"총 {item_count}개 품목 ({matched}개 자동매칭" + (f", {needs}개 확인필요" if needs else "") + ")",
         "",
-        f"🔗 실수량 입력 링크 (직원 공유용):",
-        link,
+        "이제 제품사진을 순서 무관하게 보내주세요.",
+        "다 보내셨으면 `사진 끝` 을 입력해주세요.",
         "",
-        "• 미입고는 `N번 미입고` 로 알려주세요",
-        "• 작업이 끝나면 `입고 마감`",
+        f"🔗 직접 작업 링크:\n{link}",
     ]
     return "\n".join(l for l in lines if l is not None)
+
+
+async def _handle_product_photo(
+    user_id: str,
+    channel_id: str,
+    batch_id: str,
+    image_data: bytes,
+    filename: str,
+) -> str:
+    """제품사진 inbox에 사진을 추가한다. 중복이면 조용히 무시."""
+    result = _add_inbox_photo(batch_id, user_id, channel_id, image_data, filename)
+    if result.get("duplicate"):
+        return None  # 중복 사진은 조용히 무시
+    count = result.get("count", 0)
+    return f"현재 제품사진 {count}장 접수"
 
 
 # ─────────────────────────────────────

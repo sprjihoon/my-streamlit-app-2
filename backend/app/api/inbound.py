@@ -306,6 +306,83 @@ def ensure_inbound_tables():
                 con.execute(f"ALTER TABLE repair_barcode ADD COLUMN {_col}")
             except Exception:
                 pass
+
+        # ── 제품사진 inbox (봇 채팅으로 수집된 제품사진) ──
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_product_photo_inbox (
+                id TEXT PRIMARY KEY,
+                batch_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                filename TEXT,
+                stored_filename TEXT,
+                item_id TEXT,           -- 매칭 완료 후 연결
+                is_deleted INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (batch_id) REFERENCES inbound_batches(id)
+            )
+        """)
+
+        # ── 상품사진 사전 (직원이 확정 연결한 항목만 등록) ──
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS product_photo_dict (
+                id TEXT PRIMARY KEY,
+                photo_filename TEXT NOT NULL,
+                item_id TEXT,
+                barcode TEXT,
+                vendor TEXT,
+                wholesale TEXT,
+                wholesale_product TEXT,
+                sales_product TEXT,
+                option_text TEXT,
+                confirmed_by TEXT,
+                confirmed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_representative INTEGER DEFAULT 0,
+                quality_score REAL DEFAULT 0.0,
+                replaced_at DATETIME,
+                replace_reason TEXT
+            )
+        """)
+
+        # ── 상품 이미지 특징값 (추천 서비스용, 향후 구현) ──
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS product_image_features (
+                barcode TEXT NOT NULL,
+                photo_filename TEXT NOT NULL,
+                feature_vector TEXT,        -- JSON 직렬화 벡터
+                provider TEXT DEFAULT 'none',
+                computed_at DATETIME,
+                PRIMARY KEY (barcode, photo_filename)
+            )
+        """)
+
+        # ── 입고 수량 상태 이력 ──
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS inbound_item_qty_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id TEXT NOT NULL,
+                changed_by TEXT,
+                changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                field_name TEXT NOT NULL,
+                before_value INTEGER,
+                after_value INTEGER,
+                reason TEXT
+            )
+        """)
+
+        # inbound_items 에 세부 수량 상태 컬럼 추가 (additive migration)
+        for col_def in [
+            "defect_pending_qty INTEGER DEFAULT 0",
+            "repairing_qty INTEGER DEFAULT 0",
+            "repair_done_qty INTEGER DEFAULT 0",
+            "unrecoverable_qty INTEGER DEFAULT 0",
+        ]:
+            try:
+                con.execute(f"ALTER TABLE inbound_items ADD COLUMN {col_def}")
+            except Exception:
+                pass
+
         con.commit()
 
 
@@ -1645,6 +1722,44 @@ def update_item(
                 )
 
         con.commit()
+
+    # ── 사진 사전 자동 등록 ──────────────────────────────────
+    # matched_barcode 가 새로 설정된 경우, inbox 사진 중 이 품목에 연결된 항목을
+    # product_photo_dict 에 등록한다 (호출되지 않는 서비스 연결).
+    if body.matched_barcode:
+        try:
+            from backend.app.services.inbound_photo_dict import confirm_photo_link
+            with get_connection() as _pd_con:
+                inbox_rows = _pd_con.execute(
+                    "SELECT id, stored_filename FROM inbound_product_photo_inbox "
+                    "WHERE item_id=? AND is_deleted=0",
+                    (item_id,)
+                ).fetchall()
+                item_meta = _pd_con.execute(
+                    """SELECT i.matched_barcode, i.matched_vendor,
+                              COALESCE(i.item_wholesale, b.wholesale) AS wholesale,
+                              i.matched_product
+                       FROM inbound_items i
+                       JOIN inbound_batches b ON i.batch_id = b.id
+                       WHERE i.id=?""",
+                    (item_id,)
+                ).fetchone()
+            if item_meta and inbox_rows:
+                for inbox_row in inbox_rows:
+                    try:
+                        confirm_photo_link(
+                            photo_filename=inbox_row[1] or inbox_row[0],
+                            item_id=item_id,
+                            barcode=item_meta[0] or body.matched_barcode,
+                            vendor=item_meta[1] or "",
+                            wholesale=item_meta[2] or "",
+                            sales_product=item_meta[3] or "",
+                        )
+                    except Exception:
+                        pass  # 사진 사전 등록 실패는 품목 저장에 영향 없음
+        except Exception:
+            pass  # 서비스 불가 시 무시
+
     return {"ok": True}
 
 
@@ -1743,6 +1858,50 @@ def serve_photo(
     if not path.exists():
         raise HTTPException(status_code=404, detail="사진을 찾을 수 없습니다.")
     return FileResponse(path)
+
+
+# ── 제품사진 inbox 조회 (봇이 수집한 미분류 사진) ──────────
+
+@router.get("/batches/{batch_id}/inbox")
+def list_inbox_photos(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    봇 채팅에서 수집된 미분류 제품사진 목록 반환.
+    item_id가 NULL인 항목이 매칭 대상.
+    """
+    _get_user(authorization)
+    with get_connection() as con:
+        batch_row = con.execute(
+            "SELECT id FROM inbound_batches WHERE id=?", (batch_id,)
+        ).fetchone()
+        if not batch_row:
+            raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+        rows = con.execute(
+            """SELECT id, sha256, filename, stored_filename, item_id, is_deleted, created_at
+               FROM inbound_product_photo_inbox
+               WHERE batch_id=? AND is_deleted=0
+               ORDER BY created_at ASC""",
+            (batch_id,)
+        ).fetchall()
+    return {
+        "batch_id": batch_id,
+        "photos": [
+            {
+                "id":              r[0],
+                "sha256":          r[1],
+                "filename":        r[2],
+                "url":             _image_url(r[3]) if r[3] else None,
+                "item_id":         r[4],
+                "matched":         r[4] is not None,
+                "created_at":      r[6],
+            }
+            for r in rows
+        ],
+        "total": len(rows),
+        "unmatched": sum(1 for r in rows if r[4] is None),
+    }
 
 
 # ── 입고전표 엑셀 다운로드 ────────────────────
@@ -1952,20 +2111,18 @@ def close_batch(
         total_janggi = batch_row[1] or 0
 
         # ── 오전 마감: confirming / ocr_pending → inbound_done ──────────────
+        # 입고 확인 완료: 수량만 확정, 품목 status는 그대로 둠 (검품·양품화 미실행)
         if close_type == "am":
             if current_status not in ("confirming", "ocr_pending"):
                 return {"ok": False, "warning": f"입고처리 완료는 '수량 확인 중' 또는 '장끼 등록 완료' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
 
-            pending_count = con.execute(
-                "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='pending'",
+            # 수량 미입력 품목 경고 (actual_qty=0 이고 janggi_qty>0 이면 입력 누락 가능성)
+            # 정책: 차단하지 않고 경고만 반환 (missing만 있는 경우도 정상)
+            zero_unconfirmed = con.execute(
+                "SELECT COUNT(*) FROM inbound_items "
+                "WHERE batch_id=? AND actual_qty=0 AND janggi_qty>0 AND confirmed_by IS NULL",
                 (batch_id,)
             ).fetchone()[0]
-            if pending_count > 0:
-                return {
-                    "ok": False,
-                    "warning": f"확인 전 품목이 {pending_count}개 남아 있습니다. 모두 확인 후 오전 완료해주세요.",
-                    "pending_count": pending_count,
-                }
 
             next_status = "inbound_done"
             now = datetime.utcnow().isoformat()
@@ -1981,6 +2138,7 @@ def close_batch(
                 "status": next_status,
                 "status_label": STATUS_LABELS[next_status],
                 "message": "오전 입고접수 완료 — 양품화를 진행해주세요",
+                "zero_qty_count": zero_unconfirmed,  # 0 이면 전원 수량 입력
             }
 
         # ── 오후 마감: inbound_done / grading / repairing → done ──
@@ -1990,17 +2148,33 @@ def close_batch(
         if current_status not in ("inbound_done", "grading", "repairing"):
             return {"ok": False, "warning": f"오후 최종 마감은 '양품화 중' 또는 '수선 중' 상태에서만 가능합니다. (현재: {STATUS_LABELS.get(current_status, current_status)})"}
 
-        # 미처리 품목 경고 (pending 또는 defect)
-        unresolved = con.execute(
-            "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status IN ('pending', 'defect')",
+        # 미결 불량 품목은 차단 (defect 상태는 명시적 처리 필요)
+        defect_count = con.execute(
+            "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='defect'",
             (batch_id,)
         ).fetchone()[0]
-        if unresolved > 0:
+        if defect_count > 0:
             return {
                 "ok": False,
-                "warning": f"미처리(확인전/불량) 품목이 {unresolved}개 있습니다. 처리 후 오후 마감해주세요.",
-                "unresolved_count": unresolved,
+                "warning": f"불량판정중 품목이 {defect_count}개 있습니다. 수선/회생불가 처리 후 마감해주세요.",
+                "defect_count": defect_count,
             }
+
+        # 검품·양품화 완료: 남은 미처리(pending) 품목을 정상처리(confirmed)로 이동
+        # idempotent: 이미 confirmed 인 항목은 건드리지 않음
+        now = datetime.utcnow().isoformat()
+        moved_count = con.execute(
+            "SELECT COUNT(*) FROM inbound_items WHERE batch_id=? AND status='pending'",
+            (batch_id,)
+        ).fetchone()[0]
+        if moved_count > 0:
+            con.execute(
+                """UPDATE inbound_items
+                   SET status='confirmed', confirmed_by=COALESCE(confirmed_by, ?), updated_at=?
+                   WHERE batch_id=? AND status='pending'""",
+                (user["nickname"], now, batch_id)
+            )
+            _recalc_batch_totals(con, batch_id)
 
         # ── 수량 정산 ──
         # 공식: 장끼수량 = 미입고 + 일반정상 + 수선중 + 수선후정상 + 회생불가
@@ -2024,16 +2198,16 @@ def close_batch(
         formula_total = 미입고_qty + 정상_qty + 수선중_qty + 수선후정상_qty + 회생불가_qty
         discrepancy = total_janggi - formula_total  # 0이면 정상
 
-        now = datetime.utcnow().isoformat()
+        now2 = datetime.utcnow().isoformat()
         con.execute("""
             UPDATE inbound_batches
             SET status='done', closed_by=?, closed_at=?, updated_at=?
             WHERE id=?
-        """, (user["nickname"], now, now, batch_id))
+        """, (user["nickname"], now2, now2, batch_id))
         con.commit()
 
     add_log("inbound", "pm_close",
-            f"오후 최종 마감: {batch_id} | 정상{정상_qty}/수선중{수선중_qty}/수선후{수선후정상_qty}/회생불가{회생불가_qty}/미입고{미입고_qty}",
+            f"오후 최종 마감: {batch_id} | 정상{정상_qty}/수선중{수선중_qty}/수선후{수선후정상_qty}/회생불가{회생불가_qty}/미입고{미입고_qty} (자동정상처리:{moved_count})",
             user["user_id"])
 
     result = {
@@ -2042,6 +2216,7 @@ def close_batch(
         "status": "done",
         "status_label": STATUS_LABELS["done"],
         "message": "오후 최종 마감 완료",
+        "graded_count": moved_count,  # 자동으로 정상처리된 품목 수
         # ── 수량 정산 (공식 기준) ──
         "total_janggi_qty":    total_janggi,
         "정상_qty":            정상_qty,
@@ -2059,6 +2234,64 @@ def close_batch(
         ),
     }
     return result
+
+
+# ── 검품·양품화 완료 (단독 실행) ─────────────────────────
+# PM 최종 마감과 달리 배치 status를 done으로 바꾸지 않는다.
+# 미처리(pending) 품목만 정상처리(confirmed)로 이동하고 나머지 상태는 건드리지 않는다.
+# idempotent: 이미 confirmed 인 품목은 다시 변경하지 않는다.
+
+@router.post("/batches/{batch_id}/grade-complete")
+def grade_complete(
+    batch_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    검품·양품화 완료.
+    - 남은 미처리(pending) 품목 → 정상처리(confirmed) 자동 이동
+    - defect/repair/done/unrecoverable 품목은 그대로
+    - 배치 status는 변경하지 않음 (최종 마감은 pm close 별도 실행)
+    - 이 API를 여러 번 호출해도 수량이 중복 증가하지 않음 (idempotent)
+    """
+    user = _get_user(authorization)
+    with get_connection() as con:
+        batch_row = con.execute(
+            "SELECT status FROM inbound_batches WHERE id=?", (batch_id,)
+        ).fetchone()
+        if not batch_row:
+            raise HTTPException(status_code=404, detail="입고 배치를 찾을 수 없습니다.")
+
+        if batch_row[0] == "done":
+            return {"ok": True, "moved": 0, "message": "이미 최종 마감된 배치입니다."}
+
+        pending_items = con.execute(
+            "SELECT id, actual_qty FROM inbound_items WHERE batch_id=? AND status='pending'",
+            (batch_id,)
+        ).fetchall()
+
+        if not pending_items:
+            return {"ok": True, "moved": 0, "message": "미처리 품목이 없습니다. 이미 완료 상태입니다."}
+
+        now = datetime.utcnow().isoformat()
+        con.execute(
+            """UPDATE inbound_items
+               SET status='confirmed',
+                   confirmed_by = COALESCE(confirmed_by, ?),
+                   updated_at   = ?
+               WHERE batch_id=? AND status='pending'""",
+            (user["nickname"], now, batch_id)
+        )
+        _recalc_batch_totals(con, batch_id)
+        con.commit()
+
+    moved = len(pending_items)
+    add_log("inbound", "grade_complete",
+            f"검품·양품화 완료: {batch_id} | 자동정상처리 {moved}건", user["user_id"])
+    return {
+        "ok": True,
+        "moved": moved,
+        "message": f"미처리 {moved}건을 정상처리로 이동했습니다.",
+    }
 
 
 # ── 배치 삭제 (관리자) ──────────────────

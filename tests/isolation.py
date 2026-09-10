@@ -30,6 +30,158 @@ def upload_manifest(folder: Path) -> list[str]:
     )
 
 
+_INBOUND_SCHEMA = """
+CREATE TABLE IF NOT EXISTS inbound_batches (
+    id TEXT PRIMARY KEY,
+    vendor TEXT NOT NULL,
+    inbound_date TEXT NOT NULL,
+    status TEXT DEFAULT 'ocr_pending',
+    memo TEXT,
+    receipt_id TEXT,
+    janggi_filename TEXT,
+    janggi_date TEXT,
+    janggi_no TEXT,
+    wholesale TEXT,
+    total_janggi_qty INTEGER DEFAULT 0,
+    total_actual_qty INTEGER DEFAULT 0,
+    total_missing_qty INTEGER DEFAULT 0,
+    created_by TEXT,
+    closed_by TEXT,
+    closed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    vendor_canonical TEXT
+);
+CREATE TABLE IF NOT EXISTS inbound_items (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    line_no INTEGER DEFAULT 0,
+    item_name TEXT,
+    option_text TEXT,
+    unit_price REAL,
+    janggi_qty INTEGER DEFAULT 0,
+    actual_qty INTEGER DEFAULT 0,
+    missing_qty INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending',
+    matched_barcode TEXT,
+    matched_vendor TEXT,
+    matched_product TEXT,
+    matched_option TEXT,
+    match_confidence REAL DEFAULT 0.0,
+    needs_matching INTEGER DEFAULT 0,
+    supplier_location TEXT,
+    supplier_contact TEXT,
+    memo TEXT,
+    defect_case_id TEXT,
+    inbound_item_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    confirmed_by TEXT,
+    item_wholesale TEXT,
+    normal_qty INTEGER DEFAULT 0,
+    defect_pending_qty INTEGER DEFAULT 0,
+    repairing_qty INTEGER DEFAULT 0,
+    repair_done_qty INTEGER DEFAULT 0,
+    unrecoverable_qty INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS inbound_item_photos (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS inbound_share_links (
+    token TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    password TEXT,
+    expires_at TEXT,
+    allow_excel INTEGER DEFAULT 0,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    revoked_at DATETIME
+);
+CREATE TABLE IF NOT EXISTS inbound_product_photo_inbox (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    filename TEXT,
+    stored_filename TEXT,
+    item_id TEXT,
+    is_deleted INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS product_photo_dict (
+    id TEXT PRIMARY KEY,
+    photo_filename TEXT NOT NULL,
+    item_id TEXT,
+    barcode TEXT,
+    vendor TEXT,
+    wholesale TEXT,
+    wholesale_product TEXT,
+    sales_product TEXT,
+    option_text TEXT,
+    confirmed_by TEXT,
+    confirmed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    is_representative INTEGER DEFAULT 0,
+    quality_score REAL DEFAULT 0.0,
+    replaced_at DATETIME,
+    replace_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS product_image_features (
+    barcode TEXT NOT NULL,
+    photo_filename TEXT NOT NULL,
+    feature_vector TEXT,
+    provider TEXT DEFAULT 'none',
+    computed_at DATETIME,
+    PRIMARY KEY (barcode, photo_filename)
+);
+CREATE TABLE IF NOT EXISTS inbound_item_qty_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    changed_by TEXT,
+    changed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    field_name TEXT NOT NULL,
+    before_value INTEGER,
+    after_value INTEGER,
+    reason TEXT
+);
+CREATE TABLE IF NOT EXISTS defect_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    날짜 TEXT,
+    업체명 TEXT,
+    제품명 TEXT,
+    불량명 TEXT,
+    수량 INTEGER DEFAULT 1,
+    비고 TEXT,
+    처리결과 TEXT,
+    before_image TEXT,
+    after_image TEXT,
+    extra_images TEXT,
+    작성자 TEXT,
+    저장시간 TIMESTAMP,
+    inbound_item_id TEXT,
+    defect_case_id TEXT
+);
+CREATE TABLE IF NOT EXISTS repair_barcode (
+    바코드 TEXT PRIMARY KEY,
+    업체명 TEXT NOT NULL,
+    제품명 TEXT NOT NULL,
+    옵션 TEXT,
+    상품코드 TEXT,
+    로케이션 TEXT,
+    상품명 TEXT,
+    출처 TEXT,
+    저장시간 TIMESTAMP,
+    도매처 TEXT,
+    도매처주소 TEXT,
+    도매처연락처 TEXT
+);
+"""
+
+
 def seed_isolated_schema(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as con:
@@ -147,6 +299,7 @@ def seed_isolated_schema(db_path: Path) -> None:
                 제품명 TEXT,
                 옵션 TEXT,
                 바코드 TEXT,
+                불량명 TEXT,
                 작업 TEXT,
                 수량 INTEGER DEFAULT 1,
                 비용 INTEGER DEFAULT 0,
@@ -157,7 +310,11 @@ def seed_isolated_schema(db_path: Path) -> None:
                 barcode_image TEXT,
                 before_image TEXT,
                 after_image TEXT,
-                extra_images TEXT
+                extra_images TEXT,
+                수정자 TEXT,
+                수정시간 TIMESTAMP,
+                inbound_item_id TEXT,
+                defect_case_id TEXT
             );
             CREATE TABLE IF NOT EXISTS shipping_zone (
                 [요금제] TEXT,
@@ -191,6 +348,7 @@ def seed_isolated_schema(db_path: Path) -> None:
             INSERT INTO aliases (alias, file_type, vendor) VALUES ('팔로우미', 'work_log', '팔로우미코스메틱');
             """
         )
+        con.executescript(_INBOUND_SCHEMA)
         con.commit()
 
 

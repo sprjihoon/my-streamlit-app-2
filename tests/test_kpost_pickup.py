@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 
 from fastapi import HTTPException
+
+
+def _next_weekday(d: date, days_ahead: int = 1) -> str:
+    """오늘 이후이면서 평일인 날짜를 반환한다 (kpost 수거일 조건)."""
+    candidate = d + timedelta(days=days_ahead)
+    while candidate.weekday() >= 5:  # 토=5, 일=6
+        candidate += timedelta(days=1)
+    return candidate.isoformat()
+
+
+_FUTURE_PICKUP_DATE = _next_weekday(date.today())
 
 from backend.app.api.kpost_pickup import (
     PickupSubmitRequest,
@@ -69,7 +81,7 @@ def _req(**overrides) -> PickupSubmitRequest:
         "zipcode": "06236",
         "addr1": "서울특별시 강남구 테헤란로 123",
         "addr2": "201호",
-        "pickup_date": "2026-09-10",
+        "pickup_date": _FUTURE_PICKUP_DATE,
         "goods_name": "의류",
         "box_size": "DEFAULT",
         "box_quantity": 1,
@@ -155,7 +167,7 @@ def test_build_return_pickup_params_ord_center_rec_customer():
             "weight": 2,
             "volume": 60,
             "qty": 3,
-            "ret_visit_ymd": "2026-09-10",
+            "ret_visit_ymd": _FUTURE_PICKUP_DATE,
             "test_yn": "Y",
         }
     )
@@ -222,9 +234,10 @@ def test_refresh_status_marks_pickup_complete(isolated_runtime, monkeypatch):
     created = create_pickup(_req(confirm=True), token)
     pickup_id = created["id"]
     with sqlite3.connect(isolated_runtime["db"]) as con:
+        # is_test=0 으로 변경하고 pickup_date를 오늘로 설정해야 refresh가 처리함
         con.execute(
-            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='00', treat_status_name='신청접수' WHERE id=?",
-            (pickup_id,),
+            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='00', treat_status_name='신청접수', pickup_date=? WHERE id=?",
+            (date.today().isoformat(), pickup_id),
         )
         con.commit()
 
@@ -251,10 +264,11 @@ def test_refresh_status_uses_public_tracking_when_getresinfo_stays_requested(iso
         con.execute(
             """
             UPDATE kpost_pickup_requests
-            SET is_test=0, treat_status='00', treat_status_name='신청접수', tracking_no='7222222222222'
+            SET is_test=0, treat_status='00', treat_status_name='신청접수',
+                tracking_no='7222222222222', pickup_date=?
             WHERE id=?
             """,
-            (pickup_id,),
+            (date.today().isoformat(), pickup_id),
         )
         con.commit()
 

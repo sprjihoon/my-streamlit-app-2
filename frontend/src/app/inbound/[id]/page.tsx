@@ -8,13 +8,16 @@ import {
   updateInboundItem,
   deleteInboundItem,
   closeInboundBatch,
+  gradeCompleteInboundBatch,
   runInboundOcr,
   listInboundVendors,
+  listInboundInboxPhotos,
   getRepairBarcodes,
   getVendorAliases,
   ApiError,
   InboundBatch,
   InboundItem,
+  InboundInboxPhoto,
   InboundRegisteredVendor,
   VendorAlias,
   RepairBarcode,
@@ -1152,6 +1155,11 @@ export default function InboundWorkPage() {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrMsg,    setOcrMsg]    = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [inboxPhotos,   setInboxPhotos]   = useState<InboundInboxPhoto[]>([]);
+  const [showInbox,     setShowInbox]     = useState(false);
+  const [grading,       setGrading]       = useState(false);
+  const [gradeMsg,      setGradeMsg]      = useState('');
+  const [fillingQty,    setFillingQty]    = useState(false);
 
   const reload = useCallback(async (tok: string) => {
     if (!id) return;
@@ -1159,6 +1167,12 @@ export default function InboundWorkPage() {
     try {
       const data = await getInboundBatch(tok, id);
       setBatch(data);
+      // 봇 수집 제품사진 inbox 로드 (로그인 세션만)
+      if (tok) {
+        listInboundInboxPhotos(tok, id)
+          .then(r => setInboxPhotos(r.photos))
+          .catch(() => {});
+      }
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 410) {
         setExpired(true);
@@ -1200,6 +1214,41 @@ export default function InboundWorkPage() {
       }
     } catch (e) { setCloseMsg('오류: ' + (e instanceof Error ? e.message : String(e))); }
     finally { setClosing(false); }
+  }
+
+  /** 검품·양품화 완료: 미처리(pending) 품목을 정상처리(confirmed)로 일괄 이동 */
+  async function handleGradeComplete() {
+    if (!batch) return;
+    if (!window.confirm('미처리 품목을 모두 정상처리로 이동합니다. 불량·수선 처리가 모두 끝난 후 실행해주세요. 계속하시겠습니까?')) return;
+    setGrading(true); setGradeMsg('');
+    try {
+      const res = await gradeCompleteInboundBatch(token, batch.id);
+      await reload(token);
+      setGradeMsg(res.moved > 0
+        ? `✅ 미처리 ${res.moved}건 → 정상처리 완료`
+        : '✅ ' + res.message);
+    } catch (e) { setGradeMsg('❌ ' + (e instanceof Error ? e.message : '오류 발생')); }
+    finally { setGrading(false); }
+  }
+
+  /** 수량 전부 장끼와 동일: 모든 품목의 실입고수량을 장끼수량으로 설정 */
+  async function handleFillAllJanggi() {
+    if (!batch) return;
+    const pendingItems = (batch.items || []).filter(i => (i.actual_qty ?? 0) === 0 && (i.janggi_qty ?? 0) > 0);
+    if (pendingItems.length === 0) { alert('이미 모든 품목에 수량이 입력되어 있습니다.'); return; }
+    if (!window.confirm(`${pendingItems.length}개 품목의 실입고수량을 장끼수량과 동일하게 설정합니다.`)) return;
+    setFillingQty(true);
+    try {
+      await Promise.all(pendingItems.map(item =>
+        updateInboundItem(token, item.id, {
+          actual_qty:  item.janggi_qty ?? 0,
+          missing_qty: 0,
+          ...(workerName ? { confirmed_by: workerName } : {}),
+        })
+      ));
+      await reload(token);
+    } catch (e) { alert('일부 품목 저장 실패: ' + (e instanceof Error ? e.message : String(e))); }
+    finally { setFillingQty(false); }
   }
 
   function saveName() {
@@ -1247,7 +1296,8 @@ export default function InboundWorkPage() {
   const doneCount  = items.filter(i => i.status !== 'pending').length;
   const progress   = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
   const statusC    = BATCH_STATUS_COLOR[batch.status] || { bg: C.borderLight, color: C.textSub };
-  const canClose   = ['confirming'].includes(batch.status);
+  const canClose        = ['confirming'].includes(batch.status);
+  const canGradeComplete = ['inbound_done', 'grading', 'repairing'].includes(batch.status);
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Noto Sans KR', -apple-system, sans-serif" }}>
@@ -1357,6 +1407,52 @@ export default function InboundWorkPage() {
         </div>
       </div>
 
+      {/* ── 봇 수집 제품사진 inbox ── */}
+      {inboxPhotos.length > 0 && (
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '8px 14px 0' }}>
+          <SectionToggle
+            open={showInbox}
+            label={`📦 봇 수집 제품사진 (${inboxPhotos.filter(p => !p.matched).length}장 미매칭 / 총 ${inboxPhotos.length}장)`}
+            badge={
+              inboxPhotos.some(p => !p.matched)
+                ? <span style={{ background: C.warningLight, color: C.warning, borderRadius: 8, padding: '1px 6px', fontSize: 11, fontWeight: 700 }}>매칭필요</span>
+                : <span style={{ background: C.successLight, color: C.success, borderRadius: 8, padding: '1px 6px', fontSize: 11, fontWeight: 700 }}>완료</span>
+            }
+            onToggle={() => setShowInbox(v => !v)}
+          />
+          {showInbox && (
+            <div style={{ ...cardStyle, marginTop: 4, padding: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {inboxPhotos.map(photo => (
+                  <div key={photo.id} style={{
+                    position: 'relative', borderRadius: 10, overflow: 'hidden',
+                    border: `2px solid ${photo.matched ? C.successBorder : C.warningBorder}`,
+                    background: photo.matched ? C.successLight : C.warningLight,
+                  }}>
+                    {photo.url ? (
+                      <img
+                        src={`${API_BASE}${photo.url}`}
+                        alt={photo.filename || '제품사진'}
+                        style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block', cursor: 'pointer' }}
+                        onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
+                      />
+                    ) : (
+                      <div style={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>📷</div>
+                    )}
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.5)', padding: '3px 5px', fontSize: 10, color: '#fff', textAlign: 'center' }}>
+                      {photo.matched ? '✅ 매칭완료' : '미매칭'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, color: C.textMuted, lineHeight: 1.6 }}>
+                봇 채팅에서 수집된 제품사진입니다. 품목 편집 → 바코드 선택 시 자동으로 사진 사전에 등록됩니다.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── 품목 목록 ── */}
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '12px 14px' }}>
 
@@ -1463,7 +1559,26 @@ export default function InboundWorkPage() {
           </div>
         )}
 
-        {/* ── 마감 버튼 (관리자) ── */}
+        {/* ── 수량 전부 장끼와 동일 (관리자, 수량 입력 단계) ── */}
+        {isAdmin && canClose && items.length > 0 && (
+          <div style={{ marginBottom: 4 }}>
+            <button
+              onClick={handleFillAllJanggi}
+              disabled={fillingQty}
+              style={{
+                width: '100%', height: 40,
+                background: fillingQty ? '#d1d5db' : C.borderLight,
+                color: fillingQty ? C.textFaint : C.textSub,
+                border: `1px solid ${C.border}`, borderRadius: 10,
+                fontSize: 13, fontWeight: 600, cursor: fillingQty ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {fillingQty ? '설정 중…' : '📋 수량 전부 장끼와 동일 (미입력 품목만)'}
+            </button>
+          </div>
+        )}
+
+        {/* ── 입고 확인 완료 버튼 (관리자, confirming 상태) ── */}
         {isAdmin && canClose && (
           <div style={{ paddingTop: 4, paddingBottom: 20 }}>
             {closeMsg && (
@@ -1486,9 +1601,35 @@ export default function InboundWorkPage() {
                 boxShadow: closing ? 'none' : '0 4px 16px rgba(3,105,161,0.35)',
                 letterSpacing: '-0.3px',
               }}>
-                {closing ? '처리 중…' : '✅ 완료'}
+                {closing ? '처리 중…' : '✅ 입고 확인 완료'}
               </button>
             )}
+          </div>
+        )}
+
+        {/* ── 검품·양품화 완료 버튼 (관리자, inbound_done/grading/repairing 상태) ── */}
+        {isAdmin && canGradeComplete && (
+          <div style={{ paddingTop: 4, paddingBottom: 20 }}>
+            {gradeMsg && (
+              <div style={{
+                marginBottom: 12, padding: '11px 14px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                background: gradeMsg.startsWith('✅') ? C.successLight : C.dangerLight,
+                color:      gradeMsg.startsWith('✅') ? C.success : C.danger,
+                border: `1px solid ${gradeMsg.startsWith('✅') ? C.successBorder : C.dangerBorder}`,
+              }}>
+                {gradeMsg}
+              </div>
+            )}
+            <button onClick={handleGradeComplete} disabled={grading} style={{
+              width: '100%', height: 54,
+              background: grading ? '#d1d5db' : '#5b21b6', color: '#fff',
+              border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800,
+              cursor: grading ? 'not-allowed' : 'pointer',
+              boxShadow: grading ? 'none' : '0 4px 16px rgba(91,33,182,0.35)',
+              letterSpacing: '-0.3px',
+            }}>
+              {grading ? '처리 중…' : '🔷 검품·양품화 완료'}
+            </button>
           </div>
         )}
 

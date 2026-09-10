@@ -1950,6 +1950,13 @@ export async function updateInboundItem(token: string, itemId: string, body: Par
   );
 }
 
+export async function gradeCompleteInboundBatch(token: string, batchId: string) {
+  return fetchApi<{ ok: boolean; moved: number; message: string }>(
+    `/inbound/batches/${batchId}/grade-complete`,
+    { method: 'POST', headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' } }
+  );
+}
+
 export async function closeInboundBatch(
   token: string,
   batchId: string,
@@ -1962,9 +1969,10 @@ export async function closeInboundBatch(
     status_label?: string;
     message?: string;
     warning?: string;
-    pending_count?: number;
-    unresolved_count?: number;
-    // AM 응답에는 없음; PM 마감 시 수량 정산
+    defect_count?: number;
+    zero_qty_count?: number;
+    graded_count?: number;
+    // PM 마감 시 수량 정산
     total_janggi_qty?: number;
     '정상_qty'?: number;
     '수선중_qty'?: number;
