@@ -43,6 +43,26 @@ function statusLabel(item: KpostPickupItem): string {
   return item.treat_status_name || item.status || '신청접수';
 }
 
+const STATUS_CHIP: Record<string, React.CSSProperties> = {
+  '신청접수': { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' },
+  '수거중':   { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' },
+  '수거완료': { background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontWeight: 700 },
+  '배달완료': { background: '#ecfdf5', color: '#0f766e', border: '1px solid #99f6e4', fontWeight: 700 },
+  '취소':     { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' },
+};
+
+function StatusChip({ label }: { label: string }) {
+  const style: React.CSSProperties = {
+    display: 'inline-block',
+    padding: '0.2rem 0.55rem',
+    borderRadius: '999px',
+    fontSize: '0.78rem',
+    whiteSpace: 'nowrap',
+    ...(STATUS_CHIP[label] ?? { background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0' }),
+  };
+  return <span style={style}>{label}</span>;
+}
+
 function canCancel(item: KpostPickupItem): boolean {
   return item.status === 'requested' && item.treat_status !== '01' && item.treat_status !== '03';
 }
@@ -282,7 +302,6 @@ export default function KpostPickupListPage() {
                   <tbody>
                     {pageItems.map((item) => {
                       const label = statusLabel(item);
-                      const done = label === '수거완료';
                       return (
                         <tr key={item.id}>
                           <td>
@@ -300,9 +319,7 @@ export default function KpostPickupListPage() {
                           <td>
                             {item.box_size} × {item.box_quantity || 1}
                           </td>
-                          <td>
-                            <span style={done ? { color: '#0f766e', fontWeight: 700 } : undefined}>{label}</span>
-                          </td>
+                          <td><StatusChip label={label} /></td>
                           <td>
                             {item.created_by || '-'}
                             <div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
