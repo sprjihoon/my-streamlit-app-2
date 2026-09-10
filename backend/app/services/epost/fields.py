@@ -89,13 +89,16 @@ def treat_status_code(code: str | None) -> str:
 def treat_status_from_tracking_text(text: str | None) -> str | None:
     """우체국 공개 종적조회 HTML에서 현재 처리상태코드를 추출한다.
 
-    ⚠ 주의: service.epost.go.kr 추적 페이지 HTML에는 진행 단계 UI 레이블로
-    '배달완료' 같은 문자열이 항상 포함된다. 전체 blob 검색 시 오탐(거짓 "03")이
-    발생하므로, 아래 3단계로 신뢰도를 구분한다.
+    ※ service.epost.go.kr HTML 실제 구조 (2026 기준):
+      - 날짜와 시간이 별도 TD: <td>2026.09.10</td><td>07:55</td><td>위치</td><td>상태</td>
+      - 이력이 오래된 순(오름차순) → 마지막 이력 행이 가장 최신 상태
+      - 진행 단계 UI 레이블로 '배달완료' 등이 HTML 어디에나 존재 → 오탐 방지 필수
 
-    1단계 (최우선): 날짜/시간 패턴이 있는 이력 <tr> 행만 파싱 — 실제 이력 데이터
-    2단계 (중간): 전체 <td> 셀 검색, 단 '배달완료'는 제외 — 단계 레이블 오탐 방지
-    3단계 (마지막): HTML 없는 텍스트 모드 fallback — 전체 blob 검색
+    3단계 파싱:
+      1단계: 날짜 TD(\d{4}.\d{2}.\d{2})가 포함된 이력 <tr>에서만 추출,
+             마지막 매칭 행이 최신 상태 (오름차순이므로 역순 탐색)
+      2단계: 전체 <td> 역순 검색 — '배달완료' 제외 (단계 레이블 오탐 방지)
+      3단계: HTML 없는 텍스트 fallback — 전체 blob 정방향 검색
     """
     blob = text or ""
     if not blob:
@@ -108,7 +111,8 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
         (["배달중"], "07"),
         (["배달준비"], "06"),
         (["이동중", "수거중", "발송"], "02"),
-        (["수거준비", "접수확인"], "05"),
+        # 배차신청 = 수거 차량 배정 (수거준비 단계)
+        (["수거준비", "접수확인", "배차신청"], "05"),
         (["운송장출력"], "04"),
     ]
 
@@ -118,13 +122,19 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
                 return code
         return None
 
-    # ── 1단계: 날짜/시간이 포함된 이력 <tr> 에서만 상태 추출 ──────────────
-    # service.epost.go.kr 형식: "YYYY.MM.DD HH:MM" 또는 "YYYY-MM-DD HH:MM"
-    _DATE_RE = re.compile(r'\d{4}[.\-]\d{2}[.\-]\d{2}\s+\d{2}:\d{2}')
+    # ── 1단계: 날짜 TD가 포함된 이력 <tr>만 추출 → 역순(최신 우선) 탐색 ──
+    # 실제 HTML: <td>2026.09.10</td><td>07:55</td> 처럼 날짜·시간 TD 분리
+    _DATE_TD_RE = re.compile(r'^\d{4}[.\-]\d{2}[.\-]\d{2}$')
     rows = re.findall(r'<tr[^>]*>(.*?)</tr>', blob, re.IGNORECASE | re.DOTALL)
+    event_rows: list[str] = []
     for row in rows:
-        if not _DATE_RE.search(row):
-            continue  # 날짜 없는 행(헤더·단계 레이블 등) 건너뜀
+        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
+        cell_texts = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+        if any(_DATE_TD_RE.match(t) for t in cell_texts):
+            event_rows.append(row)
+
+    # 역순 탐색 — 마지막 이력 행(가장 최신)부터 상태 추출
+    for row in reversed(event_rows):
         cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
         for cell in cells:
             cell_text = re.sub(r'<[^>]+>', '', cell).strip()
@@ -132,14 +142,15 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
             if code:
                 return code
 
-    # ── 2단계: <td> 전체 검색 — '배달완료' 제외(단계 레이블 오탐 방지) ─────
-    for m in re.finditer(r'<td[^>]*>(.*?)</td>', blob, re.IGNORECASE | re.DOTALL):
-        cell_text = re.sub(r'<[^>]+>', '', m.group(1)).strip()
+    # ── 2단계: 전체 <td> 역순 검색 — '배달완료' 제외(단계 레이블 오탐 방지) ─
+    all_tds = re.findall(r'<td[^>]*>(.*?)</td>', blob, re.IGNORECASE | re.DOTALL)
+    for raw_td in reversed(all_tds):
+        cell_text = re.sub(r'<[^>]+>', '', raw_td).strip()
         for keywords, code in _STATUS_RULES[1:]:   # "03" 스킵
             if any(kw in cell_text for kw in keywords):
                 return code
 
-    # ── 3단계: HTML 없는 텍스트 fallback — 전체 blob 검색 ──────────────────
+    # ── 3단계: HTML 없는 텍스트 fallback — 전체 blob 정방향 검색 ────────────
     for keywords, code in _STATUS_RULES:
         if any(kw in blob for kw in keywords):
             return code

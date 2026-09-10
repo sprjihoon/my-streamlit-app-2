@@ -983,6 +983,54 @@ def debug_track(regi_no: str, token: str):
     return results
 
 
+@router.post("/maintenance/reset-status")
+def maintenance_reset_status(secret: str, body: dict):
+    """유지보수 전용: EPOST_RELAY_SECRET 인증으로 특정 송장 상태를 직접 수정.
+
+    body: {"tracking_nos": ["...", ...], "treat_status": "05"}
+    secret: EPOST_RELAY_SECRET 값
+    """
+    relay_secret = os.getenv("EPOST_RELAY_SECRET", "").strip()
+    if not relay_secret or secret != relay_secret:
+        raise HTTPException(status_code=403, detail="인증 실패: secret이 올바르지 않습니다.")
+
+    tracking_nos: list[str] = body.get("tracking_nos") or []
+    new_status: str = (body.get("treat_status") or "").strip()
+    if not tracking_nos:
+        raise HTTPException(status_code=400, detail="tracking_nos가 비어 있습니다.")
+
+    from backend.app.services.epost.fields import TREAT_STATUS_LABELS
+    if new_status not in TREAT_STATUS_LABELS:
+        raise HTTPException(status_code=400, detail=f"유효하지 않은 상태코드. 허용: {list(TREAT_STATUS_LABELS.keys())}")
+
+    new_name = treat_status_label(new_status)
+    ensure_pickup_tables()
+    updated = []
+    not_found = []
+    with get_connection() as con:
+        for tno in tracking_nos:
+            row = con.execute(
+                "SELECT id, treat_status FROM kpost_pickup_requests WHERE tracking_no=? ORDER BY id DESC LIMIT 1",
+                (tno,),
+            ).fetchone()
+            if not row:
+                not_found.append(tno)
+                continue
+            con.execute(
+                "UPDATE kpost_pickup_requests SET treat_status=?, treat_status_name=? WHERE id=?",
+                (new_status, new_name, row[0]),
+            )
+            updated.append({"id": row[0], "tracking_no": tno, "prev": row[1], "now": new_status})
+        con.commit()
+    return {
+        "success": True,
+        "updated": updated,
+        "not_found": not_found,
+        "treat_status": new_status,
+        "treat_status_name": new_name,
+    }
+
+
 @router.patch("/{pickup_id}/treat-status")
 def patch_treat_status(pickup_id: int, token: str, treat_status: str):
     """관리자 전용: 특정 항목의 처리상태를 수동으로 수정."""
