@@ -348,10 +348,14 @@ def get_res_info(
 EPOST_TRACE_URL = "https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm"
 TRACKER_DELIVERY_URL = "https://apis.tracker.delivery/graphql"
 TRACKER_STATUS_TO_TREAT = {
-    "AT_PICKUP": "01",
-    "IN_TRANSIT": "02",
-    "OUT_FOR_DELIVERY": "02",
-    "DELIVERED": "03",
+    # tracker.delivery GraphQL API (kr.epost) → 내부 처리상태코드
+    "PICKUP_PENDING":   "05",  # 운송장출력 또는 수거 대기 → 수거준비
+    "PICKING_UP":       "05",  # 수거 진행 중 → 수거준비
+    "AT_PICKUP":        "01",  # 집하완료 → 수거완료
+    "IN_TRANSIT":       "02",  # 간선 이동 → 이동중
+    "OUT_FOR_DELIVERY": "07",  # 배달 출발 → 배달중
+    "DELIVERED":        "03",  # 배달완료
+    "ATTEMPT_FAILED":   "07",  # 배달 미완료 재시도 → 배달중으로 표시
 }
 
 

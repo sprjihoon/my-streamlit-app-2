@@ -776,7 +776,8 @@ def _sync_pickup_like_infront(item: dict[str, Any]) -> dict[str, Any]:
             _apply_tracking_info(item, info)
         except Exception:
             pass
-    if item.get("treat_status") not in {"01", "03"} and item.get("tracking_no"):
+    # '03'(배달완료)만 최종 상태 — 수거완료(01) 이후에도 이동중·배달중·배달완료 추적을 계속한다
+    if item.get("treat_status") not in {"03"} and item.get("tracking_no"):
         tracked = track_regi_no(item["tracking_no"])
         _apply_tracking_info(item, tracked)
     return item
@@ -795,7 +796,7 @@ def refresh_pickup_statuses(token: str):
                    created_by, created_at, canceled_at, canceled_by
             FROM kpost_pickup_requests
             WHERE status = 'requested' AND is_test = 0
-              AND (treat_status IS NULL OR treat_status NOT IN ('01', '03'))
+              AND (treat_status IS NULL OR treat_status NOT IN ('03'))
               AND (
                 (order_no IS NOT NULL AND order_no != '')
                 OR (tracking_no IS NOT NULL AND tracking_no != '')
@@ -826,9 +827,7 @@ def refresh_pickup_statuses(token: str):
                     )
                     con.commit()
             continue
-        if item.get("treat_status") in {"01", "03"}:
-            if item.get("treat_status") == "01":
-                completed += 1
+        if item.get("treat_status") in {"03"}:
             continue
         try:
             _sync_pickup_like_infront(item)

@@ -39,16 +39,41 @@ function parseApiError(err: unknown): string {
 
 function statusLabel(item: KpostPickupItem): string {
   if (item.status === 'canceled') return '취소';
-  if (item.treat_status === '01' || item.treat_status_name === '집하완료') return '수거완료';
-  return item.treat_status_name || item.status || '신청접수';
+  // treat_status 코드 우선, 없으면 treat_status_name 텍스트로 fallback
+  const code = item.treat_status;
+  if (code === '03') return '배달완료';
+  if (code === '07') return '배달중';
+  if (code === '06') return '배달준비';
+  if (code === '02') return '이동중';
+  if (code === '01' || item.treat_status_name === '집하완료') return '수거완료';
+  if (code === '05') return '수거준비';
+  if (code === '04') return '운송장출력';
+  if (code === '00') return '신청접수';
+  // 레거시 treat_status_name 텍스트 매핑
+  const nm = item.treat_status_name || '';
+  if (nm === '수거중' || nm === '이동중') return '이동중';
+  if (nm === '배달준비') return '배달준비';
+  if (nm === '배달중') return '배달중';
+  if (nm === '수거완료' || nm === '집하완료') return '수거완료';
+  if (nm === '배달완료') return '배달완료';
+  return nm || item.status || '신청접수';
 }
 
 const STATUS_CHIP: Record<string, React.CSSProperties> = {
-  '신청접수': { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' },
-  '수거중':   { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' },
-  '수거완료': { background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontWeight: 700 },
-  '배달완료': { background: '#ecfdf5', color: '#0f766e', border: '1px solid #99f6e4', fontWeight: 700 },
-  '취소':     { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' },
+  // ── 수거 전 단계 ───────────────────────────────────
+  '신청접수':  { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' },
+  '운송장출력': { background: '#fefce8', color: '#854d0e', border: '1px solid #fde68a' },
+  '수거준비':  { background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' },
+  // ── 수거 완료 ─────────────────────────────────────
+  '수거완료':  { background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontWeight: 700 },
+  // ── 배송 중 ───────────────────────────────────────
+  '이동중':    { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' },
+  '수거중':    { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }, // 레거시
+  '배달준비':  { background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe' },
+  '배달중':    { background: '#fdf4ff', color: '#86198f', border: '1px solid #f0abfc' },
+  // ── 최종 ──────────────────────────────────────────
+  '배달완료':  { background: '#ecfdf5', color: '#0f766e', border: '1px solid #99f6e4', fontWeight: 700 },
+  '취소':      { background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' },
 };
 
 function StatusChip({ label }: { label: string }) {

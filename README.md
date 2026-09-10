@@ -49,6 +49,14 @@ cd frontend && npm run dev
 ## 변경 이력
 
 ### 2026-09-10
+- **feat(kpost-pickup): 송장조회 상태 세분화 + 배달완료까지 추적** (`d8d99c89` → `현재`)
+  - 처리상태코드 8단계 추가: `신청접수(00) → 운송장출력(04) → 수거준비(05) → 수거완료(01) → 이동중(02) → 배달준비(06) → 배달중(07) → 배달완료(03)`
+  - `TRACKER_STATUS_TO_TREAT` 확장: `PICKUP_PENDING→05`, `OUT_FOR_DELIVERY→07`, `ATTEMPT_FAILED→07`
+  - `treat_status_from_tracking_text` 확장: 운송장출력·수거준비·이동중·배달준비·배달중 텍스트 인식
+  - `_sync_pickup_like_infront`: 수거완료(01) 이후에도 `track_regi_no` 계속 호출 → 배달완료(03)까지 추적
+  - DB 쿼리: 배달완료(`03`)만 LIMIT 200 제외 → 수거완료 건도 배달완료까지 지속 조회
+  - StatusChip 10가지 색상 칩: 운송장출력(노랑), 수거준비(주황), 수거완료(초록), 이동중(파랑), 배달준비(보라), 배달중(핑크), 배달완료(민트), 취소(빨강)
+  - 신규 테스트: `test_treat_status_from_tracking_text_granular`, `test_refresh_status_skips_only_delivered` — 15/15 통과
 - **feat(kpost-pickup): 회수신청 목록 컬럼별 정렬** (`80227823`)
   - 모든 컬럼 헤더 클릭 → 오름/내림차순 전환, 활성 컬럼 ▲▼ 표시
 - **fix(kpost-pickup): 송장조회 수거완료·배달완료 건 DB 단 제외** (`7a98aa1e`)

@@ -51,11 +51,19 @@ EPOST_CENTER_DEFAULTS = {
 }
 
 TREAT_STATUS_LABELS = {
-    "00": "신청접수",
-    "01": "수거완료",
-    "02": "수거중",
-    "03": "배달완료",
+    # 우체국 계약소포 API(GetResInfo) 및 공개 종적조회 단계코드
+    "00": "신청접수",   # order placed / API accepted
+    "04": "운송장출력",  # waybill printed by postal worker
+    "05": "수거준비",   # pickup scheduled / confirmed (PICKUP_PENDING)
+    "01": "수거완료",   # picked up / 집하완료 (AT_PICKUP)
+    "02": "이동중",     # in transit at distribution hub (IN_TRANSIT)
+    "06": "배달준비",   # arrived at local post office
+    "07": "배달중",     # out for delivery (OUT_FOR_DELIVERY)
+    "03": "배달완료",   # delivered to recipient/warehouse (DELIVERED)
 }
+
+# 최종 상태(더 이상 조회 불필요)
+FINAL_TREAT_STATUSES = {"03"}
 
 
 def treat_status_code(code: str | None) -> str:
@@ -66,26 +74,41 @@ def treat_status_code(code: str | None) -> str:
 
 
 def treat_status_from_tracking_text(text: str | None) -> str | None:
+    """우체국 공개 종적조회 HTML/텍스트에서 처리상태코드를 추론한다.
+    
+    우선순위: 최종상태(배달완료) → 집하완료 → 배달중 → 이동중 → 수거준비 → 운송장출력
+    """
     blob = text or ""
+    # 최종 배달 완료
     if any(token in blob for token in ("배달완료", "배달 완료")):
         return "03"
-    # "집하" 단독 토큰은 우체국 추적 페이지의 헤더·단계 레이블에도 등장하므로 제외.
-    # "집하완료" / "집하 완료" / "수거완료" / "수거 완료" 처럼 완료를 명시한 경우만 수거완료로 판정.
+    # 집하(수거) 완료 — "집하" 단독 토큰은 추적 페이지 레이블에도 등장하므로 반드시 "완료" 포함
     if any(token in blob for token in ("집하완료", "집하 완료", "수거완료", "수거 완료")):
         return "01"
-    if any(token in blob for token in ("수거중", "배달준비", "발송")):
+    # 배달 진행
+    if "배달중" in blob:
+        return "07"
+    if "배달준비" in blob:
+        return "06"
+    # 이동 / 간선 수송
+    if any(token in blob for token in ("이동중", "수거중", "발송")):
         return "02"
+    # 수거 전 단계
+    if any(token in blob for token in ("수거준비", "접수확인")):
+        return "05"
+    if "운송장출력" in blob:
+        return "04"
     return None
 
 
 def treat_status_label(code: str | None, fallback: str | None = None) -> str:
     cd = treat_status_code(code)
-    if cd == "01" or (fallback or "").strip() == "집하완료":
-        return "수거완료"
     if cd in TREAT_STATUS_LABELS:
         return TREAT_STATUS_LABELS[cd]
-    name = (fallback or "").strip()
-    return name or "신청접수"
+    fb = (fallback or "").strip()
+    if fb == "집하완료":
+        return "수거완료"
+    return fb or "신청접수"
 
 
 PICKUP_BOX_SIZES = [

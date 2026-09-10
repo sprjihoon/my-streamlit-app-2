@@ -106,12 +106,38 @@ def test_seed128_matches_rfc4269_and_infront_reference():
 
 
 def test_treat_status_label_maps_picked_up_to_completed():
+    # 기존 코드
     assert treat_status_label("01") == "수거완료"
     assert treat_status_label("00") == "신청접수"
     assert treat_status_label("1", "집하완료") == "수거완료"
     assert treat_status_label("", "집하완료") == "수거완료"
+    # 신규 세분화 코드
+    assert treat_status_label("04") == "운송장출력"
+    assert treat_status_label("05") == "수거준비"
+    assert treat_status_label("02") == "이동중"
+    assert treat_status_label("06") == "배달준비"
+    assert treat_status_label("07") == "배달중"
+    assert treat_status_label("03") == "배달완료"
+
+
+def test_treat_status_from_tracking_text_granular():
+    """우체국 공개 종적조회 텍스트 → 처리상태코드 매핑 검증."""
     assert treat_status_from_tracking_text("집하완료 동대구우체국") == "01"
     assert treat_status_from_tracking_text("배달완료") == "03"
+    assert treat_status_from_tracking_text("운송장출력") == "04"
+    assert treat_status_from_tracking_text("수거준비 중") == "05"
+    assert treat_status_from_tracking_text("접수확인 완료") == "05"
+    assert treat_status_from_tracking_text("이동중") == "02"
+    assert treat_status_from_tracking_text("발송 처리") == "02"
+    assert treat_status_from_tracking_text("배달중") == "07"
+    assert treat_status_from_tracking_text("배달준비") == "06"
+    # 배달완료가 가장 우선
+    assert treat_status_from_tracking_text("배달완료 배달중 이동중") == "03"
+    # 집하완료가 배달중보다 우선
+    assert treat_status_from_tracking_text("집하완료 이동중") == "01"
+    # 인식 불가 텍스트
+    assert treat_status_from_tracking_text("알 수 없음") is None
+    assert treat_status_from_tracking_text(None) is None
 
 
 def test_resolve_center_ignores_legacy_infront_name():
@@ -249,6 +275,11 @@ def test_refresh_status_marks_pickup_complete(isolated_runtime, monkeypatch):
             "regiNo": "7111111111111",
         },
     )
+    # '01' 이후 track_regi_no도 호출됨 (배달완료까지 추적하기 위해). 같은 상태 반환으로 mock.
+    monkeypatch.setattr(
+        "backend.app.api.kpost_pickup.track_regi_no",
+        lambda regi_no: {"treatStusCd": "01", "treatStusNm": "수거완료", "regiNo": regi_no},
+    )
     result = refresh_pickup_statuses(token)
     assert result["completed"] == 1
     item = list_pickups(token)["items"][0]
@@ -285,13 +316,14 @@ def test_refresh_status_uses_public_tracking_when_getresinfo_stays_requested(iso
     assert list_pickups(token)["items"][0]["treat_status_name"] == "수거완료"
 
 
-def test_refresh_status_skips_completed_and_delivered(isolated_runtime, monkeypatch):
-    """treat_status='01'(수거완료) 또는 '03'(배달완료) 건은 송장조회에서 제외되어야 한다."""
+def test_refresh_status_skips_only_delivered(isolated_runtime, monkeypatch):
+    """배달완료('03')만 송장조회에서 제외되어야 한다.
+    수거완료('01')는 배달완료까지 계속 추적하므로 제외하지 않는다."""
     token = _seed_user(isolated_runtime["db"])
 
-    # 수거완료 건 생성
+    # 수거완료 건 — 아직 배달중이므로 계속 조회해야 함
     c1 = create_pickup(_req(confirm=True), token)
-    # 배달완료 건 생성
+    # 배달완료 건 — 최종 상태이므로 조회 제외
     c2 = create_pickup(_req(confirm=True, recipient_name="이영희", recipient_phone="01099998888"), token)
 
     with sqlite3.connect(isolated_runtime["db"]) as con:
@@ -313,11 +345,21 @@ def test_refresh_status_skips_completed_and_delivered(isolated_runtime, monkeypa
         return {"treatStusCd": "01", "treatStusNm": "수거완료", "regiNo": "7000000000000"}
 
     monkeypatch.setattr("backend.app.api.kpost_pickup.get_res_info_with_dates", mock_get_res_info)
+    # track_regi_no도 mock (수거완료 유지)
+    monkeypatch.setattr(
+        "backend.app.api.kpost_pickup.track_regi_no",
+        lambda regi_no: {"treatStusCd": "01", "treatStusNm": "수거완료", "regiNo": regi_no},
+    )
 
     result = refresh_pickup_statuses(token)
-    # 수거완료·배달완료 건은 DB 쿼리에서 제외 → 우체국 API 호출 0건
-    assert result["checked"] == 0, f"completed/delivered items should be skipped, got checked={result['checked']}"
-    assert api_call_count == 0, f"Korea Post API should not be called for completed items, called {api_call_count} times"
+    # 수거완료('01') 건은 계속 조회 → checked=1, 배달완료('03') 건은 제외
+    assert result["checked"] == 1, f"수거완료 건은 계속 조회해야 합니다. checked={result['checked']}"
+    assert api_call_count == 1, f"수거완료 건 1건만 API 호출해야 합니다. called {api_call_count} times"
+
+    # 배달완료 건은 DB에서 제외됐으므로 여전히 '03'
+    items = list_pickups(token)["items"]
+    delivered = next(i for i in items if i["id"] == c2["id"])
+    assert delivered["treat_status"] == "03", "배달완료 건은 변경되지 않아야 합니다"
 
 
 def test_missing_detail_rejected_when_live_like_validation(isolated_runtime, monkeypatch):
