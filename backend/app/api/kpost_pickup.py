@@ -795,6 +795,7 @@ def refresh_pickup_statuses(token: str):
                    created_by, created_at, canceled_at, canceled_by
             FROM kpost_pickup_requests
             WHERE status = 'requested' AND is_test = 0
+              AND (treat_status IS NULL OR treat_status NOT IN ('01', '03'))
               AND (
                 (order_no IS NOT NULL AND order_no != '')
                 OR (tracking_no IS NOT NULL AND tracking_no != '')
