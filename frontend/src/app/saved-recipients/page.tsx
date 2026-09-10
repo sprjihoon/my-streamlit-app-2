@@ -80,19 +80,26 @@ export default function SavedRecipientsPage() {
   }, []);
 
   function openPostcode() {
-    if (!window.daum?.Postcode) {
-      setError('다음 주소 검색 API를 로드하지 못했습니다.');
+    const run = () => {
+      if (!window.daum?.Postcode) return;
+      new window.daum.Postcode({
+        oncomplete: (data) => {
+          setForm((prev) => ({
+            ...prev,
+            zipcode: data.zonecode,
+            addr1: data.roadAddress || data.jibunAddress,
+          }));
+        },
+      }).open();
+    };
+    if (window.daum?.Postcode) {
+      run();
       return;
     }
-    new window.daum.Postcode({
-      oncomplete: (data) => {
-        setForm((prev) => ({
-          ...prev,
-          zipcode: data.zonecode,
-          addr1: data.roadAddress || data.jibunAddress,
-        }));
-      },
-    }).open();
+    const script = document.createElement('script');
+    script.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+    script.onload = run;
+    document.body.appendChild(script);
   }
 
   async function handleSave() {
