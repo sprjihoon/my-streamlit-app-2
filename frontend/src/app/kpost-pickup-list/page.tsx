@@ -65,7 +65,7 @@ export default function KpostPickupListPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const loadList = useCallback(
-    async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }) => {
+    async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string; createdBy?: string }) => {
       const data = await listKpostPickups(auth, filters);
       setItems(data.items || []);
     },
