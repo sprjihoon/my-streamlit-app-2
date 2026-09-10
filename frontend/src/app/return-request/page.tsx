@@ -221,7 +221,9 @@ export default function ReturnRequestPage() {
         setSuccess((result.message || `기존 송장 ${result.tracking_no} 를 반환했습니다.`) + extra);
       } else {
         const mode = result.is_test ? '테스트 접수' : '우체국 접수';
-        setSuccess(`${mode} 완료. 송장 ${result.tracking_no}${extra}`);
+        const tnos = result.tracking_nos?.length ? result.tracking_nos : [result.tracking_no];
+        const partialNote = result.partial ? ` (일부만 접수됨: ${tnos.length}/${form.box_quantity}개)` : '';
+        setSuccess(`${mode} 완료. 송장 ${tnos.join(', ')}${partialNote}${extra}`);
       }
       setSelectedSavedId('');
       setSaveAddress(false);
@@ -369,7 +371,7 @@ export default function ReturnRequestPage() {
             </select>
           </label>
           <label>
-            박스 수량
+            송장 갯수
             <input
               type="number"
               min="1"
