@@ -893,6 +893,9 @@ def debug_track(regi_no: str, token: str):
     from backend.app.services.epost.client import (
         _track_via_epost_trace,
         _track_via_tracker_delivery,
+        _track_via_vercel_relay,
+        VERCEL_APP_URL,
+        EPOST_RELAY_SECRET,
     )
     results: dict[str, Any] = {}
 
@@ -924,6 +927,17 @@ def debug_track(regi_no: str, token: str):
         results["tracker_delivery"] = r or "None (자격증명 없음 또는 매핑 실패)"
     except Exception as e:
         results["tracker_delivery_error"] = str(e)
+
+    # 3-B) Vercel ICN 릴레이 테스트
+    results["vercel_relay_config"] = {
+        "VERCEL_APP_URL": VERCEL_APP_URL or "(미설정)",
+        "EPOST_RELAY_SECRET": "설정됨" if EPOST_RELAY_SECRET else "(미설정)",
+    }
+    try:
+        rv = _track_via_vercel_relay(regi_no)
+        results["vercel_relay"] = rv or "None (릴레이 응답 없음 또는 텍스트 매핑 실패)"
+    except Exception as e:
+        results["vercel_relay_error"] = str(e)
 
     # 4) epost HTML 스크래핑 (service.epost.go.kr - Railway에서 차단될 수 있음)
     try:

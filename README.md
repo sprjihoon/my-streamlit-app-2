@@ -57,9 +57,11 @@ npm run start   # ❌ 로컬 서버 실행은 개발용으로만
   - **A (권장)**: [tracker.delivery](https://tracker.delivery) GraphQL API 사용
     - `TRACKER_DELIVERY_CLIENT_ID` / `TRACKER_DELIVERY_CLIENT_SECRET` Railway env 등록 필요
     - 글로벌 접근 가능, `kr.epost` 지원
-  - **B**: Vercel `/api/epost-relay` 라우트를 `service.epost.go.kr` GET 요청도 허용하도록 확장
-    - `route.ts`의 `ALLOWED_HOST`에 `service.epost.go.kr` 추가
-    - `client.py`에 `_track_via_vercel_relay()` 함수 추가
+  - **B** ✅ **구현됨**: Vercel `/api/epost-relay` 라우트가 `service.epost.go.kr` GET 허용으로 확장됨
+    - `route.ts`: `isAllowedUrl()` 로직으로 `service.epost.go.kr` GET 허용, `arrayBuffer()` 바이너리 전달
+    - `client.py`: `_track_via_vercel_relay()` 추가, `track_regi_no()` 에서 2번째 경로로 사용
+    - **Railway env 설정 필요**: `VERCEL_APP_URL=https://<your-vercel-domain>` (예: `https://tillion.io.kr`)
+    - `EPOST_RELAY_SECRET` 은 이미 설정되어 있으면 공유해서 사용
 
 ### 상태 조회 현재 동작 (2026-09-10 기준)
 

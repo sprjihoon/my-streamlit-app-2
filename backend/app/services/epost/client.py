@@ -31,9 +31,12 @@ EPOST_BASE_URLS = ("https://ship.epost.go.kr", "http://ship.epost.go.kr")
 EPOST_USER_AGENT = "Apache-HttpClient/4.5.1 (Java/1.8.0_91)"
 
 # Vercel Seoul 중계 URL (싱가포르 → 우체국 직접 연결 불가 대응)
-# 예: https://tillion.io.kr  → /api/epost-relay 로 POST
+# 계약소포 API 중계: EPOST_RELAY_URL (tillion.io.kr) → ship.epost.go.kr
 EPOST_RELAY_URL: str = os.getenv("EPOST_RELAY_URL", "").strip().rstrip("/")
 EPOST_RELAY_SECRET: str = os.getenv("EPOST_RELAY_SECRET", "").strip()
+# 공개 종적조회 중계: VERCEL_APP_URL (Vercel ICN) → service.epost.go.kr
+# Railway env에서 VERCEL_APP_URL=https://<your-vercel-domain> 으로 설정 필요
+VERCEL_APP_URL: str = os.getenv("VERCEL_APP_URL", "").strip().rstrip("/")
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -419,6 +422,45 @@ def _track_via_tracker_delivery(regi_no: str) -> dict[str, str] | None:
     return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
 
 
+def _track_via_vercel_relay(regi_no: str) -> dict[str, str] | None:
+    """Vercel Seoul(ICN) /api/epost-relay 를 통해 service.epost.go.kr 종적조회.
+
+    Railway → service.epost.go.kr 직접 연결이 차단된 경우의 우회 경로.
+    VERCEL_APP_URL 과 EPOST_RELAY_SECRET 이 모두 설정되어 있어야 동작한다.
+    """
+    if not (VERCEL_APP_URL and EPOST_RELAY_SECRET):
+        return None
+    tracking_url = (
+        f"https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm"
+        f"?sid1={regi_no}&displayHeader=N"
+    )
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(
+                f"{VERCEL_APP_URL}/api/epost-relay",
+                headers={"x-relay-secret": EPOST_RELAY_SECRET},
+                json={"method": "GET", "url": tracking_url, "form_body": ""},
+            )
+        if resp.status_code >= 400:
+            return None
+        # Vercel 릴레이는 바이너리를 그대로 전달 — EUC-KR 디코딩 처리
+        raw = resp.content
+        detected_enc = (resp.charset_encoding or "").lower().replace("-", "")
+        if detected_enc in ("utf8", "utf-8"):
+            html = raw.decode("utf-8", errors="replace")
+        else:
+            try:
+                html = raw.decode("euc-kr")
+            except (UnicodeDecodeError, LookupError):
+                html = raw.decode("utf-8", errors="replace")
+        treat = treat_status_from_tracking_text(html)
+        if not treat:
+            return None
+        return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
+    except Exception:
+        return None
+
+
 def _track_via_epost_trace(regi_no: str) -> dict[str, str] | None:
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -457,7 +499,11 @@ def track_regi_no(regi_no: str) -> dict[str, str]:
     tracking_no = re.sub(r"\D", "", regi_no or "")
     if len(tracking_no) < 10:
         raise EpostError("송장번호가 없어 종적조회를 할 수 없습니다.")
-    tracked = _track_via_tracker_delivery(tracking_no) or _track_via_epost_trace(tracking_no)
+    tracked = (
+        _track_via_tracker_delivery(tracking_no)   # tracker.delivery GraphQL (자격증명 필요)
+        or _track_via_vercel_relay(tracking_no)    # Vercel Seoul ICN 릴레이 (VERCEL_APP_URL 필요)
+        or _track_via_epost_trace(tracking_no)     # 직접 호출 (Railway에서 차단됨, fallback)
+    )
     if not tracked:
         raise EpostError(f"송장 {tracking_no} 조회 결과가 없습니다.")
     return tracked
