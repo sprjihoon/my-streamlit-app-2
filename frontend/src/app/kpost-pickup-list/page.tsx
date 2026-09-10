@@ -61,6 +61,8 @@ export default function KpostPickupListPage() {
   const [createdByFilter, setCreatedByFilter] = useState('');
   const [createdByOptions, setCreatedByOptions] = useState<string[]>([]);
   const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState(30);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const loadList = useCallback(
     async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }) => {
@@ -107,6 +109,7 @@ export default function KpostPickupListPage() {
 
   async function handleFilter() {
     setError(null);
+    setCurrentPage(1);
     try {
       await loadList(token, currentFilters());
     } catch (err) {
@@ -119,6 +122,7 @@ export default function KpostPickupListPage() {
     setDateTo('');
     setRecipientFilter('');
     setCreatedByFilter('');
+    setCurrentPage(1);
     setError(null);
     try {
       await loadList(token);
@@ -237,85 +241,131 @@ export default function KpostPickupListPage() {
         </div>
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>
-        ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>수거송장번호</th>
-                  <th>수취인</th>
-                  <th>주소</th>
-                  <th>수거일</th>
-                  <th>박스</th>
-                  <th>상태</th>
-                  <th>접수자</th>
-                  <th>취소자</th>
-                  <th style={{ whiteSpace: 'nowrap', width: '1%' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => {
-                  const label = statusLabel(item);
-                  const done = label === '수거완료';
-                  return (
-                    <tr key={item.id}>
-                      <td>
-                        <strong>{item.tracking_no || '-'}</strong>
-                        {item.is_test ? ' (테스트)' : ''}
-                      </td>
-                      <td>
-                        {item.recipient_name}
-                        <div className="text-muted">{item.recipient_phone}</div>
-                      </td>
-                      <td>
-                        [{item.zipcode}] {item.addr1} {item.addr2}
-                      </td>
-                      <td>{item.pickup_date}</td>
-                      <td>
-                        {item.box_size} × {item.box_quantity || 1}
-                      </td>
-                      <td>
-                        <span style={done ? { color: '#0f766e', fontWeight: 700 } : undefined}>{label}</span>
-                      </td>
-                      <td>
-                        {item.created_by || '-'}
-                        <div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
-                      </td>
-                      <td>
-                        {item.canceled_by
-                          ? (<>{item.canceled_by}<div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.canceled_at?.replace('T', ' ').slice(0, 16)}</div></>)
-                          : <span className="text-muted">-</span>}
-                      </td>
-                      <td style={{ whiteSpace: 'nowrap', verticalAlign: 'middle', width: '1%' }}>
-                        <div style={{ display: 'flex', gap: '0.3rem' }}>
-                          {canCancel(item) && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              onClick={() => handleCancel(item.id, item.tracking_no)}
-                            >
-                              취소
-                            </button>
-                          )}
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              style={{ color: '#dc2626' }}
-                              onClick={() => handleDelete(item.id, item.tracking_no)}
-                            >
-                              삭제
-                            </button>
-                          )}
-                        </div>
-                      </td>
+        ) : (() => {
+          const totalPages = Math.ceil(items.length / pageSize);
+          const safePage = Math.min(currentPage, totalPages);
+          const pageItems = items.slice((safePage - 1) * pageSize, safePage * pageSize);
+          return (
+            <>
+              {/* 페이지 크기 + 페이지 정보 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem', flexWrap: 'wrap' }}>
+                <span className="text-muted" style={{ fontSize: '0.85rem' }}>
+                  {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, items.length)} / {items.length}건
+                </span>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
+                  페이지당
+                  <select
+                    style={{ ...inputStyle, width: 'auto', padding: '0.25rem 0.5rem' }}
+                    value={pageSize}
+                    onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                  >
+                    {[10, 30, 50, 100].map((n) => <option key={n} value={n}>{n}건</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>수거송장번호</th>
+                      <th>수취인</th>
+                      <th>주소</th>
+                      <th>수거일</th>
+                      <th>박스</th>
+                      <th>상태</th>
+                      <th>접수자</th>
+                      <th>취소자</th>
+                      <th style={{ whiteSpace: 'nowrap', width: '1%' }}></th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody>
+                    {pageItems.map((item) => {
+                      const label = statusLabel(item);
+                      const done = label === '수거완료';
+                      return (
+                        <tr key={item.id}>
+                          <td>
+                            <strong>{item.tracking_no || '-'}</strong>
+                            {item.is_test ? ' (테스트)' : ''}
+                          </td>
+                          <td>
+                            {item.recipient_name}
+                            <div className="text-muted">{item.recipient_phone}</div>
+                          </td>
+                          <td>
+                            [{item.zipcode}] {item.addr1} {item.addr2}
+                          </td>
+                          <td>{item.pickup_date}</td>
+                          <td>
+                            {item.box_size} × {item.box_quantity || 1}
+                          </td>
+                          <td>
+                            <span style={done ? { color: '#0f766e', fontWeight: 700 } : undefined}>{label}</span>
+                          </td>
+                          <td>
+                            {item.created_by || '-'}
+                            <div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.created_at?.replace('T', ' ').slice(0, 16)}</div>
+                          </td>
+                          <td>
+                            {item.canceled_by
+                              ? (<>{item.canceled_by}<div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.canceled_at?.replace('T', ' ').slice(0, 16)}</div></>)
+                              : <span className="text-muted">-</span>}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap', verticalAlign: 'middle', width: '1%' }}>
+                            <div style={{ display: 'flex', gap: '0.3rem' }}>
+                              {canCancel(item) && (
+                                <button type="button" className="btn btn-secondary" onClick={() => handleCancel(item.id, item.tracking_no)}>
+                                  취소
+                                </button>
+                              )}
+                              {isAdmin && (
+                                <button type="button" className="btn btn-secondary" style={{ color: '#dc2626' }} onClick={() => handleDelete(item.id, item.tracking_no)}>
+                                  삭제
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 페이지 네비게이션 */}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.3rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                  <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === 1} onClick={() => setCurrentPage(1)}>«</button>
+                  <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === 1} onClick={() => setCurrentPage((p) => p - 1)}>‹</button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 2)
+                    .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                      if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('…');
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) =>
+                      p === '…' ? (
+                        <span key={`ellipsis-${i}`} style={{ padding: '0 0.3rem', color: 'var(--text-muted)' }}>…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          className="btn btn-secondary"
+                          style={{ padding: '0.3rem 0.6rem', ...(p === safePage ? { background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' } : {}) }}
+                          onClick={() => setCurrentPage(p as number)}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+                  <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>›</button>
+                  <button className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === totalPages} onClick={() => setCurrentPage(totalPages)}>»</button>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </Card>
     </div>
   );
