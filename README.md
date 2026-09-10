@@ -110,6 +110,24 @@ cd frontend && npm run dev
 
 ## 변경 이력
 
+### 2026-09-10 (3차)
+- **feat(kpost-pickup): 송장 갯수만큼 InsertOrder 반복 — 박스당 송장번호 1개 발급** (`0364f399`)
+  - 기존: InsertOrder 1회 호출(qty=N 전송) → 송장번호 1개
+  - 변경: InsertOrder N회 반복(qty=1 고정) → 송장번호 N개
+  - DB도 박스별 row 1개씩 저장 (box_quantity=1)
+  - 중복 방지 로직 개선: 기존 접수 수 < 요청 수량이면 남은 개수만 추가 접수 허용 (부분 실패 재시도 가능)
+  - 타임아웃: qty × 7초 동적 계산 (최소 20초)
+  - 성공 메시지: 발급된 송장번호 전체 목록 표시 (`송장 A, B, C, D, E`)
+  - 폼 라벨: **"박스 수량" → "송장 갯수"** (직관적 표현)
+- **feat(kpost-pickup): 상태코드 Korean text 통합 + 신청취소 처리** (`b0d4a462`)
+  - `treat_status` DB 컬럼: 숫자코드(`05`) → Korean text(`수거준비`) 직접 저장
+  - `_STATUS_CANONICAL` / `TREAT_STATUS_ORDER` / `FINAL_TREAT_STATUSES` 모두 Korean text 기준
+  - `신청취소` 종단 상태(order=10) 추가 → 수거준비에서 신청취소로 정상 전이
+  - DB 마이그레이션: 앱 시작 시 기존 숫자코드 rows 일괄 Korean text 변환
+  - 프론트 `TREAT_STATUS_OPTIONS` / `statusLabel()` / `canCancel()` Korean text 기준으로 통합
+  - `GET /kpost-pickup/maintenance/inspect` 엔드포인트 추가 (DB 레코드 + insert_snapshot 조회)
+  - 단위 테스트 11/11 PASS (`test_tracking_fix.py`)
+
 ### 2026-09-10 (2차)
 - **fix(kpost-pickup): treat_status_from_tracking_text 오탐 수정** (`763db40f` → `76886603`)
   - **버그**: `service.epost.go.kr` HTML에 진행 단계 레이블로 '배달완료'가 항상 포함 → 수거준비 건도 `03`으로 오탐

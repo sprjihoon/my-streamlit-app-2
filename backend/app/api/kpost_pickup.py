@@ -509,25 +509,34 @@ def create_pickup(req: PickupSubmitRequest, token: str):
         f"{validated['visit_ymd'][6:8]}"
     )
 
-    # 중복 방지: 같은 사용자·수령인 전화번호·수거일에 'requested' 상태가 이미 있으면 guard 반환
+    # 중복 방지: 같은 사용자·수령인 전화번호·수거일에 이미 접수된 건 확인
     with get_connection() as _dup_con:
-        _existing = _dup_con.execute(
+        _existing_rows = _dup_con.execute(
             """SELECT id, tracking_no FROM kpost_pickup_requests
                WHERE created_by=? AND recipient_phone=? AND pickup_date=?
                  AND status='requested'
-               ORDER BY id DESC LIMIT 1""",
+               ORDER BY id ASC""",
             (user["nickname"], validated["phone"], pickup_iso),
-        ).fetchone()
-    if _existing:
+        ).fetchall()
+
+    qty = validated["qty"]
+    already = len(_existing_rows)
+
+    if already >= qty:
+        # 요청 수량만큼 이미 모두 접수됨 → guard 반환
+        all_tnos = [r[1] for r in _existing_rows[:qty]]
         return {
             "duplicate_guard": True,
-            "id": _existing[0],
-            "tracking_no": _existing[1],
+            "id": _existing_rows[0][0],
+            "tracking_no": all_tnos[0],
+            "tracking_nos": all_tnos,
             "success": True,
         }
+    elif already > 0:
+        # 일부만 접수됨(부분 실패 후 재시도) → 남은 개수만 추가 접수
+        qty = qty - already
 
     env = _env()
-    qty = validated["qty"]
     created_at = datetime.now(KST).isoformat(timespec="seconds")
 
     # qty박스 각각 InsertOrder 1회 → 송장번호 qty개 발급
