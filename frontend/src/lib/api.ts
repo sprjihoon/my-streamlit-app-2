@@ -1667,6 +1667,13 @@ export async function refreshKpostPickupStatuses(token: string) {
   }>(`/kpost-pickup/refresh-status${pickupQuery(token)}`, { method: 'POST' });
 }
 
+export async function patchKpostTreatStatus(token: string, id: number, treatStatus: string) {
+  return fetchApi<{ success: boolean; treat_status: string; treat_status_name: string }>(
+    `/kpost-pickup/${id}/treat-status?token=${token}&treat_status=${treatStatus}`,
+    { method: 'PATCH' },
+  );
+}
+
 export interface SavedRecipient {
   id: number;
   label: string;
@@ -1768,6 +1775,8 @@ export interface InboundItem {
   supplier_contact: string | null;
   created_at: string;
   updated_at: string | null;
+  actual_qty_confirmed: boolean;
+  photo_decision: 'photo' | 'existing' | 'new' | 'none' | null;
   photos?: InboundItemPhoto[];
 }
 
@@ -1943,6 +1952,7 @@ export async function updateInboundItem(token: string, itemId: string, body: Par
   matched_barcode: string; matched_vendor: string; matched_product: string; matched_option: string;
   supplier_location: string; supplier_contact: string;
   confirmed_by: string;
+  photo_decision: 'photo' | 'existing' | 'new' | 'none';
 }>) {
   return fetchApi<{ ok: boolean }>(
     `/inbound/items/${itemId}`,
@@ -1970,8 +1980,14 @@ export async function closeInboundBatch(
     message?: string;
     warning?: string;
     defect_count?: number;
+    defect_qty?: number;
+    repair_qty?: number;
     zero_qty_count?: number;
     graded_count?: number;
+    unconfirmed_count?: number;
+    unconfirmed_items?: { id: string; line_no: number; item_name: string; janggi_qty: number }[];
+    undecided_photo_count?: number;
+    undecided_photo_items?: { id: string; line_no: number; item_name: string; actual_qty: number }[];
     // PM 마감 시 수량 정산
     total_janggi_qty?: number;
     '정상_qty'?: number;
@@ -2044,6 +2060,22 @@ export async function listInboundInboxPhotos(token: string, batchId: string) {
   return fetchApi<{ batch_id: string; photos: InboundInboxPhoto[]; total: number; unmatched: number }>(
     `/inbound/batches/${batchId}/inbox`,
     { headers: inboundHeaders(token) }
+  );
+}
+
+/** 봇 inbox 사진을 품목에 연결 (파일 복사 없음) */
+export async function linkInboxPhotoToItem(
+  token: string,
+  itemId: string,
+  inboxPhotoId: string
+) {
+  return fetchApi<{ ok: boolean; id: string; url: string; duplicated: boolean }>(
+    `/inbound/items/${itemId}/photos/from-inbox`,
+    {
+      method: 'POST',
+      headers: inboundHeaders(token),
+      body: JSON.stringify({ inbox_photo_id: inboxPhotoId }),
+    }
   );
 }
 

@@ -925,14 +925,72 @@ def debug_track(regi_no: str, token: str):
     except Exception as e:
         results["tracker_delivery_error"] = str(e)
 
-    # 4) epost HTML 스크래핑 테스트 (Railway에서 접근 불가능할 수 있음)
+    # 4) epost HTML 스크래핑 (service.epost.go.kr - Railway에서 차단될 수 있음)
     try:
         r2 = _track_via_epost_trace(regi_no)
         results["epost_trace"] = r2 or "None (텍스트 매핑 실패)"
     except Exception as e:
         results["epost_trace_error"] = str(e)
 
+    # 5) ntrack.epost.go.kr (신형 서버) 접근 가능성 테스트
+    try:
+        import httpx as _httpx
+        nr = _httpx.get(
+            "https://ntrack.epost.go.kr/trace/traceDelivery.comm",
+            params={"barCode": regi_no, "displayHeader": "N"},
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "ko-KR,ko;q=0.9"},
+            follow_redirects=True,
+        )
+        results["ntrack_status"] = nr.status_code
+        if nr.status_code < 400:
+            raw_n = nr.content
+            try:
+                html_n = raw_n.decode("euc-kr")
+            except Exception:
+                html_n = raw_n.decode("utf-8", errors="replace")
+            from backend.app.services.epost.fields import treat_status_from_tracking_text
+            treat_n = treat_status_from_tracking_text(html_n)
+            results["ntrack_treat"] = treat_n
+            results["ntrack_sample"] = html_n[:300]
+        else:
+            results["ntrack_sample"] = f"HTTP {nr.status_code}"
+    except Exception as e:
+        results["ntrack_error"] = str(e)
+
     return results
+
+
+@router.patch("/{pickup_id}/treat-status")
+def patch_treat_status(pickup_id: int, token: str, treat_status: str):
+    """관리자 전용: 특정 항목의 처리상태를 수동으로 수정."""
+    from backend.app.services.epost.fields import TREAT_STATUS_LABELS
+    user = _get_user(token)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자만 사용할 수 있습니다.")
+    if treat_status not in TREAT_STATUS_LABELS:
+        allowed = list(TREAT_STATUS_LABELS.keys())
+        raise HTTPException(status_code=400, detail=f"유효하지 않은 상태코드. 허용: {allowed}")
+    ensure_pickup_tables()
+    with get_connection() as con:
+        row = con.execute("SELECT id FROM kpost_pickup_requests WHERE id=?", (pickup_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="항목을 찾을 수 없습니다.")
+        new_name = treat_status_label(treat_status)
+        con.execute(
+            "UPDATE kpost_pickup_requests SET treat_status=?, treat_status_name=? WHERE id=?",
+            (treat_status, new_name, pickup_id),
+        )
+        con.commit()
+    add_log(
+        action_type="수동상태수정",
+        target_type="kpost_pickup",
+        target_id=str(pickup_id),
+        target_name=str(pickup_id),
+        user_nickname=user["nickname"],
+        details=f"treat_status → {treat_status}({new_name})",
+    )
+    return {"success": True, "id": pickup_id, "treat_status": treat_status, "treat_status_name": new_name}
 
 
 @router.get("/{pickup_id}")

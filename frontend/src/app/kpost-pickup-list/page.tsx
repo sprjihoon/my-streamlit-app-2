@@ -10,9 +10,21 @@ import {
   deleteKpostPickup,
   getKpostPickupFilterOptions,
   listKpostPickups,
+  patchKpostTreatStatus,
   refreshKpostPickupStatuses,
   type KpostPickupItem,
 } from '@/lib/api';
+
+const TREAT_STATUS_OPTIONS = [
+  { code: '00', label: '신청접수' },
+  { code: '04', label: '운송장출력' },
+  { code: '05', label: '수거준비' },
+  { code: '01', label: '수거완료' },
+  { code: '02', label: '이동중' },
+  { code: '06', label: '배달준비' },
+  { code: '07', label: '배달중' },
+  { code: '03', label: '배달완료' },
+];
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -383,7 +395,28 @@ export default function KpostPickupListPage() {
                           <td>
                             {item.box_size} × {item.box_quantity || 1}
                           </td>
-                          <td><StatusChip label={label} /></td>
+                          <td>
+                            <StatusChip label={label} />
+                            {isAdmin && item.status !== 'canceled' && (
+                              <select
+                                value={item.treat_status || '00'}
+                                onChange={async (e) => {
+                                  try {
+                                    await patchKpostTreatStatus(token, item.id, e.target.value);
+                                    await loadList(token, currentFilters());
+                                  } catch (err: unknown) {
+                                    setError(err instanceof Error ? err.message : '상태 수정 실패');
+                                  }
+                                }}
+                                style={{ marginTop: '0.3rem', fontSize: '0.75rem', padding: '0.1rem 0.3rem', display: 'block', width: '100%', border: '1px solid #cbd5e1', borderRadius: '4px', background: '#f8fafc' }}
+                                title="관리자: 상태 수동 수정"
+                              >
+                                {TREAT_STATUS_OPTIONS.map(o => (
+                                  <option key={o.code} value={o.code}>{o.label}</option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
                           <td>
                             {item.created_by || '-'}
                             <div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.created_at?.replace('T', ' ').slice(0, 16)}</div>

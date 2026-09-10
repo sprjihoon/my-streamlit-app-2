@@ -25,6 +25,56 @@ npm run start   # ❌ 로컬 서버 실행은 개발용으로만
 
 ---
 
+## ⚠️ Railway 네트워크 제약 — 우체국 API 호출 아키텍처
+
+> **차후 개발 필독**: Railway 서버에서 직접 우체국 API를 호출하면 차단됩니다.
+
+### 차단되는 경로
+
+| 호출 대상 | 도메인 | 상태 |
+|-----------|--------|------|
+| 우체국 계약소포 API | `ship.epost.go.kr` | ❌ Railway(싱가포르)에서 직접 호출 차단 |
+| 우체국 공개 종적조회 | `service.epost.go.kr` | ❌ Railway에서 timeout (IP 차단 추정) |
+| 우체국 신형 추적 | `ntrack.epost.go.kr` | ❓ 미확인 (동일 차단 가능성 높음) |
+
+### 현재 우회 방법
+
+#### 1. 계약소포 API (`ship.epost.go.kr`) — ✅ 해결됨
+- **경로**: Railway → `EPOST_RELAY_URL`(`tillion.io.kr`) → `ship.epost.go.kr`
+- `tillion.io.kr`은 국내 서버이므로 우체국 API 직접 호출 가능
+- `backend/app/services/epost/client.py` `call_epost()` 함수가 이 경로를 사용
+- 관련 env var: `EPOST_RELAY_URL`, `EPOST_RELAY_SECRET`
+
+#### 2. Vercel Seoul(ICN) API Route — ✅ 구현됨, 계약 API용
+- `frontend/src/app/api/epost-relay/route.ts` — `preferredRegion = 'icn1'`
+- 현재는 `ship.epost.go.kr` 전용. 공개 종적조회(`service.epost.go.kr`) 릴레이는 미구현
+- 관련 env var: `EPOST_RELAY_SECRET` (Railway·Vercel 양쪽 동일 값 설정 필요)
+
+#### 3. 공개 종적조회 (`service.epost.go.kr`) — ❌ 미해결
+- Railway → `service.epost.go.kr` 직접 호출 → **15초 timeout**
+- `_track_via_epost_trace()` 함수가 항상 실패함
+- **향후 해결 방안**:
+  - **A (권장)**: [tracker.delivery](https://tracker.delivery) GraphQL API 사용
+    - `TRACKER_DELIVERY_CLIENT_ID` / `TRACKER_DELIVERY_CLIENT_SECRET` Railway env 등록 필요
+    - 글로벌 접근 가능, `kr.epost` 지원
+  - **B**: Vercel `/api/epost-relay` 라우트를 `service.epost.go.kr` GET 요청도 허용하도록 확장
+    - `route.ts`의 `ALLOWED_HOST`에 `service.epost.go.kr` 추가
+    - `client.py`에 `_track_via_vercel_relay()` 함수 추가
+
+### 상태 조회 현재 동작 (2026-09-10 기준)
+
+```
+송장조회 버튼 클릭
+  └─ GetResInfo (계약 API, tillion.io.kr 릴레이) → 수거완료(01)까지는 정상 갱신
+  └─ track_regi_no (공개 종적조회) → Railway에서 항상 timeout → 예외 무시
+      └─ 결과: 수거완료(01) 이후 단계(이동중·배달준비·배달중·배달완료)는
+               GetResInfo가 해당 코드를 반환할 때만 갱신됨
+```
+
+> **임시 해결**: 관리자는 회수신청 목록의 상태 칩 하단 드롭다운으로 수동 수정 가능
+
+---
+
 ## 개발 환경
 
 | 항목 | 값 |
