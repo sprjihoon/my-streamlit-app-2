@@ -49,6 +49,13 @@ cd frontend && npm run dev
 ## 변경 이력
 
 ### 2026-09-10
+- **feat(kpost-pickup): 회수신청 목록 상태 컬럼 색상 칩 표시** (`c868604e`)
+  - 신청접수(회색) / 수거중(파랑) / 수거완료(초록) / 배달완료(청록) / 취소(빨강) 칩
+  - React import 누락 수정
+- **feat(kpost-pickup): 회수신청 목록 페이징 추가** (`31827bc8`)
+  - 페이지당 10/30/50/100건 선택, 페이지 네비게이션, 필터 조회 시 1페이지 리셋
+- **feat(kpost-pickup): 관리자 송장번호 일괄 삭제 API** (`70acbd2d`)
+  - `POST /kpost-pickup/bulk-delete` 엔드포인트 추가 (관리자 전용)
 - **feat(kpost-pickup): 회수신청 목록 수취인·접수자 콤보박스 필터 추가** (`5dcaaa10`)
   - `GET /kpost-pickup/filter-options` 엔드포인트 추가 (접수자 전체·수취인 최근 200명 고유값 반환)
   - 수취인·접수자 입력 필드에 `<datalist>` 연결 — 드롭다운 선택 + 직접 입력 모두 가능
