@@ -15,6 +15,19 @@ import {
   type KpostPickupItem,
 } from '@/lib/api';
 
+// 박스 사이즈 코드 → 표시 레이블 (회수신청 폼과 동일)
+const BOX_SIZE_LABELS: Record<string, string> = {
+  MICRO:   '극소 · 1kg · 45cm',
+  DEFAULT: '극소형 · 2kg · 60cm',
+  SMALL:   '소형 · 5kg · 80cm',
+  MEDIUM:  '중형 · 10kg · 100cm',
+  LARGE:   '대형 · 20kg · 120cm',
+  XL:      '특대형 · 30kg · 160cm',
+};
+function boxLabel(code: string) {
+  return BOX_SIZE_LABELS[code?.toUpperCase()] || code || '-';
+}
+
 // treat_status는 Korean text가 그대로 DB/API 값이자 레이블
 const TREAT_STATUS_OPTIONS = [
   { code: '신청접수',  label: '신청접수' },
@@ -389,7 +402,8 @@ export default function KpostPickupListPage() {
                       <SortTh col="recipient_name" label="수취인" />
                       <SortTh col="addr1"          label="주소" />
                       <SortTh col="pickup_date"    label="수거일" />
-                      <SortTh col="box_size"       label="박스" />
+                      <SortTh col="box_size"       label="박스 규격" />
+                      <SortTh col="notes"          label="수거 메모" />
                       <SortTh col="treat_status"   label="상태" />
                       <SortTh col="created_by"     label="접수자" />
                       <SortTh col="canceled_by"    label="취소자" />
@@ -413,8 +427,11 @@ export default function KpostPickupListPage() {
                             [{item.zipcode}] {item.addr1} {item.addr2}
                           </td>
                           <td>{item.pickup_date}</td>
-                          <td>
-                            {item.box_size} × {item.box_quantity || 1}
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            {boxLabel(item.box_size)}
+                          </td>
+                          <td style={{ maxWidth: '160px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)' }}>
+                            {item.notes || '-'}
                           </td>
                           <td>
                             <StatusChip label={label} />
