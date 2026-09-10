@@ -83,6 +83,8 @@ export default function KpostPickupListPage() {
   const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState(30);
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortKey, setSortKey] = useState<string>('id');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const loadList = useCallback(
     async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string; createdBy?: string }) => {
@@ -126,6 +128,42 @@ export default function KpostPickupListPage() {
       }
     })();
   }, [loadList]);
+
+  function handleSort(key: string) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+    setCurrentPage(1);
+  }
+
+  function sortedItems() {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...items].sort((a, b) => {
+      const av = (a as Record<string, unknown>)[sortKey] ?? '';
+      const bv = (b as Record<string, unknown>)[sortKey] ?? '';
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }
+
+  function SortTh({ col, label, style }: { col: string; label: string; style?: React.CSSProperties }) {
+    const active = sortKey === col;
+    return (
+      <th
+        onClick={() => handleSort(col)}
+        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...style }}
+      >
+        {label}{' '}
+        <span style={{ opacity: active ? 1 : 0.25, fontSize: '0.7rem' }}>
+          {active ? (sortDir === 'asc' ? '▲' : '▼') : '▲▼'}
+        </span>
+      </th>
+    );
+  }
 
   async function handleFilter() {
     setError(null);
@@ -262,15 +300,16 @@ export default function KpostPickupListPage() {
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>
         ) : (() => {
-          const totalPages = Math.ceil(items.length / pageSize);
+          const sorted = sortedItems();
+          const totalPages = Math.ceil(sorted.length / pageSize);
           const safePage = Math.min(currentPage, totalPages);
-          const pageItems = items.slice((safePage - 1) * pageSize, safePage * pageSize);
+          const pageItems = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
           return (
             <>
               {/* 페이지 크기 + 페이지 정보 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem', flexWrap: 'wrap' }}>
                 <span className="text-muted" style={{ fontSize: '0.85rem' }}>
-                  {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, items.length)} / {items.length}건
+                  {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, sorted.length)} / {sorted.length}건
                 </span>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
                   페이지당
@@ -288,14 +327,14 @@ export default function KpostPickupListPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>수거송장번호</th>
-                      <th>수취인</th>
-                      <th>주소</th>
-                      <th>수거일</th>
-                      <th>박스</th>
-                      <th>상태</th>
-                      <th>접수자</th>
-                      <th>취소자</th>
+                      <SortTh col="tracking_no"   label="수거송장번호" />
+                      <SortTh col="recipient_name" label="수취인" />
+                      <SortTh col="addr1"          label="주소" />
+                      <SortTh col="pickup_date"    label="수거일" />
+                      <SortTh col="box_size"       label="박스" />
+                      <SortTh col="treat_status"   label="상태" />
+                      <SortTh col="created_by"     label="접수자" />
+                      <SortTh col="canceled_by"    label="취소자" />
                       <th style={{ whiteSpace: 'nowrap', width: '1%' }}></th>
                     </tr>
                   </thead>
