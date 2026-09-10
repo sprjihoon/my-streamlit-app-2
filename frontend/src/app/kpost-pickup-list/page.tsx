@@ -15,17 +15,19 @@ import {
   type KpostPickupItem,
 } from '@/lib/api';
 
+// treat_status는 Korean text가 그대로 DB/API 값이자 레이블
 const TREAT_STATUS_OPTIONS = [
-  { code: '00', label: '신청접수' },
-  { code: '04', label: '운송장출력' },
-  { code: '08', label: '접수확인' },
-  { code: '05', label: '수거준비' },
-  { code: '09', label: '배차신청' },
-  { code: '01', label: '수거완료' },
-  { code: '02', label: '이동중' },
-  { code: '06', label: '배달준비' },
-  { code: '07', label: '배달중' },
-  { code: '03', label: '배달완료' },
+  { code: '신청접수',  label: '신청접수' },
+  { code: '운송장출력', label: '운송장출력' },
+  { code: '접수확인',  label: '접수확인' },
+  { code: '수거준비',  label: '수거준비' },
+  { code: '배차신청',  label: '배차신청' },
+  { code: '수거완료',  label: '수거완료' },
+  { code: '이동중',    label: '이동중' },
+  { code: '배달준비',  label: '배달준비' },
+  { code: '배달중',    label: '배달중' },
+  { code: '배달완료',  label: '배달완료' },
+  { code: '신청취소',  label: '신청취소' },
 ];
 
 const inputStyle: React.CSSProperties = {
@@ -53,26 +55,19 @@ function parseApiError(err: unknown): string {
 
 function statusLabel(item: KpostPickupItem): string {
   if (item.status === 'canceled') return '취소';
-  // treat_status 코드 우선, 없으면 treat_status_name 텍스트로 fallback
-  const code = item.treat_status;
-  if (code === '03') return '배달완료';
-  if (code === '07') return '배달중';
-  if (code === '06') return '배달준비';
-  if (code === '02') return '이동중';
-  if (code === '01' || item.treat_status_name === '집하완료') return '수거완료';
-  if (code === '09') return '배차신청';
-  if (code === '05') return '수거준비';
-  if (code === '08') return '접수확인';
-  if (code === '04') return '운송장출력';
-  if (code === '00') return '신청접수';
-  // 레거시 treat_status_name 텍스트 매핑
+  // treat_status는 Korean text가 그대로 레이블 (숫자코드 레거시 fallback 포함)
+  const ts = item.treat_status || '';
+  const legacyMap: Record<string, string> = {
+    '00': '신청접수', '04': '운송장출력', '08': '접수확인',
+    '05': '수거준비',  '09': '배차신청',  '01': '수거완료',
+    '02': '이동중',    '06': '배달준비',  '07': '배달중',  '03': '배달완료',
+  };
+  if (ts in legacyMap) return legacyMap[ts];   // 숫자코드 레거시 DB 값 대응
+  if (ts) return ts;                            // Korean text 그대로 사용
+  // treat_status_name fallback (집하완료 → 수거완료 등)
   const nm = item.treat_status_name || '';
-  if (nm === '수거중' || nm === '이동중') return '이동중';
-  if (nm === '배달준비') return '배달준비';
-  if (nm === '배달중') return '배달중';
-  if (nm === '수거완료' || nm === '집하완료') return '수거완료';
-  if (nm === '배달완료') return '배달완료';
-  return nm || item.status || '신청접수';
+  if (nm === '집하완료') return '수거완료';
+  return nm || '신청접수';
 }
 
 const STATUS_CHIP: Record<string, React.CSSProperties> = {
@@ -107,7 +102,10 @@ function StatusChip({ label }: { label: string }) {
 }
 
 function canCancel(item: KpostPickupItem): boolean {
-  return item.status === 'requested' && item.treat_status !== '01' && item.treat_status !== '03';
+  const ts = item.treat_status || '';
+  // 수거완료 이후(수거완료·이동중·배달준비·배달중·배달완료) 또는 취소 불가
+  const noCancel = new Set(['수거완료', '이동중', '배달준비', '배달중', '배달완료', '01', '03']);
+  return item.status === 'requested' && !noCancel.has(ts);
 }
 
 export default function KpostPickupListPage() {
@@ -422,7 +420,7 @@ export default function KpostPickupListPage() {
                             <StatusChip label={label} />
                             {isAdmin && item.status !== 'canceled' && (
                               <select
-                                value={item.treat_status || '00'}
+                                value={item.treat_status || '신청접수'}
                                 onChange={async (e) => {
                                   try {
                                     await patchKpostTreatStatus(token, item.id, e.target.value);

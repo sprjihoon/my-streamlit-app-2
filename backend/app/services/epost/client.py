@@ -334,7 +334,8 @@ def get_res_info(
         timeout=timeout,
         max_attempts=max_attempts,
     )
-    treat = parse_xml(xml, "treatStusCd") or "00"
+    treat_code = parse_xml(xml, "treatStusCd") or "00"
+    treat_name = treat_status_code(treat_code)   # 숫자코드 → Korean text
     return {
         "reqNo": parse_xml(xml, "reqNo") or "",
         "resNo": parse_xml(xml, "resNo") or "",
@@ -343,22 +344,22 @@ def get_res_info(
         "resDate": parse_xml(xml, "resDate") or "",
         "price": parse_xml(xml, "price") or "0",
         "vTelNo": parse_xml(xml, "vTelNo") or "",
-        "treatStusCd": treat,
-        "treatStusNm": treat_status_label(treat),
+        "treatStusCd": treat_name,   # Korean text (e.g. '수거준비')
+        "treatStusNm": treat_name,
     }
 
 
 EPOST_TRACE_URL = "https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm"
 TRACKER_DELIVERY_URL = "https://apis.tracker.delivery/graphql"
 TRACKER_STATUS_TO_TREAT = {
-    # tracker.delivery GraphQL API (kr.epost) → 내부 처리상태코드
-    "PICKUP_PENDING":   "05",  # 운송장출력 또는 수거 대기 → 수거준비
-    "PICKING_UP":       "05",  # 수거 진행 중 → 수거준비
-    "AT_PICKUP":        "01",  # 집하완료 → 수거완료
-    "IN_TRANSIT":       "02",  # 간선 이동 → 이동중
-    "OUT_FOR_DELIVERY": "07",  # 배달 출발 → 배달중
-    "DELIVERED":        "03",  # 배달완료
-    "ATTEMPT_FAILED":   "07",  # 배달 미완료 재시도 → 배달중으로 표시
+    # tracker.delivery GraphQL API (kr.epost) → Korean text
+    "PICKUP_PENDING":   "수거준비",
+    "PICKING_UP":       "수거준비",
+    "AT_PICKUP":        "수거완료",
+    "IN_TRANSIT":       "이동중",
+    "OUT_FOR_DELIVERY": "배달중",
+    "DELIVERED":        "배달완료",
+    "ATTEMPT_FAILED":   "배달중",
 }
 
 
@@ -443,7 +444,8 @@ def _track_via_vercel_relay(regi_no: str) -> dict[str, str] | None:
             )
         if resp.status_code >= 400:
             return None
-        # Vercel 릴레이는 바이너리를 그대로 전달 — EUC-KR 디코딩 처리
+        # Vercel 릴레이는 Content-Type: text/html;charset=utf-8 으로 응답
+        # (service.epost.go.kr HTML을 UTF-8로 변환해 전달)
         raw = resp.content
         detected_enc = (resp.charset_encoding or "").lower().replace("-", "")
         if detected_enc in ("utf8", "utf-8"):

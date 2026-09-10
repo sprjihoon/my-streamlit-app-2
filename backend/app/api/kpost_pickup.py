@@ -27,6 +27,7 @@ from backend.app.services.epost.client import (
     mock_insert_order,
 )
 from backend.app.services.epost.fields import (
+    FINAL_TREAT_STATUSES,
     PICKUP_BOX_SIZES,
     TREAT_STATUS_ORDER,
     build_return_pickup_params,
@@ -137,8 +138,16 @@ def ensure_pickup_tables() -> None:
         try:
             con.execute("SELECT box_quantity FROM kpost_pickup_requests LIMIT 1")
         except Exception:
-            # Column doesn't exist, add it
             con.execute("ALTER TABLE kpost_pickup_requests ADD COLUMN box_quantity INTEGER NOT NULL DEFAULT 1")
+
+        # Migration: 숫자코드 treat_status → Korean text (1회성, 이미 변환된 행은 영향 없음)
+        from backend.app.services.epost.fields import TREAT_STATUS_LABELS
+        for code, label in TREAT_STATUS_LABELS.items():
+            con.execute(
+                "UPDATE kpost_pickup_requests SET treat_status=?, treat_status_name=? "
+                "WHERE treat_status=?",
+                (label, label, code),
+            )
         
         con.execute(
             """
@@ -774,16 +783,15 @@ def _apply_tracking_info(item: dict[str, Any], info: dict[str, str]) -> dict[str
     상태는 앞으로만 진행한다(no-downgrade).
     GetResInfo가 수거완료(01)를 반환해도 이미 배달준비(06)인 항목을 덮어쓰지 않는다.
     """
-    new_code = treat_status_code(info.get("treatStusCd") or "")
-    if new_code:
-        cur_code = treat_status_code(item.get("treat_status") or "00")
-        cur_order = TREAT_STATUS_ORDER.get(cur_code, 0)
-        new_order = TREAT_STATUS_ORDER.get(new_code, 0)
+    # treat_status_code()로 숫자코드·Korean text 모두 Korean text로 정규화
+    new_name = treat_status_code(info.get("treatStusCd") or "")
+    if new_name and new_name != "신청접수":
+        cur_name = treat_status_code(item.get("treat_status") or "신청접수")
+        cur_order = TREAT_STATUS_ORDER.get(cur_name, 0)
+        new_order = TREAT_STATUS_ORDER.get(new_name, 0)
         if new_order >= cur_order:  # 더 진행된 상태이거나 같은 상태일 때만 업데이트
-            item["treat_status"] = new_code
-            item["treat_status_name"] = treat_status_label(
-                new_code, info.get("treatStusNm") or item.get("treat_status_name")
-            )
+            item["treat_status"] = new_name
+            item["treat_status_name"] = new_name
     if info.get("regiNo"):
         item["tracking_no"] = info["regiNo"]
     return item
@@ -798,9 +806,9 @@ def _sync_pickup_like_infront(item: dict[str, Any]) -> dict[str, Any]:
             _apply_tracking_info(item, info)
         except Exception:
             pass
-    # '03'(배달완료)만 최종 상태 — 수거완료(01) 이후에도 이동중·배달중·배달완료 추적을 계속한다.
+    # '배달완료'만 최종 상태 — 수거완료 이후에도 이동중·배달중·배달완료 추적을 계속한다.
     # track_regi_no 실패는 조용히 무시: GetResInfo 결과만으로도 DB를 갱신해야 하기 때문.
-    if item.get("treat_status") not in {"03"} and item.get("tracking_no"):
+    if item.get("treat_status") not in FINAL_TREAT_STATUSES and item.get("tracking_no"):
         try:
             tracked = track_regi_no(item["tracking_no"])
             _apply_tracking_info(item, tracked)
@@ -822,7 +830,7 @@ def refresh_pickup_statuses(token: str):
                    created_by, created_at, canceled_at, canceled_by
             FROM kpost_pickup_requests
             WHERE status = 'requested' AND is_test = 0
-              AND (treat_status IS NULL OR treat_status NOT IN ('03'))
+              AND (treat_status IS NULL OR treat_status NOT IN ('배달완료'))
               AND (
                 (order_no IS NOT NULL AND order_no != '')
                 OR (tracking_no IS NOT NULL AND tracking_no != '')
@@ -841,10 +849,10 @@ def refresh_pickup_statuses(token: str):
         """단일 항목 API 조회 (스레드에서 실행). DB 쓰기는 호출자가 처리."""
         pickup_ymd = re.sub(r"\D", "", item.get("pickup_date") or "")[:8]
         if pickup_ymd and pickup_ymd > today_ymd:
-            if item.get("treat_status") == "01":
+            if item.get("treat_status") == "수거완료":
                 return "reset", item
             return "skip", item
-        if item.get("treat_status") in {"03"}:
+        if item.get("treat_status") in FINAL_TREAT_STATUSES:
             return "skip", item
         try:
             _sync_pickup_like_infront(item)
@@ -860,7 +868,7 @@ def refresh_pickup_statuses(token: str):
             if status == "reset":
                 with get_connection() as con:
                     con.execute(
-                        "UPDATE kpost_pickup_requests SET treat_status='00', treat_status_name='신청접수' WHERE id=?",
+                        "UPDATE kpost_pickup_requests SET treat_status='신청접수', treat_status_name='신청접수' WHERE id=?",
                         (item["id"],),
                     )
                     con.commit()
@@ -876,7 +884,7 @@ def refresh_pickup_statuses(token: str):
                     )
                     con.commit()
                 checked += 1
-                if item.get("treat_status") == "01":
+                if item.get("treat_status") == "수거완료":
                     completed += 1
             elif status == "failed":
                 failed += 1
@@ -987,7 +995,7 @@ def debug_track(regi_no: str, token: str):
 def maintenance_reset_status(secret: str, body: dict):
     """유지보수 전용: EPOST_RELAY_SECRET 인증으로 특정 송장 상태를 직접 수정.
 
-    body: {"tracking_nos": ["...", ...], "treat_status": "05"}
+    body: {"tracking_nos": ["...", ...], "treat_status": "수거준비"} (또는 숫자코드 "05"도 허용)
     secret: EPOST_RELAY_SECRET 값
     """
     relay_secret = os.getenv("EPOST_RELAY_SECRET", "").strip()
@@ -995,15 +1003,14 @@ def maintenance_reset_status(secret: str, body: dict):
         raise HTTPException(status_code=403, detail="인증 실패: secret이 올바르지 않습니다.")
 
     tracking_nos: list[str] = body.get("tracking_nos") or []
-    new_status: str = (body.get("treat_status") or "").strip()
+    raw_status: str = (body.get("treat_status") or "").strip()
     if not tracking_nos:
         raise HTTPException(status_code=400, detail="tracking_nos가 비어 있습니다.")
+    # 숫자코드('05') 또는 Korean text('수거준비') 모두 허용
+    new_name = treat_status_code(raw_status)
+    if new_name not in TREAT_STATUS_ORDER:
+        raise HTTPException(status_code=400, detail=f"유효하지 않은 상태. 허용: {list(TREAT_STATUS_ORDER.keys())}")
 
-    from backend.app.services.epost.fields import TREAT_STATUS_LABELS
-    if new_status not in TREAT_STATUS_LABELS:
-        raise HTTPException(status_code=400, detail=f"유효하지 않은 상태코드. 허용: {list(TREAT_STATUS_LABELS.keys())}")
-
-    new_name = treat_status_label(new_status)
     ensure_pickup_tables()
     updated = []
     not_found = []
@@ -1018,15 +1025,15 @@ def maintenance_reset_status(secret: str, body: dict):
                 continue
             con.execute(
                 "UPDATE kpost_pickup_requests SET treat_status=?, treat_status_name=? WHERE id=?",
-                (new_status, new_name, row[0]),
+                (new_name, new_name, row[0]),
             )
-            updated.append({"id": row[0], "tracking_no": tno, "prev": row[1], "now": new_status})
+            updated.append({"id": row[0], "tracking_no": tno, "prev": row[1], "now": new_name})
         con.commit()
     return {
         "success": True,
         "updated": updated,
         "not_found": not_found,
-        "treat_status": new_status,
+        "treat_status": new_name,
         "treat_status_name": new_name,
     }
 
@@ -1034,22 +1041,22 @@ def maintenance_reset_status(secret: str, body: dict):
 @router.patch("/{pickup_id}/treat-status")
 def patch_treat_status(pickup_id: int, token: str, treat_status: str):
     """관리자 전용: 특정 항목의 처리상태를 수동으로 수정."""
-    from backend.app.services.epost.fields import TREAT_STATUS_LABELS
     user = _get_user(token)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="관리자만 사용할 수 있습니다.")
-    if treat_status not in TREAT_STATUS_LABELS:
-        allowed = list(TREAT_STATUS_LABELS.keys())
-        raise HTTPException(status_code=400, detail=f"유효하지 않은 상태코드. 허용: {allowed}")
+    # treat_status는 Korean text (예: '수거준비') — 숫자코드면 변환
+    new_name = treat_status_code(treat_status)
+    if new_name not in TREAT_STATUS_ORDER:
+        allowed = list(TREAT_STATUS_ORDER.keys())
+        raise HTTPException(status_code=400, detail=f"유효하지 않은 상태. 허용: {allowed}")
     ensure_pickup_tables()
     with get_connection() as con:
         row = con.execute("SELECT id FROM kpost_pickup_requests WHERE id=?", (pickup_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="항목을 찾을 수 없습니다.")
-        new_name = treat_status_label(treat_status)
         con.execute(
             "UPDATE kpost_pickup_requests SET treat_status=?, treat_status_name=? WHERE id=?",
-            (treat_status, new_name, pickup_id),
+            (new_name, new_name, pickup_id),
         )
         con.commit()
     add_log(
@@ -1058,9 +1065,9 @@ def patch_treat_status(pickup_id: int, token: str, treat_status: str):
         target_id=str(pickup_id),
         target_name=str(pickup_id),
         user_nickname=user["nickname"],
-        details=f"treat_status → {treat_status}({new_name})",
+        details=f"treat_status → {new_name}",
     )
-    return {"success": True, "id": pickup_id, "treat_status": treat_status, "treat_status_name": new_name}
+    return {"success": True, "id": pickup_id, "treat_status": new_name, "treat_status_name": new_name}
 
 
 @router.get("/{pickup_id}")
