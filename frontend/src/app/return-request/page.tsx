@@ -81,15 +81,11 @@ function applySavedRecipientToForm(
 function saveAliasError(
   saveAddress: boolean,
   alias: string,
-  existingLabels: string[],
 ): string | null {
   if (!saveAddress) return null;
   const label = alias.trim();
   if (!label) return '주소지를 저장하려면 별칭을 입력해주세요.';
   if (label.length > 50) return '별칭은 50자 이하여야 합니다.';
-  if (existingLabels.includes(label)) {
-    return `'${label}' 별칭이 이미 있습니다. 다른 별칭을 입력해주세요.`;
-  }
   return null;
 }
 
@@ -187,7 +183,6 @@ export default function ReturnRequestPage() {
     const aliasErr = saveAliasError(
       saveAddress,
       addressAlias,
-      savedRecipients.map((item) => item.label),
     );
     if (aliasErr) {
       setError(aliasErr);

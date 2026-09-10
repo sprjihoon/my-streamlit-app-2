@@ -706,6 +706,15 @@ def save_recipient(req: SavedRecipientRequest, token: str):
     addr2 = (req.addr2 or "").strip()
     created_at = datetime.now(KST).isoformat(timespec="seconds")
     with get_connection() as con:
+        # 중복 라벨이면 기존 레코드 반환 (1회만 저장)
+        existing = con.execute(
+            "SELECT id FROM saved_recipients WHERE user_id=? AND label=?",
+            (user["user_id"], label),
+        ).fetchone()
+        if existing:
+            return {"success": True, "id": existing[0], "label": label,
+                    "recipient_name": name, "recipient_phone": phone,
+                    "zipcode": zipcode, "addr1": addr1, "addr2": addr2}
         try:
             cur = con.execute(
                 """
@@ -718,7 +727,14 @@ def save_recipient(req: SavedRecipientRequest, token: str):
             con.commit()
         except Exception as exc:
             if "UNIQUE constraint" in str(exc):
-                raise HTTPException(status_code=400, detail=f"'{label}' 라벨이 이미 존재합니다. 다른 이름을 사용해주세요.")
+                row = con.execute(
+                    "SELECT id FROM saved_recipients WHERE user_id=? AND label=?",
+                    (user["user_id"], label),
+                ).fetchone()
+                if row:
+                    return {"success": True, "id": row[0], "label": label,
+                            "recipient_name": name, "recipient_phone": phone,
+                            "zipcode": zipcode, "addr1": addr1, "addr2": addr2}
             raise
     return {
         "success": True,
