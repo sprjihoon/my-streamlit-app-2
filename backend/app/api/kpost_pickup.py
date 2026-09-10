@@ -371,6 +371,7 @@ def list_pickups(
     date_to: str | None = None,
     recipient_name: str | None = None,
     created_by: str | None = None,
+    treat_status: str | None = None,
 ):
     _get_user(token)
     ensure_pickup_tables()
@@ -389,6 +390,13 @@ def list_pickups(
     if created_by and created_by.strip():
         conditions.append("created_by LIKE ?")
         params.append(f"%{created_by.strip()}%")
+    if treat_status and treat_status.strip():
+        # "canceled" 는 status 컬럼으로 필터, 나머지는 treat_status 컬럼으로 필터
+        if treat_status.strip() == "canceled":
+            conditions.append("status = 'canceled'")
+        else:
+            conditions.append("treat_status = ?")
+            params.append(treat_status.strip())
     
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     params.append(max(1, min(limit, 5000)))

@@ -1596,7 +1596,7 @@ export async function previewKpostPickup(token: string, payload: KpostPickupPayl
 
 export async function listKpostPickups(
   token: string,
-  filters?: { dateFrom?: string; dateTo?: string; recipientName?: string; createdBy?: string }
+  filters?: { dateFrom?: string; dateTo?: string; recipientName?: string; createdBy?: string; treatStatus?: string }
 ) {
   let url = `/kpost-pickup${pickupQuery(token)}`;
   if (filters) {
@@ -1605,6 +1605,7 @@ export async function listKpostPickups(
     if (filters.dateTo) params.set('date_to', filters.dateTo);
     if (filters.recipientName) params.set('recipient_name', filters.recipientName);
     if (filters.createdBy) params.set('created_by', filters.createdBy);
+    if (filters.treatStatus) params.set('treat_status', filters.treatStatus);
     if (params.toString()) url += `&${params.toString()}`;
   }
   return fetchApi<{ items: KpostPickupItem[] }>(url);
@@ -1791,6 +1792,7 @@ export interface InboundInboxPhoto {
   id: string;
   sha256: string;
   filename: string | null;
+  stored_filename: string | null;  // 실제 저장 파일명 (inbound_item_photos.filename 과 비교용)
   url: string | null;
   item_id: string | null;
   matched: boolean;
@@ -2076,6 +2078,13 @@ export async function linkInboxPhotoToItem(
       headers: inboundHeaders(token),
       body: JSON.stringify({ inbox_photo_id: inboxPhotoId }),
     }
+  );
+}
+
+export async function unlinkInboxPhotoFromItem(token: string, itemId: string, inboxPhotoId: string) {
+  return fetchApi<{ ok: boolean; unlinked: boolean; inbox_photo_id: string; item_id: string }>(
+    `/inbound/items/${itemId}/photos/from-inbox/${inboxPhotoId}`,
+    { method: 'DELETE', headers: inboundHeaders(token) }
   );
 }
 

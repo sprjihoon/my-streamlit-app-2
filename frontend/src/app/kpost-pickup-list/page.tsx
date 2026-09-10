@@ -116,6 +116,7 @@ export default function KpostPickupListPage() {
   const [dateTo, setDateTo] = useState('');
   const [recipientFilter, setRecipientFilter] = useState('');
   const [createdByFilter, setCreatedByFilter] = useState('');
+  const [treatStatusFilter, setTreatStatusFilter] = useState('');
   const [createdByOptions, setCreatedByOptions] = useState<string[]>([]);
   const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState(30);
@@ -137,6 +138,7 @@ export default function KpostPickupListPage() {
       dateTo: dateTo || undefined,
       recipientName: recipientFilter || undefined,
       createdBy: createdByFilter || undefined,
+      treatStatus: treatStatusFilter || undefined,
     };
   }
 
@@ -217,6 +219,7 @@ export default function KpostPickupListPage() {
     setDateTo('');
     setRecipientFilter('');
     setCreatedByFilter('');
+    setTreatStatusFilter('');
     setCurrentPage(1);
     setError(null);
     try {
@@ -279,7 +282,7 @@ export default function KpostPickupListPage() {
           style={{
             marginBottom: '1rem',
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr 1fr auto auto auto',
+            gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr auto auto auto',
             gap: '0.5rem',
             alignItems: 'end',
           }}
@@ -323,6 +326,20 @@ export default function KpostPickupListPage() {
                 <option key={name} value={name} />
               ))}
             </datalist>
+          </label>
+          <label>
+            배송상태
+            <select
+              style={inputStyle}
+              value={treatStatusFilter}
+              onChange={(e) => setTreatStatusFilter(e.target.value)}
+            >
+              <option value="">전체</option>
+              {TREAT_STATUS_OPTIONS.map((o) => (
+                <option key={o.code} value={o.code}>{o.label}</option>
+              ))}
+              <option value="canceled">취소</option>
+            </select>
           </label>
           <button type="button" className="btn btn-secondary" onClick={handleFilter}>
             조회
