@@ -54,7 +54,9 @@ TREAT_STATUS_LABELS = {
     # 우체국 계약소포 API(GetResInfo) 및 공개 종적조회 단계코드
     "00": "신청접수",   # order placed / API accepted
     "04": "운송장출력",  # waybill printed by postal worker
-    "05": "수거준비",   # pickup scheduled / confirmed (PICKUP_PENDING)
+    "08": "접수확인",   # pickup confirmed by postal office (공개 종적조회 전용)
+    "05": "수거준비",   # pickup scheduled / confirmed (GetResInfo treatStusCd=05)
+    "09": "배차신청",   # vehicle assigned for pickup (공개 종적조회 전용)
     "01": "수거완료",   # picked up / 집하완료 (AT_PICKUP)
     "02": "이동중",     # in transit at distribution hub (IN_TRANSIT)
     "06": "배달준비",   # arrived at local post office
@@ -70,12 +72,14 @@ FINAL_TREAT_STATUSES = {"03"}
 TREAT_STATUS_ORDER: dict[str, int] = {
     "00": 0,  # 신청접수
     "04": 1,  # 운송장출력
-    "05": 2,  # 수거준비
-    "01": 3,  # 수거완료 (집하완료)
-    "02": 4,  # 이동중
-    "06": 5,  # 배달준비
-    "07": 6,  # 배달중
-    "03": 7,  # 배달완료 (최종)
+    "08": 2,  # 접수확인
+    "05": 3,  # 수거준비
+    "09": 4,  # 배차신청
+    "01": 5,  # 수거완료 (집하완료)
+    "02": 6,  # 이동중
+    "06": 7,  # 배달준비
+    "07": 8,  # 배달중
+    "03": 9,  # 배달완료 (최종)
 }
 
 
@@ -95,7 +99,7 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
       - 진행 단계 UI 레이블로 '배달완료' 등이 HTML 어디에나 존재 → 오탐 방지 필수
 
     3단계 파싱:
-      1단계: 날짜 TD(\d{4}.\d{2}.\d{2})가 포함된 이력 <tr>에서만 추출,
+      1단계: 날짜 TD(YYYY.MM.DD 형식)가 포함된 이력 <tr>에서만 추출,
              마지막 매칭 행이 최신 상태 (오름차순이므로 역순 탐색)
       2단계: 전체 <td> 역순 검색 — '배달완료' 제외 (단계 레이블 오탐 방지)
       3단계: HTML 없는 텍스트 fallback — 전체 blob 정방향 검색
@@ -111,8 +115,9 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
         (["배달중"], "07"),
         (["배달준비"], "06"),
         (["이동중", "수거중", "발송"], "02"),
-        # 배차신청 = 수거 차량 배정 (수거준비 단계)
-        (["수거준비", "접수확인", "배차신청"], "05"),
+        (["배차신청"], "09"),         # 수거 차량 배정
+        (["수거준비"], "05"),          # 수거 일정 확정
+        (["접수확인"], "08"),          # 우체국 접수 확인
         (["운송장출력"], "04"),
     ]
 

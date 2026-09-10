@@ -18,7 +18,9 @@ import {
 const TREAT_STATUS_OPTIONS = [
   { code: '00', label: '신청접수' },
   { code: '04', label: '운송장출력' },
+  { code: '08', label: '접수확인' },
   { code: '05', label: '수거준비' },
+  { code: '09', label: '배차신청' },
   { code: '01', label: '수거완료' },
   { code: '02', label: '이동중' },
   { code: '06', label: '배달준비' },
@@ -58,7 +60,9 @@ function statusLabel(item: KpostPickupItem): string {
   if (code === '06') return '배달준비';
   if (code === '02') return '이동중';
   if (code === '01' || item.treat_status_name === '집하완료') return '수거완료';
+  if (code === '09') return '배차신청';
   if (code === '05') return '수거준비';
+  if (code === '08') return '접수확인';
   if (code === '04') return '운송장출력';
   if (code === '00') return '신청접수';
   // 레거시 treat_status_name 텍스트 매핑
@@ -75,7 +79,9 @@ const STATUS_CHIP: Record<string, React.CSSProperties> = {
   // ── 수거 전 단계 ───────────────────────────────────
   '신청접수':  { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' },
   '운송장출력': { background: '#fefce8', color: '#854d0e', border: '1px solid #fde68a' },
+  '접수확인':  { background: '#fef9c3', color: '#713f12', border: '1px solid #fde047' },
   '수거준비':  { background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa' },
+  '배차신청':  { background: '#ffedd5', color: '#9a3412', border: '1px solid #fdba74' },
   // ── 수거 완료 ─────────────────────────────────────
   '수거완료':  { background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', fontWeight: 700 },
   // ── 배송 중 ───────────────────────────────────────
