@@ -1568,6 +1568,12 @@ function pickupQuery(token: string, extra = '') {
   return `?token=${encodeURIComponent(token)}${extra}`;
 }
 
+export async function getKpostPickupFilterOptions(token: string) {
+  return fetchApi<{ created_by: string[]; recipient_names: string[] }>(
+    `/kpost-pickup/filter-options${pickupQuery(token)}`
+  );
+}
+
 export async function getKpostPickupMeta(token: string) {
   return fetchApi<{
     vendor: string;

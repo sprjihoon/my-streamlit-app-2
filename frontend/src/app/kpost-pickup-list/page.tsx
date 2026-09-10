@@ -8,6 +8,7 @@ import PageHeader from '@/components/PageHeader';
 import {
   cancelKpostPickup,
   deleteKpostPickup,
+  getKpostPickupFilterOptions,
   listKpostPickups,
   refreshKpostPickupStatuses,
   type KpostPickupItem,
@@ -58,6 +59,8 @@ export default function KpostPickupListPage() {
   const [dateTo, setDateTo] = useState('');
   const [recipientFilter, setRecipientFilter] = useState('');
   const [createdByFilter, setCreatedByFilter] = useState('');
+  const [createdByOptions, setCreatedByOptions] = useState<string[]>([]);
+  const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
 
   const loadList = useCallback(
     async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string }) => {
@@ -88,7 +91,12 @@ export default function KpostPickupListPage() {
     }
     (async () => {
       try {
-        await loadList(stored);
+        const [, opts] = await Promise.all([
+          loadList(stored),
+          getKpostPickupFilterOptions(stored).catch(() => ({ created_by: [], recipient_names: [] })),
+        ]);
+        setCreatedByOptions(opts.created_by || []);
+        setRecipientOptions(opts.recipient_names || []);
       } catch (err) {
         setError(parseApiError(err));
       } finally {
@@ -191,8 +199,15 @@ export default function KpostPickupListPage() {
               style={inputStyle}
               value={recipientFilter}
               onChange={(e) => setRecipientFilter(e.target.value)}
-              placeholder="수취인 이름 검색"
+              placeholder="이름 입력 또는 선택"
+              list="recipient-options"
+              autoComplete="off"
             />
+            <datalist id="recipient-options">
+              {recipientOptions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
           </label>
           <label>
             접수자
@@ -200,8 +215,15 @@ export default function KpostPickupListPage() {
               style={inputStyle}
               value={createdByFilter}
               onChange={(e) => setCreatedByFilter(e.target.value)}
-              placeholder="접수자 검색"
+              placeholder="이름 입력 또는 선택"
+              list="createdby-options"
+              autoComplete="off"
             />
+            <datalist id="createdby-options">
+              {createdByOptions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
           </label>
           <button type="button" className="btn btn-secondary" onClick={handleFilter}>
             조회

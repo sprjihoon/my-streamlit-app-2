@@ -307,6 +307,28 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return data
 
 
+@router.get("/filter-options")
+def pickup_filter_options(token: str):
+    """목록 필터용 고유값 목록 반환 (접수자 전체, 수취인 최근 200명)."""
+    _get_user(token)
+    ensure_pickup_tables()
+    with get_connection() as con:
+        cb_rows = con.execute(
+            "SELECT DISTINCT created_by FROM kpost_pickup_requests "
+            "WHERE created_by IS NOT NULL AND created_by != '' "
+            "ORDER BY created_by"
+        ).fetchall()
+        rn_rows = con.execute(
+            "SELECT DISTINCT recipient_name FROM kpost_pickup_requests "
+            "WHERE recipient_name IS NOT NULL AND recipient_name != '' "
+            "ORDER BY recipient_name LIMIT 200"
+        ).fetchall()
+    return {
+        "created_by": [r[0] for r in cb_rows],
+        "recipient_names": [r[0] for r in rn_rows],
+    }
+
+
 @router.get("/meta")
 def pickup_meta(token: str):
     _get_user(token)
