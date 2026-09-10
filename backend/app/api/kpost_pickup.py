@@ -427,51 +427,22 @@ def list_pickups(
     return {"items": [_row_to_dict(row) for row in rows]}
 
 
-@router.post("")
-def create_pickup(req: PickupSubmitRequest, token: str):
-    import logging as _logging
-    _log = _logging.getLogger("epost")
-    user = _get_user(token)
-    ensure_pickup_tables()
-    if not req.confirm:
-        raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
-
-    live = has_epost_credentials() and not req.test_mode
-    try:
-        validated = _build_validated(req, live=live)
-    except ValueError as exc:
-        raise _http_error(exc) from exc
-
-    # 중복 방지: 같은 사용자, 같은 수령인 전화번호, 같은 수거일에 'requested' 상태가 이미 있으면 guard 반환
-    _pickup_visit_iso = (
-        f"{validated.get('visit_ymd','')[:4]}-"
-        f"{validated.get('visit_ymd','')[4:6]}-"
-        f"{validated.get('visit_ymd','')[6:8]}"
-    )
-    with get_connection() as _dup_con:
-        _existing = _dup_con.execute(
-            """SELECT id, tracking_no FROM kpost_pickup_requests
-               WHERE created_by=? AND recipient_phone=? AND pickup_date=?
-                 AND status='requested'
-               ORDER BY id DESC LIMIT 1""",
-            (user["nickname"], validated["phone"], _pickup_visit_iso),
-        ).fetchone()
-    if _existing:
-        return {
-            "duplicate_guard": True,
-            "id": _existing[0],
-            "tracking_no": _existing[1],
-            "success": True,
-        }
-
-    env = _env()
-    order_no = format_pickup_order_no()
+def _one_insert_order(
+    box_order_no: str,
+    validated: dict,
+    env: dict,
+    live: bool,
+    box_idx: int,
+    qty_total: int,
+    _log: Any,
+) -> tuple[dict, dict]:
+    """박스 1개분 InsertOrder 호출. (params, result) 반환."""
     params = build_return_pickup_params(
         {
             "cust_no": env.get("EPOST_CUSTOMER_ID") or "TEST",
             "appr_no": env.get("EPOST_APPROVAL_NO") or "0000000000",
             "office_ser": resolve_office_ser(env),
-            "order_no": order_no,
+            "order_no": box_order_no,
             "center": {
                 "ord_nm": validated["center"]["ord_nm"],
                 "zip": validated["center"]["zip"],
@@ -490,7 +461,7 @@ def create_pickup(req: PickupSubmitRequest, token: str):
             "weight": validated["spec"]["weight"],
             "volume": validated["spec"]["volume"],
             "micro": validated["spec"].get("micro", False),
-            "qty": validated["qty"],
+            "qty": 1,  # 박스 1개씩 InsertOrder → 송장번호 1개
             "deliv_msg": validated["notes"],
             "ret_visit_ymd": validated["visit_ymd"],
             "test_yn": "Y" if not live else "N",
@@ -498,115 +469,188 @@ def create_pickup(req: PickupSubmitRequest, token: str):
     )
 
     if not live:
-        result = mock_insert_order()
-    else:
-        try:
-            result = insert_order({**params, "orderNo": order_no})
-        except Exception as first_err:
-            import logging as _logging
-            _logging.getLogger("epost").error(
-                "[InsertOrder ERR] %s | orderNo=%s | visit=%s",
-                first_err, order_no, validated.get("visit_ymd"),
-            )
-            recovered = None
-            if not is_ambiguous_insert_error(first_err):
-                try:
-                    recovered = get_res_info(
-                        order_no,
-                        validated["visit_ymd"],
-                        timeout=3.0,
-                        max_attempts=1,
-                    )
-                    if not (recovered.get("regiNo") or "").strip():
-                        recovered = None
-                except Exception:
+        return params, mock_insert_order()
+
+    try:
+        result = insert_order({**params, "orderNo": box_order_no})
+    except Exception as first_err:
+        _log.error(
+            "[InsertOrder ERR] %s | orderNo=%s | box=%d/%d",
+            first_err, box_order_no, box_idx + 1, qty_total,
+        )
+        recovered = None
+        if not is_ambiguous_insert_error(first_err):
+            try:
+                recovered = get_res_info(
+                    box_order_no,
+                    validated["visit_ymd"],
+                    timeout=3.0,
+                    max_attempts=1,
+                )
+                if not (recovered.get("regiNo") or "").strip():
                     recovered = None
-            if recovered and len(recovered.get("regiNo") or "") >= 10:
-                result = recovered
-            else:
-                hint = ""
-                msg = str(first_err)
-                if "보안키" in msg or "고객번호" in msg:
-                    hint = ""
-                elif is_ambiguous_insert_error(first_err):
-                    hint = " 우체국에 이미 접수되었을 수 있습니다. 목록을 확인한 뒤 다시 누르지 마세요."
-                elif "recAddr2" in msg:
-                    hint = " 상세주소(동·호수·층)를 2글자 이상 입력했는지 확인해주세요."
-                elif "recAddr1" in msg or "recZip" in msg:
-                    hint = " 주소 검색으로 도로명 주소와 우편번호를 다시 선택해주세요."
-                raise HTTPException(status_code=502, detail=msg + hint)
+            except Exception:
+                recovered = None
+        if recovered and len(recovered.get("regiNo") or "") >= 10:
+            return params, recovered
+        raise  # 호출자가 처리
+    return params, result
 
-    tracking = (result.get("regiNo") or "").strip()
-    if live and len(tracking) < 10:
-        raise HTTPException(
-            status_code=502,
-            detail="우체국이 수거송장번호를 반환하지 않았습니다. 접수가 완료되지 않았습니다.",
-        )
-    _log.info("[InsertOrder OK] regiNo=%s reqNo=%s orderNo=%s user=%s", tracking, result.get("reqNo"), order_no, user.get("nickname"))
 
-    snapshot = {k: v for k, v in params.items() if k != "testYn"}
-    pickup_iso = f"{validated['visit_ymd'][:4]}-{validated['visit_ymd'][4:6]}-{validated['visit_ymd'][6:8]}"
-    created_at = datetime.now(KST).isoformat(timespec="seconds")
-    with get_connection() as con:
-        cur = con.execute(
-            """
-            INSERT INTO kpost_pickup_requests (
-                vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
-                pickup_date, goods_name, box_size, box_quantity, notes, tracking_no, req_no, res_no, res_date,
-                price, post_office, treat_status, treat_status_name, status, is_test,
-                insert_snapshot, created_by, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                "spring",
-                order_no,
-                validated["name"],
-                validated["phone"],
-                validated["zipcode"],
-                validated["addr1"],
-                validated["addr2"],
-                pickup_iso,
-                validated["goods"],
-                validated["spec"]["code"],
-                validated["qty"],
-                validated["notes"],
-                tracking,
-                result.get("reqNo") or "",
-                result.get("resNo") or "",
-                result.get("resDate") or "",
-                result.get("price") or "0",
-                result.get("regiPoNm") or "",
-                "00" if live else "TEST",
-                "신청접수" if live else "테스트접수",
-                "requested",
-                0 if live else 1,
-                json.dumps(snapshot, ensure_ascii=False),
-                user["nickname"],
-                created_at,
-            ),
-        )
-        pickup_id = cur.lastrowid
-        con.commit()
+@router.post("")
+def create_pickup(req: PickupSubmitRequest, token: str):
+    import logging as _logging
+    _log = _logging.getLogger("epost")
+    user = _get_user(token)
+    ensure_pickup_tables()
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
 
-    add_log(
-        action_type="우체국회수접수",
-        target_type="kpost_pickup",
-        target_id=str(pickup_id),
-        target_name=result.get("regiNo") or order_no,
-        user_nickname=user["nickname"],
-        details=f"{validated['name']} / {pickup_iso}",
+    live = has_epost_credentials() and not req.test_mode
+    try:
+        validated = _build_validated(req, live=live)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+
+    pickup_iso = (
+        f"{validated['visit_ymd'][:4]}-"
+        f"{validated['visit_ymd'][4:6]}-"
+        f"{validated['visit_ymd'][6:8]}"
     )
+
+    # 중복 방지: 같은 사용자·수령인 전화번호·수거일에 이미 접수된 건이 있으면 guard 반환
+    with get_connection() as _dup_con:
+        _existing_rows = _dup_con.execute(
+            """SELECT id, tracking_no FROM kpost_pickup_requests
+               WHERE created_by=? AND recipient_phone=? AND pickup_date=?
+                 AND status='requested'
+               ORDER BY id ASC""",
+            (user["nickname"], validated["phone"], pickup_iso),
+        ).fetchall()
+    if _existing_rows:
+        all_tnos = [r[1] for r in _existing_rows]
+        return {
+            "duplicate_guard": True,
+            "id": _existing_rows[0][0],
+            "tracking_no": all_tnos[0],
+            "tracking_nos": all_tnos,
+            "success": True,
+        }
+
+    env = _env()
+    qty = validated["qty"]
+    created_at = datetime.now(KST).isoformat(timespec="seconds")
+
+    # qty박스 각각 InsertOrder 1회 → 송장번호 qty개 발급
+    created: list[dict] = []
+    for box_idx in range(qty):
+        box_order_no = format_pickup_order_no()
+        try:
+            params, result = _one_insert_order(
+                box_order_no, validated, env, live, box_idx, qty, _log
+            )
+        except Exception as err:
+            if created:
+                # 일부 박스 접수 완료 → 부분 성공으로 처리
+                _log.warning(
+                    "[InsertOrder PARTIAL] %d/%d 박스 접수 완료 후 실패: %s",
+                    len(created), qty, err,
+                )
+                break
+            hint = ""
+            msg = str(err)
+            if is_ambiguous_insert_error(err):
+                hint = " 우체국에 이미 접수되었을 수 있습니다. 목록을 확인한 뒤 다시 누르지 마세요."
+            elif "recAddr2" in msg:
+                hint = " 상세주소(동·호수·층)를 2글자 이상 입력했는지 확인해주세요."
+            elif "recAddr1" in msg or "recZip" in msg:
+                hint = " 주소 검색으로 도로명 주소와 우편번호를 다시 선택해주세요."
+            raise HTTPException(status_code=502, detail=msg + hint)
+
+        tracking = (result.get("regiNo") or "").strip()
+        if live and len(tracking) < 10:
+            if created:
+                break  # 부분 성공
+            raise HTTPException(
+                status_code=502,
+                detail="우체국이 수거송장번호를 반환하지 않았습니다. 접수가 완료되지 않았습니다.",
+            )
+        _log.info(
+            "[InsertOrder OK] regiNo=%s reqNo=%s orderNo=%s box=%d/%d user=%s",
+            tracking, result.get("reqNo"), box_order_no,
+            box_idx + 1, qty, user["nickname"],
+        )
+
+        snapshot = {k: v for k, v in params.items() if k != "testYn"}
+        with get_connection() as con:
+            cur = con.execute(
+                """INSERT INTO kpost_pickup_requests (
+                    vendor, order_no, recipient_name, recipient_phone, zipcode, addr1, addr2,
+                    pickup_date, goods_name, box_size, box_quantity, notes, tracking_no,
+                    req_no, res_no, res_date, price, post_office,
+                    treat_status, treat_status_name, status, is_test,
+                    insert_snapshot, created_by, created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    "spring",
+                    box_order_no,
+                    validated["name"],
+                    validated["phone"],
+                    validated["zipcode"],
+                    validated["addr1"],
+                    validated["addr2"],
+                    pickup_iso,
+                    validated["goods"],
+                    validated["spec"]["code"],
+                    1,  # 박스 1개씩 DB 저장
+                    validated["notes"],
+                    tracking,
+                    result.get("reqNo") or "",
+                    result.get("resNo") or "",
+                    result.get("resDate") or "",
+                    result.get("price") or "0",
+                    result.get("regiPoNm") or "",
+                    "00" if live else "TEST",
+                    "신청접수" if live else "테스트접수",
+                    "requested",
+                    0 if live else 1,
+                    json.dumps(snapshot, ensure_ascii=False),
+                    user["nickname"],
+                    created_at,
+                ),
+            )
+            box_id = cur.lastrowid
+            con.commit()
+        created.append({"id": box_id, "order_no": box_order_no, "tracking": tracking, "result": result})
+
+    if not created:
+        raise HTTPException(status_code=502, detail="접수에 실패했습니다.")
+
+    for c in created:
+        add_log(
+            action_type="우체국회수접수",
+            target_type="kpost_pickup",
+            target_id=str(c["id"]),
+            target_name=c["tracking"] or c["order_no"],
+            user_nickname=user["nickname"],
+            details=f"{validated['name']} / {pickup_iso}",
+        )
+
+    all_tnos = [c["tracking"] for c in created]
+    first = created[0]
     return {
         "success": True,
-        "id": pickup_id,
-        "order_no": order_no,
-        "tracking_no": tracking,
-        "req_no": result.get("reqNo") or "",
-        "res_no": result.get("resNo") or "",
-        "price": result.get("price") or "0",
-        "post_office": result.get("regiPoNm") or "",
+        "id": first["id"],
+        "order_no": first["order_no"],
+        "tracking_no": first["tracking"],
+        "tracking_nos": all_tnos,
+        "req_no": first["result"].get("reqNo") or "",
+        "res_no": first["result"].get("resNo") or "",
+        "price": first["result"].get("price") or "0",
+        "post_office": first["result"].get("regiPoNm") or "",
         "pickup_date": pickup_iso,
         "is_test": not live,
+        "partial": len(created) < qty,
         "preview": _preview_payload(validated, is_test=not live),
     }
 

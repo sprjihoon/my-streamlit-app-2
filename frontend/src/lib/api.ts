@@ -1613,14 +1613,18 @@ export async function listKpostPickups(
 
 export async function createKpostPickup(token: string, payload: KpostPickupPayload) {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 18000);
+  // 박스 qty개 × 7초 여유 (최소 20초)
+  const timeoutMs = Math.max(20000, (payload.box_quantity || 1) * 7000);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchApi<{
       success: boolean;
       id: number;
       tracking_no: string;
+      tracking_nos?: string[];
       is_test: boolean;
       duplicate_guard?: boolean;
+      partial?: boolean;
       message?: string;
       pickup_date?: string;
       post_office?: string;
@@ -1636,7 +1640,7 @@ export async function createKpostPickup(token: string, payload: KpostPickupPaylo
       name === 'AbortError' ||
       (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError');
     if (isAbort) {
-      throw new Error('우체국 접수 응답이 18초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.');
+      throw new Error(`우체국 접수 응답이 ${Math.round(timeoutMs / 1000)}초를 넘었습니다. 접수목록에서 송장 생성 여부를 먼저 확인한 뒤 다시 눌러주세요.`);
     }
     throw err;
   } finally {
