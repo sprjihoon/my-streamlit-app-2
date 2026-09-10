@@ -67,8 +67,22 @@ const nextConfig = {
         ],
       },
       {
+        // 입고작업 페이지는 same-origin iframe 허용 (관리 화면 팝업용)
+        source: '/inbound/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-ancestors 'self'",
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+        ],
+      },
+      {
         // 그 외 페이지는 iframe 차단
-        source: '/((?!estimate).*)',
+        source: '/((?!estimate|inbound).*)',
         headers: [
           {
             key: 'X-Frame-Options',
