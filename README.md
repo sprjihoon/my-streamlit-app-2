@@ -50,30 +50,38 @@ npm run start   # ❌ 로컬 서버 실행은 개발용으로만
 - 현재는 `ship.epost.go.kr` 전용. 공개 종적조회(`service.epost.go.kr`) 릴레이는 미구현
 - 관련 env var: `EPOST_RELAY_SECRET` (Railway·Vercel 양쪽 동일 값 설정 필요)
 
-#### 3. 공개 종적조회 (`service.epost.go.kr`) — ❌ 미해결
-- Railway → `service.epost.go.kr` 직접 호출 → **15초 timeout**
-- `_track_via_epost_trace()` 함수가 항상 실패함
-- **향후 해결 방안**:
-  - **A (권장)**: [tracker.delivery](https://tracker.delivery) GraphQL API 사용
-    - `TRACKER_DELIVERY_CLIENT_ID` / `TRACKER_DELIVERY_CLIENT_SECRET` Railway env 등록 필요
-    - 글로벌 접근 가능, `kr.epost` 지원
-  - **B** ✅ **구현됨**: Vercel `/api/epost-relay` 라우트가 `service.epost.go.kr` GET 허용으로 확장됨
-    - `route.ts`: `isAllowedUrl()` 로직으로 `service.epost.go.kr` GET 허용, `arrayBuffer()` 바이너리 전달
-    - `client.py`: `_track_via_vercel_relay()` 추가, `track_regi_no()` 에서 2번째 경로로 사용
-    - **Railway env 설정 필요**: `VERCEL_APP_URL=https://<your-vercel-domain>` (예: `https://tillion.io.kr`)
-    - `EPOST_RELAY_SECRET` 은 이미 설정되어 있으면 공유해서 사용
+#### 3. 공개 종적조회 (`service.epost.go.kr`) — ✅ 해결됨 (2026-09-10)
+- **경로**: Railway → `VERCEL_APP_URL`(`tillion.io.kr`) `/api/epost-relay` → `service.epost.go.kr`
+- `route.ts`: `isAllowedUrl()` 로직으로 `service.epost.go.kr` GET 허용, `arrayBuffer()` 바이너리 전달
+- `client.py`: `_track_via_vercel_relay()` 함수가 EUC-KR 디코딩 후 `treat_status_from_tracking_text()` 호출
+- **Railway env**: `VERCEL_APP_URL=https://tillion.io.kr` ✅ 설정 완료
+
+> **tracker.delivery GraphQL (방안 A)**도 사용 가능:  
+> `TRACKER_DELIVERY_CLIENT_ID` / `TRACKER_DELIVERY_CLIENT_SECRET` Railway env 등록 시 1순위로 사용됨
 
 ### 상태 조회 현재 동작 (2026-09-10 기준)
 
 ```
 송장조회 버튼 클릭
-  └─ GetResInfo (계약 API, tillion.io.kr 릴레이) → 수거완료(01)까지는 정상 갱신
-  └─ track_regi_no (공개 종적조회) → Railway에서 항상 timeout → 예외 무시
-      └─ 결과: 수거완료(01) 이후 단계(이동중·배달준비·배달중·배달완료)는
-               GetResInfo가 해당 코드를 반환할 때만 갱신됨
+  └─ GetResInfo (계약 API, tillion.io.kr 릴레이) → 수거완료(01)까지 정상 갱신
+  └─ _track_via_vercel_relay() (Vercel ICN → service.epost.go.kr)
+      └─ EUC-KR 디코딩 → treat_status_from_tracking_text() → 최신 상태 추출
+      └─ 이동중(02) / 배달준비(06) / 배달중(07) / 배달완료(03) 갱신 가능
+  └─ _track_via_epost_trace() (Railway 직접 → 차단, fallback 유지)
 ```
 
-> **임시 해결**: 관리자는 회수신청 목록의 상태 칩 하단 드롭다운으로 수동 수정 가능
+> ⚠️ **HTML 파싱 주의**: `service.epost.go.kr` 페이지에는 진행 단계 레이블로 '배달완료' 텍스트가
+> 항상 포함됨. `treat_status_from_tracking_text()`는 실제 이력 `<td>` 행만 역순 파싱해 오탐 방지.
+> 날짜/시간이 **별도 TD로 분리**되며 이력은 **오름차순** (마지막 행 = 최신).
+
+### 유지보수 엔드포인트
+
+```
+POST /kpost-pickup/maintenance/reset-status?secret=<EPOST_RELAY_SECRET>
+Body: {"tracking_nos": ["78901..."], "treat_status": "05"}
+```
+- DB 상태를 직접 수정 (인증: `EPOST_RELAY_SECRET` 값 사용)
+- 잘못 변경된 상태 복구 또는 테스트 목적으로 사용
 
 ---
 
@@ -100,7 +108,29 @@ cd frontend && npm run dev
 
 ## 변경 이력
 
-### 2026-09-10
+### 2026-09-10 (2차)
+- **fix(kpost-pickup): treat_status_from_tracking_text 오탐 수정** (`763db40f` → `76886603`)
+  - **버그**: `service.epost.go.kr` HTML에 진행 단계 레이블로 '배달완료'가 항상 포함 → 수거준비 건도 `03`으로 오탐
+  - **원인 분석**: 실제 HTML 구조 확인 — 날짜/시간이 별도 TD(`<td>2026.09.10</td><td>07:55</td>`), 이력 오름차순
+  - **수정**: 3단계 파싱으로 변경
+    1. 날짜 TD 패턴(`^\d{4}.\d{2}.\d{2}$`) 포함 이력 `<tr>` 역순 탐색 → 최신 상태 추출
+    2. 전체 `<td>` 역순 검색 (배달완료 제외)
+    3. 텍스트 fallback
+  - **신규 상태**: `배차신청`(수거 차량 배정) → `05(수거준비)` 매핑 추가
+  - **단위 테스트**: 8/8 PASS (`test_tracking_fix.py`)
+- **feat(kpost-pickup): 회수신청 목록 배송상태 필터 추가** (`5e8964cb`)
+  - 필터 바에 **배송상태 드롭다운** 추가 (전체 / 신청접수~배달완료 / 취소)
+  - 백엔드 `GET /kpost-pickup`에 `treat_status` 쿼리 파라미터 추가
+  - `canceled` 값이면 `status='canceled'` 필터 처리
+  - 전체목록 버튼 클릭 시 상태 필터도 초기화
+- **feat(kpost-pickup): 유지보수 엔드포인트 추가** (`76886603`)
+  - `POST /kpost-pickup/maintenance/reset-status?secret=<EPOST_RELAY_SECRET>`
+  - 특정 송장 번호의 treat_status를 직접 수정 (잘못 변경된 상태 복구용)
+- **feat: Vercel 릴레이 공개 종적조회 활성화** (`4ade0014` + Railway env)
+  - `VERCEL_APP_URL=https://tillion.io.kr` Railway 환경변수 설정 완료
+  - `_track_via_vercel_relay()` 활성화 → 배달완료까지 자동 추적 가능
+
+### 2026-09-10 (1차)
 - **feat(kpost-pickup): 송장조회 상태 세분화 + 배달완료까지 추적** (`d8d99c89` → `현재`)
   - 처리상태코드 8단계 추가: `신청접수(00) → 운송장출력(04) → 수거준비(05) → 수거완료(01) → 이동중(02) → 배달준비(06) → 배달중(07) → 배달완료(03)`
   - `TRACKER_STATUS_TO_TREAT` 확장: `PICKUP_PENDING→05`, `OUT_FOR_DELIVERY→07`, `ATTEMPT_FAILED→07`
