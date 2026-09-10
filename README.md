@@ -49,6 +49,12 @@ cd frontend && npm run dev
 ## 변경 이력
 
 ### 2026-09-10
+- **feat(kpost-pickup): 회수신청 목록 컬럼별 정렬** (`80227823`)
+  - 모든 컬럼 헤더 클릭 → 오름/내림차순 전환, 활성 컬럼 ▲▼ 표시
+- **fix(kpost-pickup): 송장조회 수거완료·배달완료 건 DB 단 제외** (`7a98aa1e`)
+  - `treat_status NOT IN ('01','03')` 조건 추가 → LIMIT 200을 실조회 대상에만 사용
+  - 취소 건은 기존 `status='requested'` 조건으로 이미 제외
+  - 검증 테스트 추가 (`test_refresh_status_skips_completed_and_delivered`) — 14/14 통과
 - **feat(kpost-pickup): 회수신청 목록 상태 컬럼 색상 칩 표시** (`c868604e`)
   - 신청접수(회색) / 수거중(파랑) / 수거완료(초록) / 배달완료(청록) / 취소(빨강) 칩
   - React import 누락 수정

@@ -285,6 +285,41 @@ def test_refresh_status_uses_public_tracking_when_getresinfo_stays_requested(iso
     assert list_pickups(token)["items"][0]["treat_status_name"] == "수거완료"
 
 
+def test_refresh_status_skips_completed_and_delivered(isolated_runtime, monkeypatch):
+    """treat_status='01'(수거완료) 또는 '03'(배달완료) 건은 송장조회에서 제외되어야 한다."""
+    token = _seed_user(isolated_runtime["db"])
+
+    # 수거완료 건 생성
+    c1 = create_pickup(_req(confirm=True), token)
+    # 배달완료 건 생성
+    c2 = create_pickup(_req(confirm=True, recipient_name="이영희", recipient_phone="01099998888"), token)
+
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='01', treat_status_name='수거완료', pickup_date=? WHERE id=?",
+            (date.today().isoformat(), c1["id"]),
+        )
+        con.execute(
+            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='03', treat_status_name='배달완료', pickup_date=? WHERE id=?",
+            (date.today().isoformat(), c2["id"]),
+        )
+        con.commit()
+
+    api_call_count = 0
+
+    def mock_get_res_info(order_no, req_ymds):
+        nonlocal api_call_count
+        api_call_count += 1
+        return {"treatStusCd": "01", "treatStusNm": "수거완료", "regiNo": "7000000000000"}
+
+    monkeypatch.setattr("backend.app.api.kpost_pickup.get_res_info_with_dates", mock_get_res_info)
+
+    result = refresh_pickup_statuses(token)
+    # 수거완료·배달완료 건은 DB 쿼리에서 제외 → 우체국 API 호출 0건
+    assert result["checked"] == 0, f"completed/delivered items should be skipped, got checked={result['checked']}"
+    assert api_call_count == 0, f"Korea Post API should not be called for completed items, called {api_call_count} times"
+
+
 def test_missing_detail_rejected_when_live_like_validation(isolated_runtime, monkeypatch):
     token = _seed_user(isolated_runtime["db"])
     monkeypatch.setenv("EPOST_API_KEY", "x")
