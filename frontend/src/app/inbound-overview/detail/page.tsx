@@ -325,6 +325,60 @@ function SubLogModal({ type, allItems, onClose }: { type: 'defect' | 'repair'; a
 // ─────────────────────────────────────────────
 // 메인 상세 페이지 컴포넌트
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// 입고작업 iframe 팝업 모달
+// ─────────────────────────────────────────────
+function InboundWorkModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <>
+      {/* 배경 오버레이 */}
+      <div
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', zIndex: 3000, backdropFilter: 'blur(3px)' }}
+      />
+      {/* 모달 */}
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        width: 'min(96vw, 540px)', height: 'min(92vh, 900px)',
+        background: '#fff', borderRadius: 16,
+        boxShadow: '0 32px 80px rgba(0,0,0,0.35)',
+        zIndex: 3001, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* 모달 헤더 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.7rem 1rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', flexShrink: 0 }}>
+          <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>📦 입고 작업</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => window.open(`/inbound/${batchId}`, '_blank')}
+              style={{ background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, padding: '0.25rem 0.6rem', fontSize: '0.78rem', color: '#64748b', cursor: 'pointer' }}
+            >
+              새 탭 ↗
+            </button>
+            <button
+              onClick={onClose}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.4rem', color: '#64748b', lineHeight: 1, padding: '0 4px' }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        {/* iframe */}
+        <iframe
+          src={`/inbound/${batchId}`}
+          style={{ flex: 1, border: 'none', width: '100%' }}
+          title="입고 작업"
+        />
+      </div>
+    </>
+  );
+}
+
 function DetailPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -336,6 +390,7 @@ function DetailPageInner() {
   const [error, setError] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [subModal, setSubModal] = useState<'defect' | 'repair' | null>(null);
+  const [workModal, setWorkModal] = useState<string | null>(null); // batchId
 
   const loadDetail = useCallback(() => {
     if (!vendor || !date) return;
@@ -356,6 +411,9 @@ function DetailPageInner() {
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
       {subModal && (
         <SubLogModal type={subModal} allItems={allItems} onClose={() => setSubModal(null)} />
+      )}
+      {workModal && (
+        <InboundWorkModal batchId={workModal} onClose={() => { setWorkModal(null); loadDetail(); }} />
       )}
 
       {/* 헤더 */}
@@ -475,10 +533,10 @@ function DetailPageInner() {
                       📥 입고전표
                     </button>
                     <button
-                      onClick={() => window.open(`/inbound/${batch.id}`, '_blank')}
-                      style={{ background: 'none', border: `1px solid ${C.primary}`, borderRadius: 5, color: C.primary, fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
+                      onClick={() => setWorkModal(batch.id)}
+                      style={{ background: C.primary, border: 'none', borderRadius: 5, color: '#fff', fontSize: '0.75rem', cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
                     >
-                      입고작업 ↗
+                      📦 입고작업
                     </button>
                   </div>
                 </div>
