@@ -196,7 +196,6 @@ export default function BillingInvoicePage() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [uploadError, setUploadError] = useState('');
-  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; name: string } | null>(null);
   const [uploadResults, setUploadResults] = useState<{ name: string; ok: boolean; msg: string }[]>([]);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [filterMonth, setFilterMonth] = useState(0);
@@ -248,44 +247,52 @@ export default function BillingInvoicePage() {
 
   useEffect(() => { if (token && isAdmin) load(token); }, [token, isAdmin, load]);
 
-  async function handleUploadMultiple(files: FileList | File[]) {
-    const pdfs = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-    const nonPdfs = Array.from(files).filter(f => !f.name.toLowerCase().endsWith('.pdf'));
-    if (pdfs.length === 0) { setUploadMsg(''); setUploadError('PDF 파일이 없습니다.'); return; }
+  async function handleUploadExcel(files: FileList | File[]) {
+    const xlsx = Array.from(files).find(
+      f => f.name.toLowerCase().endsWith('.xlsx') || f.name.toLowerCase().endsWith('.xls')
+    );
+    if (!xlsx) { setUploadMsg(''); setUploadError('Excel 파일(.xlsx/.xls)이 없습니다.'); return; }
 
     setUploading(true); setUploadMsg(''); setUploadError(''); setUploadResults([]);
-    const results: { name: string; ok: boolean; msg: string }[] = [];
 
-    for (let i = 0; i < pdfs.length; i++) {
-      const file = pdfs[i];
-      setUploadProgress({ current: i + 1, total: pdfs.length, name: file.name });
-      const fd = new FormData();
-      fd.append('token', token);
-      fd.append('file', file);
-        try {
-        const r = await fetch(`${API}/billing-invoice/upload`, { method: 'POST', body: fd });
-        const d = await r.json();
-        if (!r.ok) {
-          const msg = r.status === 409 ? `⚠️ 중복: ${d.detail}` : (d.detail || '업로드 실패');
-          throw new Error(msg);
-        }
-        const warn = d.parsed?._parse_warning ? ` ⚠️ ${d.parsed._parse_warning}` : '';
-        const reparse = d.parsed?._reparse_applied ? ' (재파싱 적용)' : '';
-        const regexFix = d.parsed?._regex_corrections?.length ? ` 🔧 regex교정(${d.parsed._regex_corrections.length}건)` : '';
-        results.push({ name: file.name, ok: true, msg: `${d.parsed?.client_name} / ${d.parsed?.service_month} — ${d.item_count}개 항목${reparse}${regexFix}${warn}` });
-      } catch (e) {
-        results.push({ name: file.name, ok: false, msg: e instanceof Error ? e.message : '업로드 실패' });
+    const fd = new FormData();
+    fd.append('token', token);
+    fd.append('file', xlsx);
+    try {
+      const r = await fetch(`${API}/billing-invoice/upload-excel`, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || '업로드 실패');
+
+      const { inserted, skipped, errors, service_month, inserted_clients, skipped_clients, error_clients } = d;
+      const results: { name: string; ok: boolean; msg: string }[] = [];
+
+      if (inserted > 0) {
+        results.push({
+          name: xlsx.name,
+          ok: true,
+          msg: `✅ ${inserted}건 등록 완료${service_month ? ` (서비스월: ${service_month})` : ''}`,
+        });
+        inserted_clients?.forEach((c: string) =>
+          results.push({ name: '', ok: true, msg: `  • ${c}` })
+        );
       }
+      if (skipped > 0) {
+        results.push({ name: '', ok: false, msg: `⚠️ 중복 ${skipped}건 건너뜀: ${skipped_clients?.join(', ')}` });
+      }
+      if (errors > 0) {
+        results.push({ name: '', ok: false, msg: `❌ 오류 ${errors}건: ${error_clients?.join(', ')}` });
+      }
+      if (inserted === 0 && skipped === 0) {
+        results.push({ name: xlsx.name, ok: false, msg: '처리된 행이 없습니다. 파일 형식을 확인해주세요.' });
+      }
+
+      setUploadResults(results);
+      load(token);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : '업로드 실패');
     }
 
-    if (nonPdfs.length > 0) {
-      results.push({ name: `${nonPdfs.length}개 파일`, ok: false, msg: 'PDF가 아닌 파일은 건너뜀' });
-    }
-
-    setUploadResults(results);
-    setUploadProgress(null);
     setUploading(false);
-    load(token);
   }
 
   async function handleDelete(id: string) {
@@ -394,7 +401,7 @@ export default function BillingInvoicePage() {
       <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>실 인보이스 관리</h2>
-          <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>PDF 청구서 업로드 → AI 자동 파싱 → 납부 추적</p>
+          <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>청구금액 엑셀 업로드 → 업체별 납부 추적</p>
         </div>
         {/* 탭 */}
         <div style={{ display: 'flex', gap: '0.35rem' }}>
@@ -466,7 +473,7 @@ export default function BillingInvoicePage() {
       <div
         onDragOver={e => { e.preventDefault(); setDrag(true); }}
         onDragLeave={() => setDrag(false)}
-        onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) handleUploadMultiple(e.dataTransfer.files); }}
+        onDrop={e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) handleUploadExcel(e.dataTransfer.files); }}
         onClick={() => !uploading && fileRef.current?.click()}
         style={{
           border: `2px dashed ${drag ? '#1a3c6e' : '#d1d5db'}`,
@@ -476,29 +483,17 @@ export default function BillingInvoicePage() {
           transition: 'all 0.2s',
         }}
       >
-        <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.length) handleUploadMultiple(e.target.files); e.target.value = ''; }} />
-        {uploading && uploadProgress
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.length) handleUploadExcel(e.target.files); e.target.value = ''; }} />
+        {uploading
           ? <>
               <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>⏳</div>
-              <p style={{ color: '#1a3c6e', fontWeight: 700, marginBottom: '0.3rem' }}>
-                {uploadProgress.current} / {uploadProgress.total} 처리 중
-              </p>
-              <p style={{ color: '#6b7280', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
-                {uploadProgress.name}
-              </p>
-              <div style={{ background: '#e5e7eb', borderRadius: 99, height: 8, width: '80%', margin: '0 auto' }}>
-                <div style={{
-                  height: 8, borderRadius: 99, background: '#1a3c6e',
-                  width: `${(uploadProgress.current / uploadProgress.total) * 100}%`,
-                  transition: 'width 0.3s',
-                }} />
-              </div>
+              <p style={{ color: '#1a3c6e', fontWeight: 700 }}>업로드 처리 중...</p>
             </>
           : <>
-              <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>📄</div>
-              <p style={{ color: '#374151', fontWeight: 600 }}>PDF 청구서를 드래그하거나 클릭해서 업로드</p>
-              <p style={{ color: '#9ca3af', fontSize: '0.78rem', marginTop: '0.25rem' }}>여러 파일 동시 업로드 가능 · 엑셀 기반 PDF만 지원 (스캔 불가)</p>
+              <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>📊</div>
+              <p style={{ color: '#374151', fontWeight: 600 }}>청구금액 엑셀을 드래그하거나 클릭해서 업로드</p>
+              <p style={{ color: '#9ca3af', fontSize: '0.78rem', marginTop: '0.25rem' }}>형식: No | 파일명 | 업체명 | 청구금액(원) · .xlsx / .xls 지원</p>
             </>
         }
       </div>
@@ -509,15 +504,13 @@ export default function BillingInvoicePage() {
       {uploadResults.length > 0 && (
         <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: '1rem', overflow: 'hidden' }}>
           <div style={{ padding: '0.6rem 1rem', background: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontSize: '0.8rem', fontWeight: 600, color: '#374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>업로드 결과 — 성공 {uploadResults.filter(r => r.ok).length} / {uploadResults.filter(r => !r.msg.includes('건너뜀')).length}건</span>
+            <span>업로드 결과</span>
             <button onClick={() => setUploadResults([])} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '1rem' }}>✕</button>
           </div>
           <div style={{ maxHeight: 220, overflowY: 'auto' }}>
             {uploadResults.map((r, i) => (
-              <div key={i} style={{ padding: '0.4rem 1rem', borderBottom: '1px solid #f3f4f6', display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.78rem' }}>
-                <span>{r.ok ? '✅' : '❌'}</span>
-                <span style={{ color: '#6b7280', flex: '0 0 auto', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.name}>{r.name}</span>
-                <span style={{ color: r.ok ? '#16a34a' : '#dc2626', flex: 1 }}>{r.msg}</span>
+              <div key={i} style={{ padding: '0.4rem 1rem', borderBottom: '1px solid #f3f4f6', fontSize: '0.78rem', color: r.ok ? '#16a34a' : '#dc2626' }}>
+                {r.msg}
               </div>
             ))}
           </div>

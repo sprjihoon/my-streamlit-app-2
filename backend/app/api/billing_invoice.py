@@ -1,10 +1,9 @@
 """
-backend/app/api/billing_invoice.py - 실 인보이스 업로드 / 파싱 / 분석 API
+backend/app/api/billing_invoice.py - 실 인보이스 관리 API
 
-PDF (엑셀 기반) → pdfplumber 텍스트 추출 → GPT-4o 구조화 파싱 → DB 저장
+Excel 업로드 → 업체별 청구금액 파싱 → DB 저장 → 납부 추적
 """
 import os
-import json
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -16,12 +15,9 @@ from pydantic import BaseModel
 
 from logic.db import get_connection
 from backend.app.api.logs import add_log
-from backend.app.config import settings
 
 router = APIRouter(prefix="/billing-invoice", tags=["billing-invoice"])
 
-UPLOAD_DIR = Path("/app/billing_invoice_uploads") if Path("/app").exists() else Path("billing_invoice_uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 CATEGORY_MAP = {
     "우체국택배": "택배비",
@@ -44,45 +40,6 @@ CATEGORY_MAP = {
     "사입": "부대비용",
     "차감": "차감",
 }
-
-GPT_SYSTEM_PROMPT = """
-너는 물류 풀필먼트 청구서 PDF 텍스트를 분석해서 구조화된 JSON으로 반환하는 AI야.
-
-[파싱 규칙 - 반드시 준수]
-1. PDF 텍스트는 멀티컬럼 레이아웃 때문에 순서가 뒤섞여 있을 수 있어. No 순서대로 품명을 매핑해.
-2. 금액이 음수(차감)인 경우 그대로 음수로 반환해.
-3. 숫자 앞의 행번호(1, 2, 3...)를 금액에 포함시키지 마. 예: 행번호 1, 금액 4,104,420 → amount: 4104420 (14104420 아님).
-4. 모든 items의 amount 합계(양수)가 supply_amount(공급가액)와 일치하는지 반드시 확인해. 일치하지 않으면 누락된 항목이 있는지 다시 점검해.
-5. 소계/합계 행은 items에 포함하지 마. 개별 항목만 포함해.
-6. 텍스트가 잘려 있거나 불명확한 금액은 주변 맥락(단가×수량)으로 검증해.
-
-반드시 아래 JSON 형식만 반환하고 다른 설명은 하지 마:
-
-{
-  "invoice_no": "문서번호",
-  "client_name": "수신 거래처명 (회사명만, '대표님 귀하' 제외)",
-  "invoice_date": "청구일자 YYYY-MM-DD",
-  "due_date": "지급기한 YYYY-MM-DD (없으면 null)",
-  "service_month": "서비스 월 YYYY-MM (건명에서 추출, 예: 2026-05)",
-  "subject": "건명",
-  "supply_amount": 공급가액(숫자),
-  "vat_amount": 부가세(숫자),
-  "total_amount": 청구합계(숫자),
-  "bank_name": "은행명",
-  "account_holder": "예금주",
-  "account_number": "계좌번호",
-  "items": [
-    {
-      "line_no": 행번호(숫자),
-      "item_name": "품명",
-      "quantity": 수량(숫자 또는 null),
-      "unit_price": 단가(숫자 또는 null),
-      "amount": 금액(숫자, 차감은 음수),
-      "memo": "비고 (없으면 null)"
-    }
-  ]
-}
-"""
 
 
 # ─────────────────────────────────────
@@ -160,295 +117,161 @@ def _guess_category(item_name: str) -> str:
     return "기타"
 
 
-def _fix_pdf_number_spaces(text: str) -> str:
-    """pdfplumber가 큰 숫자 안에 삽입하는 공백을 제거합니다.
-    예: '1 4,344,660' → '14,344,660'
-    패턴: 숫자(1-2자리) + 공백 + 숫자·쉼표 연속
-    """
-    import re
-    # 반복 적용 (여러 번 삽입된 경우 처리)
-    for _ in range(5):
-        fixed = re.sub(r'(\d{1,2}) (\d{3}[,\d]*)', r'\1\2', text)
-        if fixed == text:
-            break
-        text = fixed
-    return text
-
-
-def _regex_extract_totals(text: str) -> dict:
-    """regex로 공급가액·부가세·청구합계를 직접 추출 (pdfplumber 공백 처리 포함)."""
-    import re
-
-    def _clean(raw: str) -> int | None:
-        val = re.sub(r'[\s,]', '', raw)
-        return int(val) if val.isdigit() and int(val) > 0 else None
-
-    result = {}
-    patterns = {
-        "total_amount": [
-            r'청구금액\s*[₩￦]\s*([\d ,]+)',
-            r'청\s*구\s*금\s*액\s*[₩￦]\s*([\d ,]+)',
-        ],
-        "supply_amount": [
-            r'공급가액\s*[₩￦]?\s*([\d ,]+)',
-            r'합계\s*금\s*액\s*[₩￦]\s*([\d ,]+)',
-        ],
-        "vat_amount": [
-            r'부가세\s*[₩￦]?\s*([\d ,]+)',
-            r'세\s*액\s*[₩￦]?\s*([\d ,]+)',
-        ],
-    }
-    for key, pats in patterns.items():
-        for pat in pats:
-            m = re.search(pat, text)
-            if m:
-                val = _clean(m.group(1))
-                if val:
-                    result[key] = val
-                    break
-    return result
-
-
-def _gpt_parse(client, text: str, extra_messages: list | None = None) -> dict:
-    """GPT 호출 + JSON 추출 헬퍼."""
-    messages = [
-        {"role": "system", "content": GPT_SYSTEM_PROMPT},
-        {"role": "user", "content": f"아래 PDF 텍스트를 분석해:\n\n{text}"},
-    ]
-    if extra_messages:
-        messages.extend(extra_messages)
-    resp = client.chat.completions.create(
-        model="gpt-4o", messages=messages, temperature=0, max_tokens=4000,
-    )
-    raw = resp.choices[0].message.content.strip()
-    if "```" in raw:
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw), resp.choices[0].message.content
-
-
-def _parse_pdf_text(text: str) -> dict:
-    """
-    2중 파싱 검증:
-      1단계) regex (윈도우 프로그램 동일 로직) → 업체명·합계금액 추출 (신뢰도 최고)
-      2단계) GPT → 전체 구조 파싱 (items 상세 포함)
-      3단계) 비교 교정 → GPT 금액이 regex와 다르면 regex 값으로 덮어씀
-             items 합계가 supply_amount와 1% 이상 차이 → GPT 재검토 요청
-    """
-    from openai import OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-    # ── 1단계: regex 파싱 (pdfplumber 공백 정규화 포함) ──────────
-    cleaned_text = _fix_pdf_number_spaces(text)
-    regex_result = _regex_extract_totals(cleaned_text)
-    r_total   = regex_result.get("total_amount")
-    r_supply  = regex_result.get("supply_amount")
-    r_vat     = regex_result.get("vat_amount")
-
-    # ── 2단계: GPT 파싱 (정규화된 텍스트 전달) ───────────────────
-    parsed, gpt_raw = _gpt_parse(client, cleaned_text)
-
-    # ── 3단계-A: GPT 합계 vs regex 합계 비교 교정 ─────────────────
-    corrections = []
-    if r_total and parsed.get("total_amount") and abs(parsed["total_amount"] - r_total) > 100:
-        corrections.append(
-            f"total_amount: GPT={parsed['total_amount']:,.0f} → regex={r_total:,.0f}"
-        )
-        parsed["total_amount"] = r_total
-    elif r_total and not parsed.get("total_amount"):
-        parsed["total_amount"] = r_total
-
-    if r_supply and parsed.get("supply_amount") and abs(parsed["supply_amount"] - r_supply) > 100:
-        corrections.append(
-            f"supply_amount: GPT={parsed['supply_amount']:,.0f} → regex={r_supply:,.0f}"
-        )
-        parsed["supply_amount"] = r_supply
-    elif r_supply and not parsed.get("supply_amount"):
-        parsed["supply_amount"] = r_supply
-
-    if r_vat and parsed.get("vat_amount") and abs(parsed["vat_amount"] - r_vat) > 100:
-        parsed["vat_amount"] = r_vat
-    elif r_vat and not parsed.get("vat_amount"):
-        parsed["vat_amount"] = r_vat
-
-    if corrections:
-        parsed["_regex_corrections"] = corrections
-
-    # ── 3단계-B: items 합계 vs supply_amount 검증 → 차이 시 재파싱 ─
-    supply = parsed.get("supply_amount") or 0
-    items = parsed.get("items", [])
-    items_sum = sum(it.get("amount", 0) or 0 for it in items if (it.get("amount") or 0) > 0)
-
-    if supply > 0 and abs(items_sum - supply) / supply > 0.01:
-        verify_prompt = (
-            f"[regex 검증 결과]\n"
-            f"  청구합계(regex): {r_total:,.0f}원\n"
-            f"  공급가액(regex): {r_supply:,.0f}원\n\n"
-            f"[GPT 파싱 결과]\n"
-            f"  items 합계: {items_sum:,.0f}원\n"
-            f"  공급가액: {supply:,.0f}원\n"
-            f"  차이: {items_sum - supply:,.0f}원\n\n"
-            f"items 합계가 공급가액과 일치하지 않습니다. "
-            f"PDF를 다시 꼼꼼히 확인해 누락된 항목을 추가하거나 잘못된 금액을 수정해주세요. "
-            f"특히 행번호(1, 2, 3...)가 금액 앞에 붙어 있는지 확인하세요. "
-            f"수정된 전체 JSON을 반환하세요."
-        )
-        try:
-            parsed2, _ = _gpt_parse(client, cleaned_text, extra_messages=[
-                {"role": "assistant", "content": gpt_raw},
-                {"role": "user", "content": verify_prompt},
-            ])
-            items2 = parsed2.get("items", [])
-            items_sum2 = sum(it.get("amount", 0) or 0 for it in items2 if (it.get("amount") or 0) > 0)
-            if abs(items_sum2 - supply) < abs(items_sum - supply):
-                # 재파싱이 더 정확 → items만 교체 (합계는 이미 regex로 고정됨)
-                parsed["items"] = items2
-                parsed["_reparse_applied"] = True
-        except Exception:
-            pass
-
-    # ── 최종 경고 (재파싱 후에도 차이 남은 경우) ──────────────────
-    final_items = parsed.get("items", [])
-    final_sum = sum(it.get("amount", 0) or 0 for it in final_items if (it.get("amount") or 0) > 0)
-    final_supply = parsed.get("supply_amount") or 0
-    if final_supply > 0 and abs(final_sum - final_supply) > 100:
-        parsed["_parse_warning"] = (
-            f"항목합계({final_sum:,.0f})와 공급가액({final_supply:,.0f}) 차이: "
-            f"{abs(final_sum - final_supply):,.0f}원 — 항목을 직접 확인하세요"
-        )
-
-    return parsed
-
 
 # ─────────────────────────────────────
-# API: PDF 업로드 & 파싱
+# API: Excel 업로드 & 일괄 저장
 # ─────────────────────────────────────
 
-@router.post("/upload")
-async def upload_invoice(token: str = Form(...), file: UploadFile = File(...)):
-    """PDF 업로드 → 텍스트 추출 → GPT 파싱 → DB 저장"""
+@router.post("/upload-excel")
+async def upload_excel_invoice(token: str = Form(...), file: UploadFile = File(...)):
+    """Excel 업로드 → 업체별 청구금액 파싱 → DB 일괄 저장
+
+    지원 컬럼 형식: No | 파일명 | 업체명 | 청구금액(원)
+    파일명에서 서비스월 자동 추출 (예: 2026_08월_... → 2026-08)
+    """
     ensure_tables()
     user = _require_admin(token)
 
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
+    fname_lower = (file.filename or "").lower()
+    if not (fname_lower.endswith(".xlsx") or fname_lower.endswith(".xls")):
+        raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
 
     try:
-        import pdfplumber
+        import openpyxl
     except ImportError:
-        raise HTTPException(status_code=500, detail="pdfplumber가 설치되지 않았습니다.")
+        raise HTTPException(status_code=500, detail="openpyxl이 설치되지 않았습니다.")
 
-    # 파일 저장
-    pdf_id = str(uuid.uuid4())
-    safe_name = f"{pdf_id}.pdf"
-    pdf_path = UPLOAD_DIR / safe_name
+    import re
+    from io import BytesIO
+
     content = await file.read()
-    pdf_path.write_bytes(content)
 
-    # 텍스트 추출
+    # 서비스월: 파일명에서 추출 (예: 2026_08월_ / 2026-08_ / 202608_)
+    service_month: Optional[str] = None
+    m = re.search(r'(\d{4})[_\-](\d{1,2})월', file.filename or "")
+    if m:
+        service_month = f"{m.group(1)}-{m.group(2).zfill(2)}"
+    else:
+        m2 = re.search(r'(\d{4})(\d{2})', file.filename or "")
+        if m2:
+            service_month = f"{m2.group(1)}-{m2.group(2)}"
+
+    # openpyxl 파싱
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+        wb = openpyxl.load_workbook(BytesIO(content))
     except Exception as e:
-        pdf_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"PDF 읽기 실패: {e}")
+        raise HTTPException(status_code=400, detail=f"Excel 파일을 열 수 없습니다: {e}")
 
-    if not text.strip():
-        pdf_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="PDF에서 텍스트를 추출할 수 없습니다. (스캔 PDF는 미지원)")
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
 
-    # GPT 파싱
-    try:
-        parsed = _parse_pdf_text(text)
-    except Exception as e:
-        pdf_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"AI 파싱 실패: {e}")
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="Excel 파일에 데이터가 없습니다.")
 
-    # GPT 파싱 완료 후 즉시 파일 삭제 (정보만 DB에 저장)
-    pdf_path.unlink(missing_ok=True)
+    # 첫 번째 행 = 헤더 스킵
+    data_rows = rows[1:]
 
-    # 중복 방지: 같은 (거래처, 서비스월, 청구합계) 이미 존재하면 차단
-    client_name_parsed = parsed.get("client_name", "미상")
-    service_month_parsed = parsed.get("service_month")
-    total_amount_parsed = parsed.get("total_amount", 0)
-    with get_connection() as con:
-        existing = con.execute("""
-            SELECT id FROM billing_invoices
-            WHERE client_name = ? AND service_month = ? AND total_amount = ?
-            LIMIT 1
-        """, (client_name_parsed, service_month_parsed, total_amount_parsed)).fetchone()
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"이미 동일한 인보이스가 존재합니다: {client_name_parsed} / {service_month_parsed} / {total_amount_parsed:,.0f}원 (ID: {existing[0][:8]}...)"
+    inserted_clients: list = []
+    skipped_clients: list = []
+    error_clients: list = []
+
+    for row in data_rows:
+        if not row or row[0] is None:
+            continue
+
+        row_no = row[0]
+        # 합계/소계 행 스킵
+        if str(row_no).strip() in ("합계", "소계", "합 계", "총합계"):
+            continue
+        # No 컬럼이 숫자가 아닌 경우 스킵 (예: 헤더 반복)
+        try:
+            int(row_no)
+        except (TypeError, ValueError):
+            continue
+
+        # 업체명(C) / 청구금액(D)
+        client_name = str(row[2]).strip() if row[2] not in (None, "") else None
+        total_raw = row[3]
+        pdf_ref = str(row[1]).strip() if row[1] not in (None, "") else None  # 파일명 참고용 보관
+
+        if not client_name or total_raw is None:
+            continue
+
+        try:
+            total_amount = float(total_raw)
+        except (TypeError, ValueError):
+            error_clients.append(f"{client_name} (금액 파싱 오류: {total_raw})")
+            continue
+
+        if total_amount <= 0:
+            continue
+
+        # 중복 체크 (업체명 + 서비스월 + 청구금액)
+        with get_connection() as con:
+            existing = con.execute(
+                "SELECT id FROM billing_invoices WHERE client_name=? AND service_month=? AND total_amount=? LIMIT 1",
+                (client_name, service_month, total_amount),
+            ).fetchone()
+
+        if existing:
+            skipped_clients.append(client_name)
+            continue
+
+        # 공급가액·부가세 역산 (청구금액 = 공급가액 × 1.1 가정)
+        supply_amount = round(total_amount / 1.1)
+        vat_amount = round(total_amount - supply_amount)
+
+        invoice_id = str(uuid.uuid4())
+        subject = f"{service_month} 청구" if service_month else None
+
+        with get_connection() as con:
+            con.execute(
+                """
+                INSERT INTO billing_invoices
+                  (id, invoice_no, client_name, invoice_date, due_date, service_month,
+                   subject, supply_amount, vat_amount, total_amount,
+                   paid_amount, status, bank_name, account_holder, account_number,
+                   pdf_filename, created_by)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    invoice_id,
+                    None,
+                    client_name,
+                    None,
+                    None,
+                    service_month,
+                    subject,
+                    supply_amount,
+                    vat_amount,
+                    total_amount,
+                    total_amount,  # 기본값: 완납
+                    "완납",
+                    None, None, None,
+                    pdf_ref,
+                    user["nickname"],
+                ),
+            )
+            con.commit()
+
+        inserted_clients.append(client_name)
+        add_log(
+            action_type="인보이스 업로드(엑셀)",
+            target_type="billing_invoice",
+            target_id=invoice_id,
+            target_name=client_name,
+            user_nickname=user["nickname"],
+            details=f"{client_name} / {service_month} / {total_amount:,.0f}원",
         )
 
-    # DB 저장
-    items = parsed.pop("items", [])
-    invoice_id = pdf_id
-
-    with get_connection() as con:
-        con.execute("""
-            INSERT INTO billing_invoices
-              (id, invoice_no, client_name, invoice_date, due_date, service_month,
-               subject, supply_amount, vat_amount, total_amount,
-               paid_amount, status,
-               bank_name, account_holder, account_number,
-               pdf_filename, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            invoice_id,
-            parsed.get("invoice_no"),
-            parsed.get("client_name", "미상"),
-            parsed.get("invoice_date"),
-            parsed.get("due_date"),
-            parsed.get("service_month"),
-            parsed.get("subject"),
-            parsed.get("supply_amount", 0),
-            parsed.get("vat_amount", 0),
-            parsed.get("total_amount", 0),
-            parsed.get("total_amount", 0),  # 기본값: 완납 (paid_amount = total_amount)
-            "완납",
-            parsed.get("bank_name"),
-            parsed.get("account_holder"),
-            parsed.get("account_number"),
-            None,
-            user["nickname"],
-        ))
-
-        for it in items:
-            item_id = str(uuid.uuid4())
-            category = _guess_category(it.get("item_name", ""))
-            con.execute("""
-                INSERT INTO billing_invoice_items
-                  (id, invoice_id, line_no, item_name, category, quantity, unit_price, amount, memo)
-                VALUES (?,?,?,?,?,?,?,?,?)
-            """, (
-                item_id, invoice_id,
-                it.get("line_no"),
-                it.get("item_name"),
-                category,
-                it.get("quantity"),
-                it.get("unit_price"),
-                it.get("amount"),
-                it.get("memo"),
-            ))
-        con.commit()
-
-    add_log(
-        action_type="인보이스 업로드",
-        target_type="billing_invoice",
-        target_id=invoice_id,
-        target_name=parsed.get("client_name", "미상"),
-        user_nickname=user["nickname"],
-        details=f"{parsed.get('client_name')} / {parsed.get('service_month')} / {parsed.get('total_amount'):,}원",
-    )
-
     return {
-        "invoice_id": invoice_id,
-        "parsed": {**parsed, "items": items},
-        "item_count": len(items),
+        "inserted": len(inserted_clients),
+        "skipped": len(skipped_clients),
+        "errors": len(error_clients),
+        "service_month": service_month,
+        "inserted_clients": inserted_clients,
+        "skipped_clients": skipped_clients,
+        "error_clients": error_clients,
     }
 
 
