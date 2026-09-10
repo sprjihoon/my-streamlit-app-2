@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
@@ -97,6 +97,9 @@ export default function KpostPickupListPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRefreshing, setAutoRefreshing] = useState(false);
+  const autoRefreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tokenRef = useRef('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [items, setItems] = useState<KpostPickupItem[]>([]);
@@ -128,8 +131,23 @@ export default function KpostPickupListPage() {
     };
   }
 
+  // 백그라운드에서 우체국 API를 호출해 상태를 갱신하고, 완료 후 목록을 다시 불러온다.
+  const silentRefresh = useCallback(async (auth: string) => {
+    if (!auth) return;
+    setAutoRefreshing(true);
+    try {
+      await refreshKpostPickupStatuses(auth);
+      await loadList(auth);
+    } catch {
+      // 자동 조회 실패는 조용히 무시 (수동 조회로 에러 확인 가능)
+    } finally {
+      setAutoRefreshing(false);
+    }
+  }, [loadList]);
+
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
+    tokenRef.current = stored;
     setToken(stored);
     const adminFlag = localStorage.getItem('is_admin');
     setIsAdmin(adminFlag === 'true' || adminFlag === '1');
@@ -151,8 +169,19 @@ export default function KpostPickupListPage() {
       } finally {
         setLoading(false);
       }
+      // 초기 로드 직후 백그라운드 자동 조회 (최신 상태 즉시 반영)
+      silentRefresh(stored);
     })();
-  }, [loadList]);
+
+    // 60초마다 자동 갱신
+    autoRefreshTimerRef.current = setInterval(() => {
+      silentRefresh(tokenRef.current);
+    }, 60_000);
+
+    return () => {
+      if (autoRefreshTimerRef.current) clearInterval(autoRefreshTimerRef.current);
+    };
+  }, [loadList, silentRefresh]);
 
   function handleSort(key: string) {
     if (sortKey === key) {
@@ -167,8 +196,8 @@ export default function KpostPickupListPage() {
   function sortedItems() {
     const dir = sortDir === 'asc' ? 1 : -1;
     return [...items].sort((a, b) => {
-      const av = (a as Record<string, unknown>)[sortKey] ?? '';
-      const bv = (b as Record<string, unknown>)[sortKey] ?? '';
+      const av = (a as unknown as Record<string, unknown>)[sortKey] ?? '';
+      const bv = (b as unknown as Record<string, unknown>)[sortKey] ?? '';
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
       return 0;
@@ -318,9 +347,14 @@ export default function KpostPickupListPage() {
           <button type="button" className="btn btn-secondary" onClick={handleShowAll}>
             전체목록
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleRefreshStatus} disabled={refreshing}>
+          <button type="button" className="btn btn-primary" onClick={handleRefreshStatus} disabled={refreshing || autoRefreshing}>
             {refreshing ? '송장조회 중...' : '송장조회'}
           </button>
+          {autoRefreshing && (
+            <span style={{ fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+              ⟳ 자동 갱신 중…
+            </span>
+          )}
         </div>
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>
