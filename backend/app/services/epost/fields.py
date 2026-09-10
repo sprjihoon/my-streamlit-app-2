@@ -66,7 +66,7 @@ TREAT_STATUS_LABELS = {
 }
 
 # 최종 상태(더 이상 조회 불필요)
-FINAL_TREAT_STATUSES = {"배달완료"}
+FINAL_TREAT_STATUSES = {"배달완료", "신청취소"}
 
 # 배송 단계 진행 순서 — Korean text 키, 값이 클수록 더 진행된 상태.
 # _apply_tracking_info 에서 상태가 뒤로 가는 것을 방지할 때 사용.
@@ -81,6 +81,7 @@ TREAT_STATUS_ORDER: dict[str, int] = {
     "배달준비": 7,
     "배달중": 8,
     "배달완료": 9,
+    "신청취소": 10,  # 취소 terminal 상태 (배달완료보다 높아 no-downgrade 통과)
 }
 
 
