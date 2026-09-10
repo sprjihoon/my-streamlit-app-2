@@ -891,6 +891,39 @@ def get_pickup(pickup_id: int, token: str, refresh: bool = False):
     return item
 
 
+@router.post("/bulk-delete")
+def bulk_delete_pickups(token: str, tracking_nos: list[str]):
+    """송장번호 목록으로 접수 내역 일괄 삭제 (관리자 전용)."""
+    user = _get_user(token)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자만 삭제할 수 있습니다.")
+    if not tracking_nos:
+        raise HTTPException(status_code=400, detail="송장번호 목록이 비어 있습니다.")
+    ensure_pickup_tables()
+    with get_connection() as con:
+        placeholders = ",".join(["?"] * len(tracking_nos))
+        rows = con.execute(
+            f"SELECT id, tracking_no FROM kpost_pickup_requests WHERE tracking_no IN ({placeholders})",
+            tracking_nos,
+        ).fetchall()
+        if not rows:
+            return {"success": True, "deleted": 0, "message": "해당 송장번호가 없습니다."}
+        ids = [r[0] for r in rows]
+        id_placeholders = ",".join(["?"] * len(ids))
+        con.execute(f"DELETE FROM kpost_pickup_requests WHERE id IN ({id_placeholders})", ids)
+        con.commit()
+    for r in rows:
+        add_log(
+            action_type="우체국회수일괄삭제",
+            target_type="kpost_pickup",
+            target_id=str(r[0]),
+            target_name=r[1],
+            user_nickname=user["nickname"],
+            details="일괄 삭제",
+        )
+    return {"success": True, "deleted": len(ids), "ids": ids}
+
+
 @router.delete("/{pickup_id}")
 def delete_pickup(pickup_id: int, token: str):
     """접수 내역을 DB에서 완전 삭제합니다 (관리자 전용)."""
