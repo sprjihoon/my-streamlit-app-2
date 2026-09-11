@@ -2068,6 +2068,46 @@ def serve_photo(
     return FileResponse(path)
 
 
+# ── 미매칭 inbox 사진 정리 ────────────────────────────────────
+
+def _cleanup_unmatched_inbox_photos(batch_id: str) -> int:
+    """
+    입고완료(am close) 시 item_id가 NULL인 미매칭 inbox 사진을
+    파일 삭제 + DB soft-delete 처리한다.
+    반환: 삭제된 사진 수
+    """
+    with get_connection() as con:
+        rows = con.execute(
+            """SELECT id, stored_filename
+               FROM inbound_product_photo_inbox
+               WHERE batch_id=? AND item_id IS NULL AND is_deleted=0""",
+            (batch_id,)
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        deleted = 0
+        for photo_id, stored_filename in rows:
+            # 파일 삭제
+            if stored_filename:
+                try:
+                    file_path = UPLOAD_DIR / Path(stored_filename).name
+                    if file_path.exists():
+                        file_path.unlink()
+                except Exception as e:
+                    logger.warning(f"inbox 사진 파일 삭제 실패 ({stored_filename}): {e}")
+            # DB soft-delete
+            con.execute(
+                "UPDATE inbound_product_photo_inbox SET is_deleted=1 WHERE id=?",
+                (photo_id,)
+            )
+            deleted += 1
+
+        con.commit()
+    return deleted
+
+
 # ── 제품사진 inbox 조회 (봇이 수집한 미분류 사진) ──────────
 
 @router.get("/batches/{batch_id}/inbox")
@@ -2571,7 +2611,13 @@ def close_batch(
                 (next_status, now, batch_id)
             )
             con.commit()
-            add_log("inbound", "am_close", f"오전 입고접수 완료: {batch_id}", user["user_id"])
+
+            # ── 미매칭 inbox 사진 정리 (입고완료 시 자동 삭제) ──────────────
+            deleted_files = _cleanup_unmatched_inbox_photos(batch_id)
+
+            add_log("inbound", "am_close",
+                    f"오전 입고접수 완료: {batch_id} | 미매칭사진 {deleted_files}장 삭제",
+                    user["user_id"])
             return {
                 "ok": True,
                 "close_type": "am",
@@ -2579,6 +2625,7 @@ def close_batch(
                 "status_label": STATUS_LABELS[next_status],
                 "message": "오전 입고접수 완료 — 양품화를 진행해주세요",
                 "zero_qty_count": 0,  # 수량 미확인 품목은 이미 위에서 차단됨
+                "deleted_inbox_photos": deleted_files,
             }
 
         # ── 오후 마감: inbound_done / grading / repairing → done ──
