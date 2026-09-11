@@ -2086,7 +2086,7 @@ export async function linkInboxPhotoToItem(
     `/inbound/items/${itemId}/photos/from-inbox`,
     {
       method: 'POST',
-      headers: inboundHeaders(token),
+      headers: { ...inboundHeaders(token), 'Content-Type': 'application/json' },
       body: JSON.stringify({ inbox_photo_id: inboxPhotoId }),
     }
   );

@@ -421,7 +421,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
   }
 
   // ── inbox 사진 연결 ──
-  const [showInboxPicker, setShowInboxPicker] = useState(false);
+  const [showInboxPicker, setShowInboxPicker] = useState(true);
   const [inboxLinking, setInboxLinking] = useState<string | null>(null);  // 링크 중인 photo id
 
   async function handleLinkInboxPhoto(inboxPhotoId: string) {
@@ -1321,7 +1321,7 @@ export default function InboundWorkPage() {
   const [ocrMsg,    setOcrMsg]    = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [inboxPhotos,   setInboxPhotos]   = useState<InboundInboxPhoto[]>([]);
-  const [showInbox,     setShowInbox]     = useState(false);
+  const [showInbox,     setShowInbox]     = useState(true);
   const [grading,       setGrading]       = useState(false);
   const [gradeMsg,      setGradeMsg]      = useState('');
   const [fillingQty,    setFillingQty]    = useState(false);
