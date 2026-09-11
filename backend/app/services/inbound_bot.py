@@ -714,7 +714,6 @@ async def _handle_janggi_image(
         "vendor": vendor,
     }, "")
 
-    link = _work_link(batch_id)
     item_count = result["item_count"]
     matched = result["matched_count"]
     needs = result["needs_count"]
@@ -727,8 +726,6 @@ async def _handle_janggi_image(
         "",
         "이제 제품사진을 순서 무관하게 보내주세요.",
         "다 보내셨으면 `사진 끝` 을 입력해주세요.",
-        "",
-        f"🔗 직접 작업 링크:\n{link}",
     ]
     return "\n".join(l for l in lines if l is not None)
 
