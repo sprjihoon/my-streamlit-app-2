@@ -122,6 +122,13 @@ function canCancel(item: KpostPickupItem): boolean {
   return item.status === 'requested' && !noCancel.has(ts);
 }
 
+// 삭제는 취소 완료(status=canceled) 또는 배달완료·신청취소 상태만 허용
+function canDelete(item: KpostPickupItem): boolean {
+  if (item.status === 'canceled') return true;
+  const done = new Set(['배달완료', '신청취소']);
+  return done.has(item.treat_status || '');
+}
+
 export default function KpostPickupListPage() {
   const [token, setToken] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -289,8 +296,11 @@ export default function KpostPickupListPage() {
   }
 
   async function handleBulkDelete() {
-    const targets = items.filter((it) => selectedIds.has(it.id));
-    if (targets.length === 0) return;
+    const targets = items.filter((it) => selectedIds.has(it.id) && canDelete(it));
+    if (targets.length === 0) {
+      setError('삭제 가능한 항목이 없습니다. 취소 또는 배달완료·신청취소 상태만 삭제할 수 있습니다.');
+      return;
+    }
     if (!window.confirm(`선택한 ${targets.length}건을 DB에서 완전 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
     setError(null);
     try {
@@ -418,9 +428,9 @@ export default function KpostPickupListPage() {
               선택 취소 ({items.filter((it) => selectedIds.has(it.id) && canCancel(it)).length}건)
             </button>
           )}
-          {isAdmin && selectedIds.size > 0 && (
+          {isAdmin && selectedIds.size > 0 && items.some((it) => selectedIds.has(it.id) && canDelete(it)) && (
             <button type="button" className="btn btn-secondary" style={{ color: '#dc2626', borderColor: '#dc2626' }} onClick={handleBulkDelete}>
-              선택 삭제 ({selectedIds.size}건)
+              선택 삭제 ({items.filter((it) => selectedIds.has(it.id) && canDelete(it)).length}건)
             </button>
           )}
         </div>
@@ -556,7 +566,7 @@ export default function KpostPickupListPage() {
                                   취소
                                 </button>
                               )}
-                              {isAdmin && (
+                              {isAdmin && canDelete(item) && (
                                 <button type="button" className="btn btn-secondary" style={{ color: '#dc2626' }} onClick={() => handleDelete(item.id, item.tracking_no)}>
                                   삭제
                                 </button>
