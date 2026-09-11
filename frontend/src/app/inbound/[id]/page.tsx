@@ -939,12 +939,12 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                         style={{
                           position: 'relative', borderRadius: 8, overflow: 'hidden',
                           border: linkedToThis ? '2px solid #22c55e' : linkedToOther ? '2px solid #f59e0b' : '2px solid #bae6fd',
-                          cursor: linkedToThis ? 'default' : inboxLinking ? 'wait' : 'pointer',
-                          opacity: inboxLinking === photo.id ? 0.6 : 1,
+                          cursor: (linkedToThis || linkedToOther) ? 'not-allowed' : inboxLinking ? 'wait' : 'pointer',
+                          opacity: inboxLinking === photo.id ? 0.6 : linkedToOther ? 0.45 : 1,
                           transition: 'opacity 0.15s',
                         }}
                       >
-                        <div onClick={() => !inboxLinking && !linkedToThis && handleLinkInboxPhoto(photo.id)}>
+                        <div onClick={() => !inboxLinking && !linkedToThis && !linkedToOther && handleLinkInboxPhoto(photo.id)}>
                           {photo.url ? (
                             <img
                               src={`${API_BASE}${photo.url}`}

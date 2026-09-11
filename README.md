@@ -110,6 +110,14 @@ cd frontend && npm run dev
 
 ## 변경 이력
 
+### 2026-09-11 (2차)
+- **fix(inbound): 봇 inbox 사진 중복 매칭 방지 강화**
+  - 다른 품목에 이미 연결된 사진(`linkedToOther`) 클릭 완전 차단
+  - `onClick` 조건에 `!linkedToOther` 추가
+  - `cursor` 스타일: `linkedToOther`일 때 `'not-allowed'`로 변경
+  - `opacity`: `linkedToOther` 사진을 `0.45`로 흐리게 처리해 시각적 비활성 표시
+  - 기존 "이 품목에 연결됨(초록)" · "다른 품목에 연결됨(주황)" 색상 구분은 유지
+
 ### 2026-09-11
 - **feat(kpost-pickup): 관리자 회수신청 목록 삭제 기능** (`ccc94eee`)
   - `isAdmin` localStorage 키 불일치 버그 수정 (`is_admin` → `isAdmin`) — 삭제 버튼이 관리자에게도 안 보이던 문제
