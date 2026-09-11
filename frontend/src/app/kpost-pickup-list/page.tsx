@@ -7,6 +7,7 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
   cancelKpostPickup,
+  bulkDeleteKpostPickups,
   deleteKpostPickup,
   getKpostPickupFilterOptions,
   listKpostPickups,
@@ -140,6 +141,7 @@ export default function KpostPickupListPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortKey, setSortKey] = useState<string>('id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const loadList = useCallback(
     async (auth: string, filters?: { dateFrom?: string; dateTo?: string; recipientName?: string; createdBy?: string }) => {
@@ -162,7 +164,7 @@ export default function KpostPickupListPage() {
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
     setToken(stored);
-    const adminFlag = localStorage.getItem('is_admin');
+    const adminFlag = localStorage.getItem('isAdmin') || localStorage.getItem('is_admin');
     setIsAdmin(adminFlag === 'true' || adminFlag === '1');
     if (!stored) {
       setError('로그인이 필요합니다.');
@@ -279,6 +281,23 @@ export default function KpostPickupListPage() {
     try {
       const result = await deleteKpostPickup(token, id);
       setSuccess(`삭제 완료: ${result.tracking_no || id}`);
+      setSelectedIds(new Set());
+      await loadList(token, currentFilters());
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleBulkDelete() {
+    const targets = items.filter((it) => selectedIds.has(it.id));
+    if (targets.length === 0) return;
+    if (!window.confirm(`선택한 ${targets.length}건을 DB에서 완전 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    setError(null);
+    try {
+      const tnos = targets.map((it) => it.tracking_no).filter(Boolean);
+      const result = await bulkDeleteKpostPickups(token, tnos);
+      setSuccess(`${result.deleted}건 삭제 완료`);
+      setSelectedIds(new Set());
       await loadList(token, currentFilters());
     } catch (err) {
       setError(parseApiError(err));
@@ -367,6 +386,11 @@ export default function KpostPickupListPage() {
           <button type="button" className="btn btn-primary" onClick={handleRefreshStatus} disabled={refreshing}>
             {refreshing ? '송장조회 중...' : '송장조회'}
           </button>
+          {isAdmin && selectedIds.size > 0 && (
+            <button type="button" className="btn btn-secondary" style={{ color: '#dc2626', borderColor: '#dc2626' }} onClick={handleBulkDelete}>
+              선택 삭제 ({selectedIds.size}건)
+            </button>
+          )}
         </div>
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>
@@ -398,6 +422,19 @@ export default function KpostPickupListPage() {
                 <table>
                   <thead>
                     <tr>
+                      {isAdmin && (
+                        <th style={{ width: '1%', whiteSpace: 'nowrap' }}>
+                          <input
+                            type="checkbox"
+                            title="전체 선택/해제"
+                            checked={pageItems.length > 0 && pageItems.every((it) => selectedIds.has(it.id))}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedIds(new Set(pageItems.map((it) => it.id)));
+                              else setSelectedIds(new Set());
+                            }}
+                          />
+                        </th>
+                      )}
                       <SortTh col="tracking_no"   label="수거송장번호" />
                       <SortTh col="recipient_name" label="수취인" />
                       <SortTh col="addr1"          label="주소" />
@@ -415,6 +452,22 @@ export default function KpostPickupListPage() {
                       const label = statusLabel(item);
                       return (
                         <tr key={item.id}>
+                          {isAdmin && (
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(item.id)}
+                                onChange={(e) => {
+                                  setSelectedIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(item.id);
+                                    else next.delete(item.id);
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </td>
+                          )}
                           <td>
                             <strong>{item.tracking_no || '-'}</strong>
                             {item.is_test ? ' (테스트)' : ''}

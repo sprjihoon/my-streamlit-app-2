@@ -1662,6 +1662,13 @@ export async function deleteKpostPickup(token: string, id: number) {
   );
 }
 
+export async function bulkDeleteKpostPickups(token: string, trackingNos: string[]) {
+  return fetchApi<{ success: boolean; deleted: number; tracking_nos: string[] }>(
+    `/kpost-pickup/bulk-delete${pickupQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(trackingNos) }
+  );
+}
+
 export async function refreshKpostPickupStatuses(token: string) {
   return fetchApi<{
     success: boolean;
