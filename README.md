@@ -110,6 +110,14 @@ cd frontend && npm run dev
 
 ## 변경 이력
 
+### 2026-09-11 (4차)
+- **feat(inbound): 입고완료 시 미매칭 inbox 사진 자동 삭제**
+  - `am close` (입고 확인 완료, `confirming → inbound_done`) 시 자동 실행
+  - 어떤 품목에도 연결되지 않은 inbox 사진(`item_id IS NULL`) 일괄 정리
+  - 파일 디스크 삭제 + DB `is_deleted=1` soft-delete
+  - 삭제 실패(디스크 오류 등)는 warning 로그만 남기고 마감은 정상 진행
+  - close 응답에 `deleted_inbox_photos` 카운트 포함
+
 ### 2026-09-11 (3차)
 - **fix(inbound-bot): 링크 전송 순서 수정 — 사진 끝 이후에만 링크 발송**
   - 장끼 OCR 완료 응답에서 작업 링크 제거 (조기 링크 제거)
