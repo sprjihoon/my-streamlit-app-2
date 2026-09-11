@@ -304,6 +304,33 @@ export default function KpostPickupListPage() {
     }
   }
 
+  async function handleBulkCancel() {
+    const targets = items.filter((it) => selectedIds.has(it.id) && canCancel(it));
+    if (targets.length === 0) {
+      setError('선택한 항목 중 취소 가능한 건이 없습니다.');
+      return;
+    }
+    if (!window.confirm(`취소 가능한 ${targets.length}건을 접수 취소할까요?`)) return;
+    setError(null);
+    let done = 0;
+    const errors: string[] = [];
+    for (const it of targets) {
+      try {
+        await cancelKpostPickup(token, it.id);
+        done++;
+      } catch (err) {
+        errors.push(it.tracking_no || String(it.id));
+      }
+    }
+    setSelectedIds(new Set());
+    await loadList(token, currentFilters());
+    if (errors.length > 0) {
+      setError(`${done}건 취소 완료, 실패: ${errors.join(', ')}`);
+    } else {
+      setSuccess(`${done}건 취소 완료`);
+    }
+  }
+
   if (loading) return <Loading text="회수신청 목록 로딩 중..." />;
 
   return (
@@ -386,6 +413,11 @@ export default function KpostPickupListPage() {
           <button type="button" className="btn btn-primary" onClick={handleRefreshStatus} disabled={refreshing}>
             {refreshing ? '송장조회 중...' : '송장조회'}
           </button>
+          {selectedIds.size > 0 && (
+            <button type="button" className="btn btn-secondary" style={{ color: '#b45309' }} onClick={handleBulkCancel}>
+              선택 취소 ({items.filter((it) => selectedIds.has(it.id) && canCancel(it)).length}건)
+            </button>
+          )}
           {isAdmin && selectedIds.size > 0 && (
             <button type="button" className="btn btn-secondary" style={{ color: '#dc2626', borderColor: '#dc2626' }} onClick={handleBulkDelete}>
               선택 삭제 ({selectedIds.size}건)
