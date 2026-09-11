@@ -110,6 +110,13 @@ cd frontend && npm run dev
 
 ## 변경 이력
 
+### 2026-09-11 (5차)
+- **fix(inbound): inbox 사진 연결 오류 + 아코디언 기본 열림**
+  - `linkInboxPhotoToItem` — `Content-Type: application/json` 누락으로 Pydantic 422 에러 발생 수정
+    - `fetchApi` 스프레드 순서 버그: `...options`가 기본 헤더를 덮어쓰는 문제 해결
+  - 봇 inbox 사진 섹션 기본값 열림 (`showInboxPicker`, `showInbox`: `false → true`)
+    - 링크 진입 즉시 사진 선택 영역이 보여 작업자 혼선 방지
+
 ### 2026-09-11 (4차)
 - **feat(inbound): 입고완료 시 미매칭 inbox 사진 자동 삭제**
   - `am close` (입고 확인 완료, `confirming → inbound_done`) 시 자동 실행
