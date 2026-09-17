@@ -43,6 +43,46 @@ const inputStyle: React.CSSProperties = {
   fontSize: '0.9rem',
 };
 
+const fieldGrid: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: '0.75rem',
+};
+
+function FormSection({
+  title,
+  first,
+  children,
+}: {
+  title: string;
+  first?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      style={{
+        marginTop: first ? 0 : '1.5rem',
+        paddingTop: first ? 0 : '1.35rem',
+        borderTop: first ? 'none' : '2px solid #cbd5e1',
+      }}
+    >
+      <h3
+        style={{
+          margin: '0 0 0.9rem',
+          fontSize: '0.95rem',
+          fontWeight: 700,
+          color: 'var(--text-primary)',
+          letterSpacing: 0,
+          textTransform: 'none',
+        }}
+      >
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -122,6 +162,7 @@ export default function OverseasShippingPage() {
   const [hsQuery, setHsQuery] = useState<Record<number, string>>({});
   const [hsOpen, setHsOpen] = useState<number | null>(null);
   const [validating, setValidating] = useState(false);
+  const [addressHint, setAddressHint] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<{
     original: { addr3: string; addr2: string; addr1: string; zip: string };
     suggested: { addr3: string; addr2: string; addr1: string; zip: string; formattedAddress?: string };
@@ -133,6 +174,14 @@ export default function OverseasShippingPage() {
   countryRef.current = form.countrycd;
   const formRef = useRef(form);
   formRef.current = form;
+  const validateRef = useRef<(opts?: {
+    addr3?: string;
+    addr2?: string;
+    addr1?: string;
+    zip?: string;
+    countrycd?: string;
+    silent?: boolean;
+  }) => Promise<void>>(async () => {});
 
   async function reloadSaved(auth: string) {
     const [addrRes, senderRes, hsRes] = await Promise.all([
@@ -226,6 +275,13 @@ export default function OverseasShippingPage() {
             receiveaddr1: parsed.addr1 || prev.receiveaddr1,
             receivezipcode: parsed.zip || prev.receivezipcode,
           }));
+          void validateRef.current({
+            addr3: parsed.addr3 || formRef.current.receiveaddr3,
+            addr2: parsed.addr2 || formRef.current.receiveaddr2,
+            addr1: parsed.addr1 || formRef.current.receiveaddr1,
+            zip: parsed.zip || formRef.current.receivezipcode,
+            countrycd: countryRef.current,
+          });
         });
       })
       .catch(() => undefined);
@@ -234,40 +290,74 @@ export default function OverseasShippingPage() {
     };
   }, [form.countrycd, loading]);
 
-  const triggerAddressValidation = useCallback(async () => {
-    if (!GMAPS_KEY) return;
+  const triggerAddressValidation = useCallback(async (override?: {
+    addr3?: string;
+    addr2?: string;
+    addr1?: string;
+    zip?: string;
+    countrycd?: string;
+    silent?: boolean;
+  }) => {
     const current = formRef.current;
-    if (!current.receiveaddr3.trim() || !supportsAddressValidation(current.countrycd)) return;
+    const addr3 = (override?.addr3 ?? current.receiveaddr3).trim();
+    const addr2 = override?.addr2 ?? current.receiveaddr2;
+    const addr1 = override?.addr1 ?? current.receiveaddr1;
+    const zip = override?.zip ?? current.receivezipcode;
+    const countrycd = override?.countrycd ?? current.countrycd;
+    const silent = !!override?.silent;
+
+    if (!GMAPS_KEY) {
+      if (!silent) setError('구글 주소키가 없어 검증할 수 없습니다.');
+      return;
+    }
+    if (!addr3) {
+      if (!silent) setError('수취인 상세주소를 입력한 뒤 검증하세요.');
+      return;
+    }
+    if (!supportsAddressValidation(countrycd)) {
+      if (!silent) setError(`${countrycd} 국가는 구글 주소검증을 지원하지 않습니다.`);
+      return;
+    }
+
     setValidating(true);
+    setAddressHint(null);
+    if (!silent) {
+      setError(null);
+      setSuccess(null);
+    }
     try {
       const result = await validateAddressWithGoogle(GMAPS_KEY, {
-        addr3: current.receiveaddr3,
-        addr2: current.receiveaddr2,
-        addr1: current.receiveaddr1,
-        zip: current.receivezipcode,
-        countryCode: current.countrycd,
+        addr3,
+        addr2,
+        addr1,
+        zip,
+        countryCode: countrycd,
       });
-      if (result && !result.isSame) {
-        setSuggestion({
-          original: {
-            addr3: current.receiveaddr3,
-            addr2: current.receiveaddr2,
-            addr1: current.receiveaddr1,
-            zip: current.receivezipcode,
-          },
-          suggested: {
-            addr3: result.suggestedAddr3,
-            addr2: result.suggestedAddr2,
-            addr1: result.suggestedAddr1,
-            zip: result.suggestedZip,
-            formattedAddress: result.formattedAddress,
-          },
-        });
+      if (!result) {
+        if (!silent) setError('구글 주소검증에 실패했습니다. 주소를 다시 확인해주세요.');
+        return;
       }
+      if (result.isSame) {
+        setAddressHint('구글 주소와 일치합니다.');
+        if (!silent) setSuccess('구글 주소검증 완료. 입력 주소가 추천 주소와 같습니다.');
+        return;
+      }
+      setSuggestion({
+        original: { addr3, addr2, addr1, zip },
+        suggested: {
+          addr3: result.suggestedAddr3,
+          addr2: result.suggestedAddr2,
+          addr1: result.suggestedAddr1,
+          zip: result.suggestedZip,
+          formattedAddress: result.formattedAddress,
+        },
+      });
     } finally {
       setValidating(false);
     }
   }, []);
+
+  validateRef.current = triggerAddressValidation;
 
   function applySaved(item: OverseasSavedAddress) {
     setSelectedSavedId(String(item.id));
@@ -494,6 +584,7 @@ export default function OverseasShippingPage() {
           {GMAPS_KEY ? ' · 구글 주소검색 가능' : ' · 구글 주소키 없음(직접 입력)'}
         </p>
 
+        <FormSection title="발송인" first>
         <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <label style={{ flex: '1 1 240px' }}>
             저장된 발송인
@@ -518,33 +609,7 @@ export default function OverseasShippingPage() {
           <button type="button" className="btn btn-secondary" disabled={!selectedSenderId} onClick={handleDeleteSavedSender}>삭제</button>
           <a href="/overseas-senders" className="btn btn-secondary">목록</a>
         </div>
-
-        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label style={{ flex: '1 1 240px' }}>
-            저장된 수취인
-            <select
-              style={inputStyle}
-              value={selectedSavedId}
-              onChange={(e) => {
-                const item = savedAddresses.find((a) => String(a.id) === e.target.value);
-                if (item) applySaved(item);
-                else setSelectedSavedId('');
-              }}
-            >
-              <option value="">{savedAddresses.length ? '수취인을 선택하면 자동입력됩니다' : '저장된 수취인이 없습니다'}</option>
-              {savedAddresses.map((a) => (
-                <option key={a.id} value={String(a.id)}>
-                  {a.is_default ? '[기본] ' : ''}{a.label} · {a.countrycd} · {a.recipient_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="btn btn-secondary" onClick={handleSaveAddressNow}>수취인 저장</button>
-          <button type="button" className="btn btn-secondary" disabled={!selectedSavedId} onClick={handleDeleteSaved}>삭제</button>
-          <a href="/overseas-recipients" className="btn btn-secondary">목록</a>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+        <div style={fieldGrid}>
           <label>
             발송인 이름
             <input
@@ -595,6 +660,61 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, sender_addr3: e.target.value }))}
             />
           </label>
+          <label>
+            발송인 별칭
+            <input
+              style={inputStyle}
+              value={form.save_sender_label || ''}
+              placeholder="스프링풀필먼트"
+              onChange={(e) => setForm((p) => ({ ...p, save_sender_label: e.target.value }))}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_sender}
+              onChange={(e) => setForm((p) => ({ ...p, save_sender: e.target.checked }))}
+            />
+            접수와 함께 발송인 저장
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_sender_default}
+              onChange={(e) => setForm((p) => ({ ...p, save_sender_default: e.target.checked }))}
+            />
+            기본 발송인으로 지정
+          </label>
+        </div>
+        </FormSection>
+
+        <FormSection title="수취인">
+        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label style={{ flex: '1 1 240px' }}>
+            저장된 수취인
+            <select
+              style={inputStyle}
+              value={selectedSavedId}
+              onChange={(e) => {
+                const item = savedAddresses.find((a) => String(a.id) === e.target.value);
+                if (item) applySaved(item);
+                else setSelectedSavedId('');
+              }}
+            >
+              <option value="">{savedAddresses.length ? '수취인을 선택하면 자동입력됩니다' : '저장된 수취인이 없습니다'}</option>
+              {savedAddresses.map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {a.is_default ? '[기본] ' : ''}{a.label} · {a.countrycd} · {a.recipient_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn btn-secondary" onClick={handleSaveAddressNow}>수취인 저장</button>
+          <button type="button" className="btn btn-secondary" disabled={!selectedSavedId} onClick={handleDeleteSaved}>삭제</button>
+          <a href="/overseas-recipients" className="btn btn-secondary">목록</a>
+        </div>
+
+        <div style={fieldGrid}>
           <label>
             배송방법
             <select
@@ -659,7 +779,7 @@ export default function OverseasShippingPage() {
               style={inputStyle}
               value={form.receivezipcode}
               onChange={(e) => setForm((p) => ({ ...p, receivezipcode: e.target.value }))}
-              onBlur={triggerAddressValidation}
+              onBlur={() => void triggerAddressValidation({ silent: true })}
             />
           </label>
           <label>
@@ -680,18 +800,63 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, receiveaddr2: e.target.value }))}
             />
           </label>
-          <label style={{ gridColumn: '1 / -1' }}>
-            상세주소 (영문){GMAPS_KEY ? ' · 구글 검색' : ''}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label>
+              상세주소 (영문){GMAPS_KEY ? ' · 구글 검색' : ''}{validating ? ' · 검증 중...' : ''}
+              <input
+                ref={addr3Ref}
+                style={inputStyle}
+                value={form.receiveaddr3}
+                placeholder="1-2-3 Example Street Apt 101"
+                autoComplete="off"
+                onChange={(e) => setForm((p) => ({ ...p, receiveaddr3: e.target.value }))}
+                onBlur={() => void triggerAddressValidation({ silent: true })}
+              />
+            </label>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.55rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void triggerAddressValidation()}
+                disabled={validating || !GMAPS_KEY}
+                style={{ minWidth: 140 }}
+              >
+                {validating ? '검증 중...' : '구글 주소 검증'}
+              </button>
+              {addressHint && <span className="text-muted">{addressHint}</span>}
+              {!GMAPS_KEY && <span className="text-muted">구글 주소키가 없어 검증할 수 없습니다.</span>}
+            </div>
+          </div>
+          <label>
+            주소록 별칭
             <input
-              ref={addr3Ref}
               style={inputStyle}
-              value={form.receiveaddr3}
-              placeholder="1-2-3 Example Street Apt 101"
-              autoComplete="off"
-              onChange={(e) => setForm((p) => ({ ...p, receiveaddr3: e.target.value }))}
-              onBlur={triggerAddressValidation}
+              value={form.save_address_label || ''}
+              placeholder="일본 오사카 창고"
+              onChange={(e) => setForm((p) => ({ ...p, save_address_label: e.target.value }))}
             />
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_address}
+              onChange={(e) => setForm((p) => ({ ...p, save_address: e.target.checked }))}
+            />
+            접수와 함께 수취인 저장
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_address_default}
+              onChange={(e) => setForm((p) => ({ ...p, save_address_default: e.target.checked }))}
+            />
+            기본 수취인으로 지정
+          </label>
+        </div>
+        </FormSection>
+
+        <FormSection title="중량 · 사이즈">
+        <div style={fieldGrid}>
           <label>
             총중량 (g)
             <input
@@ -732,56 +897,6 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, boxheight: parseInt(e.target.value, 10) || 0 }))}
             />
           </label>
-          <label>
-            주소록 별칭
-            <input
-              style={inputStyle}
-              value={form.save_address_label || ''}
-              placeholder="일본 오사카 창고"
-              onChange={(e) => setForm((p) => ({ ...p, save_address_label: e.target.value }))}
-            />
-          </label>
-          <label>
-            발송인 별칭
-            <input
-              style={inputStyle}
-              value={form.save_sender_label || ''}
-              placeholder="스프링풀필먼트"
-              onChange={(e) => setForm((p) => ({ ...p, save_sender_label: e.target.value }))}
-            />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
-            <input
-              type="checkbox"
-              checked={!!form.save_address}
-              onChange={(e) => setForm((p) => ({ ...p, save_address: e.target.checked }))}
-            />
-            접수와 함께 수취인 저장
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
-            <input
-              type="checkbox"
-              checked={!!form.save_sender}
-              onChange={(e) => setForm((p) => ({ ...p, save_sender: e.target.checked }))}
-            />
-            접수와 함께 발송인 저장
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input
-              type="checkbox"
-              checked={!!form.save_address_default}
-              onChange={(e) => setForm((p) => ({ ...p, save_address_default: e.target.checked }))}
-            />
-            기본 수취인으로 지정
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <input
-              type="checkbox"
-              checked={!!form.save_sender_default}
-              onChange={(e) => setForm((p) => ({ ...p, save_sender_default: e.target.checked }))}
-            />
-            기본 발송인으로 지정
-          </label>
           <label style={{ gridColumn: '1 / -1' }}>
             메모
             <input
@@ -791,6 +906,7 @@ export default function OverseasShippingPage() {
             />
           </label>
         </div>
+        </FormSection>
       </Card>
 
       <Card title="세관 인보이스">
