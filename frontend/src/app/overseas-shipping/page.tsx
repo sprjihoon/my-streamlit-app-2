@@ -307,24 +307,20 @@ export default function OverseasShippingPage() {
     const silent = !!override?.silent;
 
     if (!GMAPS_KEY) {
-      if (!silent) setError('구글 주소키가 없어 검증할 수 없습니다.');
+      if (!silent) window.alert('구글 주소키가 없어 검증할 수 없습니다.');
       return;
     }
     if (!addr3) {
-      if (!silent) setError('수취인 상세주소를 입력한 뒤 검증하세요.');
+      if (!silent) window.alert('수취인 상세주소를 입력한 뒤 검증하세요.');
       return;
     }
     if (!supportsAddressValidation(countrycd)) {
-      if (!silent) setError(`${countrycd} 국가는 구글 주소검증을 지원하지 않습니다.`);
+      if (!silent) window.alert(`${countrycd} 국가는 구글 주소검증을 지원하지 않습니다.`);
       return;
     }
 
     setValidating(true);
     setAddressHint(null);
-    if (!silent) {
-      setError(null);
-      setSuccess(null);
-    }
     try {
       const result = await validateAddressWithGoogle(GMAPS_KEY, {
         addr3,
@@ -334,12 +330,12 @@ export default function OverseasShippingPage() {
         countryCode: countrycd,
       });
       if (!result) {
-        if (!silent) setError('구글 주소검증에 실패했습니다. 주소를 다시 확인해주세요.');
+        if (!silent) window.alert('구글 주소검증에 실패했습니다. 주소를 다시 확인해주세요.');
         return;
       }
       if (result.isSame) {
         setAddressHint('구글 주소와 일치합니다.');
-        if (!silent) setSuccess('구글 주소검증 완료. 입력 주소가 추천 주소와 같습니다.');
+        if (!silent) window.alert('구글 주소검증 완료. 입력 주소가 추천 주소와 같습니다.');
         return;
       }
       setSuggestion({
