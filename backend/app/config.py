@@ -96,6 +96,24 @@ class Settings(BaseSettings):
     INFRONT_CENTER_ADDR1: str = "대구광역시 동구 동촌로 1"
     INFRONT_CENTER_ADDR2: str = "동대구우체국 2층 소포실"
     INFRONT_CENTER_PHONE: str = ""
+
+    # ─────────────────────────────────────
+    # 우체국 EMS / K-Packet (해외배송)
+    # 값은 Railway 환경변수로만 넣고 git에 커밋하지 않는다.
+    # ─────────────────────────────────────
+    EMS_API_KEY: str = ""
+    EMS_SECURITY_KEY: str = ""
+    EMS_CUSTOMER_NO: str = ""
+    EMS_APPROVAL_NO: str = ""
+    EMS_SENDER_NAME: str = "스프링풀필먼트"
+    EMS_SENDER_ZIPCODE: str = "41142"
+    EMS_SENDER_ADDR1: str = "1 Dongchon-ro 2F Parcel Room"
+    EMS_SENDER_ADDR2: str = "Dong-gu"
+    EMS_SENDER_ADDR3: str = "Daegu"
+    EMS_SENDER_TEL1: str = "82"
+    EMS_SENDER_TEL2: str = "10"
+    EMS_SENDER_TEL3: str = "2723"
+    EMS_SENDER_TEL4: str = "9490"
     
     @property
     def cors_origins_list(self) -> List[str]:

@@ -1736,6 +1736,144 @@ export async function deleteSavedRecipient(token: string, id: number) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 해외배송 (EMS / K-Packet)
+// ─────────────────────────────────────────────────────────────────
+
+export interface OverseasInvoiceItem {
+  name_en: string;
+  quantity: number;
+  unit_price_usd: number;
+  hs_code?: string;
+  origin_country?: string;
+}
+
+export interface OverseasShippingPayload {
+  shipping_method: 'EMS' | 'EMS_PREMIUM' | 'KPACKET';
+  countrycd: string;
+  receivename: string;
+  receivetelno: string;
+  receivemail: string;
+  receivezipcode: string;
+  receiveaddr1: string;
+  receiveaddr2: string;
+  receiveaddr3: string;
+  totweight: number;
+  boxlength: number;
+  boxwidth: number;
+  boxheight: number;
+  items: OverseasInvoiceItem[];
+  notes: string;
+  confirm?: boolean;
+  test_mode?: boolean;
+}
+
+export interface OverseasShippingItem {
+  id: number;
+  order_no: string;
+  shipping_method: string;
+  premiumcd: string;
+  countrycd: string;
+  recipient_name: string;
+  recipient_phone: string;
+  recipient_email: string;
+  recipient_zip: string;
+  recipient_addr1: string;
+  recipient_addr2: string;
+  recipient_addr3: string;
+  totweight: number;
+  boxlength: number;
+  boxwidth: number;
+  boxheight: number;
+  items: OverseasInvoiceItem[];
+  tracking_no: string;
+  req_no: string;
+  receive_seq: string;
+  ems_fee: string;
+  post_office: string;
+  status: string;
+  is_test: boolean;
+  notes: string;
+  created_by: string;
+  created_at: string;
+  canceled_at: string | null;
+  canceled_by: string | null;
+}
+
+export interface OverseasShippingPreview {
+  shipping_method: string;
+  shipping_method_name: string;
+  countrycd: string;
+  recipient_name: string;
+  recipient_phone: string;
+  recipient_email: string;
+  recipient_zip: string;
+  recipient_addr: string;
+  totweight: number;
+  boxlength: number;
+  boxwidth: number;
+  boxheight: number;
+  items: OverseasInvoiceItem[];
+  sender_name: string;
+  sender_addr: string;
+  expected_fee: number | null;
+  is_test: boolean;
+  notes: string;
+}
+
+function overseasQuery(token: string, extra = '') {
+  return `?token=${encodeURIComponent(token)}${extra}`;
+}
+
+export async function getOverseasShippingMeta(token: string) {
+  return fetchApi<{
+    live_ready: boolean;
+    methods: Array<{ code: string; name: string; desc: string; premiumcd: string; em_ee: string }>;
+    sender: { name: string; addr: string; zip: string };
+  }>(`/overseas-shipping/meta${overseasQuery(token)}`);
+}
+
+export async function listOverseasNations(token: string, premiumcd: string) {
+  return fetchApi<{
+    items: Array<{ nationcd: string; nationnm: string; nationfn: string; premiumcd?: string }>;
+    fallback: boolean;
+  }>(`/overseas-shipping/nations${overseasQuery(token, `&premiumcd=${encodeURIComponent(premiumcd)}`)}`);
+}
+
+export async function previewOverseasShipping(token: string, payload: OverseasShippingPayload) {
+  return fetchApi<{ ok: boolean; preview: OverseasShippingPreview }>(
+    `/overseas-shipping/preview${overseasQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function listOverseasShipments(token: string) {
+  return fetchApi<{ items: OverseasShippingItem[] }>(`/overseas-shipping${overseasQuery(token)}`);
+}
+
+export async function createOverseasShipping(token: string, payload: OverseasShippingPayload) {
+  return fetchApi<{
+    success: boolean;
+    id: number;
+    order_no: string;
+    tracking_no: string;
+    ems_fee: string;
+    is_test: boolean;
+    duplicate_guard?: boolean;
+    preview?: OverseasShippingPreview;
+  }>(`/overseas-shipping${overseasQuery(token)}`, {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, confirm: true }),
+  });
+}
+
+export async function cancelOverseasShipping(token: string, id: number) {
+  return fetchApi<{ success: boolean; already?: boolean; message?: string }>(
+    `/overseas-shipping/${id}/cancel${overseasQuery(token, '&confirm=true')}`,
+    { method: 'POST' }
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // 입고모드 (Inbound)
 // ─────────────────────────────────────────────────────────────────
 

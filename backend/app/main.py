@@ -30,6 +30,7 @@ from backend.app.api.receipt import router as receipt_router
 from backend.app.api.certificates import router as certificates_router
 from backend.app.api.billing_invoice import router as billing_invoice_router, ensure_tables as ensure_billing_tables
 from backend.app.api.kpost_pickup import router as kpost_pickup_router, ensure_pickup_tables
+from backend.app.api.overseas_shipping import router as overseas_shipping_router, ensure_overseas_tables
 from backend.app.api.inbound import router as inbound_router, ensure_inbound_tables
 from backend.app.config import settings
 
@@ -79,6 +80,7 @@ app.include_router(receipt_router)
 app.include_router(certificates_router)
 app.include_router(billing_invoice_router)
 app.include_router(kpost_pickup_router)
+app.include_router(overseas_shipping_router)
 app.include_router(inbound_router)
 
 
@@ -140,6 +142,7 @@ async def startup_event():
     ensure_defect_tables()
     ensure_billing_tables()
     ensure_pickup_tables()
+    ensure_overseas_tables()
     ensure_inbound_tables()
     # 스케줄러 시작 (평일 오전 10시 인사)
     from backend.app.services.scheduler import start_scheduler

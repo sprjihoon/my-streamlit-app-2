@@ -242,6 +242,15 @@ const NAV_GROUPS = [
     ],
   },
   {
+    key: 'overseas-shipping',
+    label: '해외배송',
+    icon: <Globe {...IC} />,
+    items: [
+      { href: '/overseas-shipping', label: '해외배송 접수', icon: <Globe {...IC} /> },
+      { href: '/overseas-shipping-list', label: '접수목록', icon: <Globe {...IC} /> },
+    ],
+  },
+  {
     key: 'invoice',
     label: '인보이스',
     icon: <BarChart2 {...IC} />,

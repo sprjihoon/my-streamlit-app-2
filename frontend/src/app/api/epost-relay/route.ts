@@ -7,6 +7,9 @@
  * 용도 2 — 공개 종적조회 (service.epost.go.kr):
  *   Railway 싱가포르 → service.epost.go.kr timeout 차단 우회
  *   ICN 리전(서울)에서 직접 호출하므로 국내 IP 제한 통과 가능
+ *
+ * 용도 3 — EMS/K-Packet (eship.epost.go.kr):
+ *   해외배송 견적·접수. Railway에서 직접 호출 불가
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,15 +23,23 @@ const RELAY_SECRET = (process.env.EPOST_RELAY_SECRET ?? '').trim();
 
 // 허용 대상 호스트
 const ALLOWED_API_HOST     = 'ship.epost.go.kr';
+const ALLOWED_EMS_HOST     = 'eship.epost.go.kr';
 const ALLOWED_TRACE_HOST   = 'service.epost.go.kr';
 
-function isAllowedUrl(url: string, method: string): boolean {
-  if (url.includes(ALLOWED_API_HOST)) {
-    return url.startsWith(`http://${ALLOWED_API_HOST}`) ||
-           url.startsWith(`https://${ALLOWED_API_HOST}`);
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
   }
-  if (url.includes(ALLOWED_TRACE_HOST)) {
-    // 종적조회는 GET 전용
+}
+
+function isAllowedUrl(url: string, method: string): boolean {
+  const host = hostOf(url);
+  if (host === ALLOWED_API_HOST || host === ALLOWED_EMS_HOST) {
+    return url.startsWith(`http://${host}`) || url.startsWith(`https://${host}`);
+  }
+  if (host === ALLOWED_TRACE_HOST) {
     if (method.toUpperCase() !== 'GET') return false;
     return url.startsWith(`http://${ALLOWED_TRACE_HOST}`) ||
            url.startsWith(`https://${ALLOWED_TRACE_HOST}`);
@@ -59,6 +70,7 @@ export async function POST(req: NextRequest) {
 
   // ── 요청 구성 ─────────────────────────────────────────────────────────
   const isTracing = url.includes(ALLOWED_TRACE_HOST);
+  const targetHost = hostOf(url) || ALLOWED_API_HOST;
   const fetchInit: RequestInit = {
     method: fetchMethod,
     headers: isTracing
@@ -68,9 +80,11 @@ export async function POST(req: NextRequest) {
           'Accept-Language': 'ko-KR,ko;q=0.9',
         }
       : {
-          'Content-Type': 'application/x-www-form-urlencoded',
           'User-Agent': 'Mozilla/5.0 (compatible; epost-relay/1.0)',
-          'Host': ALLOWED_API_HOST,
+          'Host': targetHost,
+          ...(fetchMethod === 'POST'
+            ? { 'Content-Type': 'application/x-www-form-urlencoded' }
+            : {}),
         },
     signal: AbortSignal.timeout(20_000),
     cache: 'no-store',
