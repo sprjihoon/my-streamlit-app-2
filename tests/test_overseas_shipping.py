@@ -352,6 +352,10 @@ def test_item_category_hs_completion(isolated_runtime):
     assert hits["items"][0]["name_en"]
     laptop = suggest_item_categories("laptop")
     assert any("Laptop" in c["name_en"] for c in laptop)
+    shirts = overseas_item_categories(token, q="T-shirts")
+    assert any(item["hs_code"].startswith("6109") for item in shirts["items"])
+    notebooks = overseas_item_categories(token, q="847130")
+    assert any(item["hs_code"] == "847130" for item in notebooks["items"])
 
 
 def test_overseas_http_api(isolated_runtime):

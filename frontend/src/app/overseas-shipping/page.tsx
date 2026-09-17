@@ -19,6 +19,7 @@ import {
   saveOverseasAddress,
   saveOverseasHs,
   saveOverseasSender,
+  searchOverseasItemCategories,
   type OverseasInvoiceItem,
   type OverseasSavedAddress,
   type OverseasSavedHs,
@@ -161,6 +162,8 @@ export default function OverseasShippingPage() {
   const [form, setForm] = useState<OverseasShippingPayload>(emptyForm());
   const [hsQuery, setHsQuery] = useState<Record<number, string>>({});
   const [hsOpen, setHsOpen] = useState<number | null>(null);
+  const [hsMatches, setHsMatches] = useState<Record<number, ItemCategory[]>>({});
+  const hsTimer = useRef<Record<number, number>>({});
   const [validating, setValidating] = useState(false);
   const [addressHint, setAddressHint] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<{
@@ -409,6 +412,38 @@ export default function OverseasShippingPage() {
     });
     setHsQuery((prev) => ({ ...prev, [index]: '' }));
     setHsOpen(null);
+  }
+
+  function searchHs(index: number, query: string) {
+    setHsQuery((prev) => ({ ...prev, [index]: query }));
+    setHsOpen(index);
+    const local = searchItemCategories(query, savedHs).slice(0, 12);
+    setHsMatches((prev) => ({ ...prev, [index]: local }));
+    if (!token) return;
+    window.clearTimeout(hsTimer.current[index]);
+    hsTimer.current[index] = window.setTimeout(async () => {
+      try {
+        const res = await searchOverseasItemCategories(token, query);
+        const remote: ItemCategory[] = (res.items || []).map((item) => ({
+          id: item.id,
+          name_ko: item.name_ko,
+          name_en: item.name_en,
+          hs_code: item.hs_code,
+          group: item.group,
+        }));
+        const seen = new Set<string>();
+        const merged: ItemCategory[] = [];
+        for (const cat of [...local.filter((c) => c.saved), ...remote, ...local]) {
+          const key = `${cat.hs_code}|${cat.name_en}|${cat.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(cat);
+        }
+        setHsMatches((prev) => ({ ...prev, [index]: merged.slice(0, 20) }));
+      } catch {
+        /* keep local */
+      }
+    }, 220);
   }
 
   async function handleSaveAddressNow() {
@@ -907,12 +942,12 @@ export default function OverseasShippingPage() {
 
       <Card title="세관 인보이스">
         <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
-          저장한 HS코드가 검색 맨 위에 나옵니다. 접수하면 품목 HS가 자동 저장됩니다.{' '}
+          한글·영문·HS 6자리로 검색하면 저장된 품목과 HS 목록이 나옵니다.{' '}
           <a href="/overseas-hs-codes">HS코드 목록</a>
         </p>
         {form.items.map((item, i) => {
           const q = hsQuery[i] ?? '';
-          const matches = searchItemCategories(q || item.name_en || item.hs_code || '', savedHs).slice(0, 8);
+          const matches = (hsMatches[i] || searchItemCategories(q || item.name_en || item.hs_code || '', savedHs)).slice(0, 12);
           return (
             <div
               key={i}
@@ -924,11 +959,10 @@ export default function OverseasShippingPage() {
                   style={inputStyle}
                   value={item.name_en}
                   placeholder="의류, Clothing, 610910"
-                  onFocus={() => setHsOpen(i)}
+                  onFocus={() => searchHs(i, q || item.name_en || item.hs_code || '')}
                   onChange={(e) => {
                     updateItem(i, { name_en: e.target.value });
-                    setHsQuery((prev) => ({ ...prev, [i]: e.target.value }));
-                    setHsOpen(i);
+                    searchHs(i, e.target.value);
                     const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.name_en.toLowerCase() === e.target.value.toLowerCase());
                     if (hit?.hs_code) updateItem(i, { name_en: e.target.value, hs_code: hit.hs_code, origin_country: hit.origin_country || item.origin_country });
                   }}
@@ -997,12 +1031,11 @@ export default function OverseasShippingPage() {
                   style={inputStyle}
                   value={item.hs_code || ''}
                   placeholder="6자리"
-                  onFocus={() => setHsOpen(i)}
+                  onFocus={() => searchHs(i, item.hs_code || q || item.name_en || '')}
                   onChange={(e) => {
                     const hs = e.target.value.replace(/\D/g, '');
                     updateItem(i, { hs_code: hs });
-                    setHsQuery((prev) => ({ ...prev, [i]: hs }));
-                    setHsOpen(i);
+                    searchHs(i, hs);
                     const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.hs_code === hs);
                     if (hit) updateItem(i, { hs_code: hs, name_en: item.name_en || hit.name_en });
                   }}

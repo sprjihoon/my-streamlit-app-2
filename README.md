@@ -242,7 +242,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 - Address Validation: 지원 국가에서 blur 시 추천 주소 다이얼로그
 - 주소록: 직원별 수취인 저장/기본주소/접수와 함께 저장 (`overseas_saved_addresses`), 화면 `/overseas-recipients`
 - 발송인: 이름·주소·전화 수정 후 목록 저장 (`overseas_saved_senders`), 화면 `/overseas-senders`
-- HS 재사용: 접수 품목은 자동 저장되고, 검색 시 저장 HS가 카탈로그보다 먼저 나온다 (`overseas_saved_hs_codes`), 화면 `/overseas-hs-codes`
+- HS 검색: 접수 화면에서 한글·영문·HS 6자리 검색. 저장 품목 + 창고 카탈로그 + WCO HS 6자리 목록(`hs6.json`, 약 5,600건)을 API로 합쳐 보여 준다. 고른 품목은 저장해 재사용 (`overseas_saved_hs_codes`)
 
 프론트 키 `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` 는 Vercel에만 넣고 git에 커밋하지 않는다. Google Cloud 키 제한에 `tillion.io.kr` 과 로컬 개발 origin을 허용해야 화면 검색이 된다.
 
@@ -252,7 +252,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 |---|---|---|
 | `GET` | `/overseas-shipping/meta` | 실접수 가능 여부, 발송인 기본값, 배송방법, HS 카탈로그 |
 | `GET` | `/overseas-shipping/nations` | 배송방법별 발송 국가 |
-| `GET` | `/overseas-shipping/item-categories` | HS/품목 검색 |
+| `GET` | `/overseas-shipping/item-categories` | HS/품목 검색 (저장 + 카탈로그 + HS 6자리 목록) |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-addresses` | 해외 수취인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-senders` | 발송인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-hs` | 저장 HS코드 목록 |

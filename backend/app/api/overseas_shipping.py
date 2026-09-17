@@ -34,7 +34,8 @@ from backend.app.services.ems.fields import (
     resolve_sender,
     validate_apply_input,
 )
-from backend.app.services.ems.item_categories import ITEM_CATEGORIES, suggest_item_categories
+from backend.app.services.ems.hs_catalog import search_hs_catalog
+from backend.app.services.ems.item_categories import ITEM_CATEGORIES
 from logic.db import get_connection
 
 router = APIRouter(prefix="/overseas-shipping", tags=["overseas-shipping"])
@@ -730,7 +731,7 @@ def overseas_nations(token: str, premiumcd: str = "31"):
 def overseas_item_categories(token: str, q: str = ""):
     _get_user(token)
     saved = _match_saved_hs(q, _list_saved_hs_rows())
-    catalog = suggest_item_categories(q) if (q or "").strip() else ITEM_CATEGORIES
+    catalog = search_hs_catalog(q, limit=30)
     seen = {(c.get("hs_code") or "", (c.get("name_en") or "").lower()) for c in saved}
     merged = list(saved)
     for cat in catalog:
@@ -739,7 +740,7 @@ def overseas_item_categories(token: str, q: str = ""):
             continue
         merged.append(cat)
         seen.add(key)
-    return {"items": merged}
+    return {"items": merged[:40], "source": "saved+catalog+hs6"}
 
 
 @router.get("/saved-addresses")
