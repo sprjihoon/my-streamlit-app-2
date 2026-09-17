@@ -86,6 +86,9 @@ export default function OverseasShippingListPage() {
       <Card title={`해외배송 목록 · 전체 ${items.length}건`}>
         <div style={{ marginBottom: '1rem' }}>
           <a href="/overseas-shipping" className="btn btn-primary">새 접수</a>
+          <a href="/overseas-senders" className="btn btn-secondary" style={{ marginLeft: '0.5rem' }}>발송인</a>
+          <a href="/overseas-recipients" className="btn btn-secondary" style={{ marginLeft: '0.5rem' }}>수취인</a>
+          <a href="/overseas-hs-codes" className="btn btn-secondary" style={{ marginLeft: '0.5rem' }}>HS코드</a>
         </div>
         {items.length === 0 ? (
           <p className="text-muted">접수 내역이 없습니다.</p>

@@ -217,6 +217,63 @@ def validate_recipient_name(name: str) -> str:
     return cleaned
 
 
+def split_sender_tel(phone: str, fallback: dict[str, str]) -> dict[str, str]:
+    digits = re.sub(r"\D", "", phone or "")
+    if not digits:
+        return {key: fallback.get(key, "") for key in ("tel1", "tel2", "tel3", "tel4")}
+    if digits.startswith("82") and len(digits) >= 10:
+        rest = digits[2:]
+    elif digits.startswith("0") and len(digits) >= 9:
+        rest = digits[1:]
+    else:
+        rest = digits
+    tel2 = rest[:2] or fallback.get("tel2", "10")
+    remain = rest[2:]
+    tel3 = remain[:4] or fallback.get("tel3", "")
+    tel4 = remain[4:] or fallback.get("tel4", "")
+    return {"tel1": "82", "tel2": tel2, "tel3": tel3, "tel4": tel4}
+
+
+def format_sender_tel(sender: dict[str, str]) -> str:
+    tel2 = (sender.get("tel2") or "").strip()
+    tel3 = (sender.get("tel3") or "").strip()
+    tel4 = (sender.get("tel4") or "").strip()
+    if tel2 and tel3:
+        return f"+82{tel2}{tel3}{tel4}"
+    return ""
+
+
+def apply_sender_override(sender: dict[str, str], patch: dict[str, Any] | str | None = None) -> dict[str, str]:
+    if isinstance(patch, str) or patch is None:
+        patch = {"sender_name": patch or ""}
+    result = dict(sender)
+    name = str(patch.get("sender_name") or patch.get("name") or "").strip()
+    if name:
+        if "@" in name:
+            raise ValueError("발송인 이름은 이메일이 아닌 실제 이름이어야 합니다.")
+        if len(name) > 50:
+            raise ValueError("발송인 이름은 50자 이하여야 합니다.")
+        result["name"] = name
+    zipcode = re.sub(r"\D", "", str(patch.get("sender_zipcode") or patch.get("zipcode") or ""))[:6]
+    if zipcode:
+        result["zipcode"] = zipcode
+    for src, key in (
+        ("sender_addr1", "addr1"),
+        ("sender_addr2", "addr2"),
+        ("sender_addr3", "addr3"),
+        ("addr1", "addr1"),
+        ("addr2", "addr2"),
+        ("addr3", "addr3"),
+    ):
+        value = str(patch.get(src) or "").strip()
+        if value:
+            result[key] = value
+    tel = str(patch.get("sender_tel") or patch.get("phone") or "").strip()
+    if tel:
+        result.update(split_sender_tel(tel, result))
+    return result
+
+
 def validate_countrycd(code: str) -> str:
     cleaned = re.sub(r"[^A-Za-z]", "", code or "").upper()
     if len(cleaned) != 2:
@@ -250,7 +307,7 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("수취인 주/도 또는 시/군 주소를 입력해주세요.")
 
     invoice = serialize_invoice_items(list(data.get("items") or []), totweight)
-    sender = resolve_sender()
+    sender = apply_sender_override(resolve_sender(), data)
     return {
         "method": method,
         "countrycd": countrycd,

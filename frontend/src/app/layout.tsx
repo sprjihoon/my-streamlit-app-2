@@ -248,6 +248,9 @@ const NAV_GROUPS = [
     items: [
       { href: '/overseas-shipping', label: '해외배송 접수', icon: <Globe {...IC} /> },
       { href: '/overseas-shipping-list', label: '접수목록', icon: <Globe {...IC} /> },
+      { href: '/overseas-senders', label: '발송인 목록', icon: <Globe {...IC} /> },
+      { href: '/overseas-recipients', label: '수취인 목록', icon: <Globe {...IC} /> },
+      { href: '/overseas-hs-codes', label: 'HS코드 목록', icon: <Globe {...IC} /> },
     ],
   },
   {

@@ -34,6 +34,7 @@ npm run start   # ❌ 로컬 서버 실행은 개발용으로만
 | 호출 대상 | 도메인 | 상태 |
 |-----------|--------|------|
 | 우체국 계약소포 API | `ship.epost.go.kr` | ❌ Railway(싱가포르)에서 직접 호출 차단 |
+| 우체국 EMS / K-Packet | `eship.epost.go.kr` | ❌ Railway에서 직접 호출 차단 → ICN 릴레이 사용 |
 | 우체국 공개 종적조회 | `service.epost.go.kr` | ❌ Railway에서 timeout (IP 차단 추정) |
 | 우체국 신형 추적 | `ntrack.epost.go.kr` | ❓ 미확인 (동일 차단 가능성 높음) |
 
@@ -45,9 +46,10 @@ npm run start   # ❌ 로컬 서버 실행은 개발용으로만
 - `backend/app/services/epost/client.py` `call_epost()` 함수가 이 경로를 사용
 - 관련 env var: `EPOST_RELAY_URL`, `EPOST_RELAY_SECRET`
 
-#### 2. Vercel Seoul(ICN) API Route — ✅ 구현됨, 계약 API용
+#### 2. Vercel Seoul(ICN) API Route — ✅ 구현됨
 - `frontend/src/app/api/epost-relay/route.ts` — `preferredRegion = 'icn1'`
-- 현재는 `ship.epost.go.kr` 전용. 공개 종적조회(`service.epost.go.kr`) 릴레이는 미구현
+- 허용 호스트: `ship.epost.go.kr`(계약소포), `eship.epost.go.kr`(해외배송 EMS), `service.epost.go.kr`(종적조회 GET)
+- 해외배송 경로: Railway → `EPOST_RELAY_URL` → `/api/epost-relay` → `eship.epost.go.kr`
 - 관련 env var: `EPOST_RELAY_SECRET` (Railway·Vercel 양쪽 동일 값 설정 필요)
 
 #### 3. 공개 종적조회 (`service.epost.go.kr`) — ✅ 해결됨 (2026-09-10)
@@ -87,6 +89,207 @@ Body: {"tracking_nos": ["78901..."], "treat_status": "05"}
 
 ---
 
+## 📦 회수접수(kpost-pickup) 배송추적 API
+
+### 추적 흐름
+
+```
+접수 후 상태 갱신 요청
+        ↓
+_sync_pickup_like_infront()   [backend/app/api/kpost_pickup.py]
+  ├─ [1] GetResInfo (계약 API, ship.epost.go.kr)
+  │        order_no + req_ymd → 신청접수~수거완료 단계 갱신
+  │
+  └─ [2] track_regi_no (공개 종적조회)
+           → 수거완료(01) 이후 이동중·배달중·배달완료 단계 추적
+           ├─ 1순위: tracker.delivery GraphQL   (자격증명 있을 때)
+           ├─ 2순위: Vercel ICN 릴레이           (VERCEL_APP_URL 설정 시)
+           └─ 3순위: service.epost.go.kr 직접   (Railway 차단 fallback)
+```
+
+> **상태는 앞으로만 진행** — `_apply_tracking_info()`에서 `TREAT_STATUS_ORDER` 기준으로
+> 이미 더 진행된 상태를 이전 상태로 되돌리지 않음.
+
+---
+
+### 추적 방법 3가지
+
+#### 1순위 — tracker.delivery GraphQL
+- 함수: `_track_via_tracker_delivery()` (`backend/app/services/epost/client.py`)
+- 필요 env: `TRACKER_DELIVERY_CLIENT_ID`, `TRACKER_DELIVERY_CLIENT_SECRET`
+- 대상 URL: `https://apis.tracker.delivery/graphql` (`carrierId: "kr.epost"`)
+- 상태 코드 매핑:
+
+| tracker.delivery 코드 | → Korean text |
+|---|---|
+| `PICKUP_PENDING` / `PICKING_UP` | 수거준비 |
+| `AT_PICKUP` | 수거완료 |
+| `IN_TRANSIT` | 이동중 |
+| `OUT_FOR_DELIVERY` | 배달중 |
+| `DELIVERED` | 배달완료 |
+| `ATTEMPT_FAILED` | 배달중 |
+
+#### 2순위 — Vercel Seoul(ICN) 릴레이
+- 함수: `_track_via_vercel_relay()` (`backend/app/services/epost/client.py`)
+- 필요 env: `VERCEL_APP_URL`, `EPOST_RELAY_SECRET`
+- 경로: Railway → `{VERCEL_APP_URL}/api/epost-relay` (ICN 리전, `preferredRegion='icn1'`) → `service.epost.go.kr`
+- 릴레이 route: `frontend/src/app/api/epost-relay/route.ts`
+  - `service.epost.go.kr` GET만 허용, 응답을 `arrayBuffer()` 바이너리 그대로 전달
+  - Python 측에서 EUC-KR 디코딩 후 `treat_status_from_tracking_text()` 호출
+
+#### 3순위 — service.epost.go.kr 직접 (fallback)
+- 함수: `_track_via_epost_trace()` (`backend/app/services/epost/client.py`)
+- 환경변수 불필요 (네트워크 직접 연결)
+- Railway 싱가포르에서 timeout 차단 가능성 높음 → fallback 용도
+- EUC-KR / UTF-8 자동 감지 디코딩
+
+---
+
+### 계약 API 상태조회 — GetResInfo
+
+```python
+# backend/app/services/epost/client.py
+get_res_info(order_no, req_ymd, req_type="2")
+# → call_epost("api.GetResInfo.jparcel", ...)
+# → ship.epost.go.kr (EPOST_RELAY_URL 중계 경유)
+```
+
+- `req_ymd` 후보: `res_date` → `created_at` → `pickup_date` 순서로 시도 (`lookup_req_ymds()`)
+- `get_res_info_with_dates(order_no, ymds)`: 날짜 목록을 순차 시도해 유효 응답 반환
+
+---
+
+### 처리상태(treatStatus) 전체 10단계
+
+| 코드 | Korean text | 순서 | 칩 색상 |
+|---|---|---|---|
+| `00` | 신청접수 | 0 | 회색 |
+| `04` | 운송장출력 | 1 | 노랑 |
+| `08` | 접수확인 | 2 | 연노랑 |
+| `05` | 수거준비 | 3 | 주황 |
+| `09` | 배차신청 | 4 | 진주황 |
+| `01` | 수거완료 | 5 | 초록 |
+| `02` | 이동중 | 6 | 파랑 |
+| `06` | 배달준비 | 7 | 보라 |
+| `07` | 배달중 | 8 | 핑크 |
+| `03` | 배달완료 | 9 | 민트 |
+| — | 취소 | — | 빨강 |
+
+- **최종 상태** (`FINAL_TREAT_STATUSES`): `배달완료`, `신청취소` → 이후 조회 중단
+- DB에는 숫자 코드가 아닌 **Korean text**로 저장 (`treat_status` 컬럼)
+
+---
+
+### 배송추적 관련 API 엔드포인트
+
+| 메서드 | 경로 | 동작 | 권한 |
+|---|---|---|---|
+| `POST` | `/kpost-pickup/refresh-status` | 미완료 접수 전체 상태 일괄 갱신 (최대 200건, 8 스레드 병렬) | 로그인 |
+| `GET` | `/kpost-pickup/{id}?refresh=true` | 특정 1건 상태 즉시 갱신 | 로그인 |
+| `GET` | `/kpost-pickup/debug-track/{regi_no}` | 4가지 추적 경로 모두 테스트 결과 반환 | 관리자 |
+| `PATCH` | `/kpost-pickup/{id}/treat-status` | 특정 건 처리상태 수동 강제 변경 | 관리자 |
+| `POST` | `/kpost-pickup/maintenance/reset-status` | 송장 목록 상태 직접 수정 (EPOST_RELAY_SECRET 인증) | 유지보수 |
+| `GET` | `/kpost-pickup/maintenance/inspect` | DB 레코드 + insert_snapshot 조회 | 유지보수 |
+
+---
+
+### 관련 환경변수 (Railway)
+
+| 환경변수 | 용도 | 필수 |
+|---|---|---|
+| `EPOST_API_KEY` | 우체국 계약소포 API 키 | ✅ |
+| `EPOST_SECURITY_KEY` | SEED-128 암호화 보안키 | ✅ |
+| `EPOST_CUSTOMER_ID` | 우체국 고객번호 | ✅ |
+| `EPOST_APPROVAL_NO` | 우체국 승인번호 | ✅ |
+| `EPOST_RELAY_URL` | 계약 API 중계 서버 URL (tillion.io.kr) | ✅ |
+| `EPOST_RELAY_SECRET` | 중계 인증 시크릿 (Vercel·Railway 동일 값) | ✅ |
+| `VERCEL_APP_URL` | 공개 종적조회 Vercel 릴레이 URL | ✅ |
+| `TRACKER_DELIVERY_CLIENT_ID` | tracker.delivery GraphQL 클라이언트 ID | 선택 |
+| `TRACKER_DELIVERY_CLIENT_SECRET` | tracker.delivery GraphQL 시크릿 | 선택 |
+
+---
+
+## 해외배송 접수 (EMS / EMS 프리미엄 / K-Packet)
+
+창고 직원이 tillion에서 **결제 없이** 우체국 해외발송을 바로 접수한다. 고객 앱(Infront)의 결제·보관료 게이트는 없다.
+
+화면: `/overseas-shipping` (접수), `/overseas-shipping-list` (목록·취소), `/overseas-senders`, `/overseas-recipients`, `/overseas-hs-codes`
+
+### 접수 흐름
+
+```
+로그인
+  → GET /overseas-shipping/meta          발송인 기본값, 배송방법, HS 카탈로그
+  → GET /overseas-shipping/nations       EMS 발송 가능 국가
+  → GET /overseas-shipping/saved-addresses  기본 주소 자동입력
+  → 발송인 이름 수정 (기본: 스프링풀필먼트)
+  → 구글 Places 자동완성 + Address Validation 추천
+  → 품목 한글/영문/HS 검색으로 인보이스·HS코드 완성
+  → POST /overseas-shipping/preview      확인 전 DB·우체국 미기록
+  → 확인 후 POST /overseas-shipping      eship.epost.go.kr 즉시 접수
+  → 목록에서 확인 후 취소
+```
+
+- 확인(`confirm=true`) 전에는 접수·취소를 쓰지 않는다.
+- 같은 직원 + 같은 전화번호 + 같은 국가 + 당일 접수는 중복 가드.
+- EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
+- 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다.
+- 요금은 우체국 후납. 미리보기 예상요금은 참고용.
+
+### 구글 주소 · 주소록 · HS코드
+
+- Places Autocomplete: 상세주소 입력 시 국가 제한 검색, 주/시/우편번호 자동 채움
+- Address Validation: 지원 국가에서 blur 시 추천 주소 다이얼로그
+- 주소록: 직원별 수취인 저장/기본주소/접수와 함께 저장 (`overseas_saved_addresses`), 화면 `/overseas-recipients`
+- 발송인: 이름·주소·전화 수정 후 목록 저장 (`overseas_saved_senders`), 화면 `/overseas-senders`
+- HS 재사용: 접수 품목은 자동 저장되고, 검색 시 저장 HS가 카탈로그보다 먼저 나온다 (`overseas_saved_hs_codes`), 화면 `/overseas-hs-codes`
+
+프론트 키 `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` 는 Vercel에만 넣고 git에 커밋하지 않는다. Google Cloud 키 제한에 `tillion.io.kr` 과 로컬 개발 origin을 허용해야 화면 검색이 된다.
+
+### API
+
+| 메서드 | 경로 | 동작 |
+|---|---|---|
+| `GET` | `/overseas-shipping/meta` | 실접수 가능 여부, 발송인 기본값, 배송방법, HS 카탈로그 |
+| `GET` | `/overseas-shipping/nations` | 배송방법별 발송 국가 |
+| `GET` | `/overseas-shipping/item-categories` | HS/품목 검색 |
+| `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-addresses` | 해외 수취인 목록 |
+| `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-senders` | 발송인 목록 |
+| `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-hs` | 저장 HS코드 목록 |
+| `POST` | `/overseas-shipping/preview` | 확인용 미리보기 (미기록) |
+| `GET` | `/overseas-shipping` | 접수 목록 |
+| `POST` | `/overseas-shipping` | 확인 후 접수 |
+| `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |
+
+### 환경변수
+
+Railway (git에 넣지 않음):
+
+| 환경변수 | 용도 |
+|---|---|
+| `EMS_API_KEY` | EMS OpenAPI 인증키 |
+| `EMS_SECURITY_KEY` | EMS 보안키 (SEED128) |
+| `EMS_CUSTOMER_NO` | 고객번호 |
+| `EMS_APPROVAL_NO` | 승인번호 |
+| `EMS_SENDER_NAME` | 기본 발송인. 화면에서 건별로 수정 가능 |
+| `EPOST_RELAY_URL` / `EPOST_RELAY_SECRET` | Seoul ICN 중계 (`eship.epost.go.kr`) |
+
+Vercel:
+
+| 환경변수 | 용도 |
+|---|---|
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Places + Address Validation (브라우저 공개키) |
+
+### 테스트
+
+```bash
+python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow.py tests/test_google_places.py -v
+```
+
+화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 수정, 주소록, HS 완성, 구글 주소 파싱·Address Validation을 검증한다.
+
+---
+
 ## 개발 환경
 
 | 항목 | 값 |
@@ -109,6 +312,14 @@ cd frontend && npm run dev
 ---
 
 ## 변경 이력
+
+### 2026-09-17
+- **feat(overseas-shipping): 창고 직원 EMS/K-Packet 즉시 접수**
+  - 결제 없이 미리보기 확인 후 `eship.epost.go.kr` 로 바로 접수 (Vercel ICN 릴레이)
+  - 발송인 이름 건별 수정, 해외 주소록 저장/기본주소, 품목·HS코드 검색 완성
+  - 구글 Places 자동완성 + Address Validation 추천 주소
+  - 확인 전 미기록, 당일 중복 가드, 테스트 접수(`EG`/`FX`/`LK`)
+  - 검증: `tests/test_overseas_shipping.py`, `tests/test_overseas_intake_flow.py`, `tests/test_google_places.py`
 
 ### 2026-09-11 (5차)
 - **fix(inbound): inbox 사진 연결 오류 + 아코디언 기본 열림**

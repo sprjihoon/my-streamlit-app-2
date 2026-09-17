@@ -1750,6 +1750,12 @@ export interface OverseasInvoiceItem {
 export interface OverseasShippingPayload {
   shipping_method: 'EMS' | 'EMS_PREMIUM' | 'KPACKET';
   countrycd: string;
+  sender_name?: string;
+  sender_zipcode?: string;
+  sender_addr1?: string;
+  sender_addr2?: string;
+  sender_addr3?: string;
+  sender_tel?: string;
   receivename: string;
   receivetelno: string;
   receivemail: string;
@@ -1765,6 +1771,12 @@ export interface OverseasShippingPayload {
   notes: string;
   confirm?: boolean;
   test_mode?: boolean;
+  save_address?: boolean;
+  save_address_label?: string;
+  save_address_default?: boolean;
+  save_sender?: boolean;
+  save_sender_label?: string;
+  save_sender_default?: boolean;
 }
 
 export interface OverseasShippingItem {
@@ -1773,6 +1785,7 @@ export interface OverseasShippingItem {
   shipping_method: string;
   premiumcd: string;
   countrycd: string;
+  sender_name?: string;
   recipient_name: string;
   recipient_phone: string;
   recipient_email: string;
@@ -1828,7 +1841,9 @@ export async function getOverseasShippingMeta(token: string) {
   return fetchApi<{
     live_ready: boolean;
     methods: Array<{ code: string; name: string; desc: string; premiumcd: string; em_ee: string }>;
-    sender: { name: string; addr: string; zip: string };
+    sender: { name: string; addr: string; zip: string; addr1?: string; addr2?: string; addr3?: string; tel?: string };
+    item_categories?: Array<{ id: string; name_ko: string; name_en: string; hs_code: string; group: string }>;
+    saved_hs?: OverseasSavedHs[];
   }>(`/overseas-shipping/meta${overseasQuery(token)}`);
 }
 
@@ -1870,6 +1885,165 @@ export async function cancelOverseasShipping(token: string, id: number) {
   return fetchApi<{ success: boolean; already?: boolean; message?: string }>(
     `/overseas-shipping/${id}/cancel${overseasQuery(token, '&confirm=true')}`,
     { method: 'POST' }
+  );
+}
+
+export interface OverseasSavedAddress {
+  id: number;
+  label: string;
+  recipient_name: string;
+  recipient_phone: string;
+  recipient_email: string;
+  countrycd: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  addr3: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface OverseasSavedAddressPayload {
+  label: string;
+  recipient_name: string;
+  recipient_phone?: string;
+  recipient_email?: string;
+  countrycd: string;
+  zipcode?: string;
+  addr1?: string;
+  addr2?: string;
+  addr3: string;
+  is_default?: boolean;
+}
+
+export async function listOverseasSavedAddresses(token: string) {
+  return fetchApi<{ items: OverseasSavedAddress[] }>(
+    `/overseas-shipping/saved-addresses${overseasQuery(token)}`
+  );
+}
+
+export async function saveOverseasAddress(token: string, payload: OverseasSavedAddressPayload) {
+  return fetchApi<OverseasSavedAddress & { success: boolean }>(
+    `/overseas-shipping/saved-addresses${overseasQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function deleteOverseasSavedAddress(token: string, id: number) {
+  return fetchApi<{ success: boolean; id: number }>(
+    `/overseas-shipping/saved-addresses/${id}${overseasQuery(token)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function updateOverseasSavedAddress(token: string, id: number, payload: OverseasSavedAddressPayload) {
+  return fetchApi<{ success: boolean; id: number; label: string }>(
+    `/overseas-shipping/saved-addresses/${id}${overseasQuery(token)}`,
+    { method: 'PUT', body: JSON.stringify(payload) }
+  );
+}
+
+export interface OverseasSavedSender {
+  id: number;
+  label: string;
+  name: string;
+  phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  addr3: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface OverseasSavedSenderPayload {
+  label: string;
+  name: string;
+  phone?: string;
+  zipcode?: string;
+  addr1?: string;
+  addr2?: string;
+  addr3?: string;
+  is_default?: boolean;
+}
+
+export async function listOverseasSavedSenders(token: string) {
+  return fetchApi<{ items: OverseasSavedSender[] }>(
+    `/overseas-shipping/saved-senders${overseasQuery(token)}`
+  );
+}
+
+export async function saveOverseasSender(token: string, payload: OverseasSavedSenderPayload) {
+  return fetchApi<OverseasSavedSender & { success: boolean }>(
+    `/overseas-shipping/saved-senders${overseasQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function updateOverseasSavedSender(token: string, id: number, payload: OverseasSavedSenderPayload) {
+  return fetchApi<{ success: boolean; id: number; label: string }>(
+    `/overseas-shipping/saved-senders/${id}${overseasQuery(token)}`,
+    { method: 'PUT', body: JSON.stringify(payload) }
+  );
+}
+
+export async function deleteOverseasSavedSender(token: string, id: number) {
+  return fetchApi<{ success: boolean; id: number }>(
+    `/overseas-shipping/saved-senders/${id}${overseasQuery(token)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export interface OverseasSavedHs {
+  id: number;
+  label: string;
+  name_ko: string;
+  name_en: string;
+  hs_code: string;
+  origin_country: string;
+  group_name: string;
+  created_at: string;
+}
+
+export interface OverseasSavedHsPayload {
+  label?: string;
+  name_ko?: string;
+  name_en: string;
+  hs_code: string;
+  origin_country?: string;
+  group_name?: string;
+}
+
+export async function listOverseasSavedHs(token: string, q = '') {
+  return fetchApi<{ items: OverseasSavedHs[] }>(
+    `/overseas-shipping/saved-hs${overseasQuery(token, q ? `&q=${encodeURIComponent(q)}` : '')}`
+  );
+}
+
+export async function saveOverseasHs(token: string, payload: OverseasSavedHsPayload) {
+  return fetchApi<OverseasSavedHs & { success: boolean; updated?: boolean }>(
+    `/overseas-shipping/saved-hs${overseasQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function updateOverseasSavedHs(token: string, id: number, payload: OverseasSavedHsPayload) {
+  return fetchApi<{ success: boolean; id: number; label: string }>(
+    `/overseas-shipping/saved-hs/${id}${overseasQuery(token)}`,
+    { method: 'PUT', body: JSON.stringify(payload) }
+  );
+}
+
+export async function deleteOverseasSavedHs(token: string, id: number) {
+  return fetchApi<{ success: boolean; id: number }>(
+    `/overseas-shipping/saved-hs/${id}${overseasQuery(token)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function searchOverseasItemCategories(token: string, q = '') {
+  return fetchApi<{ items: Array<{ id: string; name_ko: string; name_en: string; hs_code: string; group: string }> }>(
+    `/overseas-shipping/item-categories${overseasQuery(token, q ? `&q=${encodeURIComponent(q)}` : '')}`
   );
 }
 

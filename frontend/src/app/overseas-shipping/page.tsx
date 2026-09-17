@@ -1,18 +1,38 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
+import AddressSuggestionDialog from '@/components/AddressSuggestionDialog';
 import {
   createOverseasShipping,
+  deleteOverseasSavedAddress,
+  deleteOverseasSavedSender,
   getOverseasShippingMeta,
   listOverseasNations,
+  listOverseasSavedAddresses,
+  listOverseasSavedHs,
+  listOverseasSavedSenders,
   previewOverseasShipping,
+  saveOverseasAddress,
+  saveOverseasHs,
+  saveOverseasSender,
   type OverseasInvoiceItem,
+  type OverseasSavedAddress,
+  type OverseasSavedHs,
+  type OverseasSavedSender,
   type OverseasShippingPayload,
 } from '@/lib/api';
+import { ITEM_CATEGORIES, searchItemCategories, type ItemCategory } from '@/lib/item-categories';
+import {
+  googleMapsApiKey,
+  loadGoogleMapsScript,
+  parsePlaceResult,
+  supportsAddressValidation,
+  validateAddressWithGoogle,
+} from '@/lib/google-places';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -38,13 +58,19 @@ function parseApiError(err: unknown): string {
 }
 
 function newItem(): OverseasInvoiceItem {
-  return { name_en: 'Clothing', quantity: 1, unit_price_usd: 20, hs_code: '', origin_country: 'KR' };
+  return { name_en: '', quantity: 1, unit_price_usd: 20, hs_code: '', origin_country: 'KR' };
 }
 
-function emptyForm(): OverseasShippingPayload {
+function emptyForm(senderName = '스프링풀필먼트'): OverseasShippingPayload {
   return {
     shipping_method: 'EMS',
     countrycd: 'JP',
+    sender_name: senderName,
+    sender_zipcode: '',
+    sender_addr1: '',
+    sender_addr2: '',
+    sender_addr3: '',
+    sender_tel: '',
     receivename: '',
     receivetelno: '',
     receivemail: '',
@@ -59,6 +85,12 @@ function emptyForm(): OverseasShippingPayload {
     items: [newItem()],
     notes: '',
     test_mode: false,
+    save_address: false,
+    save_address_label: '',
+    save_address_default: false,
+    save_sender: false,
+    save_sender_label: '',
+    save_sender_default: false,
   };
 }
 
@@ -68,6 +100,8 @@ const METHOD_PREMIUM: Record<OverseasShippingPayload['shipping_method'], string>
   KPACKET: '14',
 };
 
+const GMAPS_KEY = googleMapsApiKey();
+
 export default function OverseasShippingPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -75,10 +109,54 @@ export default function OverseasShippingPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [liveReady, setLiveReady] = useState(false);
-  const [senderLabel, setSenderLabel] = useState('스프링풀필먼트');
+  const [defaultSender, setDefaultSender] = useState('스프링풀필먼트');
+  const [senderAddr, setSenderAddr] = useState('');
   const [methods, setMethods] = useState<Array<{ code: string; name: string; desc: string }>>([]);
   const [nations, setNations] = useState<Array<{ nationcd: string; nationnm: string; nationfn: string }>>([]);
+  const [savedAddresses, setSavedAddresses] = useState<OverseasSavedAddress[]>([]);
+  const [selectedSavedId, setSelectedSavedId] = useState('');
+  const [savedSenders, setSavedSenders] = useState<OverseasSavedSender[]>([]);
+  const [selectedSenderId, setSelectedSenderId] = useState('');
+  const [savedHs, setSavedHs] = useState<ItemCategory[]>([]);
   const [form, setForm] = useState<OverseasShippingPayload>(emptyForm());
+  const [hsQuery, setHsQuery] = useState<Record<number, string>>({});
+  const [hsOpen, setHsOpen] = useState<number | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [suggestion, setSuggestion] = useState<{
+    original: { addr3: string; addr2: string; addr1: string; zip: string };
+    suggested: { addr3: string; addr2: string; addr1: string; zip: string; formattedAddress?: string };
+  } | null>(null);
+
+  const addr3Ref = useRef<HTMLInputElement>(null);
+  const autocompleteRef = useRef<{ setComponentRestrictions: (opts: { country: string }) => void } | null>(null);
+  const countryRef = useRef(form.countrycd);
+  countryRef.current = form.countrycd;
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  async function reloadSaved(auth: string) {
+    const [addrRes, senderRes, hsRes] = await Promise.all([
+      listOverseasSavedAddresses(auth),
+      listOverseasSavedSenders(auth),
+      listOverseasSavedHs(auth),
+    ]);
+    setSavedAddresses(addrRes.items || []);
+    setSavedSenders(senderRes.items || []);
+    setSavedHs(
+      (hsRes.items || []).map((h: OverseasSavedHs) => ({
+        id: `saved-${h.id}`,
+        name_ko: h.name_ko || h.label,
+        name_en: h.name_en,
+        hs_code: h.hs_code,
+        group: h.group_name || '저장품목',
+        origin_country: h.origin_country,
+        saved: true,
+        saved_id: h.id,
+        label: h.label,
+      })),
+    );
+    return { addresses: addrRes.items || [], senders: senderRes.items || [] };
+  }
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
@@ -93,9 +171,26 @@ export default function OverseasShippingPage() {
         const meta = await getOverseasShippingMeta(stored);
         setLiveReady(meta.live_ready);
         setMethods(meta.methods || []);
-        setSenderLabel(`${meta.sender.name} · ${meta.sender.addr}`);
-        const nationRes = await listOverseasNations(stored, '31');
+        setDefaultSender(meta.sender.name);
+        setSenderAddr(meta.sender.addr);
+        setForm((prev) => ({
+          ...prev,
+          sender_name: prev.sender_name || meta.sender.name,
+          sender_zipcode: prev.sender_zipcode || meta.sender.zip || '',
+          sender_addr1: prev.sender_addr1 || meta.sender.addr1 || '',
+          sender_addr2: prev.sender_addr2 || meta.sender.addr2 || '',
+          sender_addr3: prev.sender_addr3 || meta.sender.addr3 || '',
+          sender_tel: prev.sender_tel || meta.sender.tel || '',
+        }));
+        const [nationRes, lists] = await Promise.all([
+          listOverseasNations(stored, '31'),
+          reloadSaved(stored),
+        ]);
         setNations(nationRes.items || []);
+        const defSender = lists.senders.find((a) => a.is_default);
+        if (defSender) applySender(defSender);
+        const def = lists.addresses.find((a) => a.is_default);
+        if (def) applySaved(def);
       } catch (err) {
         setError(parseApiError(err));
       } finally {
@@ -103,6 +198,104 @@ export default function OverseasShippingPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!GMAPS_KEY || !addr3Ref.current) return;
+    let cancelled = false;
+    loadGoogleMapsScript(GMAPS_KEY)
+      .then(() => {
+        if (cancelled || !addr3Ref.current || !window.google?.maps?.places) return;
+        if (autocompleteRef.current) {
+          autocompleteRef.current.setComponentRestrictions({ country: countryRef.current.toLowerCase() });
+          return;
+        }
+        const ac = new window.google.maps.places.Autocomplete(addr3Ref.current, {
+          types: ['address'],
+          componentRestrictions: { country: countryRef.current.toLowerCase() },
+          fields: ['address_components', 'formatted_address'],
+        });
+        autocompleteRef.current = ac;
+        ac.addListener('place_changed', () => {
+          const place = ac.getPlace();
+          if (!place.address_components) return;
+          const parsed = parsePlaceResult(place, countryRef.current);
+          setForm((prev) => ({
+            ...prev,
+            receiveaddr3: parsed.addr3 || prev.receiveaddr3,
+            receiveaddr2: parsed.addr2 || prev.receiveaddr2,
+            receiveaddr1: parsed.addr1 || prev.receiveaddr1,
+            receivezipcode: parsed.zip || prev.receivezipcode,
+          }));
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [form.countrycd, loading]);
+
+  const triggerAddressValidation = useCallback(async () => {
+    if (!GMAPS_KEY) return;
+    const current = formRef.current;
+    if (!current.receiveaddr3.trim() || !supportsAddressValidation(current.countrycd)) return;
+    setValidating(true);
+    try {
+      const result = await validateAddressWithGoogle(GMAPS_KEY, {
+        addr3: current.receiveaddr3,
+        addr2: current.receiveaddr2,
+        addr1: current.receiveaddr1,
+        zip: current.receivezipcode,
+        countryCode: current.countrycd,
+      });
+      if (result && !result.isSame) {
+        setSuggestion({
+          original: {
+            addr3: current.receiveaddr3,
+            addr2: current.receiveaddr2,
+            addr1: current.receiveaddr1,
+            zip: current.receivezipcode,
+          },
+          suggested: {
+            addr3: result.suggestedAddr3,
+            addr2: result.suggestedAddr2,
+            addr1: result.suggestedAddr1,
+            zip: result.suggestedZip,
+            formattedAddress: result.formattedAddress,
+          },
+        });
+      }
+    } finally {
+      setValidating(false);
+    }
+  }, []);
+
+  function applySaved(item: OverseasSavedAddress) {
+    setSelectedSavedId(String(item.id));
+    setForm((prev) => ({
+      ...prev,
+      countrycd: item.countrycd,
+      receivename: item.recipient_name,
+      receivetelno: item.recipient_phone,
+      receivemail: item.recipient_email,
+      receivezipcode: item.zipcode,
+      receiveaddr1: item.addr1,
+      receiveaddr2: item.addr2,
+      receiveaddr3: item.addr3,
+    }));
+  }
+
+  function applySender(item: OverseasSavedSender) {
+    setSelectedSenderId(String(item.id));
+    setForm((prev) => ({
+      ...prev,
+      sender_name: item.name,
+      sender_tel: item.phone,
+      sender_zipcode: item.zipcode,
+      sender_addr1: item.addr1,
+      sender_addr2: item.addr2,
+      sender_addr3: item.addr3,
+    }));
+  }
 
   async function changeMethod(code: OverseasShippingPayload['shipping_method']) {
     setForm((prev) => ({ ...prev, shipping_method: code }));
@@ -122,6 +315,107 @@ export default function OverseasShippingPage() {
     }));
   }
 
+  function pickCategory(index: number, cat: ItemCategory) {
+    updateItem(index, {
+      name_en: cat.id === 'other' ? '' : cat.name_en,
+      hs_code: cat.hs_code,
+      origin_country: cat.origin_country || 'KR',
+    });
+    setHsQuery((prev) => ({ ...prev, [index]: '' }));
+    setHsOpen(null);
+  }
+
+  async function handleSaveAddressNow() {
+    if (!token) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      await saveOverseasAddress(token, {
+        label: (form.save_address_label || form.receivename || '').trim() || '해외주소',
+        recipient_name: form.receivename,
+        recipient_phone: form.receivetelno,
+        recipient_email: form.receivemail,
+        countrycd: form.countrycd,
+        zipcode: form.receivezipcode,
+        addr1: form.receiveaddr1,
+        addr2: form.receiveaddr2,
+        addr3: form.receiveaddr3,
+        is_default: !!form.save_address_default,
+      });
+      setSuccess('수취인을 저장했습니다.');
+      await reloadSaved(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleSaveSenderNow() {
+    if (!token) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      await saveOverseasSender(token, {
+        label: (form.save_sender_label || form.sender_name || '').trim() || defaultSender,
+        name: (form.sender_name || '').trim() || defaultSender,
+        phone: form.sender_tel || '',
+        zipcode: form.sender_zipcode || '',
+        addr1: form.sender_addr1 || '',
+        addr2: form.sender_addr2 || '',
+        addr3: form.sender_addr3 || '',
+        is_default: !!form.save_sender_default,
+      });
+      setSuccess('발송인을 저장했습니다.');
+      await reloadSaved(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleSaveHs(index: number) {
+    if (!token) return;
+    const item = form.items[index];
+    setError(null);
+    setSuccess(null);
+    try {
+      await saveOverseasHs(token, {
+        label: item.name_en,
+        name_ko: item.name_en,
+        name_en: item.name_en,
+        hs_code: item.hs_code || '',
+        origin_country: item.origin_country || 'KR',
+        group_name: '저장품목',
+      });
+      setSuccess(`HS ${item.hs_code} 를 저장했습니다. 다음 접수부터 검색됩니다.`);
+      await reloadSaved(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleDeleteSaved() {
+    if (!token || !selectedSavedId) return;
+    if (!window.confirm('선택한 저장 주소를 삭제할까요?')) return;
+    try {
+      await deleteOverseasSavedAddress(token, Number(selectedSavedId));
+      setSelectedSavedId('');
+      await reloadSaved(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
+  async function handleDeleteSavedSender() {
+    if (!token || !selectedSenderId) return;
+    if (!window.confirm('선택한 발송인을 삭제할까요?')) return;
+    try {
+      await deleteOverseasSavedSender(token, Number(selectedSenderId));
+      setSelectedSenderId('');
+      await reloadSaved(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
+
   async function handleSubmit() {
     setSaving(true);
     setError(null);
@@ -133,6 +427,7 @@ export default function OverseasShippingPage() {
       const mode = liveReady && !form.test_mode ? '실접수' : '테스트 접수';
       const ok = window.confirm(
         `${mode} 할까요?\n\n` +
+          `발송인: ${p.sender_name}\n` +
           `배송: ${p.shipping_method_name} / ${p.countrycd}\n` +
           `수취인: ${p.recipient_name}\n` +
           `주소: ${p.recipient_addr}\n` +
@@ -146,7 +441,16 @@ export default function OverseasShippingPage() {
       } else {
         const label = result.is_test ? '테스트 접수' : '우체국 접수';
         setSuccess(`${label} 완료. 등기번호 ${result.tracking_no}${result.ems_fee ? ` · 요금 ${Number(result.ems_fee).toLocaleString()}원` : ''}`);
-        setForm(emptyForm());
+        const senderName = form.sender_name || defaultSender;
+        const next = emptyForm(senderName);
+        next.sender_zipcode = form.sender_zipcode;
+        next.sender_addr1 = form.sender_addr1;
+        next.sender_addr2 = form.sender_addr2;
+        next.sender_addr3 = form.sender_addr3;
+        next.sender_tel = form.sender_tel;
+        setForm(next);
+        setSelectedSavedId('');
+        await reloadSaved(token);
       }
     } catch (err) {
       setError(parseApiError(err));
@@ -166,15 +470,131 @@ export default function OverseasShippingPage() {
 
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
+      {suggestion && (
+        <AddressSuggestionDialog
+          original={suggestion.original}
+          suggested={suggestion.suggested}
+          onKeepOriginal={() => setSuggestion(null)}
+          onUseSuggested={() => {
+            setForm((prev) => ({
+              ...prev,
+              receiveaddr3: suggestion.suggested.addr3 || prev.receiveaddr3,
+              receiveaddr2: suggestion.suggested.addr2 || prev.receiveaddr2,
+              receiveaddr1: suggestion.suggested.addr1 || prev.receiveaddr1,
+              receivezipcode: suggestion.suggested.zip || prev.receivezipcode,
+            }));
+            setSuggestion(null);
+          }}
+        />
+      )}
 
       <Card title="접수 정보">
         <p className="text-muted" style={{ marginBottom: '1rem' }}>
-          {liveReady
-            ? `실접수 가능 · 발송인 ${senderLabel}`
-            : `EMS 키가 없어 테스트 접수로 저장됩니다. 발송인 ${senderLabel}`}
+          {liveReady ? `실접수 가능 · 기본 발송지 ${senderAddr}` : `EMS 키가 없어 테스트 접수로 저장됩니다. 기본 발송지 ${senderAddr}`}
+          {GMAPS_KEY ? ' · 구글 주소검색 가능' : ' · 구글 주소키 없음(직접 입력)'}
         </p>
 
+        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label style={{ flex: '1 1 240px' }}>
+            저장된 발송인
+            <select
+              style={inputStyle}
+              value={selectedSenderId}
+              onChange={(e) => {
+                const item = savedSenders.find((a) => String(a.id) === e.target.value);
+                if (item) applySender(item);
+                else setSelectedSenderId('');
+              }}
+            >
+              <option value="">{savedSenders.length ? '발송인을 선택하면 자동입력됩니다' : '저장된 발송인이 없습니다'}</option>
+              {savedSenders.map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {a.is_default ? '[기본] ' : ''}{a.label} · {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn btn-secondary" onClick={handleSaveSenderNow}>발송인 저장</button>
+          <button type="button" className="btn btn-secondary" disabled={!selectedSenderId} onClick={handleDeleteSavedSender}>삭제</button>
+          <a href="/overseas-senders" className="btn btn-secondary">목록</a>
+        </div>
+
+        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label style={{ flex: '1 1 240px' }}>
+            저장된 수취인
+            <select
+              style={inputStyle}
+              value={selectedSavedId}
+              onChange={(e) => {
+                const item = savedAddresses.find((a) => String(a.id) === e.target.value);
+                if (item) applySaved(item);
+                else setSelectedSavedId('');
+              }}
+            >
+              <option value="">{savedAddresses.length ? '수취인을 선택하면 자동입력됩니다' : '저장된 수취인이 없습니다'}</option>
+              {savedAddresses.map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {a.is_default ? '[기본] ' : ''}{a.label} · {a.countrycd} · {a.recipient_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn btn-secondary" onClick={handleSaveAddressNow}>수취인 저장</button>
+          <button type="button" className="btn btn-secondary" disabled={!selectedSavedId} onClick={handleDeleteSaved}>삭제</button>
+          <a href="/overseas-recipients" className="btn btn-secondary">목록</a>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <label>
+            발송인 이름
+            <input
+              style={inputStyle}
+              value={form.sender_name || ''}
+              placeholder={defaultSender}
+              onChange={(e) => setForm((p) => ({ ...p, sender_name: e.target.value }))}
+            />
+          </label>
+          <label>
+            발송인 전화
+            <input
+              style={inputStyle}
+              value={form.sender_tel || ''}
+              placeholder="+8210..."
+              onChange={(e) => setForm((p) => ({ ...p, sender_tel: e.target.value }))}
+            />
+          </label>
+          <label>
+            발송인 우편번호
+            <input
+              style={inputStyle}
+              value={form.sender_zipcode || ''}
+              onChange={(e) => setForm((p) => ({ ...p, sender_zipcode: e.target.value }))}
+            />
+          </label>
+          <label>
+            발송인 시/도
+            <input
+              style={inputStyle}
+              value={form.sender_addr1 || ''}
+              onChange={(e) => setForm((p) => ({ ...p, sender_addr1: e.target.value }))}
+            />
+          </label>
+          <label>
+            발송인 구/군
+            <input
+              style={inputStyle}
+              value={form.sender_addr2 || ''}
+              onChange={(e) => setForm((p) => ({ ...p, sender_addr2: e.target.value }))}
+            />
+          </label>
+          <label>
+            발송인 상세주소
+            <input
+              style={inputStyle}
+              value={form.sender_addr3 || ''}
+              onChange={(e) => setForm((p) => ({ ...p, sender_addr3: e.target.value }))}
+            />
+          </label>
           <label>
             배송방법
             <select
@@ -239,10 +659,11 @@ export default function OverseasShippingPage() {
               style={inputStyle}
               value={form.receivezipcode}
               onChange={(e) => setForm((p) => ({ ...p, receivezipcode: e.target.value }))}
+              onBlur={triggerAddressValidation}
             />
           </label>
           <label>
-            주/도 (영문)
+            주/도 (영문){validating ? ' · 확인 중...' : ''}
             <input
               style={inputStyle}
               value={form.receiveaddr1}
@@ -260,12 +681,15 @@ export default function OverseasShippingPage() {
             />
           </label>
           <label style={{ gridColumn: '1 / -1' }}>
-            상세주소 (영문)
+            상세주소 (영문){GMAPS_KEY ? ' · 구글 검색' : ''}
             <input
+              ref={addr3Ref}
               style={inputStyle}
               value={form.receiveaddr3}
               placeholder="1-2-3 Example Street Apt 101"
+              autoComplete="off"
               onChange={(e) => setForm((p) => ({ ...p, receiveaddr3: e.target.value }))}
+              onBlur={triggerAddressValidation}
             />
           </label>
           <label>
@@ -308,6 +732,56 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, boxheight: parseInt(e.target.value, 10) || 0 }))}
             />
           </label>
+          <label>
+            주소록 별칭
+            <input
+              style={inputStyle}
+              value={form.save_address_label || ''}
+              placeholder="일본 오사카 창고"
+              onChange={(e) => setForm((p) => ({ ...p, save_address_label: e.target.value }))}
+            />
+          </label>
+          <label>
+            발송인 별칭
+            <input
+              style={inputStyle}
+              value={form.save_sender_label || ''}
+              placeholder="스프링풀필먼트"
+              onChange={(e) => setForm((p) => ({ ...p, save_sender_label: e.target.value }))}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_address}
+              onChange={(e) => setForm((p) => ({ ...p, save_address: e.target.checked }))}
+            />
+            접수와 함께 수취인 저장
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_sender}
+              onChange={(e) => setForm((p) => ({ ...p, save_sender: e.target.checked }))}
+            />
+            접수와 함께 발송인 저장
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_address_default}
+              onChange={(e) => setForm((p) => ({ ...p, save_address_default: e.target.checked }))}
+            />
+            기본 수취인으로 지정
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={!!form.save_sender_default}
+              onChange={(e) => setForm((p) => ({ ...p, save_sender_default: e.target.checked }))}
+            />
+            기본 발송인으로 지정
+          </label>
           <label style={{ gridColumn: '1 / -1' }}>
             메모
             <input
@@ -320,54 +794,130 @@ export default function OverseasShippingPage() {
       </Card>
 
       <Card title="세관 인보이스">
-        {form.items.map((item, i) => (
-          <div
-            key={i}
-            style={{ display: 'grid', gridTemplateColumns: '2fr 80px 110px 120px 80px auto', gap: '0.5rem', marginBottom: '0.5rem', alignItems: 'end' }}
-          >
-            <label>
-              품명 (영문)
-              <input style={inputStyle} value={item.name_en} onChange={(e) => updateItem(i, { name_en: e.target.value })} />
-            </label>
-            <label>
-              수량
-              <input
-                type="number"
-                min={1}
-                style={inputStyle}
-                value={item.quantity}
-                onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value, 10) || 1 })}
-              />
-            </label>
-            <label>
-              단가 USD
-              <input
-                type="number"
-                min={0.01}
-                step="0.01"
-                style={inputStyle}
-                value={item.unit_price_usd}
-                onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })}
-              />
-            </label>
-            <label>
-              HS코드
-              <input style={inputStyle} value={item.hs_code || ''} onChange={(e) => updateItem(i, { hs_code: e.target.value })} />
-            </label>
-            <label>
-              원산지
-              <input style={inputStyle} value={item.origin_country || 'KR'} onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
-            </label>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={form.items.length <= 1}
-              onClick={() => setForm((p) => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }))}
+        <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+          저장한 HS코드가 검색 맨 위에 나옵니다. 접수하면 품목 HS가 자동 저장됩니다.{' '}
+          <a href="/overseas-hs-codes">HS코드 목록</a>
+        </p>
+        {form.items.map((item, i) => {
+          const q = hsQuery[i] ?? '';
+          const matches = searchItemCategories(q || item.name_en || item.hs_code || '', savedHs).slice(0, 8);
+          return (
+            <div
+              key={i}
+              style={{ display: 'grid', gridTemplateColumns: '2fr 80px 110px 140px 80px auto auto', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'end' }}
             >
-              삭제
-            </button>
-          </div>
-        ))}
+              <label style={{ position: 'relative' }}>
+                품목 (한글/영문/HS 검색)
+                <input
+                  style={inputStyle}
+                  value={item.name_en}
+                  placeholder="의류, Clothing, 610910"
+                  onFocus={() => setHsOpen(i)}
+                  onChange={(e) => {
+                    updateItem(i, { name_en: e.target.value });
+                    setHsQuery((prev) => ({ ...prev, [i]: e.target.value }));
+                    setHsOpen(i);
+                    const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.name_en.toLowerCase() === e.target.value.toLowerCase());
+                    if (hit?.hs_code) updateItem(i, { name_en: e.target.value, hs_code: hit.hs_code, origin_country: hit.origin_country || item.origin_country });
+                  }}
+                />
+                {hsOpen === i && matches.length > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    zIndex: 20,
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    background: '#fff',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    maxHeight: 220,
+                    overflowY: 'auto',
+                    boxShadow: 'var(--shadow-md)',
+                  }}>
+                    {matches.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => pickCategory(i, cat)}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '0.45rem 0.7rem',
+                          border: 0,
+                          background: cat.name_en === item.name_en ? 'var(--color-brand-light)' : '#fff',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {cat.saved ? '[저장] ' : ''}{cat.name_ko} · {cat.name_en}
+                        {cat.hs_code ? ` · HS ${cat.hs_code}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </label>
+              <label>
+                수량
+                <input
+                  type="number"
+                  min={1}
+                  style={inputStyle}
+                  value={item.quantity}
+                  onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value, 10) || 1 })}
+                />
+              </label>
+              <label>
+                단가 USD
+                <input
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  style={inputStyle}
+                  value={item.unit_price_usd}
+                  onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })}
+                />
+              </label>
+              <label>
+                HS코드
+                <input
+                  style={inputStyle}
+                  value={item.hs_code || ''}
+                  placeholder="6자리"
+                  onFocus={() => setHsOpen(i)}
+                  onChange={(e) => {
+                    const hs = e.target.value.replace(/\D/g, '');
+                    updateItem(i, { hs_code: hs });
+                    setHsQuery((prev) => ({ ...prev, [i]: hs }));
+                    setHsOpen(i);
+                    const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.hs_code === hs);
+                    if (hit) updateItem(i, { hs_code: hs, name_en: item.name_en || hit.name_en });
+                  }}
+                />
+              </label>
+              <label>
+                원산지
+                <input style={inputStyle} value={item.origin_country || 'KR'} onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
+              </label>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => handleSaveHs(i)}
+              >
+                HS 저장
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={form.items.length <= 1}
+                onClick={() => setForm((p) => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }))}
+              >
+                삭제
+              </button>
+            </div>
+          );
+        })}
         <button type="button" className="btn btn-secondary" onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
           품목 추가
         </button>
@@ -389,6 +939,9 @@ export default function OverseasShippingPage() {
             {saving ? '접수 중...' : liveReady && !form.test_mode ? '해외배송 접수' : '테스트 접수'}
           </button>
           <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
+          <a href="/overseas-senders" className="btn btn-secondary">발송인</a>
+          <a href="/overseas-recipients" className="btn btn-secondary">수취인</a>
+          <a href="/overseas-hs-codes" className="btn btn-secondary">HS코드</a>
         </div>
       </Card>
     </div>

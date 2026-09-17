@@ -11,6 +11,7 @@ const nextConfig = {
   // 환경변수
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: (process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').replace(/[\r\n]/g, '').trim(),
   },
   
   // 이미지 최적화 (필요시)
