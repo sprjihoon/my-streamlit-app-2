@@ -220,7 +220,8 @@ get_res_info(order_no, req_ymd, req_type="2")
 ```
 로그인
   → GET /overseas-shipping/meta          발송인 기본값, 배송방법, HS 카탈로그
-  → GET /overseas-shipping/nations       EMS 발송 가능 국가
+  → GET /overseas-shipping/nations       배송방법별 우체국 발송 가능 국가
+  → GET /overseas-shipping/quote         우체국 예상요금 (후납, 화면 표시)
   → GET /overseas-shipping/saved-addresses  기본 주소 자동입력
   → 발송인 이름 수정 (기본: 스프링풀필먼트)
   → 구글 Places 자동완성 + Address Validation 추천
@@ -236,7 +237,8 @@ get_res_info(order_no, req_ymd, req_type="2")
 - 같은 직원 + 같은 전화번호 + 같은 국가 + 당일 접수는 중복 가드.
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
 - 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다.
-- 요금은 우체국 후납. 미리보기 예상요금은 참고용.
+- 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 우체국 API 예상요금을 바로 보여 준다.
+- 국가 목록은 배송방법(`premiumcd` 31/32/14)마다 `api.RetrieveNationListRequest.ems` 값을 받는다. K-Packet은 EMS보다 발송국이 적다.
 
 ### 구글 주소 · 주소록 · HS코드
 
@@ -253,7 +255,8 @@ get_res_info(order_no, req_ymd, req_type="2")
 | 메서드 | 경로 | 동작 |
 |---|---|---|
 | `GET` | `/overseas-shipping/meta` | 실접수 가능 여부, 발송인 기본값, 배송방법, HS 카탈로그 |
-| `GET` | `/overseas-shipping/nations` | 배송방법별 발송 국가 |
+| `GET` | `/overseas-shipping/nations` | 배송방법별 발송 국가 (우체국 API, `premiumcd`) |
+| `GET` | `/overseas-shipping/quote` | 우체국 예상요금 (후납 참고, 결제 아님) |
 | `GET` | `/overseas-shipping/item-categories` | HS/품목 검색 (저장 + 카탈로그 + HS 6자리 목록) |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-addresses` | 해외 수취인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-senders` | 발송인 목록 |

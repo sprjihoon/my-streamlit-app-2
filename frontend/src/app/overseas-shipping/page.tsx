@@ -16,6 +16,7 @@ import {
   listOverseasSavedHs,
   listOverseasSavedSenders,
   previewOverseasShipping,
+  quoteOverseasShipping,
   saveOverseasAddress,
   saveOverseasHs,
   saveOverseasSender,
@@ -155,6 +156,12 @@ export default function OverseasShippingPage() {
   const [senderAddr, setSenderAddr] = useState('');
   const [methods, setMethods] = useState<Array<{ code: string; name: string; desc: string }>>([]);
   const [nations, setNations] = useState<Array<{ nationcd: string; nationnm: string; nationfn: string }>>([]);
+  const [nationsFallback, setNationsFallback] = useState(false);
+  const [nationQuery, setNationQuery] = useState('');
+  const [quoteFee, setQuoteFee] = useState<number | null>(null);
+  const [quoteLive, setQuoteLive] = useState(false);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [savedAddresses, setSavedAddresses] = useState<OverseasSavedAddress[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState('');
   const [savedSenders, setSavedSenders] = useState<OverseasSavedSender[]>([]);
@@ -178,6 +185,8 @@ export default function OverseasShippingPage() {
   countryRef.current = form.countrycd;
   const formRef = useRef(form);
   formRef.current = form;
+  const nationsRef = useRef(nations);
+  nationsRef.current = nations;
   const validateRef = useRef<(opts?: {
     addr3?: string;
     addr2?: string;
@@ -236,14 +245,20 @@ export default function OverseasShippingPage() {
           sender_tel: prev.sender_tel || meta.sender.tel || '',
         }));
         const [nationRes, lists] = await Promise.all([
-          listOverseasNations(stored, '31'),
+          listOverseasNations(stored, METHOD_PREMIUM.EMS),
           reloadSaved(stored),
         ]);
-        setNations(nationRes.items || []);
+        const nationItems = nationRes.items || [];
+        setNations(nationItems);
+        setNationsFallback(!!nationRes.fallback);
         const defSender = lists.senders.find((a) => a.is_default);
         if (defSender) applySender(defSender);
         const def = lists.addresses.find((a) => a.is_default);
         if (def) applySaved(def);
+        const keepCountry = def?.countrycd;
+        if (keepCountry && !nationItems.some((n) => n.nationcd === keepCountry) && nationItems[0]) {
+          setForm((prev) => ({ ...prev, countrycd: nationItems[0].nationcd }));
+        }
       } catch (err) {
         setError(parseApiError(err));
       } finally {
@@ -293,6 +308,50 @@ export default function OverseasShippingPage() {
       cancelled = true;
     };
   }, [form.countrycd, loading]);
+
+  useEffect(() => {
+    if (!token || loading || !form.countrycd || form.totweight < 1) {
+      if (form.totweight < 1) {
+        setQuoteFee(null);
+        setQuoteError(null);
+      }
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setQuoteLoading(true);
+      try {
+        const res = await quoteOverseasShipping(token, {
+          shipping_method: form.shipping_method,
+          countrycd: form.countrycd,
+          totweight: form.totweight,
+          boxlength: form.boxlength,
+          boxwidth: form.boxwidth,
+          boxheight: form.boxheight,
+        });
+        if (cancelled) return;
+        setQuoteLive(!!res.live);
+        if (res.ok && res.totalFee != null) {
+          setQuoteFee(res.totalFee);
+          setQuoteError(null);
+        } else {
+          setQuoteFee(null);
+          setQuoteError(res.error || '해당 국가 또는 서비스 요금을 조회할 수 없습니다.');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setQuoteFee(null);
+          setQuoteError(parseApiError(err));
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [token, loading, form.shipping_method, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight]);
 
   const triggerAddressValidation = useCallback(async (override?: {
     addr3?: string;
@@ -361,9 +420,13 @@ export default function OverseasShippingPage() {
 
   function applySaved(item: OverseasSavedAddress) {
     setSelectedSavedId(String(item.id));
+    const allowed = nationsRef.current.some((n) => n.nationcd === item.countrycd) || nationsRef.current.length === 0;
+    if (!allowed) {
+      window.alert(`${item.label} 의 국가 ${item.countrycd} 는 현재 배송방법으로 발송할 수 없습니다. 배송방법 또는 국가를 바꿔주세요.`);
+    }
     setForm((prev) => ({
       ...prev,
-      countrycd: item.countrycd,
+      countrycd: allowed ? item.countrycd : prev.countrycd,
       receivename: item.recipient_name,
       receivetelno: item.recipient_phone,
       receivemail: item.recipient_email,
@@ -392,7 +455,17 @@ export default function OverseasShippingPage() {
     if (!token) return;
     try {
       const nationRes = await listOverseasNations(token, METHOD_PREMIUM[code]);
-      setNations(nationRes.items || []);
+      const items = nationRes.items || [];
+      setNations(items);
+      setNationsFallback(!!nationRes.fallback);
+      setNationQuery('');
+      const current = formRef.current.countrycd;
+      const ok = items.some((n) => n.nationcd === current);
+      const nextCountry = ok ? current : (items[0]?.nationcd || '');
+      if (!ok && current && nextCountry && current !== nextCountry) {
+        window.alert(`${current} 는 이 배송방법 발송 가능 국가가 아닙니다. ${nextCountry} 로 바꿉니다.`);
+      }
+      setForm((prev) => ({ ...prev, shipping_method: code, countrycd: nextCountry }));
     } catch (err) {
       setError(parseApiError(err));
     }
@@ -585,6 +658,16 @@ export default function OverseasShippingPage() {
 
   if (loading) return <Loading text="해외배송 접수 로딩 중..." />;
 
+  const q = nationQuery.trim().toLowerCase();
+  const filteredNations = q
+    ? nations.filter((n) => `${n.nationcd} ${n.nationnm} ${n.nationfn}`.toLowerCase().includes(q))
+    : nations;
+  const nationOptions = filteredNations.some((n) => n.nationcd === form.countrycd)
+    ? filteredNations
+    : nations.filter((n) => n.nationcd === form.countrycd).concat(filteredNations);
+
+  const methodName = methods.find((m) => m.code === form.shipping_method)?.name || form.shipping_method;
+
   return (
     <div>
       <PageHeader
@@ -776,18 +859,60 @@ export default function OverseasShippingPage() {
           </label>
           <label>
             국가
+            <input
+              style={{ ...inputStyle, marginBottom: '0.35rem' }}
+              value={nationQuery}
+              placeholder="국가명·코드 검색 (예: 일본, JP)"
+              onChange={(e) => setNationQuery(e.target.value)}
+            />
             <select
               style={inputStyle}
               value={form.countrycd}
               onChange={(e) => setForm((p) => ({ ...p, countrycd: e.target.value }))}
             >
-              {nations.map((n) => (
-                <option key={n.nationcd} value={n.nationcd}>
-                  {n.nationnm || n.nationfn || n.nationcd} ({n.nationcd})
-                </option>
-              ))}
+              {nationOptions.length === 0 ? (
+                <option value={form.countrycd || ''}>발송 가능 국가가 없습니다</option>
+              ) : (
+                nationOptions.map((n) => (
+                  <option key={n.nationcd} value={n.nationcd}>
+                    {n.nationnm || n.nationfn || n.nationcd} ({n.nationcd})
+                  </option>
+                ))
+              )}
             </select>
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              {nationsFallback ? '우체국 국가목록을 받지 못해 임시 목록입니다.' : '우체국 API 발송가능국'} · {nations.length}개
+            </span>
           </label>
+          <div style={{
+            gridColumn: '1 / -1',
+            marginTop: '0.25rem',
+            padding: '0.9rem 1rem',
+            border: '2px solid #cbd5e1',
+            borderRadius: 10,
+            background: quoteError ? '#fef2f2' : '#f8fafc',
+          }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+              우체국 예상요금 (후납)
+            </div>
+            {quoteLoading ? (
+              <div style={{ marginTop: 6, fontSize: '1rem' }}>요금 조회 중...</div>
+            ) : quoteError ? (
+              <div style={{ marginTop: 6, color: '#b91c1c', fontWeight: 600 }}>{quoteError}</div>
+            ) : quoteFee != null ? (
+              <>
+                <div style={{ marginTop: 4, fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
+                  {quoteFee.toLocaleString()}원
+                </div>
+                <div className="text-muted" style={{ fontSize: '0.8rem', marginTop: 2 }}>
+                  {quoteLive ? '우체국 API' : '테스트 요금'} · {methodName} / {form.countrycd} · {form.totweight}g
+                  · 고객 결제 없음
+                </div>
+              </>
+            ) : (
+              <div className="text-muted" style={{ marginTop: 6 }}>중량을 입력하면 우체국 요금이 표시됩니다.</div>
+            )}
+          </div>
           <label>
             수취인 이름 (영문)
             <input

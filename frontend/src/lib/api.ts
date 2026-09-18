@@ -1851,7 +1851,40 @@ export async function listOverseasNations(token: string, premiumcd: string) {
   return fetchApi<{
     items: Array<{ nationcd: string; nationnm: string; nationfn: string; premiumcd?: string }>;
     fallback: boolean;
+    source?: string;
+    count?: number;
   }>(`/overseas-shipping/nations${overseasQuery(token, `&premiumcd=${encodeURIComponent(premiumcd)}`)}`);
+}
+
+export async function quoteOverseasShipping(
+  token: string,
+  payload: {
+    shipping_method: OverseasShippingPayload['shipping_method'];
+    countrycd: string;
+    totweight: number;
+    boxlength: number;
+    boxwidth: number;
+    boxheight: number;
+  }
+) {
+  const extra =
+    `&shipping_method=${encodeURIComponent(payload.shipping_method)}` +
+    `&countrycd=${encodeURIComponent(payload.countrycd)}` +
+    `&totweight=${encodeURIComponent(String(payload.totweight))}` +
+    `&boxlength=${encodeURIComponent(String(payload.boxlength || 0))}` +
+    `&boxwidth=${encodeURIComponent(String(payload.boxwidth || 0))}` +
+    `&boxheight=${encodeURIComponent(String(payload.boxheight || 0))}`;
+  return fetchApi<{
+    ok: boolean;
+    totalFee: number | null;
+    live: boolean;
+    source: string;
+    shipping_method: string;
+    shipping_method_name: string;
+    countrycd: string;
+    totweight: number;
+    error: string | null;
+  }>(`/overseas-shipping/quote${overseasQuery(token, extra)}`);
 }
 
 export async function previewOverseasShipping(token: string, payload: OverseasShippingPayload) {

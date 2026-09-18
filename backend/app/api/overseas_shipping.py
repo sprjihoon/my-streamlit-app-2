@@ -26,14 +26,17 @@ from backend.app.services.ems.client import (
     mock_quote_fee,
 )
 from backend.app.services.ems.fields import (
-    FALLBACK_NATIONS,
     SHIPPING_METHODS,
     apply_sender_override,
     build_apply_params,
     env_clean,
+    fallback_nations,
     format_sender_tel,
+    method_of,
     resolve_sender,
+    sort_nations,
     validate_apply_input,
+    validate_countrycd,
 )
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
@@ -42,6 +45,33 @@ from logic.db import get_connection
 
 router = APIRouter(prefix="/overseas-shipping", tags=["overseas-shipping"])
 KST = ZoneInfo("Asia/Seoul")
+_NATION_CACHE: dict[str, tuple[float, list[dict[str, str]]]] = {}
+_NATION_CACHE_TTL = 600.0
+
+
+def clear_nation_cache() -> None:
+    _NATION_CACHE.clear()
+
+
+def _nations_payload(premiumcd: str) -> dict[str, Any]:
+    code = (premiumcd or "31").strip()
+    now = time.time()
+    if not has_ems_credentials():
+        items = fallback_nations(code)
+        return {"items": items, "fallback": True, "source": "fallback", "count": len(items)}
+    cached = _NATION_CACHE.get(code)
+    if cached and now - cached[0] < _NATION_CACHE_TTL:
+        return {"items": cached[1], "fallback": False, "source": "epost-cache", "count": len(cached[1])}
+    try:
+        items = sort_nations(get_available_nations(code))
+        if items:
+            _NATION_CACHE[code] = (now, items)
+            return {"items": items, "fallback": False, "source": "epost", "count": len(items)}
+    except Exception:
+        if cached:
+            return {"items": cached[1], "fallback": False, "source": "epost-cache", "count": len(cached[1])}
+    items = fallback_nations(code)
+    return {"items": items, "fallback": True, "source": "fallback", "count": len(items)}
 
 
 class InvoiceItem(BaseModel):
@@ -721,12 +751,60 @@ def overseas_nations(token: str, premiumcd: str = "31"):
     code = (premiumcd or "31").strip()
     if code not in {"31", "32", "14"}:
         raise HTTPException(status_code=400, detail="잘못된 배송방법 코드입니다.")
-    if not has_ems_credentials():
-        return {"items": [{**n, "premiumcd": code} for n in FALLBACK_NATIONS], "fallback": True}
+    return _nations_payload(code)
+
+
+@router.get("/quote")
+def overseas_quote(
+    token: str,
+    shipping_method: str = "EMS",
+    countrycd: str = "JP",
+    totweight: int = 0,
+    boxlength: int = 0,
+    boxwidth: int = 0,
+    boxheight: int = 0,
+):
+    """우체국 예상요금. 결제가 아니라 후납 참고 금액."""
+    _get_user(token)
     try:
-        return {"items": get_available_nations(code), "fallback": False}
-    except Exception:
-        return {"items": [{**n, "premiumcd": code} for n in FALLBACK_NATIONS], "fallback": True}
+        method = method_of(shipping_method)
+        country = validate_countrycd(countrycd)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if totweight < 1:
+        raise HTTPException(status_code=400, detail="중량(g)을 입력해주세요.")
+    live = has_ems_credentials()
+    payload = {
+        "ok": False,
+        "totalFee": None,
+        "live": live,
+        "source": "epost" if live else "mock",
+        "shipping_method": method["code"],
+        "shipping_method_name": method["name"],
+        "countrycd": country,
+        "totweight": totweight,
+        "error": None,
+    }
+    try:
+        if live:
+            quoted = get_shipping_quote(
+                method["premiumcd"],
+                method["em_ee"],
+                country,
+                totweight,
+                boxlength=boxlength or None,
+                boxwidth=boxwidth or None,
+                boxheight=boxheight or None,
+            )
+            payload["ok"] = True
+            payload["totalFee"] = int(quoted["totalFee"])
+        else:
+            payload["ok"] = True
+            payload["totalFee"] = mock_quote_fee(totweight, method["premiumcd"])
+        return payload
+    except (EmsApiError, ValueError) as exc:
+        payload["error"] = str(exc)
+        return payload
 
 
 @router.get("/item-categories")

@@ -57,7 +57,81 @@ FALLBACK_NATIONS = [
     {"nationcd": "IT", "nationnm": "이탈리아", "nationfn": "ITALY"},
     {"nationcd": "ES", "nationnm": "스페인", "nationfn": "SPAIN"},
     {"nationcd": "NL", "nationnm": "네덜란드", "nationfn": "NETHERLANDS"},
+    {"nationcd": "MO", "nationnm": "마카오", "nationfn": "MACAO"},
+    {"nationcd": "MN", "nationnm": "몽골", "nationfn": "MONGOLIA"},
+    {"nationcd": "IN", "nationnm": "인도", "nationfn": "INDIA"},
+    {"nationcd": "AE", "nationnm": "아랍에미리트", "nationfn": "UNITED ARAB EMIRATES"},
+    {"nationcd": "SA", "nationnm": "사우디아라비아", "nationfn": "SAUDI ARABIA"},
+    {"nationcd": "SE", "nationnm": "스웨덴", "nationfn": "SWEDEN"},
+    {"nationcd": "CH", "nationnm": "스위스", "nationfn": "SWITZERLAND"},
+    {"nationcd": "BR", "nationnm": "브라질", "nationfn": "BRAZIL"},
+    {"nationcd": "MX", "nationnm": "멕시코", "nationfn": "MEXICO"},
+    {"nationcd": "GR", "nationnm": "그리스", "nationfn": "GREECE"},
+    {"nationcd": "NG", "nationnm": "나이지리아", "nationfn": "NIGERIA"},
+    {"nationcd": "NP", "nationnm": "네팔", "nationfn": "NEPAL"},
+    {"nationcd": "NO", "nationnm": "노르웨이", "nationfn": "NORWAY"},
+    {"nationcd": "DK", "nationnm": "덴마크", "nationfn": "DENMARK"},
+    {"nationcd": "LA", "nationnm": "라오스", "nationfn": "LAOS"},
+    {"nationcd": "RO", "nationnm": "루마니아", "nationfn": "ROMANIA"},
+    {"nationcd": "LU", "nationnm": "룩셈부르크", "nationfn": "LUXEMBOURG"},
+    {"nationcd": "LT", "nationnm": "리투아니아", "nationfn": "LITHUANIA"},
+    {"nationcd": "MM", "nationnm": "미얀마", "nationfn": "MYANMAR"},
+    {"nationcd": "BD", "nationnm": "방글라데시", "nationfn": "BANGLADESH"},
+    {"nationcd": "BE", "nationnm": "벨기에", "nationfn": "BELGIUM"},
+    {"nationcd": "BG", "nationnm": "불가리아", "nationfn": "BULGARIA"},
+    {"nationcd": "BN", "nationnm": "브루나이", "nationfn": "BRUNEI"},
+    {"nationcd": "LK", "nationnm": "스리랑카", "nationfn": "SRI LANKA"},
+    {"nationcd": "SK", "nationnm": "슬로바키아", "nationfn": "SLOVAKIA"},
+    {"nationcd": "SI", "nationnm": "슬로베니아", "nationfn": "SLOVENIA"},
+    {"nationcd": "AR", "nationnm": "아르헨티나", "nationfn": "ARGENTINA"},
+    {"nationcd": "IE", "nationnm": "아일랜드", "nationfn": "IRELAND"},
+    {"nationcd": "EE", "nationnm": "에스토니아", "nationfn": "ESTONIA"},
+    {"nationcd": "AT", "nationnm": "오스트리아", "nationfn": "AUSTRIA"},
+    {"nationcd": "UZ", "nationnm": "우즈베키스탄", "nationfn": "UZBEKISTAN"},
+    {"nationcd": "EG", "nationnm": "이집트", "nationfn": "EGYPT"},
+    {"nationcd": "CZ", "nationnm": "체코", "nationfn": "CZECH REPUBLIC"},
+    {"nationcd": "CL", "nationnm": "칠레", "nationfn": "CHILE"},
+    {"nationcd": "KZ", "nationnm": "카자흐스탄", "nationfn": "KAZAKHSTAN"},
+    {"nationcd": "KH", "nationnm": "캄보디아", "nationfn": "CAMBODIA"},
+    {"nationcd": "TR", "nationnm": "튀르키예", "nationfn": "TURKEY"},
+    {"nationcd": "PK", "nationnm": "파키스탄", "nationfn": "PAKISTAN"},
+    {"nationcd": "PE", "nationnm": "페루", "nationfn": "PERU"},
+    {"nationcd": "PT", "nationnm": "포르투갈", "nationfn": "PORTUGAL"},
+    {"nationcd": "PL", "nationnm": "폴란드", "nationfn": "POLAND"},
+    {"nationcd": "FI", "nationnm": "핀란드", "nationfn": "FINLAND"},
+    {"nationcd": "HU", "nationnm": "헝가리", "nationfn": "HUNGARY"},
 ]
+
+# K-Packet(14) 은 EMS보다 발송국이 적다. 우체국 API를 못 받을 때만 쓴다.
+KPACKET_FALLBACK_CODES = {
+    "JP", "US", "CN", "HK", "TW", "SG", "TH", "VN", "MY", "PH",
+    "AU", "GB", "DE", "FR", "CA", "NZ", "ID", "IT", "ES", "NL",
+    "MO", "MN", "IN", "AE", "SA", "KH", "LA", "MM", "BN", "LK",
+    "BD", "NP", "PK", "BR", "MX", "TR", "SE", "CH", "BE", "AT",
+    "PL", "CZ", "PT", "HU", "IE", "FI", "DK", "NO", "GR",
+}
+
+_NATION_PIN = ["JP", "US", "CN", "HK", "TW", "SG", "AU", "CA", "GB", "DE"]
+
+
+def sort_nations(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    rank = {code: i for i, code in enumerate(_NATION_PIN)}
+    return sorted(
+        items,
+        key=lambda n: (rank.get(str(n.get("nationcd") or ""), 99), str(n.get("nationnm") or n.get("nationcd") or "")),
+    )
+
+
+def fallback_nations(premiumcd: str) -> list[dict[str, str]]:
+    code = (premiumcd or "31").strip()
+    if code == "14":
+        items = [dict(n) for n in FALLBACK_NATIONS if n["nationcd"] in KPACKET_FALLBACK_CODES]
+    else:
+        items = [dict(n) for n in FALLBACK_NATIONS]
+    for item in items:
+        item["premiumcd"] = code
+    return sort_nations(items)
+
 
 EMS_APPLY_KEYS = [
     "custno",

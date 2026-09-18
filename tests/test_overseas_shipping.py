@@ -11,6 +11,7 @@ from backend.app.api.overseas_shipping import (
     SavedOverseasHsRequest,
     SavedOverseasSenderRequest,
     cancel_overseas,
+    clear_nation_cache,
     create_overseas,
     delete_saved_overseas_address,
     delete_saved_overseas_hs,
@@ -23,6 +24,7 @@ from backend.app.api.overseas_shipping import (
     overseas_label,
     overseas_meta,
     overseas_nations,
+    overseas_quote,
     preview_overseas,
     save_overseas_address,
     save_overseas_hs,
@@ -239,9 +241,72 @@ def test_meta_and_nations_fallback_without_ems_keys(isolated_runtime):
     meta = overseas_meta(token)
     assert meta["live_ready"] is False
     assert meta["sender"]["name"] == "스프링풀필먼트"
-    nations = overseas_nations(token, premiumcd="14")
-    assert nations["fallback"] is True
-    assert any(n["nationcd"] == "JP" for n in nations["items"])
+    ems = overseas_nations(token, premiumcd="31")
+    kpacket = overseas_nations(token, premiumcd="14")
+    assert ems["fallback"] is True
+    assert kpacket["fallback"] is True
+    ems_codes = {n["nationcd"] for n in ems["items"]}
+    kpacket_codes = {n["nationcd"] for n in kpacket["items"]}
+    assert "JP" in kpacket_codes
+    assert "NG" in ems_codes
+    assert "NG" not in kpacket_codes
+    assert len(kpacket["items"]) < len(ems["items"])
+    assert kpacket_codes.issubset(ems_codes)
+
+
+def test_nations_and_quote_use_epost_when_credentials(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    clear_nation_cache()
+
+    def fake_nations(premiumcd: str):
+        if premiumcd == "14":
+            return [
+                {"nationcd": "JP", "nationnm": "일본", "nationfn": "JAPAN", "premiumcd": "14"},
+                {"nationcd": "TW", "nationnm": "대만", "nationfn": "TAIWAN", "premiumcd": "14"},
+            ]
+        return [
+            {"nationcd": "JP", "nationnm": "일본", "nationfn": "JAPAN", "premiumcd": premiumcd},
+            {"nationcd": "TW", "nationnm": "대만", "nationfn": "TAIWAN", "premiumcd": premiumcd},
+            {"nationcd": "NG", "nationnm": "나이지리아", "nationfn": "NIGERIA", "premiumcd": premiumcd},
+        ]
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
+    monkeypatch.setattr("backend.app.api.overseas_shipping.get_available_nations", fake_nations)
+    monkeypatch.setattr(
+        "backend.app.api.overseas_shipping.get_shipping_quote",
+        lambda *args, **kwargs: {"totalFee": 36500},
+    )
+
+    kpacket = overseas_nations(token, premiumcd="14")
+    assert kpacket["fallback"] is False
+    assert kpacket["source"] == "epost"
+    assert [n["nationcd"] for n in kpacket["items"]] == ["JP", "TW"]
+    ems = overseas_nations(token, premiumcd="31")
+    assert any(n["nationcd"] == "NG" for n in ems["items"])
+
+    quoted = overseas_quote(
+        token,
+        shipping_method="EMS",
+        countrycd="JP",
+        totweight=500,
+        boxlength=30,
+        boxwidth=25,
+        boxheight=15,
+    )
+    assert quoted["ok"] is True
+    assert quoted["live"] is True
+    assert quoted["totalFee"] == 36500
+    assert quoted["source"] == "epost"
+    clear_nation_cache()
+
+
+def test_quote_mock_without_ems_keys(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    quoted = overseas_quote(token, shipping_method="KPACKET", countrycd="JP", totweight=500)
+    assert quoted["ok"] is True
+    assert quoted["live"] is False
+    assert quoted["totalFee"] and quoted["totalFee"] > 0
+    assert quoted["shipping_method_name"] == "K-Packet"
 
 
 def test_mock_apply_prefixes():

@@ -116,6 +116,26 @@ def test_staff_intake_flow_matches_overseas_shipping_page(isolated_runtime):
     kpacket_nations = client.get("/overseas-shipping/nations", params={"token": token, "premiumcd": "14"})
     assert kpacket_nations.status_code == 200
     assert kpacket_nations.json()["fallback"] is True
+    ems_codes = {n["nationcd"] for n in nations.json()["items"]}
+    kpacket_codes = {n["nationcd"] for n in kpacket_nations.json()["items"]}
+    assert len(kpacket_codes) < len(ems_codes)
+    assert kpacket_codes.issubset(ems_codes)
+
+    quote = client.get(
+        "/overseas-shipping/quote",
+        params={
+            "token": token,
+            "shipping_method": "EMS",
+            "countrycd": "JP",
+            "totweight": 500,
+            "boxlength": 30,
+            "boxwidth": 25,
+            "boxheight": 15,
+        },
+    )
+    assert quote.status_code == 200
+    assert quote.json()["ok"] is True
+    assert quote.json()["totalFee"] > 0
 
     # 3) HS코드 완성 (화면 품목 검색)
     hs = client.get("/overseas-shipping/item-categories", params={"token": token, "q": "610910"})
