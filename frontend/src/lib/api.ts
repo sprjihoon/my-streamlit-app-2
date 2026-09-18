@@ -1888,6 +1888,52 @@ export async function cancelOverseasShipping(token: string, id: number) {
   );
 }
 
+export interface OverseasLabelData {
+  source: string;
+  id: number;
+  order_no: string;
+  shipping_method: string;
+  service_label: string;
+  regino: string;
+  ems_applied: boolean;
+  is_test: boolean;
+  status: string;
+  ems_fee: number | null;
+  ems_req_no: string | null;
+  ems_receive_seq: string | null;
+  post_office: string;
+  totweight: number;
+  boxlength: number;
+  boxwidth: number;
+  boxheight: number;
+  created_at: string;
+  sender: { name: string; address: string; zip: string; tel: string; country: string };
+  recipient: {
+    name: string;
+    addr1: string;
+    addr2: string;
+    addr3: string;
+    zip: string;
+    phone: string;
+    email: string;
+    country: string;
+    country_name: string;
+  };
+  items: OverseasInvoiceItem[];
+  customs_value_usd: number;
+  barcode_url: string;
+}
+
+export function overseasLabelHtmlUrl(token: string, id: number) {
+  return `${API_BASE}/overseas-shipping/${id}/label${overseasQuery(token, '&format=html')}`;
+}
+
+export async function getOverseasShippingLabel(token: string, id: number) {
+  return fetchApi<{ ok: boolean; label: OverseasLabelData }>(
+    `/overseas-shipping/${id}/label${overseasQuery(token)}`
+  );
+}
+
 export interface OverseasSavedAddress {
   id: number;
   label: string;

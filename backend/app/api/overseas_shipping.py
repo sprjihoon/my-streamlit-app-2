@@ -10,6 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from backend.app.api.kpost_pickup import _get_user
@@ -36,6 +37,7 @@ from backend.app.services.ems.fields import (
 )
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
+from backend.app.services.ems.label import build_shipment_label, render_label_html
 from logic.db import get_connection
 
 router = APIRouter(prefix="/overseas-shipping", tags=["overseas-shipping"])
@@ -1016,6 +1018,44 @@ def list_overseas(token: str, limit: int = 500):
             (max(1, min(limit, 2000)),),
         ).fetchall()
     return {"items": [_row_to_dict(row) for row in rows]}
+
+
+@router.get("/{shipment_id}/label")
+def overseas_label(shipment_id: int, token: str, format: str = "json"):
+    """접수 저장본으로 CN22 출력서류를 내려준다. 우체국 PDF API는 없다."""
+    _get_user(token)
+    ensure_overseas_tables()
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT id, order_no, shipping_method, premiumcd, countrycd, sender_name,
+                   recipient_name, recipient_phone, recipient_email, recipient_zip,
+                   recipient_addr1, recipient_addr2, recipient_addr3,
+                   totweight, boxlength, boxwidth, boxheight, item_list,
+                   tracking_no, req_no, receive_seq, ems_fee, post_office,
+                   status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
+                   apply_snapshot
+            FROM overseas_shipping_requests
+            WHERE id = ?
+            """,
+            (shipment_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="접수 내역을 찾을 수 없습니다.")
+    snapshot_raw = row[-1]
+    data = _row_to_dict(row[:-1])
+    snapshot: dict[str, Any] | None = None
+    if snapshot_raw:
+        try:
+            parsed = json.loads(snapshot_raw)
+            if isinstance(parsed, dict):
+                snapshot = parsed
+        except json.JSONDecodeError:
+            snapshot = None
+    label = build_shipment_label(data, snapshot=snapshot)
+    if (format or "json").lower() == "html":
+        return HTMLResponse(render_label_html(label))
+    return {"ok": True, "label": label}
 
 
 @router.post("")

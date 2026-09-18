@@ -149,6 +149,7 @@ export default function OverseasShippingPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [printId, setPrintId] = useState<number | null>(null);
   const [liveReady, setLiveReady] = useState(false);
   const [defaultSender, setDefaultSender] = useState('스프링풀필먼트');
   const [senderAddr, setSenderAddr] = useState('');
@@ -541,6 +542,7 @@ export default function OverseasShippingPage() {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    setPrintId(null);
     try {
       const previewRes = await previewOverseasShipping(token, form);
       const p = previewRes.preview;
@@ -557,6 +559,7 @@ export default function OverseasShippingPage() {
       );
       if (!ok) return;
       const result = await createOverseasShipping(token, form);
+      if (result.id) setPrintId(result.id);
       if (result.duplicate_guard) {
         setSuccess(`오늘 같은 수취인으로 이미 접수된 건이 있습니다. 등기번호 ${result.tracking_no}`);
       } else {
@@ -591,6 +594,13 @@ export default function OverseasShippingPage() {
 
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
+      {printId && (
+        <p style={{ margin: '0 0 1rem' }}>
+          <a href={`/overseas-print/${printId}`} className="btn btn-primary" target="_blank" rel="noreferrer">
+            출력서류 인쇄
+          </a>
+        </p>
+      )}
       {suggestion && (
         <AddressSuggestionDialog
           original={suggestion.original}

@@ -20,6 +20,7 @@ from backend.app.api.overseas_shipping import (
     list_saved_overseas_hs,
     list_saved_overseas_senders,
     overseas_item_categories,
+    overseas_label,
     overseas_meta,
     overseas_nations,
     preview_overseas,
@@ -477,3 +478,112 @@ def test_saved_sender_and_hs_reuse(isolated_runtime):
     assert list_saved_overseas_hs(token, q="610991")["items"][0]["hs_code"] == "610991"
     assert delete_saved_overseas_hs(hs["id"], token)["success"] is True
     assert delete_saved_overseas_sender(sender["id"], token)["success"] is True
+
+
+def test_label_from_saved_shipment_not_epost_pdf(isolated_runtime):
+    from fastapi.responses import HTMLResponse
+
+    from backend.app.services.ems.label import build_shipment_label
+
+    token = _seed_user(isolated_runtime["db"])
+    created = create_overseas(_req(confirm=True, receivetelno="+819099900088"), token)
+    body = overseas_label(created["id"], token)
+    label = body["label"]
+    assert label["source"] == "internal"
+    assert label["regino"] == created["tracking_no"]
+    assert label["sender"]["name"] == "스프링풀필먼트"
+    assert label["recipient"]["name"] == "Hong Gildong"
+    assert label["items"][0]["hs_code"] == "610910"
+    assert label["customs_value_usd"] == 50.0
+    assert "custno" not in label
+    assert "apprno" not in json.dumps(label)
+    assert "quickchart.io/barcode" in label["barcode_url"]
+
+    html = overseas_label(created["id"], token, format="html")
+    assert isinstance(html, HTMLResponse)
+    text = html.body.decode("utf-8")
+    assert "Customs Declaration (CN22)" in text
+    assert created["tracking_no"] in text
+    assert "Clothing" in text
+
+    built = build_shipment_label(
+        {
+            "id": 1,
+            "order_no": "TIL-1",
+            "shipping_method": "KPACKET",
+            "countrycd": "TW",
+            "sender_name": "Spring",
+            "recipient_name": "Chen",
+            "recipient_addr3": "1 Main St",
+            "tracking_no": "LK123456789KR",
+            "is_test": False,
+            "items": [{"name_en": "Shoes", "quantity": 1, "unit_price_usd": 12, "hs_code": "6403"}],
+        }
+    )
+    assert built["service_label"] == "K-PACKET"
+    assert built["ems_applied"] is True
+
+    try:
+        overseas_label(created["id"], "bad-token")
+        raise AssertionError("label requires login")
+    except HTTPException as exc:
+        assert exc.status_code == 401
+
+    try:
+        overseas_label(9_999_999, token)
+        raise AssertionError("missing shipment should 404")
+    except HTTPException as exc:
+        assert exc.status_code == 404
+
+
+def test_label_html_escapes_and_prints_canceled(isolated_runtime):
+    from fastapi.responses import HTMLResponse
+
+    from backend.app.services.ems.label import build_shipment_label, render_label_html
+
+    token = _seed_user(isolated_runtime["db"])
+    created = create_overseas(
+        _req(
+            confirm=True,
+            receivetelno="+819099900099",
+            receivename="Hong<script>",
+            items=[
+                {
+                    "name_en": 'Shirt "A"',
+                    "quantity": 1,
+                    "unit_price_usd": 10,
+                    "hs_code": "610910",
+                    "origin_country": "KR",
+                }
+            ],
+        ),
+        token,
+    )
+    html = overseas_label(created["id"], token, format="html")
+    assert isinstance(html, HTMLResponse)
+    text = html.body.decode("utf-8")
+    assert "<script>" not in text
+    assert "Hong&lt;script&gt;" in text
+    assert "Shirt &quot;A&quot;" in text
+    assert html.media_type.startswith("text/html")
+
+    cancel_overseas(created["id"], token, confirm=True)
+    canceled_html = overseas_label(created["id"], token, format="html")
+    assert "취소된 접수" in canceled_html.body.decode("utf-8")
+
+    escaped = render_label_html(
+        build_shipment_label(
+            {
+                "order_no": "TIL-XSS",
+                "shipping_method": "EMS",
+                "countrycd": "JP",
+                "recipient_name": "<b>x</b>",
+                "recipient_addr3": "<img>",
+                "tracking_no": "EG000000001KR",
+                "items": [{"name_en": "<svg>", "quantity": 1, "unit_price_usd": 1}],
+            }
+        )
+    )
+    assert "<svg>" not in escaped
+    assert "&lt;svg&gt;" in escaped
+    assert "&lt;b&gt;x&lt;/b&gt;" in escaped

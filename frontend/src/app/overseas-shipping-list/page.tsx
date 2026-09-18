@@ -119,9 +119,12 @@ export default function OverseasShippingListPage() {
                     <td>{it.ems_fee ? `${Number(it.ems_fee).toLocaleString()}원` : '-'}</td>
                     <td>{it.status === 'canceled' ? '취소' : it.is_test ? '테스트' : '접수'}</td>
                     <td>{it.created_by}</td>
-                    <td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <a href={`/overseas-print/${it.id}`} className="btn btn-secondary" target="_blank" rel="noreferrer">
+                        출력
+                      </a>
                       {it.status !== 'canceled' && (
-                        <button type="button" className="btn btn-secondary" onClick={() => handleCancel(it)}>
+                        <button type="button" className="btn btn-secondary" style={{ marginLeft: '0.35rem' }} onClick={() => handleCancel(it)}>
                           취소
                         </button>
                       )}

@@ -227,6 +227,8 @@ get_res_info(order_no, req_ymd, req_type="2")
   → 품목 한글/영문/HS 검색으로 인보이스·HS코드 완성
   → POST /overseas-shipping/preview      확인 전 DB·우체국 미기록
   → 확인 후 POST /overseas-shipping      eship.epost.go.kr 즉시 접수
+  → GET /overseas-shipping/{id}/label    CN22 출력서류 (JSON/HTML)
+  → 화면 /overseas-print/{id} 에서 인쇄
   → 목록에서 확인 후 취소
 ```
 
@@ -259,7 +261,10 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `POST` | `/overseas-shipping/preview` | 확인용 미리보기 (미기록) |
 | `GET` | `/overseas-shipping` | 접수 목록 |
 | `POST` | `/overseas-shipping` | 확인 후 접수 |
+| `GET` | `/overseas-shipping/{id}/label` | 출력서류 CN22 (JSON, `format=html` 이면 인쇄 HTML) |
 | `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |
+
+우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, tillion이 CN22 형식 출력서류를 만들어 인쇄한다. 화면은 `/overseas-print/{id}` 이고, 접수 직후·접수목록의 **출력** 버튼으로 연다.
 
 ### 환경변수
 

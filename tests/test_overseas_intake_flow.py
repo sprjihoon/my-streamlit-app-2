@@ -227,6 +227,17 @@ def test_staff_intake_flow_matches_overseas_shipping_page(isolated_runtime):
     assert "apprno" not in snap
     assert snap["sender"] == "Spring Shop JP"
 
+    label_json = client.get(f"/overseas-shipping/{row['id']}/label", params={"token": token})
+    assert label_json.status_code == 200
+    label = label_json.json()["label"]
+    assert label["source"] == "internal"
+    assert label["regino"] == created_body["tracking_no"]
+    assert label["sender"]["name"] == "Spring Shop JP"
+    assert "CN22" in client.get(
+        f"/overseas-shipping/{row['id']}/label",
+        params={"token": token, "format": "html"},
+    ).text
+
     book = client.get("/overseas-shipping/saved-addresses", params={"token": token})
     assert book.json()["items"][0]["label"] == "시부야기본"
     assert book.json()["items"][0]["is_default"] is True
