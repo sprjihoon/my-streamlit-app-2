@@ -38,6 +38,7 @@ from backend.app.services.ems.fields import (
     validate_apply_input,
     validate_countrycd,
 )
+from backend.app.services.ems.duty_deposit import calculate_duty_deposit
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
 from backend.app.services.ems.label import build_shipment_label, render_label_html
@@ -655,6 +656,15 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
         "sender_name": sender["name"],
         "sender_addr": f"{sender['addr1']}, {sender['addr2']}, {sender['addr3']} {sender['zipcode']}",
         "expected_fee": fee,
+        "duty": calculate_duty_deposit(
+            country_code=validated["countrycd"],
+            customs_value_usd=sum(
+                float(i.get("unit_price_usd") or 0) * int(i.get("quantity") or 1)
+                for i in (validated.get("items") or [])
+            ),
+            duty_prepaid_requested=True,
+            shipping_method=method["code"],
+        ),
         "is_test": is_test,
         "notes": validated.get("notes") or "",
     }
@@ -763,8 +773,9 @@ def overseas_quote(
     boxlength: int = 0,
     boxwidth: int = 0,
     boxheight: int = 0,
+    customs_value_usd: float = 0,
 ):
-    """우체국 예상요금. 결제가 아니라 후납 참고 금액."""
+    """우체국 예상요금 + 미국/영국 DDP. 결제가 아니라 후납 참고 금액."""
     _get_user(token)
     try:
         method = method_of(shipping_method)
@@ -774,6 +785,12 @@ def overseas_quote(
     if totweight < 1:
         raise HTTPException(status_code=400, detail="중량(g)을 입력해주세요.")
     live = has_ems_credentials()
+    duty = calculate_duty_deposit(
+        country_code=country,
+        customs_value_usd=customs_value_usd,
+        duty_prepaid_requested=True,
+        shipping_method=method["code"],
+    )
     payload = {
         "ok": False,
         "totalFee": None,
@@ -784,6 +801,8 @@ def overseas_quote(
         "countrycd": country,
         "totweight": totweight,
         "error": None,
+        "duty": duty,
+        "payableTotal": None,
     }
     try:
         if live:
@@ -801,6 +820,9 @@ def overseas_quote(
         else:
             payload["ok"] = True
             payload["totalFee"] = mock_quote_fee(totweight, method["premiumcd"])
+        shipping = int(payload["totalFee"] or 0)
+        ddp = int(duty.get("depositKrw") or 0) if duty.get("dutyPrepaid") else 0
+        payload["payableTotal"] = shipping + ddp
         return payload
     except (EmsApiError, ValueError) as exc:
         payload["error"] = str(exc)

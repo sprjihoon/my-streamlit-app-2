@@ -1829,8 +1829,26 @@ export interface OverseasShippingPreview {
   sender_name: string;
   sender_addr: string;
   expected_fee: number | null;
+  duty?: OverseasDutyQuote;
   is_test: boolean;
   notes: string;
+}
+
+export interface OverseasDutyQuote {
+  eligible: boolean;
+  dutyPrepaid: boolean;
+  ddpPath: 'postal' | 'premium' | null;
+  estimateUsd: number;
+  depositKrw: number;
+  breakdown: {
+    dutyUsd: number;
+    serviceFeeUsd: number;
+    bufferUsd: number;
+    totalUsd: number;
+  } | null;
+  ineligibleReason: string | null;
+  usdKrwRate: number;
+  customsValueUsd: number;
 }
 
 function overseasQuery(token: string, extra = '') {
@@ -1865,6 +1883,7 @@ export async function quoteOverseasShipping(
     boxlength: number;
     boxwidth: number;
     boxheight: number;
+    customs_value_usd?: number;
   }
 ) {
   const extra =
@@ -1873,7 +1892,8 @@ export async function quoteOverseasShipping(
     `&totweight=${encodeURIComponent(String(payload.totweight))}` +
     `&boxlength=${encodeURIComponent(String(payload.boxlength || 0))}` +
     `&boxwidth=${encodeURIComponent(String(payload.boxwidth || 0))}` +
-    `&boxheight=${encodeURIComponent(String(payload.boxheight || 0))}`;
+    `&boxheight=${encodeURIComponent(String(payload.boxheight || 0))}` +
+    `&customs_value_usd=${encodeURIComponent(String(payload.customs_value_usd || 0))}`;
   return fetchApi<{
     ok: boolean;
     totalFee: number | null;
@@ -1884,6 +1904,8 @@ export async function quoteOverseasShipping(
     countrycd: string;
     totweight: number;
     error: string | null;
+    duty?: OverseasDutyQuote;
+    payableTotal?: number | null;
   }>(`/overseas-shipping/quote${overseasQuery(token, extra)}`);
 }
 

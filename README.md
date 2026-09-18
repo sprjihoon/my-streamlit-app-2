@@ -238,6 +238,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
 - 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다.
 - 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 우체국 API 예상요금을 바로 보여 준다.
+- 미국·영국은 Infront와 같은 DDP(관세 선납) 산출을 함께 보여 준다. 미국 신고가액 USD 800 초과는 EMS 프리미엄(FedEx DDP)만 선납 가능.
 - 국가 목록은 배송방법(`premiumcd` 31/32/14)마다 `api.RetrieveNationListRequest.ems` 값을 받는다. K-Packet은 EMS보다 발송국이 적다.
 
 ### 구글 주소 · 주소록 · HS코드
@@ -256,7 +257,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 |---|---|---|
 | `GET` | `/overseas-shipping/meta` | 실접수 가능 여부, 발송인 기본값, 배송방법, HS 카탈로그 |
 | `GET` | `/overseas-shipping/nations` | 배송방법별 발송 국가 (우체국 API, `premiumcd`) |
-| `GET` | `/overseas-shipping/quote` | 우체국 예상요금 (후납 참고, 결제 아님) |
+| `GET` | `/overseas-shipping/quote` | 우체국 예상요금 + 미국/영국 DDP (후납 참고, 결제 아님) |
 | `GET` | `/overseas-shipping/item-categories` | HS/품목 검색 (저장 + 카탈로그 + HS 6자리 목록) |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-addresses` | 해외 수취인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-senders` | 발송인 목록 |
@@ -280,6 +281,7 @@ Railway (git에 넣지 않음):
 | `EMS_CUSTOMER_NO` | 고객번호 |
 | `EMS_APPROVAL_NO` | 승인번호 |
 | `EMS_SENDER_NAME` | 기본 발송인. 화면에서 건별로 수정 가능 |
+| `EMS_USD_KRW_RATE` | DDP 환산 환율. 없으면 1400 |
 | `EPOST_RELAY_URL` / `EPOST_RELAY_SECRET` | Seoul ICN 중계 (`eship.epost.go.kr`) |
 
 Vercel:

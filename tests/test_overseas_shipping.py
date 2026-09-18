@@ -307,6 +307,57 @@ def test_quote_mock_without_ems_keys(isolated_runtime):
     assert quoted["live"] is False
     assert quoted["totalFee"] and quoted["totalFee"] > 0
     assert quoted["shipping_method_name"] == "K-Packet"
+    assert quoted["duty"]["dutyPrepaid"] is False
+
+
+def test_us_ddp_quote_and_infront_formula(isolated_runtime):
+    from backend.app.services.ems.duty_deposit import calculate_duty_deposit, requires_us_ems_premium
+
+    assert requires_us_ems_premium("US", 801) is True
+    assert requires_us_ems_premium("US", 800) is False
+    postal = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=150,
+        shipping_method="EMS",
+        usd_krw=1400,
+    )
+    assert postal["dutyPrepaid"] is True
+    assert postal["ddpPath"] == "postal"
+    assert postal["depositKrw"] >= 15_000
+    over = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=850,
+        shipping_method="EMS",
+        usd_krw=1400,
+    )
+    assert over["eligible"] is False
+    assert "EMS 프리미엄" in (over["ineligibleReason"] or "")
+    premium = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=850,
+        shipping_method="EMS_PREMIUM",
+        usd_krw=1400,
+    )
+    assert premium["ddpPath"] == "premium"
+    assert premium["depositKrw"] >= 25_000
+    gb = calculate_duty_deposit(country_code="GB", customs_value_usd=100, usd_krw=1400)
+    assert gb["dutyPrepaid"] is True
+    assert gb["depositKrw"] >= 10_000
+
+    token = _seed_user(isolated_runtime["db"])
+    quoted = overseas_quote(
+        token,
+        shipping_method="EMS",
+        countrycd="US",
+        totweight=500,
+        boxlength=20,
+        boxwidth=20,
+        boxheight=10,
+        customs_value_usd=150,
+    )
+    assert quoted["ok"] is True
+    assert quoted["duty"]["ddpPath"] == "postal"
+    assert quoted["payableTotal"] == quoted["totalFee"] + quoted["duty"]["depositKrw"]
 
 
 def test_mock_apply_prefixes():
