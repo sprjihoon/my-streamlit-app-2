@@ -1749,6 +1749,7 @@ export interface OverseasInvoiceItem {
 
 export interface OverseasShippingPayload {
   shipping_method: 'EMS' | 'EMS_PREMIUM' | 'KPACKET';
+  contents_type?: 'parcel' | 'document';
   countrycd: string;
   sender_name?: string;
   sender_zipcode?: string;
@@ -1784,6 +1785,8 @@ export interface OverseasShippingItem {
   order_no: string;
   shipping_method: string;
   premiumcd: string;
+  contents_type?: string;
+  contents_label?: string;
   countrycd: string;
   sender_name?: string;
   recipient_name: string;
@@ -1815,6 +1818,9 @@ export interface OverseasShippingItem {
 export interface OverseasShippingPreview {
   shipping_method: string;
   shipping_method_name: string;
+  contents_type?: string;
+  contents_label?: string;
+  em_ee?: string;
   countrycd: string;
   recipient_name: string;
   recipient_phone: string;
@@ -1874,10 +1880,19 @@ export async function listOverseasNations(token: string, premiumcd: string) {
   }>(`/overseas-shipping/nations${overseasQuery(token, `&premiumcd=${encodeURIComponent(premiumcd)}`)}`);
 }
 
+export type OverseasQuotePart = {
+  ok: boolean;
+  totalFee: number | null;
+  totweight: number;
+  em_ee: string;
+  error: string | null;
+};
+
 export async function quoteOverseasShipping(
   token: string,
   payload: {
     shipping_method: OverseasShippingPayload['shipping_method'];
+    contents_type?: 'parcel' | 'document';
     countrycd: string;
     totweight: number;
     boxlength: number;
@@ -1888,6 +1903,7 @@ export async function quoteOverseasShipping(
 ) {
   const extra =
     `&shipping_method=${encodeURIComponent(payload.shipping_method)}` +
+    `&contents_type=${encodeURIComponent(payload.contents_type || 'parcel')}` +
     `&countrycd=${encodeURIComponent(payload.countrycd)}` +
     `&totweight=${encodeURIComponent(String(payload.totweight))}` +
     `&boxlength=${encodeURIComponent(String(payload.boxlength || 0))}` +
@@ -1901,11 +1917,16 @@ export async function quoteOverseasShipping(
     source: string;
     shipping_method: string;
     shipping_method_name: string;
+    contents_type: 'parcel' | 'document';
+    contents_label: string;
+    em_ee: string;
     countrycd: string;
     totweight: number;
     error: string | null;
     duty?: OverseasDutyQuote;
     payableTotal?: number | null;
+    parcel?: OverseasQuotePart;
+    document?: OverseasQuotePart | null;
   }>(`/overseas-shipping/quote${overseasQuery(token, extra)}`);
 }
 
@@ -1949,6 +1970,9 @@ export interface OverseasLabelData {
   order_no: string;
   shipping_method: string;
   service_label: string;
+  contents_type?: string;
+  contents_label?: string;
+  contents_gubun?: string;
   regino: string;
   ems_applied: boolean;
   is_test: boolean;

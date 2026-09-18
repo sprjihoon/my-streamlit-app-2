@@ -112,7 +112,7 @@ export default function OverseasShippingListPage() {
                 {items.map((it) => (
                   <tr key={it.id}>
                     <td>{(it.created_at || '').replace('T', ' ').slice(0, 16)}</td>
-                    <td>{METHOD_LABEL[it.shipping_method] || it.shipping_method}</td>
+                    <td>{METHOD_LABEL[it.shipping_method] || it.shipping_method}{it.contents_label ? ` · ${it.contents_label}` : ''}</td>
                     <td>{it.countrycd}</td>
                     <td>{it.recipient_name}</td>
                     <td style={{ fontFamily: 'monospace' }}>{it.tracking_no || '-'}</td>

@@ -136,6 +136,20 @@ def test_staff_intake_flow_matches_overseas_shipping_page(isolated_runtime):
     assert quote.status_code == 200
     assert quote.json()["ok"] is True
     assert quote.json()["totalFee"] > 0
+    assert quote.json()["parcel"]["totalFee"] != quote.json()["document"]["totalFee"]
+    doc_quote = client.get(
+        "/overseas-shipping/quote",
+        params={
+            "token": token,
+            "shipping_method": "EMS",
+            "contents_type": "document",
+            "countrycd": "JP",
+            "totweight": 500,
+        },
+    )
+    assert doc_quote.status_code == 200
+    assert doc_quote.json()["contents_label"] == "서류"
+    assert doc_quote.json()["totalFee"] == quote.json()["document"]["totalFee"]
 
     # 3) HS코드 완성 (화면 품목 검색)
     hs = client.get("/overseas-shipping/item-categories", params={"token": token, "q": "610910"})

@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from backend.app.services.ems.dimension_limits import (
+    snap_doc_weight_g,
     validate_shipping_dimensions,
     validate_weight,
 )
@@ -201,10 +202,36 @@ def method_of(code: str) -> dict[str, str]:
     method = SHIPPING_METHOD_MAP.get((code or "").strip().upper())
     if not method:
         raise ValueError(f"지원하지 않는 배송방법: {code}")
+    return dict(method)
+
+
+def normalize_contents_type(raw: Any) -> str:
+    text = str(raw or "parcel").strip().lower()
+    if text in {"document", "doc", "ee", "서류", "documents"}:
+        return "document"
+    return "parcel"
+
+
+def contents_label(contents_type: str) -> str:
+    return "서류" if contents_type == "document" else "화물"
+
+
+def resolve_method(shipping_method: str, contents_type: Any = None) -> dict[str, str]:
+    method = method_of(shipping_method)
+    kind = normalize_contents_type(contents_type)
+    if method["premiumcd"] == "14" and kind == "document":
+        raise ValueError("K-Packet은 서류 접수가 불가합니다. 화물로 접수하세요.")
+    if kind == "document":
+        method["em_ee"] = "ee"
     return method
 
 
-def serialize_invoice_items(items: list[dict[str, Any]], totweight_g: int) -> dict[str, str]:
+def serialize_invoice_items(
+    items: list[dict[str, Any]],
+    totweight_g: int,
+    *,
+    contents_type: str = "parcel",
+) -> dict[str, str]:
     if not items:
         raise ValueError("인보이스 물품을 1개 이상 입력해주세요.")
     cleaned: list[dict[str, Any]] = []
@@ -239,8 +266,9 @@ def serialize_invoice_items(items: list[dict[str, Any]], totweight_g: int) -> di
         for i in range(len(cleaned))
     ]
     weights = [max(1, w) for w in weights]
+    gubun = "Document" if normalize_contents_type(contents_type) == "document" else "Merchandise"
     return {
-        "EM_gubun": ";".join(["Merchandise"] * len(cleaned)),
+        "EM_gubun": ";".join([gubun] * len(cleaned)),
         "contents": ";".join(it["name_en"] for it in cleaned),
         "number": ";".join(str(it["quantity"]) for it in cleaned),
         "weight": ";".join(str(w) for w in weights),
@@ -356,20 +384,27 @@ def validate_countrycd(code: str) -> str:
 
 
 def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
-    method = method_of(str(data.get("shipping_method") or "EMS"))
+    kind = normalize_contents_type(data.get("contents_type"))
+    method = resolve_method(str(data.get("shipping_method") or "EMS"), kind)
     countrycd = validate_countrycd(str(data.get("countrycd") or ""))
     totweight = int(data.get("totweight") or 0)
-    boxlength = float(data.get("boxlength") or 0)
-    boxwidth = float(data.get("boxwidth") or 0)
-    boxheight = float(data.get("boxheight") or 0)
+    is_doc = method["em_ee"] == "ee"
     weight_err = validate_weight(method["premiumcd"], method["em_ee"], totweight)
     if weight_err:
         raise ValueError(weight_err)
-    dim_err = validate_shipping_dimensions(
-        method["premiumcd"], method["em_ee"], countrycd, boxlength, boxwidth, boxheight
-    )
-    if dim_err:
-        raise ValueError(dim_err)
+    if is_doc:
+        totweight = snap_doc_weight_g(totweight)
+    boxlength = float(data.get("boxlength") or 0)
+    boxwidth = float(data.get("boxwidth") or 0)
+    boxheight = float(data.get("boxheight") or 0)
+    if not is_doc:
+        dim_err = validate_shipping_dimensions(
+            method["premiumcd"], method["em_ee"], countrycd, boxlength, boxwidth, boxheight
+        )
+        if dim_err:
+            raise ValueError(dim_err)
+        if boxlength < 1 or boxwidth < 1 or boxheight < 1:
+            raise ValueError("화물(비서류)은 박스 크기(가로·세로·높이)를 입력해주세요.")
 
     receivename = validate_recipient_name(str(data.get("receivename") or ""))
     addr1 = (str(data.get("receiveaddr1") or "")).strip()
@@ -380,15 +415,19 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
     if not addr1 and not addr2:
         raise ValueError("수취인 주/도 또는 시/군 주소를 입력해주세요.")
 
-    invoice = serialize_invoice_items(list(data.get("items") or []), totweight)
+    invoice = serialize_invoice_items(
+        list(data.get("items") or []), totweight, contents_type=kind
+    )
     sender = apply_sender_override(resolve_sender(), data)
     return {
         "method": method,
+        "contents_type": kind,
+        "contents_label": contents_label(kind),
         "countrycd": countrycd,
         "totweight": totweight,
-        "boxlength": int(boxlength),
-        "boxwidth": int(boxwidth),
-        "boxheight": int(boxheight),
+        "boxlength": 0 if is_doc else int(boxlength),
+        "boxwidth": 0 if is_doc else int(boxwidth),
+        "boxheight": 0 if is_doc else int(boxheight),
         "receivename": receivename,
         "receivezipcode": str(data.get("receivezipcode") or "").strip(),
         "receiveaddr1": addr1,

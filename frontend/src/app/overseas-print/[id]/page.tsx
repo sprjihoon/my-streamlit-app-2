@@ -193,9 +193,12 @@ export default function OverseasPrintPage() {
             </div>
             <div style={{ fontSize: '9pt', color: '#555' }}>
               <div>{label.ems_fee != null ? `예상 우편요금: ₩${Number(label.ems_fee).toLocaleString()}` : '우편요금 / Postage'}</div>
-              <div style={{ marginTop: 4 }}>우편물 종류: {label.service_label}</div>
-              <div style={{ marginTop: 4 }}>중량: {label.totweight}g · {label.boxlength}×{label.boxwidth}×{label.boxheight}cm</div>
-              <div style={{ marginTop: 4 }}>내용품유형: Merchandise</div>
+              <div style={{ marginTop: 4 }}>우편물 종류: {label.service_label}{label.contents_label ? ` ${label.contents_label}` : ''}</div>
+              <div style={{ marginTop: 4 }}>
+                중량: {label.totweight}g
+                {label.contents_type === 'document' ? '' : ` · ${label.boxlength}×${label.boxwidth}×${label.boxheight}cm`}
+              </div>
+              <div style={{ marginTop: 4 }}>내용품유형: {label.contents_gubun || 'Merchandise'}</div>
             </div>
           </div>
           <div style={{ margin: '10px 14px 14px', fontSize: '7.5pt', color: '#888', lineHeight: 1.4, borderTop: '1px solid #eee', paddingTop: 8 }}>

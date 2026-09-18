@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 import httpx
 
 from backend.app.services.ems.dimension_limits import (
+    snap_doc_weight_g,
     validate_shipping_dimensions,
     validate_weight,
 )
@@ -183,10 +184,12 @@ def get_shipping_quote(
     boxwidth: int | None = None,
     boxheight: int | None = None,
 ) -> dict[str, int]:
+    is_doc = em_ee == "ee"
     weight_err = validate_weight(premiumcd, em_ee, totweight)
     if weight_err:
         raise EmsApiError(weight_err)
-    if boxlength and boxwidth and boxheight:
+    quote_weight = snap_doc_weight_g(totweight) if is_doc else totweight
+    if not is_doc and boxlength and boxwidth and boxheight:
         dim_err = validate_shipping_dimensions(
             premiumcd, em_ee, countrycd, boxlength, boxwidth, boxheight
         )
@@ -196,16 +199,17 @@ def get_shipping_quote(
         "premiumcd": premiumcd,
         "em_ee": em_ee,
         "countrycd": countrycd,
-        "totweight": str(totweight),
+        "totweight": str(quote_weight),
         "boyn": "N",
         "boprc": "0",
     }
-    if boxlength:
-        params["boxlength"] = str(boxlength)
-    if boxwidth:
-        params["boxwidth"] = str(boxwidth)
-    if boxheight:
-        params["boxheight"] = str(boxheight)
+    if not is_doc:
+        if boxlength:
+            params["boxlength"] = str(boxlength)
+        if boxwidth:
+            params["boxwidth"] = str(boxwidth)
+        if boxheight:
+            params["boxheight"] = str(boxheight)
     apprno = _appr()
     if apprno:
         params["apprno"] = apprno
@@ -299,7 +303,13 @@ def cancel_ems(reqno: str, regino: str) -> dict[str, str]:
     }
 
 
-def mock_quote_fee(totweight: int, premiumcd: str) -> int:
+def mock_quote_fee(totweight: int, premiumcd: str, em_ee: str = "em") -> int:
+    is_doc = em_ee == "ee"
+    weight = snap_doc_weight_g(totweight) if is_doc else totweight
+    if is_doc:
+        base = 12000 if premiumcd == "31" else 20000
+        extra = max(0, (weight - 500) // 250) * 1500
+        return base + extra
     base = 18000 if premiumcd == "14" else 28000 if premiumcd == "31" else 42000
-    extra = max(0, (totweight - 500) // 500) * 2500
+    extra = max(0, (weight - 500) // 500) * 2500
     return base + extra

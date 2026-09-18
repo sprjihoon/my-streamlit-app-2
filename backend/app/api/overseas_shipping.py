@@ -29,15 +29,18 @@ from backend.app.services.ems.fields import (
     SHIPPING_METHODS,
     apply_sender_override,
     build_apply_params,
+    contents_label,
     env_clean,
     fallback_nations,
     format_sender_tel,
-    method_of,
+    normalize_contents_type,
+    resolve_method,
     resolve_sender,
     sort_nations,
     validate_apply_input,
     validate_countrycd,
 )
+from backend.app.services.ems.dimension_limits import snap_doc_weight_g, validate_weight
 from backend.app.services.ems.duty_deposit import calculate_duty_deposit
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
@@ -85,6 +88,7 @@ class InvoiceItem(BaseModel):
 
 class OverseasSubmitRequest(BaseModel):
     shipping_method: str = "EMS"
+    contents_type: str = "parcel"
     countrycd: str
     sender_name: str = ""
     sender_zipcode: str = ""
@@ -156,6 +160,7 @@ def ensure_overseas_tables() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_no TEXT NOT NULL,
                 shipping_method TEXT NOT NULL,
+                contents_type TEXT NOT NULL DEFAULT 'parcel',
                 premiumcd TEXT,
                 countrycd TEXT NOT NULL,
                 sender_name TEXT,
@@ -195,6 +200,12 @@ def ensure_overseas_tables() -> None:
             con.execute("SELECT sender_name FROM overseas_shipping_requests LIMIT 1")
         except Exception:
             con.execute("ALTER TABLE overseas_shipping_requests ADD COLUMN sender_name TEXT")
+        try:
+            con.execute("SELECT contents_type FROM overseas_shipping_requests LIMIT 1")
+        except Exception:
+            con.execute(
+                "ALTER TABLE overseas_shipping_requests ADD COLUMN contents_type TEXT DEFAULT 'parcel'"
+            )
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS overseas_saved_addresses (
@@ -269,6 +280,7 @@ def _http_error(exc: Exception, status: int = 400) -> HTTPException:
 def _req_dict(req: OverseasSubmitRequest) -> dict[str, Any]:
     return {
         "shipping_method": req.shipping_method,
+        "contents_type": req.contents_type,
         "countrycd": req.countrycd,
         "sender_name": req.sender_name,
         "sender_zipcode": req.sender_zipcode,
@@ -610,23 +622,66 @@ def _autosave_invoice_hs(nickname: str, items: list[dict[str, Any]]) -> None:
             pass
 
 
+def _quote_shipping(
+    premiumcd: str,
+    em_ee: str,
+    countrycd: str,
+    totweight: int,
+    *,
+    boxlength: int = 0,
+    boxwidth: int = 0,
+    boxheight: int = 0,
+    live: bool,
+) -> dict[str, Any]:
+    is_doc = em_ee == "ee"
+    quote_weight = snap_doc_weight_g(totweight) if is_doc else totweight
+    try:
+        if live:
+            quoted = get_shipping_quote(
+                premiumcd,
+                em_ee,
+                countrycd,
+                totweight,
+                boxlength=None if is_doc else (boxlength or None),
+                boxwidth=None if is_doc else (boxwidth or None),
+                boxheight=None if is_doc else (boxheight or None),
+            )
+            fee = int(quoted["totalFee"])
+        else:
+            weight_err = validate_weight(premiumcd, em_ee, totweight)
+            if weight_err:
+                raise ValueError(weight_err)
+            fee = mock_quote_fee(quote_weight, premiumcd, em_ee)
+        return {
+            "ok": True,
+            "totalFee": fee,
+            "totweight": quote_weight,
+            "em_ee": em_ee,
+            "error": None,
+        }
+    except (EmsApiError, ValueError) as exc:
+        return {
+            "ok": False,
+            "totalFee": None,
+            "totweight": quote_weight,
+            "em_ee": em_ee,
+            "error": str(exc),
+        }
+
+
 def _quote_fee(validated: dict[str, Any], *, live: bool) -> int | None:
     method = validated["method"]
-    if not live:
-        return mock_quote_fee(validated["totweight"], method["premiumcd"])
-    try:
-        quoted = get_shipping_quote(
-            method["premiumcd"],
-            method["em_ee"],
-            validated["countrycd"],
-            validated["totweight"],
-            boxlength=validated["boxlength"],
-            boxwidth=validated["boxwidth"],
-            boxheight=validated["boxheight"],
-        )
-        return int(quoted["totalFee"])
-    except Exception:
-        return None
+    quoted = _quote_shipping(
+        method["premiumcd"],
+        method["em_ee"],
+        validated["countrycd"],
+        validated["totweight"],
+        boxlength=validated["boxlength"],
+        boxwidth=validated["boxwidth"],
+        boxheight=validated["boxheight"],
+        live=live,
+    )
+    return int(quoted["totalFee"]) if quoted.get("ok") and quoted.get("totalFee") is not None else None
 
 
 def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | None) -> dict[str, Any]:
@@ -635,6 +690,11 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
     return {
         "shipping_method": method["code"],
         "shipping_method_name": method["name"],
+        "contents_type": validated.get("contents_type") or "parcel",
+        "contents_label": validated.get("contents_label") or contents_label(
+            validated.get("contents_type") or "parcel"
+        ),
+        "em_ee": method["em_ee"],
         "countrycd": validated["countrycd"],
         "sender_name": sender["name"],
         "recipient_name": validated["receivename"],
@@ -675,6 +735,7 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         "id",
         "order_no",
         "shipping_method",
+        "contents_type",
         "premiumcd",
         "countrycd",
         "sender_name",
@@ -705,6 +766,8 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     ]
     data = dict(zip(keys, row))
     data["is_test"] = bool(data["is_test"])
+    data["contents_type"] = data.get("contents_type") or "parcel"
+    data["contents_label"] = contents_label(str(data["contents_type"]))
     try:
         data["items"] = json.loads(data.pop("item_list") or "[]")
     except json.JSONDecodeError:
@@ -768,6 +831,7 @@ def overseas_nations(token: str, premiumcd: str = "31"):
 def overseas_quote(
     token: str,
     shipping_method: str = "EMS",
+    contents_type: str = "parcel",
     countrycd: str = "JP",
     totweight: int = 0,
     boxlength: int = 0,
@@ -777,9 +841,11 @@ def overseas_quote(
 ):
     """우체국 예상요금 + 미국/영국 DDP. 결제가 아니라 후납 참고 금액."""
     _get_user(token)
+    kind = normalize_contents_type(contents_type)
     try:
-        method = method_of(shipping_method)
+        parcel_method = resolve_method(shipping_method, "parcel")
         country = validate_countrycd(countrycd)
+        selected_method = resolve_method(shipping_method, kind)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if totweight < 1:
@@ -789,44 +855,48 @@ def overseas_quote(
         country_code=country,
         customs_value_usd=customs_value_usd,
         duty_prepaid_requested=True,
-        shipping_method=method["code"],
+        shipping_method=selected_method["code"],
     )
-    payload = {
-        "ok": False,
-        "totalFee": None,
+    parcel = _quote_shipping(
+        parcel_method["premiumcd"],
+        parcel_method["em_ee"],
+        country,
+        totweight,
+        boxlength=boxlength,
+        boxwidth=boxwidth,
+        boxheight=boxheight,
+        live=live,
+    )
+    document = None
+    if parcel_method["premiumcd"] != "14":
+        document = _quote_shipping(
+            selected_method["premiumcd"] if kind == "document" else parcel_method["premiumcd"],
+            "ee",
+            country,
+            totweight,
+            live=live,
+        )
+    selected = document if kind == "document" and document is not None else parcel
+    shipping = int(selected.get("totalFee") or 0) if selected.get("ok") else 0
+    ddp = int(duty.get("depositKrw") or 0) if duty.get("dutyPrepaid") else 0
+    return {
+        "ok": bool(selected.get("ok")),
+        "totalFee": selected.get("totalFee") if selected.get("ok") else None,
         "live": live,
         "source": "epost" if live else "mock",
-        "shipping_method": method["code"],
-        "shipping_method_name": method["name"],
+        "shipping_method": selected_method["code"],
+        "shipping_method_name": selected_method["name"],
+        "contents_type": kind,
+        "contents_label": contents_label(kind),
+        "em_ee": selected_method["em_ee"],
         "countrycd": country,
-        "totweight": totweight,
-        "error": None,
+        "totweight": selected.get("totweight") or totweight,
+        "error": selected.get("error"),
         "duty": duty,
-        "payableTotal": None,
+        "payableTotal": (shipping + ddp) if selected.get("ok") else None,
+        "parcel": parcel,
+        "document": document,
     }
-    try:
-        if live:
-            quoted = get_shipping_quote(
-                method["premiumcd"],
-                method["em_ee"],
-                country,
-                totweight,
-                boxlength=boxlength or None,
-                boxwidth=boxwidth or None,
-                boxheight=boxheight or None,
-            )
-            payload["ok"] = True
-            payload["totalFee"] = int(quoted["totalFee"])
-        else:
-            payload["ok"] = True
-            payload["totalFee"] = mock_quote_fee(totweight, method["premiumcd"])
-        shipping = int(payload["totalFee"] or 0)
-        ddp = int(duty.get("depositKrw") or 0) if duty.get("dutyPrepaid") else 0
-        payload["payableTotal"] = shipping + ddp
-        return payload
-    except (EmsApiError, ValueError) as exc:
-        payload["error"] = str(exc)
-        return payload
 
 
 @router.get("/item-categories")
@@ -1105,7 +1175,7 @@ def list_overseas(token: str, limit: int = 500):
     with get_connection() as con:
         rows = con.execute(
             """
-            SELECT id, order_no, shipping_method, premiumcd, countrycd, sender_name,
+            SELECT id, order_no, shipping_method, contents_type, premiumcd, countrycd, sender_name,
                    recipient_name, recipient_phone, recipient_email, recipient_zip,
                    recipient_addr1, recipient_addr2, recipient_addr3,
                    totweight, boxlength, boxwidth, boxheight, item_list,
@@ -1128,7 +1198,7 @@ def overseas_label(shipment_id: int, token: str, format: str = "json"):
     with get_connection() as con:
         row = con.execute(
             """
-            SELECT id, order_no, shipping_method, premiumcd, countrycd, sender_name,
+            SELECT id, order_no, shipping_method, contents_type, premiumcd, countrycd, sender_name,
                    recipient_name, recipient_phone, recipient_email, recipient_zip,
                    recipient_addr1, recipient_addr2, recipient_addr3,
                    totweight, boxlength, boxwidth, boxheight, item_list,
@@ -1220,17 +1290,18 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         cur = con.execute(
             """
             INSERT INTO overseas_shipping_requests (
-                order_no, shipping_method, premiumcd, countrycd, sender_name,
+                order_no, shipping_method, contents_type, premiumcd, countrycd, sender_name,
                 recipient_name, recipient_phone, recipient_email, recipient_zip,
                 recipient_addr1, recipient_addr2, recipient_addr3,
                 totweight, boxlength, boxwidth, boxheight, item_list,
                 tracking_no, req_no, receive_seq, ems_fee, post_office,
                 status, is_test, apply_snapshot, notes, created_by, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 order_no,
                 validated["method"]["code"],
+                validated.get("contents_type") or "parcel",
                 validated["method"]["premiumcd"],
                 validated["countrycd"],
                 validated["sender"]["name"],
@@ -1268,7 +1339,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         target_id=str(row_id),
         target_name=tracking or order_no,
         user_nickname=user["nickname"],
-        details=f"{validated['sender']['name']} → {validated['receivename']} / {validated['countrycd']} / {validated['method']['code']}",
+        details=f"{validated['sender']['name']} → {validated['receivename']} / {validated['countrycd']} / {validated['method']['code']} {validated.get('contents_label') or '화물'}",
     )
     if req.save_address:
         try:

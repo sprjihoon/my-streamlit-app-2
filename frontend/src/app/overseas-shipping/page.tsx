@@ -23,6 +23,7 @@ import {
   searchOverseasItemCategories,
   type OverseasDutyQuote,
   type OverseasInvoiceItem,
+  type OverseasQuotePart,
   type OverseasSavedAddress,
   type OverseasSavedHs,
   type OverseasSavedSender,
@@ -107,6 +108,7 @@ function newItem(): OverseasInvoiceItem {
 function emptyForm(senderName = '스프링풀필먼트'): OverseasShippingPayload {
   return {
     shipping_method: 'EMS',
+    contents_type: 'parcel',
     countrycd: 'JP',
     sender_name: senderName,
     sender_zipcode: '',
@@ -165,6 +167,8 @@ export default function OverseasShippingPage() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteDuty, setQuoteDuty] = useState<OverseasDutyQuote | null>(null);
   const [quoteTotal, setQuoteTotal] = useState<number | null>(null);
+  const [quoteParcel, setQuoteParcel] = useState<OverseasQuotePart | null>(null);
+  const [quoteDocument, setQuoteDocument] = useState<OverseasQuotePart | null>(null);
   const [savedAddresses, setSavedAddresses] = useState<OverseasSavedAddress[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState('');
   const [savedSenders, setSavedSenders] = useState<OverseasSavedSender[]>([]);
@@ -319,6 +323,8 @@ export default function OverseasShippingPage() {
         setQuoteError(null);
         setQuoteDuty(null);
         setQuoteTotal(null);
+        setQuoteParcel(null);
+        setQuoteDocument(null);
       }
       return;
     }
@@ -332,6 +338,7 @@ export default function OverseasShippingPage() {
       try {
         const res = await quoteOverseasShipping(token, {
           shipping_method: form.shipping_method,
+          contents_type: form.contents_type || 'parcel',
           countrycd: form.countrycd,
           totweight: form.totweight,
           boxlength: form.boxlength,
@@ -343,6 +350,8 @@ export default function OverseasShippingPage() {
         setQuoteLive(!!res.live);
         setQuoteDuty(res.duty || null);
         setQuoteTotal(res.payableTotal ?? null);
+        setQuoteParcel(res.parcel || null);
+        setQuoteDocument(res.document ?? null);
         if (res.ok && res.totalFee != null) {
           setQuoteFee(res.totalFee);
           setQuoteError(null);
@@ -355,6 +364,8 @@ export default function OverseasShippingPage() {
           setQuoteFee(null);
           setQuoteDuty(null);
           setQuoteTotal(null);
+          setQuoteParcel(null);
+          setQuoteDocument(null);
           setQuoteError(parseApiError(err));
         }
       } finally {
@@ -365,7 +376,7 @@ export default function OverseasShippingPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [token, loading, form.shipping_method, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight, form.items]);
+  }, [token, loading, form.shipping_method, form.contents_type, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight, form.items]);
 
   const triggerAddressValidation = useCallback(async (override?: {
     addr3?: string;
@@ -465,7 +476,11 @@ export default function OverseasShippingPage() {
   }
 
   async function changeMethod(code: OverseasShippingPayload['shipping_method']) {
-    setForm((prev) => ({ ...prev, shipping_method: code }));
+    setForm((prev) => ({
+      ...prev,
+      shipping_method: code,
+      contents_type: code === 'KPACKET' ? 'parcel' : (prev.contents_type || 'parcel'),
+    }));
     if (!token) return;
     try {
       const nationRes = await listOverseasNations(token, METHOD_PREMIUM[code]);
@@ -479,7 +494,12 @@ export default function OverseasShippingPage() {
       if (!ok && current && nextCountry && current !== nextCountry) {
         window.alert(`${current} 는 이 배송방법 발송 가능 국가가 아닙니다. ${nextCountry} 로 바꿉니다.`);
       }
-      setForm((prev) => ({ ...prev, shipping_method: code, countrycd: nextCountry }));
+      setForm((prev) => ({
+        ...prev,
+        shipping_method: code,
+        contents_type: code === 'KPACKET' ? 'parcel' : (prev.contents_type || 'parcel'),
+        countrycd: nextCountry,
+      }));
     } catch (err) {
       setError(parseApiError(err));
     }
@@ -649,10 +669,12 @@ export default function OverseasShippingPage() {
       const ok = window.confirm(
         `${mode} 할까요?\n\n` +
           `발송인: ${p.sender_name}\n` +
-          `배송: ${p.shipping_method_name} / ${p.countrycd}\n` +
+          `배송: ${p.shipping_method_name} ${p.contents_label || '화물'} / ${p.countrycd}\n` +
           `수취인: ${p.recipient_name}\n` +
           `주소: ${p.recipient_addr}\n` +
-          `무게: ${p.totweight}g · ${p.boxlength}×${p.boxwidth}×${p.boxheight}cm\n` +
+          (p.contents_type === 'document'
+            ? `무게: ${p.totweight}g (서류)\n`
+            : `무게: ${p.totweight}g · ${p.boxlength}×${p.boxwidth}×${p.boxheight}cm\n`) +
           `예상요금: ${feeText}${dutyLine}${totalLine}\n\n결제 없이 우체국에 바로 접수됩니다.`,
       );
       if (!ok) return;
@@ -692,6 +714,16 @@ export default function OverseasShippingPage() {
     : nations.filter((n) => n.nationcd === form.countrycd).concat(filteredNations);
 
   const methodName = methods.find((m) => m.code === form.shipping_method)?.name || form.shipping_method;
+  const canDocument = form.shipping_method !== 'KPACKET';
+  const isDocument = canDocument && form.contents_type === 'document';
+
+  function setContentsType(kind: 'parcel' | 'document') {
+    if (kind === 'document' && !canDocument) {
+      window.alert('K-Packet은 화물만 접수할 수 있습니다.');
+      return;
+    }
+    setForm((prev) => ({ ...prev, contents_type: kind }));
+  }
 
   return (
     <div>
@@ -909,56 +941,45 @@ export default function OverseasShippingPage() {
               {nationsFallback ? '우체국 국가목록을 받지 못해 임시 목록입니다.' : '우체국 API 발송가능국'} · {nations.length}개
             </span>
           </label>
-          <div style={{
-            gridColumn: '1 / -1',
-            marginTop: '0.25rem',
-            padding: '0.9rem 1rem',
-            border: '2px solid #cbd5e1',
-            borderRadius: 10,
-            background: quoteError ? '#fef2f2' : '#f8fafc',
-          }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
-              우체국 예상요금 + 관세 선납 (후납)
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>우편물 종류</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setContentsType('parcel')}
+                style={{
+                  flex: 1,
+                  border: !isDocument ? '2px solid #0f172a' : '1px solid var(--border)',
+                  background: !isDocument ? '#0f172a' : '#fff',
+                  color: !isDocument ? '#fff' : 'inherit',
+                  fontWeight: 700,
+                }}
+              >
+                화물 (비서류)
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setContentsType('document')}
+                disabled={!canDocument}
+                style={{
+                  flex: 1,
+                  border: isDocument ? '2px solid #0f172a' : '1px solid var(--border)',
+                  background: isDocument ? '#0f172a' : '#fff',
+                  color: isDocument ? '#fff' : 'inherit',
+                  fontWeight: 700,
+                  opacity: canDocument ? 1 : 0.45,
+                }}
+              >
+                서류
+              </button>
             </div>
-            {quoteLoading ? (
-              <div style={{ marginTop: 6, fontSize: '1rem' }}>요금 조회 중...</div>
-            ) : quoteError ? (
-              <div style={{ marginTop: 6, color: '#b91c1c', fontWeight: 600 }}>{quoteError}</div>
-            ) : quoteFee != null ? (
-              <>
-                <div style={{ marginTop: 6, fontSize: '0.9rem' }}>
-                  배송요금 <strong>{quoteFee.toLocaleString()}원</strong>
-                </div>
-                {quoteDuty?.dutyPrepaid && quoteDuty.depositKrw > 0 && (
-                  <div style={{ marginTop: 4, fontSize: '0.9rem', color: '#047857' }}>
-                    관세 선납(DDP) <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
-                    {quoteDuty.estimateUsd > 0 ? ` · USD ${quoteDuty.estimateUsd.toFixed(2)}` : ''}
-                    {quoteDuty.ddpPath === 'premium' ? ' · FedEx DDP' : quoteDuty.ddpPath === 'postal' ? ' · 우체국 postal DDP' : ''}
-                  </div>
-                )}
-                {quoteDuty?.ineligibleReason && (
-                  <div style={{ marginTop: 4, fontSize: '0.82rem', color: '#b45309', fontWeight: 600 }}>
-                    {quoteDuty.ineligibleReason}
-                  </div>
-                )}
-                {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
-                  <div className="text-muted" style={{ marginTop: 4, fontSize: '0.82rem' }}>
-                    인보이스 신고가액을 입력하면 미국·영국 관세 선납(DDP) 금액이 나옵니다.
-                  </div>
-                )}
-                <div style={{ marginTop: 6, fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
-                  {(quoteTotal ?? quoteFee).toLocaleString()}원
-                </div>
-                <div className="text-muted" style={{ fontSize: '0.8rem', marginTop: 2 }}>
-                  {quoteLive ? '우체국 API' : '테스트 요금'}
-                  {quoteDuty?.dutyPrepaid ? ' + DDP 예상' : ''}
-                  {' · '}{methodName} / {form.countrycd} · {form.totweight}g
-                  · 고객 결제 없음(후납)
-                </div>
-              </>
-            ) : (
-              <div className="text-muted" style={{ marginTop: 6 }}>중량을 입력하면 우체국 요금이 표시됩니다.</div>
-            )}
+            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              {canDocument
+                ? '화물·서류 요금이 다릅니다. 선택한 유형으로 접수됩니다.'
+                : 'K-Packet은 화물만 가능합니다.'}
+            </span>
           </div>
           <label>
             수취인 이름 (영문)
@@ -1079,7 +1100,19 @@ export default function OverseasShippingPage() {
               value={form.totweight}
               onChange={(e) => setForm((p) => ({ ...p, totweight: parseInt(e.target.value, 10) || 0 }))}
             />
+            {isDocument && (
+              <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+                서류 요금은 300g~2kg 구간으로 계산됩니다
+                {form.shipping_method === 'EMS_PREMIUM' ? ' · 프리미엄 서류 최대 500g' : ' · EMS 서류 최대 2kg'}
+              </span>
+            )}
           </label>
+          {isDocument ? (
+            <div className="text-muted" style={{ fontSize: '0.85rem', alignSelf: 'center' }}>
+              서류는 박스 크기·부피중량을 적용하지 않습니다.
+            </div>
+          ) : (
+            <>
           <label>
             가로 (cm)
             <input
@@ -1110,6 +1143,8 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, boxheight: parseInt(e.target.value, 10) || 0 }))}
             />
           </label>
+            </>
+          )}
           <label style={{ gridColumn: '1 / -1' }}>
             메모
             <input
@@ -1124,7 +1159,9 @@ export default function OverseasShippingPage() {
 
       <Card title="세관 인보이스">
         <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
-          한글·영문·HS 6자리로 검색하면 저장된 품목과 HS 목록이 나옵니다.{' '}
+          {isDocument
+            ? '서류도 내용품명(영문)을 입력하세요. 예: Documents. '
+            : '한글·영문·HS 6자리로 검색하면 저장된 품목과 HS 목록이 나옵니다. '}
           <a href="/overseas-hs-codes">HS코드 목록</a>
         </p>
         {form.items.map((item, i) => {
@@ -1248,6 +1285,120 @@ export default function OverseasShippingPage() {
         <button type="button" className="btn btn-secondary" onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
           품목 추가
         </button>
+      </Card>
+
+      <Card title="배송요금">
+        <div style={{
+          padding: '0.9rem 1rem',
+          border: '2px solid #cbd5e1',
+          borderRadius: 10,
+          background: quoteError && quoteFee == null ? '#fef2f2' : '#f8fafc',
+        }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
+            우체국 예상요금 + 관세 선납 (후납)
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: canDocument ? '1fr 1fr' : '1fr',
+            gap: 8,
+            marginTop: 8,
+          }}>
+            <button
+              type="button"
+              onClick={() => setContentsType('parcel')}
+              style={{
+                textAlign: 'left',
+                padding: '0.75rem 0.85rem',
+                border: !isDocument ? '2px solid #0f172a' : '1px solid #cbd5e1',
+                borderRadius: 8,
+                background: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b' }}>화물 (비서류)</div>
+              {quoteLoading && !quoteParcel ? (
+                <div style={{ marginTop: 4 }}>조회 중...</div>
+              ) : quoteParcel && !quoteParcel.ok ? (
+                <div style={{ marginTop: 4, color: '#b91c1c', fontWeight: 600, fontSize: '0.85rem' }}>{quoteParcel.error}</div>
+              ) : quoteParcel?.totalFee != null ? (
+                <div style={{ marginTop: 4, fontSize: '1.25rem', fontWeight: 800 }}>
+                  {quoteParcel.totalFee.toLocaleString()}원
+                </div>
+              ) : (
+                <div className="text-muted" style={{ marginTop: 4 }}>중량을 입력하세요</div>
+              )}
+            </button>
+            {canDocument && (
+              <button
+                type="button"
+                onClick={() => setContentsType('document')}
+                style={{
+                  textAlign: 'left',
+                  padding: '0.75rem 0.85rem',
+                  border: isDocument ? '2px solid #0f172a' : '1px solid #cbd5e1',
+                  borderRadius: 8,
+                  background: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b' }}>서류</div>
+                {quoteLoading && !quoteDocument ? (
+                  <div style={{ marginTop: 4 }}>조회 중...</div>
+                ) : quoteDocument && !quoteDocument.ok ? (
+                  <div style={{ marginTop: 4, color: '#b91c1c', fontWeight: 600, fontSize: '0.85rem' }}>{quoteDocument.error}</div>
+                ) : quoteDocument?.totalFee != null ? (
+                  <div style={{ marginTop: 4, fontSize: '1.25rem', fontWeight: 800 }}>
+                    {quoteDocument.totalFee.toLocaleString()}원
+                    {quoteDocument.totweight ? (
+                      <span className="text-muted" style={{ fontSize: '0.78rem', fontWeight: 600, marginLeft: 6 }}>
+                        {quoteDocument.totweight}g 구간
+                      </span>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="text-muted" style={{ marginTop: 4 }}>중량을 입력하세요</div>
+                )}
+              </button>
+            )}
+          </div>
+          {quoteLoading ? (
+            <div style={{ marginTop: 8, fontSize: '0.9rem' }}>요금 조회 중...</div>
+          ) : quoteError && quoteFee == null ? (
+            <div style={{ marginTop: 8, color: '#b91c1c', fontWeight: 600 }}>{quoteError}</div>
+          ) : quoteFee != null ? (
+            <>
+              {quoteDuty?.dutyPrepaid && quoteDuty.depositKrw > 0 && (
+                <div style={{ marginTop: 8, fontSize: '0.9rem', color: '#047857' }}>
+                  관세 선납(DDP) <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
+                  {quoteDuty.estimateUsd > 0 ? ` · USD ${quoteDuty.estimateUsd.toFixed(2)}` : ''}
+                  {quoteDuty.ddpPath === 'premium' ? ' · FedEx DDP' : quoteDuty.ddpPath === 'postal' ? ' · 우체국 postal DDP' : ''}
+                </div>
+              )}
+              {quoteDuty?.ineligibleReason && (
+                <div style={{ marginTop: 4, fontSize: '0.82rem', color: '#b45309', fontWeight: 600 }}>
+                  {quoteDuty.ineligibleReason}
+                </div>
+              )}
+              {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
+                <div className="text-muted" style={{ marginTop: 4, fontSize: '0.82rem' }}>
+                  인보이스 신고가액을 입력하면 미국·영국 관세 선납(DDP) 금액이 나옵니다.
+                </div>
+              )}
+              <div style={{ marginTop: 8, fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
+                {(quoteTotal ?? quoteFee).toLocaleString()}원
+              </div>
+              <div className="text-muted" style={{ fontSize: '0.8rem', marginTop: 2 }}>
+                {isDocument ? '서류' : '화물'} 선택
+                {' · '}{quoteLive ? '우체국 API' : '테스트 요금'}
+                {quoteDuty?.dutyPrepaid ? ' + DDP 예상' : ''}
+                {' · '}{methodName} / {form.countrycd} · {form.totweight}g
+                · 고객 결제 없음(후납)
+              </div>
+            </>
+          ) : (
+            <div className="text-muted" style={{ marginTop: 8 }}>중량을 입력하면 우체국 요금이 표시됩니다.</div>
+          )}
+        </div>
       </Card>
 
       <Card title="접수">

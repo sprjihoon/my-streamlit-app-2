@@ -65,6 +65,16 @@ KPACKET_DIMENSION_RULES = {
 
 EMS_PREMIUM_NONDOC_MAX_WEIGHT_G = 70_000
 EMS_PREMIUM_DOC_MAX_WEIGHT_G = 500
+EMS_DOC_WEIGHT_TIERS_G = (300, 500, 750, 1000, 1250, 1500, 1750, 2000)
+
+
+def snap_doc_weight_g(totweight_g: int) -> int:
+    """실중량을 EMS 서류 요금 구간으로 올림. Infront snapDocWeightG 와 동일."""
+    weight = int(totweight_g or 0)
+    for tier in EMS_DOC_WEIGHT_TIERS_G:
+        if weight <= tier:
+            return tier
+    return 2000
 
 
 def sort_box_dimensions(a: float, b: float, c: float) -> tuple[float, float, float]:

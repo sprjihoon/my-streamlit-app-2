@@ -96,6 +96,14 @@ def build_shipment_label(
     order_no = str(row.get("order_no") or "")
     countrycd = str(row.get("countrycd") or "").upper()
     fee_raw = str(row.get("ems_fee") or "").strip()
+    snap = snapshot or {}
+    em_gubun = str(snap.get("EM_gubun") or "").split(";")[0].strip()
+    contents_type = str(row.get("contents_type") or "").strip() or (
+        "document" if (em_gubun.lower() == "document" or snap.get("em_ee") == "ee") else "parcel"
+    )
+    if not em_gubun:
+        em_gubun = "Document" if contents_type == "document" else "Merchandise"
+    contents_label = "서류" if contents_type == "document" else "화물"
     try:
         fee = int(float(fee_raw)) if fee_raw else None
     except ValueError:
@@ -106,6 +114,9 @@ def build_shipment_label(
         "order_no": order_no,
         "shipping_method": method,
         "service_label": SERVICE_LABEL.get(method, method),
+        "contents_type": contents_type,
+        "contents_label": contents_label,
+        "contents_gubun": em_gubun,
         "regino": tracking or order_no,
         "ems_applied": bool(tracking) and not bool(row.get("is_test")),
         "is_test": bool(row.get("is_test")),
@@ -249,9 +260,9 @@ def render_label_html(data: dict[str, Any]) -> str:
       </div>
       <div style="font-size:9pt;color:#555">
         <div>{_esc(fee_html)}</div>
-        <div style="margin-top:4px">우편물 종류: {_esc(data['service_label'])}</div>
-        <div style="margin-top:4px">중량: {int(data.get('totweight') or 0)}g · {int(data.get('boxlength') or 0)}×{int(data.get('boxwidth') or 0)}×{int(data.get('boxheight') or 0)}cm</div>
-        <div style="margin-top:4px">내용품유형: Merchandise</div>
+        <div style="margin-top:4px">우편물 종류: {_esc(data['service_label'])} {_esc(data.get('contents_label') or '')}</div>
+        <div style="margin-top:4px">중량: {int(data.get('totweight') or 0)}g{'' if data.get('contents_type') == 'document' else f" · {int(data.get('boxlength') or 0)}×{int(data.get('boxwidth') or 0)}×{int(data.get('boxheight') or 0)}cm"}</div>
+        <div style="margin-top:4px">내용품유형: {_esc(data.get('contents_gubun') or 'Merchandise')}</div>
       </div>
     </div>
     <div style="margin:10px 14px 14px;font-size:7.5pt;color:#888;line-height:1.4;border-top:1px solid #eee;padding-top:8px">

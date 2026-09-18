@@ -127,6 +127,12 @@ def test_invoice_semicolon_and_english_name():
     assert packed["number"] == "1"
     assert packed["weight"] == "800"
     assert packed["EM_gubun"] == "Merchandise"
+    docs = serialize_invoice_items(
+        [{"name_en": "Documents", "quantity": 1, "unit_price_usd": 1, "hs_code": "", "origin_country": "KR"}],
+        400,
+        contents_type="document",
+    )
+    assert docs["EM_gubun"] == "Document"
     try:
         validate_apply_input(
             {
@@ -308,6 +314,45 @@ def test_quote_mock_without_ems_keys(isolated_runtime):
     assert quoted["totalFee"] and quoted["totalFee"] > 0
     assert quoted["shipping_method_name"] == "K-Packet"
     assert quoted["duty"]["dutyPrepaid"] is False
+    assert quoted["contents_label"] == "화물"
+    assert quoted["parcel"]["totalFee"] == quoted["totalFee"]
+    assert quoted["document"] is None
+
+
+def test_document_and_parcel_quotes_and_apply(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    parcel = overseas_quote(token, shipping_method="EMS", countrycd="JP", totweight=400, contents_type="parcel")
+    document = overseas_quote(token, shipping_method="EMS", countrycd="JP", totweight=400, contents_type="document")
+    assert parcel["ok"] is True and document["ok"] is True
+    assert parcel["contents_label"] == "화물"
+    assert document["contents_label"] == "서류"
+    assert parcel["parcel"]["totalFee"] != document["document"]["totalFee"]
+    assert document["totalFee"] == document["document"]["totalFee"]
+    assert document["totweight"] == 500
+
+    try:
+        overseas_quote(token, shipping_method="KPACKET", countrycd="JP", totweight=400, contents_type="document")
+        raise AssertionError("kpacket document should fail")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "서류" in str(exc.detail)
+
+    validated = validate_apply_input(_req(contents_type="document", totweight=400).model_dump())
+    assert validated["contents_type"] == "document"
+    assert validated["method"]["em_ee"] == "ee"
+    assert validated["totweight"] == 500
+    assert validated["boxlength"] == 0
+    assert validated["invoice"]["EM_gubun"] == "Document"
+
+    created = create_overseas(_req(confirm=True, contents_type="document", totweight=400, receivetelno="+819011122233"), token)
+    assert created["success"] is True
+    row = list_overseas(token)["items"][0]
+    assert row["contents_type"] == "document"
+    assert row["contents_label"] == "서류"
+    assert row["totweight"] == 500
+    label = overseas_label(created["id"], token)["label"]
+    assert label["contents_gubun"] == "Document"
+    assert label["contents_label"] == "서류"
 
 
 def test_us_ddp_quote_and_infront_formula(isolated_runtime):
