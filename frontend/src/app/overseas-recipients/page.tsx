@@ -139,7 +139,7 @@ export default function OverseasRecipientsPage() {
   if (loading) return <Loading text="수취인 목록 로딩 중..." />;
 
   return (
-    <div>
+    <div className="overseas-page">
       <PageHeader title="해외배송 수취인" subtitle="자주 보내는 해외 수취인 주소록을 저장하고 접수 화면에서 선택합니다." />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}

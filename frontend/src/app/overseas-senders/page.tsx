@@ -135,7 +135,7 @@ export default function OverseasSendersPage() {
   if (loading) return <Loading text="발송인 목록 로딩 중..." />;
 
   return (
-    <div>
+    <div className="overseas-page">
       <PageHeader title="해외배송 발송인" subtitle="자주 쓰는 발송인 이름·주소·전화를 저장하고 접수 화면에서 선택합니다." />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}

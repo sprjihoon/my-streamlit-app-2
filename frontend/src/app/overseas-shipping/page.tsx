@@ -65,8 +65,8 @@ function FormSection({
   return (
     <section
       style={{
-        marginTop: first ? 0 : '1.5rem',
-        paddingTop: first ? 0 : '1.35rem',
+        marginTop: first ? 0 : '1.1rem',
+        paddingTop: first ? 0 : '1rem',
         borderTop: first ? 'none' : '2px solid #cbd5e1',
       }}
     >
@@ -726,7 +726,7 @@ export default function OverseasShippingPage() {
   }
 
   return (
-    <div>
+    <div className="overseas-page">
       <PageHeader
         title="해외배송 접수"
         subtitle="창고에서 EMS / EMS 프리미엄 / K-Packet를 결제 없이 바로 접수합니다."
@@ -759,6 +759,8 @@ export default function OverseasShippingPage() {
         />
       )}
 
+      <div className="overseas-intake">
+      <div>
       <Card title="접수 정보">
         <p className="text-muted" style={{ marginBottom: '1rem' }}>
           {liveReady ? `실접수 가능 · 기본 발송지 ${senderAddr}` : `EMS 키가 없어 테스트 접수로 저장됩니다. 기본 발송지 ${senderAddr}`}
@@ -1090,7 +1092,11 @@ export default function OverseasShippingPage() {
         </FormSection>
 
         <FormSection title="중량 · 사이즈">
-        <div style={fieldGrid}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isDocument ? '1fr 1fr' : '1.2fr repeat(3, 1fr)',
+          gap: '0.75rem',
+        }}>
           <label>
             총중량 (g)
             <input
@@ -1170,7 +1176,7 @@ export default function OverseasShippingPage() {
           return (
             <div
               key={i}
-              style={{ display: 'grid', gridTemplateColumns: '2fr 80px 110px 140px 80px auto auto', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'end' }}
+              className="overseas-item-row"
             >
               <label style={{ position: 'relative' }}>
                 품목 (한글/영문/HS 검색)
@@ -1287,6 +1293,8 @@ export default function OverseasShippingPage() {
         </button>
       </Card>
 
+      </div>
+      <aside className="overseas-intake-aside">
       <Card title="배송요금">
         <div style={{
           padding: '0.9rem 1rem',
@@ -1299,7 +1307,7 @@ export default function OverseasShippingPage() {
           </div>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: canDocument ? '1fr 1fr' : '1fr',
+            gridTemplateColumns: '1fr',
             gap: 8,
             marginTop: 8,
           }}>
@@ -1412,16 +1420,20 @@ export default function OverseasShippingPage() {
             테스트 접수 (우체국에 실제 신청하지 않음)
           </label>
         )}
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+          <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={saving} style={{ width: '100%' }}>
             {saving ? '접수 중...' : liveReady && !form.test_mode ? '해외배송 접수' : '테스트 접수'}
           </button>
-          <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
-          <a href="/overseas-senders" className="btn btn-secondary">발송인</a>
-          <a href="/overseas-recipients" className="btn btn-secondary">수취인</a>
-          <a href="/overseas-hs-codes" className="btn btn-secondary">HS코드</a>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
+            <a href="/overseas-senders" className="btn btn-secondary">발송인</a>
+            <a href="/overseas-recipients" className="btn btn-secondary">수취인</a>
+            <a href="/overseas-hs-codes" className="btn btn-secondary">HS코드</a>
+          </div>
         </div>
       </Card>
+      </aside>
+      </div>
     </div>
   );
 }

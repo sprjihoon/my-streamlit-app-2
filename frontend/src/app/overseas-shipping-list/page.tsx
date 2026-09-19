@@ -78,7 +78,7 @@ export default function OverseasShippingListPage() {
   if (loading) return <Loading text="해외배송 목록 로딩 중..." />;
 
   return (
-    <div>
+    <div className="overseas-page">
       <PageHeader title="해외배송 접수목록" subtitle="EMS / K-Packet 등기번호와 취소 내역을 관리합니다." />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}

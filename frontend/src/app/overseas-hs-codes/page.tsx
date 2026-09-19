@@ -132,7 +132,7 @@ export default function OverseasHsCodesPage() {
   if (loading) return <Loading text="HS코드 목록 로딩 중..." />;
 
   return (
-    <div>
+    <div className="overseas-page">
       <PageHeader title="해외배송 HS코드" subtitle="자주 쓰는 품목·HS 6자리를 저장하면 접수 인보이스 검색에서 바로 고를 수 있습니다." />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
