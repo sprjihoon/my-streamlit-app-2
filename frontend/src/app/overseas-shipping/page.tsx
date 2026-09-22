@@ -6,6 +6,7 @@ import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import AddressSuggestionDialog from '@/components/AddressSuggestionDialog';
+import OverseasRecipientPickerModal from '@/components/OverseasRecipientPickerModal';
 import {
   createOverseasShipping,
   deleteOverseasSavedAddress,
@@ -171,6 +172,7 @@ export default function OverseasShippingPage() {
   const [quoteDocument, setQuoteDocument] = useState<OverseasQuotePart | null>(null);
   const [savedAddresses, setSavedAddresses] = useState<OverseasSavedAddress[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState('');
+  const [recipientPickerOpen, setRecipientPickerOpen] = useState(false);
   const [savedSenders, setSavedSenders] = useState<OverseasSavedSender[]>([]);
   const [selectedSenderId, setSelectedSenderId] = useState('');
   const [savedHs, setSavedHs] = useState<ItemCategory[]>([]);
@@ -684,7 +686,7 @@ export default function OverseasShippingPage() {
         setSuccess(`오늘 같은 수취인으로 이미 접수된 건이 있습니다. 등기번호 ${result.tracking_no}`);
       } else {
         const label = result.is_test ? '테스트 접수' : '우체국 접수';
-        setSuccess(`${label} 완료. 등기번호 ${result.tracking_no}${result.ems_fee ? ` · 요금 ${Number(result.ems_fee).toLocaleString()}원` : ''}`);
+        setSuccess(`${label} 완료. 등기번호 ${result.tracking_no}${result.ems_fee ? ` · 요금 ${Number(result.ems_fee).toLocaleString()}원` : ''}. 출력서류는 아래 버튼 또는 접수목록에서 다시 인쇄할 수 있습니다.`);
         const senderName = form.sender_name || defaultSender;
         const next = emptyForm(senderName);
         next.sender_zipcode = form.sender_zipcode;
@@ -716,6 +718,7 @@ export default function OverseasShippingPage() {
   const methodName = methods.find((m) => m.code === form.shipping_method)?.name || form.shipping_method;
   const canDocument = form.shipping_method !== 'KPACKET';
   const isDocument = canDocument && form.contents_type === 'document';
+  const selectedSaved = savedAddresses.find((a) => String(a.id) === selectedSavedId);
 
   function setContentsType(kind: 'parcel' | 'document') {
     if (kind === 'document' && !canDocument) {
@@ -755,6 +758,17 @@ export default function OverseasShippingPage() {
               receivezipcode: suggestion.suggested.zip || prev.receivezipcode,
             }));
             setSuggestion(null);
+          }}
+        />
+      )}
+      {recipientPickerOpen && (
+        <OverseasRecipientPickerModal
+          items={savedAddresses}
+          selectedId={selectedSavedId}
+          onClose={() => setRecipientPickerOpen(false)}
+          onSelect={(item) => {
+            applySaved(item);
+            setRecipientPickerOpen(false);
           }}
         />
       )}
@@ -873,28 +887,27 @@ export default function OverseasShippingPage() {
 
         <FormSection title="수취인">
         <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label style={{ flex: '1 1 240px' }}>
+          <label style={{ flex: '1 1 260px' }}>
             저장된 수취인
-            <select
-              style={inputStyle}
-              value={selectedSavedId}
-              onChange={(e) => {
-                const item = savedAddresses.find((a) => String(a.id) === e.target.value);
-                if (item) applySaved(item);
-                else setSelectedSavedId('');
+            <button
+              type="button"
+              onClick={() => setRecipientPickerOpen(true)}
+              style={{
+                ...inputStyle,
+                textAlign: 'left',
+                background: '#fff',
+                cursor: 'pointer',
+                color: selectedSaved ? 'inherit' : 'var(--text-muted)',
               }}
             >
-              <option value="">{savedAddresses.length ? '수취인을 선택하면 자동입력됩니다' : '저장된 수취인이 없습니다'}</option>
-              {savedAddresses.map((a) => (
-                <option key={a.id} value={String(a.id)}>
-                  {a.is_default ? '[기본] ' : ''}{a.label} · {a.countrycd} · {a.recipient_name}
-                </option>
-              ))}
-            </select>
+              {selectedSaved
+                ? `${selectedSaved.is_default ? '[기본] ' : ''}${selectedSaved.label} · ${selectedSaved.countrycd} · ${selectedSaved.recipient_name}`
+                : (savedAddresses.length ? '목록에서 수취인을 선택하세요' : '저장된 수취인이 없습니다')}
+            </button>
           </label>
+          <button type="button" className="btn btn-primary" onClick={() => setRecipientPickerOpen(true)}>목록</button>
           <button type="button" className="btn btn-secondary" onClick={handleSaveAddressNow}>수취인 저장</button>
           <button type="button" className="btn btn-secondary" disabled={!selectedSavedId} onClick={handleDeleteSaved}>삭제</button>
-          <a href="/overseas-recipients" className="btn btn-secondary">목록</a>
         </div>
 
         <div style={fieldGrid}>

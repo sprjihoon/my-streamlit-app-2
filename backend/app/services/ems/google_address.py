@@ -79,6 +79,45 @@ def parse_place_result(place: dict[str, Any], country_code: str) -> dict[str, st
     return {"addr3": addr3, "addr2": addr2, "addr1": addr1, "zip": postal_code}
 
 
+def _component_text(components: list[dict[str, Any]], type_name: str) -> str:
+    for item in components:
+        if item.get("componentType") != type_name:
+            continue
+        name = item.get("componentName") or {}
+        if isinstance(name, dict):
+            return str(name.get("text") or "").strip()
+        return str(name or "").strip()
+    return ""
+
+
+def suggested_from_validation(data: dict[str, Any]) -> dict[str, str]:
+    """Address Validation 응답에서 상세주소·시/군·주/도를 나눈다.
+
+    영국처럼 postalAddress.administrativeArea 가 비면 addressComponents 의
+    administrative_area_level_1(England)을 주/도로 쓴다.
+    """
+    result = (data or {}).get("result") or {}
+    address = result.get("address") or {}
+    postal = address.get("postalAddress") or {}
+    components = list(address.get("addressComponents") or [])
+    lines = [str(line).strip() for line in (postal.get("addressLines") or []) if str(line).strip()]
+    admin = str(postal.get("administrativeArea") or "").strip() or _component_text(
+        components, "administrative_area_level_1"
+    )
+    city = (
+        str(postal.get("locality") or "").strip()
+        or _component_text(components, "postal_town")
+        or _component_text(components, "locality")
+    )
+    return {
+        "suggestedAddr3": ", ".join(lines),
+        "suggestedAddr2": city,
+        "suggestedAddr1": admin,
+        "suggestedZip": str(postal.get("postalCode") or "").strip(),
+        "formattedAddress": str(address.get("formattedAddress") or "").strip(),
+    }
+
+
 def validate_address_with_google(
     api_key: str,
     addr: dict[str, str],
@@ -112,13 +151,6 @@ def validate_address_with_google(
 
     result = (data or {}).get("result") or {}
     address = result.get("address") or {}
-    postal = address.get("postalAddress") or {}
-    lines_out = list(postal.get("addressLines") or [])
-    suggested = {
-        "suggestedAddr3": lines_out[0] if lines_out else "",
-        "suggestedAddr2": postal.get("locality") or "",
-        "suggestedAddr1": postal.get("administrativeArea") or "",
-        "suggestedZip": postal.get("postalCode") or "",
-        "formattedAddress": address.get("formattedAddress") or "",
-    }
-    return {"ok": True, "status": 200, "suggested": suggested, "raw": data}
+    if not address:
+        return {"ok": False, "status": 200, "body": "empty address"}
+    return {"ok": True, "status": 200, "suggested": suggested_from_validation(data), "raw": data}

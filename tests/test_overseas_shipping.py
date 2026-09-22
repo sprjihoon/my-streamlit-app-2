@@ -505,6 +505,69 @@ def test_create_can_save_address_book(isolated_runtime):
     assert items[0]["is_default"] is True
 
 
+def test_saved_recipient_list_has_picker_autofill_fields(isolated_runtime):
+    """수취인 모달이 고른 주소의 이름·전화·국가·주소를 접수 입력에 넣을 수 있어야 한다."""
+    token = _seed_user(isolated_runtime["db"])
+    save_overseas_address(_addr(), token)
+    item = list_saved_overseas_addresses(token)["items"][0]
+    for key in (
+        "id",
+        "label",
+        "recipient_name",
+        "recipient_phone",
+        "recipient_email",
+        "countrycd",
+        "zipcode",
+        "addr1",
+        "addr2",
+        "addr3",
+        "is_default",
+    ):
+        assert key in item
+    assert item["recipient_name"] == "Taro Yamada"
+    assert item["countrycd"] == "JP"
+    assert item["addr1"] == "Osaka"
+    assert item["addr2"] == "Namba"
+    assert item["addr3"] == "1-2-3 Namba Street"
+    assert item["zipcode"] == "150-0001"
+
+
+def test_list_row_can_reprint_label_after_create(isolated_runtime):
+    """접수목록의 출력서류 버튼이 쓰는 라벨 API는 같은 건을 다시 내려준다."""
+    token = _seed_user(isolated_runtime["db"])
+    created = create_overseas(_req(confirm=True, receivetelno="+819099900077"), token)
+    row = list_overseas(token)["items"][0]
+    assert row["id"] == created["id"]
+    first = overseas_label(row["id"], token)["label"]
+    again = overseas_label(row["id"], token)["label"]
+    assert first["regino"] == again["regino"] == created["tracking_no"]
+    assert first["recipient"]["name"] == row["recipient_name"]
+    html = overseas_label(row["id"], token, format="html")
+    text = html.body.decode("utf-8")
+    assert created["tracking_no"] in text
+    assert "인쇄" in text
+    cancel_overseas(row["id"], token, confirm=True)
+    reprinted = overseas_label(row["id"], token)["label"]
+    assert reprinted["status"] == "canceled"
+    assert reprinted["regino"] == created["tracking_no"]
+
+
+def test_ui_wires_recipient_picker_and_reprint_button():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    intake = (root / "frontend/src/app/overseas-shipping/page.tsx").read_text(encoding="utf-8")
+    listing = (root / "frontend/src/app/overseas-shipping-list/page.tsx").read_text(encoding="utf-8")
+    modal = (root / "frontend/src/components/OverseasRecipientPickerModal.tsx").read_text(encoding="utf-8")
+    assert "OverseasRecipientPickerModal" in intake
+    assert "applySaved(item)" in intake
+    assert "setRecipientPickerOpen(true)" in intake
+    assert 'href={`/overseas-print/${it.id}`}' in listing
+    assert "출력서류" in listing
+    assert "onSelect(a)" in modal
+    assert "recipient_name" in modal
+
+
 def test_item_category_hs_completion(isolated_runtime):
     token = _seed_user(isolated_runtime["db"])
     meta = overseas_meta(token)

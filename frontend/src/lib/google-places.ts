@@ -184,11 +184,20 @@ export async function validateAddressWithGoogle(
     const result = data?.result;
     if (!result?.address) return null;
     const postalAddr = result.address.postalAddress ?? {};
-    const lines: string[] = postalAddr.addressLines ?? [];
-    const suggestedAddr3 = lines[0] ?? "";
-    const suggestedAddr2: string = postalAddr.locality ?? "";
-    const suggestedAddr1: string = postalAddr.administrativeArea ?? "";
-    const suggestedZip: string = postalAddr.postalCode ?? "";
+    const lines: string[] = (postalAddr.addressLines ?? []).map((line: string) => String(line || '').trim()).filter(Boolean);
+    const components: Array<{ componentType?: string; componentName?: { text?: string } | string }> =
+      result.address.addressComponents ?? [];
+    const componentText = (type: string) => {
+      const found = components.find((c) => c.componentType === type);
+      const name = found?.componentName;
+      if (!name) return '';
+      if (typeof name === 'string') return name.trim();
+      return (name.text || '').trim();
+    };
+    const suggestedAddr3 = lines.join(', ');
+    const suggestedAddr2: string = (postalAddr.locality ?? '').trim() || componentText('postal_town') || componentText('locality');
+    const suggestedAddr1: string = (postalAddr.administrativeArea ?? '').trim() || componentText('administrative_area_level_1');
+    const suggestedZip: string = postalAddr.postalCode ?? '';
     const formattedAddress: string = result.address.formattedAddress ?? "";
     const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
     const isSame =

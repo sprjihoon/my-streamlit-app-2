@@ -3,6 +3,7 @@ from __future__ import annotations
 from backend.app.services.ems.google_address import (
     google_maps_api_key,
     parse_place_result,
+    suggested_from_validation,
     supports_address_validation,
     validate_address_with_google,
 )
@@ -51,6 +52,31 @@ def test_parse_place_result_jp_us_and_fallback():
 
     fallback = parse_place_result({"formatted_address": "1-2-3 Example Street, Taipei"}, "TW")
     assert fallback["addr3"] == "1-2-3 Example Street"
+
+
+def test_gb_validation_uses_admin_component_when_postal_area_missing():
+    suggested = suggested_from_validation({
+        "result": {
+            "address": {
+                "formattedAddress": "Heathrow Airport, West Drayton UB7 0HJ, UK",
+                "postalAddress": {
+                    "addressLines": ["Heathrow Airport", "Colnbrook By-Pass, Harmondsworth"],
+                    "locality": "West Drayton",
+                    "postalCode": "UB7 0HJ",
+                    "regionCode": "GB",
+                },
+                "addressComponents": [
+                    {"componentType": "premise", "componentName": {"text": "Heathrow Airport"}},
+                    {"componentType": "administrative_area_level_1", "componentName": {"text": "England"}},
+                    {"componentType": "postal_town", "componentName": {"text": "West Drayton"}},
+                ],
+            }
+        }
+    })
+    assert suggested["suggestedAddr1"] == "England"
+    assert suggested["suggestedAddr2"] == "West Drayton"
+    assert "Colnbrook By-Pass" in suggested["suggestedAddr3"]
+    assert suggested["suggestedZip"] == "UB7 0HJ"
 
 
 def test_google_address_validation_live_or_reachable():

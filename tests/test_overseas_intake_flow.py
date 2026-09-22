@@ -307,6 +307,208 @@ def test_staff_intake_flow_matches_overseas_shipping_page(isolated_runtime):
     assert client.get("/overseas-shipping", params={"token": token}).json()["items"][0]["status"] == "canceled"
 
 
+HEATHROW = {
+    "countrycd": "GB",
+    "receivename": "Alex Morgan",
+    "receivetelno": "+442087594321",
+    "receivemail": "alex.morgan@example.com",
+    "receivezipcode": "UB7 0HJ",
+    "receiveaddr1": "England",
+    "receiveaddr2": "Harmondsworth",
+    "receiveaddr3": "Heathrow Airport, Colnbrook By-Pass",
+}
+
+
+def test_gb_heathrow_intake_quote_create_and_cancel(isolated_runtime):
+    """영국 Heathrow 주소로 요금 조회, 테스트 접수, 취소 API까지 확인한다."""
+    token = _seed_user(isolated_runtime["db"], token="tok-gb")
+    client = TestClient(app, raise_server_exceptions=False)
+
+    nations = client.get("/overseas-shipping/nations", params={"token": token, "premiumcd": "31"})
+    assert nations.status_code == 200
+    assert any(n["nationcd"] == "GB" for n in nations.json()["items"])
+
+    validated = validate_address_with_google(
+        google_maps_api_key(),
+        {
+            "addr3": HEATHROW["receiveaddr3"],
+            "addr2": HEATHROW["receiveaddr2"],
+            "addr1": HEATHROW["receiveaddr1"],
+            "zip": HEATHROW["receivezipcode"],
+            "countryCode": "GB",
+        },
+    )
+    assert validated is not None
+    address = dict(HEATHROW)
+    if validated.get("ok"):
+        suggested = validated["suggested"]
+        blob = " ".join(
+            str(suggested.get(key) or "")
+            for key in ("formattedAddress", "suggestedAddr1", "suggestedAddr2", "suggestedAddr3", "suggestedZip")
+        ).lower()
+        assert "ub7" in blob.replace(" ", "")
+        assert suggested.get("suggestedAddr1"), "구글 검증은 주/도(England)를 포함해야 합니다."
+        assert "england" in suggested["suggestedAddr1"].lower()
+        if suggested.get("suggestedAddr1"):
+            address["receiveaddr1"] = suggested["suggestedAddr1"]
+        if suggested.get("suggestedAddr2"):
+            address["receiveaddr2"] = suggested["suggestedAddr2"]
+        if suggested.get("suggestedAddr3"):
+            address["receiveaddr3"] = suggested["suggestedAddr3"]
+        if suggested.get("suggestedZip"):
+            address["receivezipcode"] = suggested["suggestedZip"]
+        assert address["receiveaddr1"], "구글 검증 결과에 주/도(England)가 있어야 합니다."
+    else:
+        body = (validated.get("body") or "").lower()
+        assert validated.get("status") in {400, 403, 429}
+        assert "request_denied" in body or "referer" in body or "api" in body or "key" in body
+
+    quote = client.get(
+        "/overseas-shipping/quote",
+        params={
+            "token": token,
+            "shipping_method": "EMS",
+            "contents_type": "parcel",
+            "countrycd": "GB",
+            "totweight": 2000,
+            "boxlength": 40,
+            "boxwidth": 30,
+            "boxheight": 20,
+            "customs_value_usd": 80,
+        },
+    )
+    assert quote.status_code == 200
+    quoted = quote.json()
+    assert quoted["ok"] is True
+    assert quoted["totalFee"] > 0
+    assert quoted["countrycd"] == "GB"
+    assert quoted["parcel"]["totalFee"] > 0
+    assert quoted["document"]["ok"] is True
+    assert quoted["duty"]["dutyPrepaid"] is True
+    assert quoted["payableTotal"] == quoted["totalFee"] + quoted["duty"]["depositKrw"]
+
+    payload = _payload(
+        **address,
+        totweight=2000,
+        boxlength=40,
+        boxwidth=30,
+        boxheight=20,
+        notes="heathrow-intake",
+        items=[{
+            "name_en": "Documents Sample",
+            "quantity": 1,
+            "unit_price_usd": 80,
+            "hs_code": "610910",
+            "origin_country": "KR",
+        }],
+    )
+    preview = client.post("/overseas-shipping/preview", params={"token": token}, json=payload)
+    assert preview.status_code == 200
+    assert preview.json()["preview"]["countrycd"] == "GB"
+    assert preview.json()["preview"]["recipient_name"] == "Alex Morgan"
+    assert "Heathrow" in preview.json()["preview"]["recipient_addr"] or "England" in preview.json()["preview"]["recipient_addr"] or address["receiveaddr3"] in preview.json()["preview"]["recipient_addr"]
+
+    created = client.post("/overseas-shipping", params={"token": token}, json={**payload, "confirm": True})
+    assert created.status_code == 200
+    body = created.json()
+    assert body["success"] is True
+    assert body["is_test"] is True
+    assert body["tracking_no"].startswith("EG")
+    shipment_id = body["id"]
+
+    listed = client.get("/overseas-shipping", params={"token": token}).json()["items"]
+    assert len(listed) == 1
+    assert listed[0]["id"] == shipment_id
+    assert listed[0]["countrycd"] == "GB"
+    assert listed[0]["status"] == "requested"
+
+    label = client.get(f"/overseas-shipping/{shipment_id}/label", params={"token": token})
+    assert label.status_code == 200
+    assert label.json()["label"]["regino"] == body["tracking_no"]
+    assert label.json()["label"]["recipient"]["country"] == "GB"
+
+    denied = client.post(f"/overseas-shipping/{shipment_id}/cancel", params={"token": token, "confirm": False})
+    assert denied.status_code == 400
+    assert client.get("/overseas-shipping", params={"token": token}).json()["items"][0]["status"] == "requested"
+
+    canceled = client.post(f"/overseas-shipping/{shipment_id}/cancel", params={"token": token, "confirm": True})
+    assert canceled.status_code == 200
+    assert canceled.json()["success"] is True
+    row = client.get("/overseas-shipping", params={"token": token}).json()["items"][0]
+    assert row["status"] == "canceled"
+    assert row["canceled_by"] == "물류담당"
+
+    again = client.post(f"/overseas-shipping/{shipment_id}/cancel", params={"token": token, "confirm": True})
+    assert again.status_code == 200
+    assert again.json().get("already") is True
+
+    reprinted = client.get(f"/overseas-shipping/{shipment_id}/label", params={"token": token, "format": "html"})
+    assert reprinted.status_code == 200
+    assert "취소된 접수" in reprinted.text
+    assert body["tracking_no"] in reprinted.text
+
+
+def test_real_receipt_cancel_calls_epost_cancel(isolated_runtime, monkeypatch):
+    """테스트가 아닌 접수는 취소 API가 우체국 취소 API를 호출한 뒤 상태를 바꾼다."""
+    token = _seed_user(isolated_runtime["db"], token="tok-cancel-live")
+    client = TestClient(app, raise_server_exceptions=False)
+    created = client.post(
+        "/overseas-shipping",
+        params={"token": token},
+        json=_payload(**{**HEATHROW, "receivetelno": "+442087594322", "confirm": True}),
+    )
+    assert created.status_code == 200
+    shipment_id = created.json()["id"]
+    tracking = created.json()["tracking_no"]
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE overseas_shipping_requests SET is_test=0, req_no=? WHERE id=?",
+            ("REQ-HEATHROW", shipment_id),
+        )
+        con.commit()
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_cancel(reqno, regino):
+        calls.append((reqno, regino))
+        return {"canceledyn": "Y", "notcancelreason": ""}
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.cancel_ems", fake_cancel)
+    canceled = client.post(
+        f"/overseas-shipping/{shipment_id}/cancel",
+        params={"token": token, "confirm": True},
+    )
+    assert canceled.status_code == 200
+    assert calls == [("REQ-HEATHROW", tracking)]
+    assert client.get("/overseas-shipping", params={"token": token}).json()["items"][0]["status"] == "canceled"
+
+    blocked = client.post(
+        "/overseas-shipping",
+        params={"token": token},
+        json=_payload(**{**HEATHROW, "receivetelno": "+442087594323", "confirm": True}),
+    )
+    blocked_id = blocked.json()["id"]
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE overseas_shipping_requests SET is_test=0, req_no=? WHERE id=?",
+            ("REQ-BLOCKED", blocked_id),
+        )
+        con.commit()
+
+    def refuse_cancel(reqno, regino):
+        return {"canceledyn": "N", "notcancelreason": "이미 발송"}
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.cancel_ems", refuse_cancel)
+    refused = client.post(
+        f"/overseas-shipping/{blocked_id}/cancel",
+        params={"token": token, "confirm": True},
+    )
+    assert refused.status_code == 502
+    assert "이미 발송" in refused.json()["detail"]
+    still = next(item for item in client.get("/overseas-shipping", params={"token": token}).json()["items"] if item["id"] == blocked_id)
+    assert still["status"] == "requested"
+
+
 def test_intake_flow_rejects_invalid_form_before_write(isolated_runtime):
     token = _seed_user(isolated_runtime["db"], token="tok-guard")
     client = TestClient(app, raise_server_exceptions=False)
