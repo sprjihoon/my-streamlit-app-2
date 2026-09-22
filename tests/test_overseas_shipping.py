@@ -37,9 +37,14 @@ from backend.app.services.ems.client import approval_no_for, mock_apply_ems
 from backend.app.services.ems.dimension_limits import validate_shipping_dimensions, validate_weight
 from backend.app.services.ems.fields import (
     apply_sender_override,
+    build_apply_params,
     build_ems_params,
     resolve_sender,
-    sender_mobile,
+    epost_sender_name,
+    hs_code_for_epost,
+    sender_mobile_parts,
+    format_recipient_tel,
+    split_recipient_tel,
     serialize_invoice_items,
     validate_apply_input,
 )
@@ -230,7 +235,9 @@ def test_snapshot_excludes_contract_secrets(isolated_runtime):
     assert "custno" not in snapshot
     assert "apprno" not in snapshot
     assert snapshot["premiumcd"] == "31"
-    assert snapshot["sender"] == "스프링풀필먼트"
+    assert snapshot["sender"] == "Spring Fulfillment"
+    assert snapshot["sendermobile1"] == "82"
+    assert snapshot["sendermobile2"] == "10"
 
 
 def test_cancel_requires_confirm(isolated_runtime):
@@ -344,6 +351,16 @@ def test_document_and_parcel_quotes_and_apply(isolated_runtime):
     assert validated["totweight"] == 500
     assert validated["boxlength"] == 0
     assert validated["invoice"]["EM_gubun"] == "Document"
+    doc_plain = build_ems_params(
+        build_apply_params(validated, order_no="TIL-DOC", custno="1", apprno="1")
+    )
+    assert "boxlength" not in doc_plain
+    assert "boxwidth" not in doc_plain
+    assert "boxheight" not in doc_plain
+    assert "hs_code=4901999000" in doc_plain
+    assert hs_code_for_epost("490199") == "4901999000"
+    assert hs_code_for_epost("4901999000") == "4901999000"
+    assert hs_code_for_epost("610910", document=True) == "4901999000"
 
     created = create_overseas(_req(confirm=True, contents_type="document", totweight=400, receivetelno="+819011122233"), token)
     assert created["success"] is True
@@ -716,7 +733,7 @@ def test_label_from_saved_shipment_not_epost_pdf(isolated_runtime):
     label = body["label"]
     assert label["source"] == "internal"
     assert label["regino"] == created["tracking_no"]
-    assert label["sender"]["name"] == "스프링풀필먼트"
+    assert label["sender"]["name"] == "Spring Fulfillment"
     assert label["recipient"]["name"] == "Hong Gildong"
     assert label["items"][0]["hs_code"] == "610910"
     assert label["customs_value_usd"] == 50.0
@@ -815,9 +832,24 @@ def test_label_html_escapes_and_prints_canceled(isolated_runtime):
 
 
 def test_sender_mobile_and_contract_approval_numbers(monkeypatch):
-    assert sender_mobile({"tel2": "10", "tel3": "2723", "tel4": "9490"}) == "010-2723-9490"
-    plain = build_ems_params({"apprno": "70020C0247", "sendermobile": "010-2723-9490"})
-    assert "sendermobile=010-2723-9490" in plain
+    parts = sender_mobile_parts({"tel1": "82", "tel2": "10", "tel3": "2723", "tel4": "9490"})
+    assert parts == {
+        "sendermobile1": "82",
+        "sendermobile2": "10",
+        "sendermobile3": "2723",
+        "sendermobile4": "9490",
+    }
+    plain = build_ems_params(parts)
+    assert "sendermobile1=82" in plain
+    assert "sendermobile=010" not in plain
+    assert epost_sender_name("틸리언") == "Tillion"
+    assert epost_sender_name("Tillion") == "Tillion"
+    recipient = split_recipient_tel("+442087594321", "GB")
+    assert recipient["receivetelno1"] == "44"
+    assert recipient["receivetelno2"] == "2087"
+    assert format_recipient_tel("+442087594321", "GB") == "020-8759-4321"
+    assert format_recipient_tel("+819012345678", "JP") == "090-1234-5678"
+    assert "+" not in format_recipient_tel("+442087594321", "GB")
     monkeypatch.setenv("EMS_APPROVAL_NO", "70020C0247")
     monkeypatch.setenv("EMS_KPACKET_APPROVAL_NO", "70020J0048")
     assert approval_no_for("31") == "70020C0247"

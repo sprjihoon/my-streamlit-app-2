@@ -156,12 +156,19 @@ EMS_APPLY_KEYS = [
     "sendertelno2",
     "sendertelno3",
     "sendertelno4",
-    "sendermobile",
+    "sendermobile1",
+    "sendermobile2",
+    "sendermobile3",
+    "sendermobile4",
     "receivename",
     "receivezipcode",
     "receiveaddr1",
     "receiveaddr2",
     "receiveaddr3",
+    "receivetelno1",
+    "receivetelno2",
+    "receivetelno3",
+    "receivetelno4",
     "receivetelno",
     "receivemail",
     "EM_gubun",
@@ -337,19 +344,98 @@ def split_sender_tel(phone: str, fallback: dict[str, str]) -> dict[str, str]:
     return {"tel1": "82", "tel2": tel2, "tel3": tel3, "tel4": tel4}
 
 
-def sender_mobile(sender: dict[str, str]) -> str:
-    """우체국 접수 필수값. 계약에 등록된 형식(010-2723-9490)으로 보낸다."""
-    tel2 = re.sub(r"\D", "", str(sender.get("tel2") or ""))
-    tel3 = re.sub(r"\D", "", str(sender.get("tel3") or ""))
-    tel4 = re.sub(r"\D", "", str(sender.get("tel4") or ""))
-    if not tel2 or not tel3:
-        return ""
-    digits = f"0{tel2}{tel3}{tel4}"
-    if len(digits) == 11:
-        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
-    if len(digits) == 10:
-        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
-    return digits
+_SENDER_NAME_EN = {
+    "틸리언": "Tillion",
+    "스프링풀필먼트": "Spring Fulfillment",
+}
+
+
+# 우체국은 관세청 10자리 세번만 받는다. 0000으로 메운 코드는 없다고 거절된다.
+_HSK10 = {
+    "490199": "4901999000",
+}
+
+
+def hs_code_for_epost(code: str, *, document: bool = False) -> str:
+    """화면 HS를 우체국 세번으로 바꾼다. 서류는 49로 시작하는 10자리만 가능하다."""
+    parts = []
+    for piece in str(code or "").split(";"):
+        digits = re.sub(r"\D", "", piece)
+        if len(digits) == 6:
+            digits = _HSK10.get(digits, digits)
+        if document and (len(digits) != 10 or not digits.startswith("49")):
+            digits = "4901999000"
+        if digits:
+            parts.append(digits)
+    return ";".join(parts)
+
+
+def epost_sender_name(name: str) -> str:
+    """우체국 접수 sender는 영문 35자 이하다. 계약 한글명은 영문으로 바꾼다."""
+    raw = (name or "").strip()
+    mapped = _SENDER_NAME_EN.get(raw, raw)
+    if any(ord(ch) > 127 for ch in mapped):
+        raise ValueError("우체국 접수 발송인 이름은 영문 35자 이하여야 합니다.")
+    if not mapped or len(mapped) > 35:
+        raise ValueError("우체국 접수 발송인 이름은 영문 35자 이하여야 합니다.")
+    return mapped
+
+
+def sender_mobile_parts(sender: dict[str, str]) -> dict[str, str]:
+    """계약 EMS 매뉴얼. 발송인 휴대전화는 82 / 10 / 2723 / 9490 처럼 4칸이다."""
+    return {
+        "sendermobile1": re.sub(r"\D", "", str(sender.get("tel1") or "")) or "82",
+        "sendermobile2": re.sub(r"\D", "", str(sender.get("tel2") or "")),
+        "sendermobile3": re.sub(r"\D", "", str(sender.get("tel3") or "")),
+        "sendermobile4": re.sub(r"\D", "", str(sender.get("tel4") or "")),
+    }
+
+
+_CALLING_CODES = {
+    "US": "1", "CA": "1", "JP": "81", "CN": "86", "HK": "852", "TW": "886",
+    "GB": "44", "DE": "49", "FR": "33", "AU": "61", "SG": "65", "TH": "66",
+    "VN": "84", "MY": "60", "PH": "63", "ID": "62", "NZ": "64", "IT": "39",
+    "ES": "34", "NL": "31", "KR": "82",
+}
+
+
+def split_recipient_tel(phone: str, countrycd: str) -> dict[str, str]:
+    """수취인 전화. 첫 칸은 도착국 국가번호, 나머지는 4자리씩."""
+    digits = re.sub(r"\D", "", phone or "")
+    cc = _CALLING_CODES.get((countrycd or "").upper(), "")
+    national = digits
+    if cc and digits.startswith(cc) and len(digits) > len(cc) + 4:
+        national = digits[len(cc):]
+    if national.startswith("0"):
+        national = national[1:]
+    return {
+        "receivetelno1": cc,
+        "receivetelno2": national[:4],
+        "receivetelno3": national[4:8],
+        "receivetelno4": national[8:12],
+    }
+
+
+_TRUNK_ZERO_COUNTRIES = {
+    "KR", "JP", "GB", "DE", "FR", "AU", "CN", "IT", "ES", "NL",
+    "TH", "VN", "MY", "ID", "NZ", "TW",
+}
+
+
+def format_recipient_tel(phone: str, countrycd: str) -> str:
+    """수취인 전체 전화번호. 국가번호와 + 없이 010-1234-1234 형식."""
+    parts = split_recipient_tel(phone, countrycd)
+    national = f"{parts['receivetelno2']}{parts['receivetelno3']}{parts['receivetelno4']}"
+    country = (countrycd or "").upper()
+    if country in _TRUNK_ZERO_COUNTRIES and national and not national.startswith("0"):
+        national = f"0{national}"
+    if len(national) == 11:
+        return f"{national[:3]}-{national[3:7]}-{national[7:]}"
+    if len(national) == 10:
+        return f"{national[:3]}-{national[3:6]}-{national[6:]}"
+    if len(national) == 9:
+        return f"{national[:2]}-{national[2:5]}-{national[5:]}"
+    return national
 
 
 def format_sender_tel(sender: dict[str, str]) -> str:
@@ -462,6 +548,7 @@ def build_apply_params(validated: dict[str, Any], *, order_no: str, custno: str,
     method = validated["method"]
     sender = validated["sender"]
     invoice = validated["invoice"]
+    is_doc = method["em_ee"] == "ee"
     return {
         "custno": custno,
         "apprno": apprno,
@@ -469,13 +556,13 @@ def build_apply_params(validated: dict[str, Any], *, order_no: str, custno: str,
         "em_ee": method["em_ee"],
         "countrycd": validated["countrycd"],
         "totweight": validated["totweight"],
-        "boxlength": validated["boxlength"],
-        "boxwidth": validated["boxwidth"],
-        "boxheight": validated["boxheight"],
+        "boxlength": None if is_doc else validated["boxlength"],
+        "boxwidth": None if is_doc else validated["boxwidth"],
+        "boxheight": None if is_doc else validated["boxheight"],
         "boyn": "N",
         "boprc": 0,
         "orderno": order_no,
-        "sender": sender["name"],
+        "sender": epost_sender_name(sender["name"]),
         "senderzipcode": sender["zipcode"],
         "senderaddr1": sender["addr1"],
         "senderaddr2": sender["addr2"],
@@ -484,20 +571,21 @@ def build_apply_params(validated: dict[str, Any], *, order_no: str, custno: str,
         "sendertelno2": sender["tel2"],
         "sendertelno3": sender["tel3"],
         "sendertelno4": sender["tel4"],
-        "sendermobile": sender_mobile(sender),
+        **sender_mobile_parts(sender),
         "receivename": validated["receivename"],
         "receivezipcode": validated["receivezipcode"],
         "receiveaddr1": validated["receiveaddr1"],
         "receiveaddr2": validated["receiveaddr2"],
         "receiveaddr3": validated["receiveaddr3"],
-        "receivetelno": validated["receivetelno"],
+        **split_recipient_tel(validated["receivetelno"], validated["countrycd"]),
+        "receivetelno": format_recipient_tel(validated["receivetelno"], validated["countrycd"]),
         "receivemail": validated["receivemail"],
         "EM_gubun": invoice["EM_gubun"],
         "contents": invoice["contents"],
         "number": invoice["number"],
         "weight": invoice["weight"],
         "value": invoice["value"],
-        "hs_code": invoice["hs_code"],
+        "hs_code": hs_code_for_epost(invoice["hs_code"], document=is_doc),
         "origin": invoice["origin"],
         "currunitcd": "USD",
         "snd_message": validated.get("notes") or "",
