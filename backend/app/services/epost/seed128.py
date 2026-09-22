@@ -260,11 +260,11 @@ def _seed_encrypt(block: bytes, round_key: list[int]) -> bytes:
     return bytes(out)
 
 
-def seed128_encrypt(plain_text: str, key: str) -> str:
+def seed128_encrypt(plain_text: str, key: str, *, encoding: str = "utf-8") -> str:
     key_bytes = key.encode("utf-8")
     key16 = (key_bytes + b"\x00" * 16)[:16]
     round_key = _seed_round_key(key16)
-    data = plain_text.encode("utf-8")
+    data = plain_text.encode(encoding)
     blocks = max(1, (len(data) + 15) // 16)
     out = bytearray(blocks * 16)
     for i in range(blocks):

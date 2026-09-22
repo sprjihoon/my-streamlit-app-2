@@ -49,6 +49,13 @@ def _appr() -> str:
     return env_clean("EMS_APPROVAL_NO")
 
 
+def approval_no_for(premiumcd: str) -> str:
+    """EMS·프리미엄은 EMS 계약승인번호, K-Packet은 별도 계약승인번호."""
+    if str(premiumcd or "").strip() == "14":
+        return env_clean("EMS_KPACKET_APPROVAL_NO") or _appr()
+    return _appr()
+
+
 def has_ems_credentials() -> bool:
     return bool(_key() and _sec() and _cust() and _appr())
 
@@ -166,7 +173,7 @@ def _post_encrypted(endpoint: str, params: dict[str, Any], timeout: float = 10.0
     if not _key():
         raise EmsApiError("EMS_API_KEY 환경변수가 설정되지 않았습니다.")
     plain = build_ems_params(params)
-    encrypted = seed128_encrypt(plain, sec)
+    encrypted = seed128_encrypt(plain, sec, encoding="euc-kr")
     form_body = urlencode({"key": _key(), "regData": encrypted})
     url = f"{EMS_BASE}/{endpoint}"
     if EPOST_RELAY_URL and EPOST_RELAY_SECRET:
@@ -286,12 +293,12 @@ def mock_apply_ems(premiumcd: str, em_ee: str, countrycd: str) -> dict[str, str]
     }
 
 
-def cancel_ems(reqno: str, regino: str) -> dict[str, str]:
+def cancel_ems(reqno: str, regino: str, apprno: str | None = None) -> dict[str, str]:
     xml = _post_encrypted(
         "api.EmsApplyCancel.ems",
         {
             "custno": _cust(),
-            "apprno": _appr(),
+            "apprno": apprno or _appr(),
             "reqno": reqno,
             "regino": regino,
             "cancelyn": "Y",

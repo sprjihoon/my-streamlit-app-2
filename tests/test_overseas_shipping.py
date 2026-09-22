@@ -33,12 +33,13 @@ from backend.app.api.overseas_shipping import (
     update_saved_overseas_hs,
     update_saved_overseas_sender,
 )
-from backend.app.services.ems.client import mock_apply_ems
+from backend.app.services.ems.client import approval_no_for, mock_apply_ems
 from backend.app.services.ems.dimension_limits import validate_shipping_dimensions, validate_weight
 from backend.app.services.ems.fields import (
     apply_sender_override,
     build_ems_params,
     resolve_sender,
+    sender_mobile,
     serialize_invoice_items,
     validate_apply_input,
 )
@@ -811,3 +812,14 @@ def test_label_html_escapes_and_prints_canceled(isolated_runtime):
     assert "<svg>" not in escaped
     assert "&lt;svg&gt;" in escaped
     assert "&lt;b&gt;x&lt;/b&gt;" in escaped
+
+
+def test_sender_mobile_and_contract_approval_numbers(monkeypatch):
+    assert sender_mobile({"tel2": "10", "tel3": "2723", "tel4": "9490"}) == "010-2723-9490"
+    plain = build_ems_params({"apprno": "70020C0247", "sendermobile": "010-2723-9490"})
+    assert "sendermobile=010-2723-9490" in plain
+    monkeypatch.setenv("EMS_APPROVAL_NO", "70020C0247")
+    monkeypatch.setenv("EMS_KPACKET_APPROVAL_NO", "70020J0048")
+    assert approval_no_for("31") == "70020C0247"
+    assert approval_no_for("32") == "70020C0247"
+    assert approval_no_for("14") == "70020J0048"

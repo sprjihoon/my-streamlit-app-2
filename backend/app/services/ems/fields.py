@@ -156,6 +156,7 @@ EMS_APPLY_KEYS = [
     "sendertelno2",
     "sendertelno3",
     "sendertelno4",
+    "sendermobile",
     "receivename",
     "receivezipcode",
     "receiveaddr1",
@@ -336,6 +337,21 @@ def split_sender_tel(phone: str, fallback: dict[str, str]) -> dict[str, str]:
     return {"tel1": "82", "tel2": tel2, "tel3": tel3, "tel4": tel4}
 
 
+def sender_mobile(sender: dict[str, str]) -> str:
+    """우체국 접수 필수값. 계약에 등록된 형식(010-2723-9490)으로 보낸다."""
+    tel2 = re.sub(r"\D", "", str(sender.get("tel2") or ""))
+    tel3 = re.sub(r"\D", "", str(sender.get("tel3") or ""))
+    tel4 = re.sub(r"\D", "", str(sender.get("tel4") or ""))
+    if not tel2 or not tel3:
+        return ""
+    digits = f"0{tel2}{tel3}{tel4}"
+    if len(digits) == 11:
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    if len(digits) == 10:
+        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    return digits
+
+
 def format_sender_tel(sender: dict[str, str]) -> str:
     tel2 = (sender.get("tel2") or "").strip()
     tel3 = (sender.get("tel3") or "").strip()
@@ -468,6 +484,7 @@ def build_apply_params(validated: dict[str, Any], *, order_no: str, custno: str,
         "sendertelno2": sender["tel2"],
         "sendertelno3": sender["tel3"],
         "sendertelno4": sender["tel4"],
+        "sendermobile": sender_mobile(sender),
         "receivename": validated["receivename"],
         "receivezipcode": validated["receivezipcode"],
         "receiveaddr1": validated["receiveaddr1"],

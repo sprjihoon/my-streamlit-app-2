@@ -469,7 +469,7 @@ def test_real_receipt_cancel_calls_epost_cancel(isolated_runtime, monkeypatch):
 
     calls: list[tuple[str, str]] = []
 
-    def fake_cancel(reqno, regino):
+    def fake_cancel(reqno, regino, apprno=None):
         calls.append((reqno, regino))
         return {"canceledyn": "Y", "notcancelreason": ""}
 
@@ -495,7 +495,7 @@ def test_real_receipt_cancel_calls_epost_cancel(isolated_runtime, monkeypatch):
         )
         con.commit()
 
-    def refuse_cancel(reqno, regino):
+    def refuse_cancel(reqno, regino, apprno=None):
         return {"canceledyn": "N", "notcancelreason": "이미 발송"}
 
     monkeypatch.setattr("backend.app.api.overseas_shipping.cancel_ems", refuse_cancel)

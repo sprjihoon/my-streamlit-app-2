@@ -18,6 +18,7 @@ from backend.app.api.logs import add_log
 from backend.app.services.ems.client import (
     EmsApiError,
     apply_ems,
+    approval_no_for,
     cancel_ems,
     get_available_nations,
     get_shipping_quote,
@@ -1265,7 +1266,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         validated,
         order_no=order_no,
         custno=env_clean("EMS_CUSTOMER_NO") or "TEST",
-        apprno=env_clean("EMS_APPROVAL_NO") or "0000000000",
+        apprno=approval_no_for(validated["method"]["premiumcd"]) or "0000000000",
     )
     try:
         result = (
@@ -1399,7 +1400,7 @@ def cancel_overseas(shipment_id: int, token: str, confirm: bool = False):
     with get_connection() as con:
         row = con.execute(
             """
-            SELECT id, status, is_test, req_no, tracking_no
+            SELECT id, status, is_test, req_no, tracking_no, premiumcd
             FROM overseas_shipping_requests WHERE id = ?
             """,
             (shipment_id,),
@@ -1414,7 +1415,7 @@ def cancel_overseas(shipment_id: int, token: str, confirm: bool = False):
         tracking = row[4] or ""
         if req_no and tracking:
             try:
-                canceled = cancel_ems(req_no, tracking)
+                canceled = cancel_ems(req_no, tracking, approval_no_for(row[5] or ""))
                 if canceled.get("canceledyn") == "N" and canceled.get("notcancelreason"):
                     raise HTTPException(
                         status_code=502,
