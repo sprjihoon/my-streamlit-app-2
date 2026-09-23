@@ -1,7 +1,7 @@
-"""DDP(관세 선납). Infront lib/duty-deposit.ts 와 동일 산출.
+"""DDP(관세 선납) 예상액. 창고 내부 전산용.
 
 우체국 postal DDP(미국 $800 이하, 영국) + EMS 프리미엄 FedEx DDP(미국 $800 초과).
-창고 접수는 고객 결제가 없지만, 후납·정산용 예상액을 미리 보여 준다.
+세율과 운송사 수수료에 버퍼 10%, 환율 2%를 얹는다. 최저 금액으로 올리지 않는다.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ US_DDP_MAX_USD = 800
 US_GIFT_MAX_USD = 100
 US_POSTAL_DDP_MAX_USD = US_DDP_MAX_USD
 DEFAULT_USD_KRW = 1400
+DUTY_BUFFER_RATE = 0.10
 
 
 def usd_krw_rate() -> int:
@@ -89,12 +90,12 @@ def _apply_fx(usd: float, rate: float, spread: float) -> float:
 def _estimate_us_postal_duty(usd: float, is_gift: bool = False) -> dict[str, float]:
     if is_gift and usd <= US_GIFT_MAX_USD:
         service = 1.04
-        buffer = service * 0.15
+        buffer = service * DUTY_BUFFER_RATE
         return {"dutyUsd": 0, "serviceFeeUsd": service, "bufferUsd": buffer, "totalUsd": service + buffer}
     duty = usd * 0.17
     service = 1.04 + duty * 0.1
     subtotal = duty + service
-    buffer = subtotal * 0.15
+    buffer = subtotal * DUTY_BUFFER_RATE
     return {"dutyUsd": duty, "serviceFeeUsd": service, "bufferUsd": buffer, "totalUsd": subtotal + buffer}
 
 
@@ -102,13 +103,13 @@ def _estimate_us_premium_duty(usd: float) -> dict[str, float]:
     duty = usd * 0.2
     service = 2.62 + 15 + duty * 0.05
     subtotal = duty + service
-    buffer = subtotal * 0.2
+    buffer = subtotal * DUTY_BUFFER_RATE
     return {"dutyUsd": duty, "serviceFeeUsd": service, "bufferUsd": buffer, "totalUsd": subtotal + buffer}
 
 
 def _estimate_gb_duty(usd: float) -> dict[str, float]:
     vat = usd * 0.2
-    buffer = vat * 0.1
+    buffer = vat * DUTY_BUFFER_RATE
     return {"dutyUsd": 0, "serviceFeeUsd": vat, "bufferUsd": buffer, "totalUsd": vat + buffer}
 
 
@@ -172,14 +173,15 @@ def calculate_duty_deposit(
         breakdown = _estimate_us_postal_duty(usd, False)
     else:
         breakdown = _estimate_gb_duty(usd)
-    min_krw = 25_000 if path == "premium" else (15_000 if country == "US" else 10_000)
-    deposit = max(min_krw, _round_up_to(_apply_fx(breakdown["totalUsd"], rate, fx_spread), 1_000))
+    deposit = _round_up_to(_apply_fx(breakdown["totalUsd"], rate, fx_spread), 1_000)
+    buffer_krw = int(round(_apply_fx(breakdown["bufferUsd"], rate, fx_spread)))
     return {
         "eligible": True,
         "dutyPrepaid": True,
         "ddpPath": path,
         "estimateUsd": round(breakdown["totalUsd"] * 100) / 100,
         "depositKrw": deposit,
+        "bufferKrw": buffer_krw,
         "breakdown": breakdown,
         "ineligibleReason": None,
         "usdKrwRate": int(rate),

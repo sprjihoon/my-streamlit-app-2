@@ -1846,6 +1846,7 @@ export interface OverseasDutyQuote {
   ddpPath: 'postal' | 'premium' | null;
   estimateUsd: number;
   depositKrw: number;
+  bufferKrw?: number;
   breakdown: {
     dutyUsd: number;
     serviceFeeUsd: number;

@@ -660,7 +660,8 @@ export default function OverseasShippingPage() {
       const dutyLine = duty?.dutyPrepaid && duty.depositKrw
         ? `\n관세 선납(DDP): ${duty.depositKrw.toLocaleString()}원` +
           (duty.estimateUsd ? ` (USD ${duty.estimateUsd.toFixed(2)})` : '') +
-          (duty.ddpPath === 'premium' ? ' · FedEx DDP' : '')
+          (duty.ddpPath === 'premium' ? ' · FedEx DDP' : '') +
+          (duty.bufferKrw ? `\n버퍼 10%: ${duty.bufferKrw.toLocaleString()}원 (DDP에 포함)` : '')
         : duty?.ineligibleReason
           ? `\n관세 선납: ${duty.ineligibleReason}`
           : '';
@@ -1390,9 +1391,17 @@ export default function OverseasShippingPage() {
             <>
               {quoteDuty?.dutyPrepaid && quoteDuty.depositKrw > 0 && (
                 <div style={{ marginTop: 8, fontSize: '0.9rem', color: '#047857' }}>
-                  관세 선납(DDP) <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
-                  {quoteDuty.estimateUsd > 0 ? ` · USD ${quoteDuty.estimateUsd.toFixed(2)}` : ''}
-                  {quoteDuty.ddpPath === 'premium' ? ' · FedEx DDP' : quoteDuty.ddpPath === 'postal' ? ' · 우체국 postal DDP' : ''}
+                  <div>
+                    관세 선납(DDP) <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
+                    {quoteDuty.estimateUsd > 0 ? ` · USD ${quoteDuty.estimateUsd.toFixed(2)}` : ''}
+                    {quoteDuty.ddpPath === 'premium' ? ' · FedEx DDP' : quoteDuty.ddpPath === 'postal' ? ' · 우체국 postal DDP' : ''}
+                  </div>
+                  {quoteDuty.bufferKrw ? (
+                    <div style={{ marginTop: 2, fontSize: '0.85rem' }}>
+                      버퍼 10% <strong>{quoteDuty.bufferKrw.toLocaleString()}원</strong>
+                      <span style={{ fontWeight: 500 }}> (DDP에 포함)</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
               {quoteDuty?.ineligibleReason && (

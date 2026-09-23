@@ -386,7 +386,17 @@ def test_us_ddp_quote_and_infront_formula(isolated_runtime):
     )
     assert postal["dutyPrepaid"] is True
     assert postal["ddpPath"] == "postal"
-    assert postal["depositKrw"] >= 15_000
+    assert postal["depositKrw"] == 46_000
+    assert postal["bufferKrw"] == 4_154
+    subtotal = postal["breakdown"]["dutyUsd"] + postal["breakdown"]["serviceFeeUsd"]
+    assert abs(postal["breakdown"]["bufferUsd"] - subtotal * 0.1) < 1e-9
+    small = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=1,
+        shipping_method="EMS",
+        usd_krw=1400,
+    )
+    assert small["depositKrw"] == 2_000
     over = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=850,
@@ -402,10 +412,14 @@ def test_us_ddp_quote_and_infront_formula(isolated_runtime):
         usd_krw=1400,
     )
     assert premium["ddpPath"] == "premium"
-    assert premium["depositKrw"] >= 25_000
+    assert premium["depositKrw"] == 309_000
+    premium_sub = premium["breakdown"]["dutyUsd"] + premium["breakdown"]["serviceFeeUsd"]
+    assert abs(premium["breakdown"]["bufferUsd"] - premium_sub * 0.1) < 1e-9
     gb = calculate_duty_deposit(country_code="GB", customs_value_usd=100, usd_krw=1400)
     assert gb["dutyPrepaid"] is True
-    assert gb["depositKrw"] >= 10_000
+    assert gb["depositKrw"] == 32_000
+    assert gb["bufferKrw"] == 2_856
+    assert abs(gb["breakdown"]["bufferUsd"] - gb["breakdown"]["serviceFeeUsd"] * 0.1) < 1e-9
 
     token = _seed_user(isolated_runtime["db"])
     quoted = overseas_quote(

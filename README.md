@@ -223,23 +223,35 @@ get_res_info(order_no, req_ymd, req_type="2")
   → GET /overseas-shipping/nations       배송방법별 우체국 발송 가능 국가
   → GET /overseas-shipping/quote         우체국 예상요금 (후납, 화면 표시)
   → GET /overseas-shipping/saved-addresses  기본 주소 자동입력
-  → 발송인 이름 수정 (기본: 스프링풀필먼트)
+  → 발송인 이름 수정 (화면 기본값은 EMS_SENDER_NAME, 없으면 스프링풀필먼트)
   → 구글 Places 자동완성 + Address Validation 추천
+  → 화물/서류 선택. 서류는 박스 크기를 넣지 않는다
   → 품목 한글/영문/HS 검색으로 인보이스·HS코드 완성
   → POST /overseas-shipping/preview      확인 전 DB·우체국 미기록
   → 확인 후 POST /overseas-shipping      eship.epost.go.kr 즉시 접수
   → GET /overseas-shipping/{id}/label    CN22 출력서류 (JSON/HTML)
   → 화면 /overseas-print/{id} 에서 인쇄
+  → 접수목록에서 같은 서류를 다시 연다 (취소 후에도 가능)
   → 목록에서 확인 후 취소
 ```
 
 - 확인(`confirm=true`) 전에는 접수·취소를 쓰지 않는다.
 - 같은 직원 + 같은 전화번호 + 같은 국가 + 당일 접수는 중복 가드.
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
-- 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다.
-- 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 우체국 API 예상요금을 바로 보여 준다.
-- 미국·영국은 Infront와 같은 DDP(관세 선납) 산출을 함께 보여 준다. 미국 신고가액 USD 800 초과는 EMS 프리미엄(FedEx DDP)만 선납 가능.
+- 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다. 접수 `regData`는 SEED128, EUC-KR이다.
+- 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 화물·서류 예상요금을 나눠 보여 준다.
+- 미국·영국 DDP 예상액은 세율·운송사 수수료에 버퍼 10%와 환율 2%를 얹은 내부 참고값이다. 최저 금액으로 올리지 않고, 1,000원 단위로만 올린다. 배송요금 칸에는 DDP 합계와 그 안에 포함된 버퍼 원화를 같이 보여 준다. 미국 신고가액 USD 800 초과는 EMS 프리미엄(FedEx DDP)만 선납 가능하다.
 - 국가 목록은 배송방법(`premiumcd` 31/32/14)마다 `api.RetrieveNationListRequest.ems` 값을 받는다. K-Packet은 EMS보다 발송국이 적다.
+- EMS·프리미엄(`premiumcd` 31/32)은 `EMS_APPROVAL_NO`, K-Packet(`14`)은 `EMS_KPACKET_APPROVAL_NO` 를 쓴다.
+
+### 우체국에 보내는 값
+
+계약 OpenAPI 항목명 그대로 보낸다. 한 칸짜리 `sendermobile` 은 없다.
+
+- 발송인 이름(`sender`)은 영문 35자 이하다. 화면의 `틸리언`은 `Tillion`, `스프링풀필먼트`는 `Spring Fulfillment`로 바꿔 접수한다. 그 외 한글 이름은 접수 전에 거절한다.
+- 발송인 전화·휴대전화는 4칸이다. 첫 칸은 국가번호 `82`, 나머지는 국내번호에서 앞 `0`을 뺀 값이다. 예: `010-1234-4567` → `82` / `10` / `1234` / `4567`.
+- 수취인 전화도 4칸(`receivetelno1`~`4`)과 전체번호(`receivetelno`)를 같이 보낸다. 첫 칸은 도착국 국가번호이고, 전체번호는 `+` 없이 `010-1234-1234`처럼 하이픈이 있는 국내번호다.
+- 서류(`em_ee=ee`)는 가로·세로·높이를 보내지 않는다. HS는 `49`로 시작하는 10자리다. 화면의 `490199`는 `4901999000`으로 보내고, 49가 아닌 서류 HS도 같은 세번으로 바꾼다.
 
 ### 구글 주소 · 주소록 · HS코드
 
@@ -268,7 +280,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `GET` | `/overseas-shipping/{id}/label` | 출력서류 CN22 (JSON, `format=html` 이면 인쇄 HTML) |
 | `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |
 
-우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, tillion이 CN22 형식 출력서류를 만들어 인쇄한다. 화면은 `/overseas-print/{id}` 이고, 접수 직후·접수목록의 **출력** 버튼으로 연다.
+우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, tillion이 CN22 형식 출력서류를 만들어 인쇄한다. 화면은 `/overseas-print/{id}` 이다. 접수 직후의 **출력서류 인쇄**와 접수목록 각 행의 **출력서류**가 같은 페이지를 연다. 취소된 건도 출력서류 버튼은 남고, 서류 위에 취소된 접수라고 표시한다.
 
 ### 환경변수
 
@@ -279,8 +291,9 @@ Railway (git에 넣지 않음):
 | `EMS_API_KEY` | EMS OpenAPI 인증키 |
 | `EMS_SECURITY_KEY` | EMS 보안키 (SEED128) |
 | `EMS_CUSTOMER_NO` | 고객번호 |
-| `EMS_APPROVAL_NO` | 승인번호 |
-| `EMS_SENDER_NAME` | 기본 발송인. 화면에서 건별로 수정 가능 |
+| `EMS_APPROVAL_NO` | EMS·프리미엄 계약승인번호 (`premiumcd` 31/32) |
+| `EMS_KPACKET_APPROVAL_NO` | K-Packet 계약승인번호 (`premiumcd` 14) |
+| `EMS_SENDER_NAME` | 화면 기본 발송인. 우체국에는 영문 35자로 전달 |
 | `EMS_USD_KRW_RATE` | DDP 환산 환율. 없으면 1400 |
 | `EPOST_RELAY_URL` / `EPOST_RELAY_SECRET` | Seoul ICN 중계 (`eship.epost.go.kr`) |
 
@@ -296,7 +309,7 @@ Vercel:
 python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow.py tests/test_google_places.py -v
 ```
 
-화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 수정, 주소록, HS 완성, 구글 주소 파싱·Address Validation을 검증한다.
+화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 영문 변환, 휴대전화 4칸, 서류 HS·박스 생략, 주소록, HS 완성, 출력서류 재출력, 구글 주소 파싱·Address Validation을 검증한다.
 
 ---
 
@@ -322,6 +335,20 @@ cd frontend && npm run dev
 ---
 
 ## 변경 이력
+
+### 2026-09-23
+- **fix(overseas-shipping): DDP 버퍼 10% 통일, 최저 금액 제거**
+  - 미국 EMS·프리미엄·영국 버퍼를 추정액의 10%로 맞춘다
+  - 15,000 / 25,000 / 10,000원 바닥값은 쓰지 않고, 환율 2%와 1,000원 올림만 적용한다
+  - 배송요금 칸과 접수 확인창에 버퍼 원화를 표시한다 (DDP 합계에 포함)
+
+### 2026-09-22
+- **fix(overseas-shipping): 우체국 실접수 항목을 계약 매뉴얼에 맞춘다**
+  - 발송인 휴대전화를 `sendermobile1`~`4`(국가번호 82)로 보내고, 한글 발송인명은 영문 35자로 바꾼다
+  - 수취인 전화는 도착국 국가번호와 하이픈 국내번호로 나눈다
+  - 서류는 박스 크기를 빼고, HS `490199`는 `4901999000`으로 접수한다
+  - K-Packet은 `EMS_KPACKET_APPROVAL_NO` 를 쓴다
+  - 접수목록 **출력서류**로 취소 후에도 CN22를 다시 연다
 
 ### 2026-09-17
 - **feat(overseas-shipping): 창고 직원 EMS/K-Packet 즉시 접수**
