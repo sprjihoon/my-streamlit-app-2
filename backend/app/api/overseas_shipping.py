@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,7 @@ from backend.app.services.ems.duty_deposit import calculate_duty_deposit
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
 from backend.app.services.ems.label import build_shipment_label, render_label_html
+from backend.app.services.ems.order_excel import parse_order_workbook
 from logic.db import get_connection
 
 router = APIRouter(prefix="/overseas-shipping", tags=["overseas-shipping"])
@@ -1155,6 +1156,18 @@ def delete_saved_overseas_hs(hs_id: int, token: str):
         con.execute("DELETE FROM overseas_saved_hs_codes WHERE id=?", (hs_id,))
         con.commit()
     return {"success": True, "id": hs_id}
+
+
+@router.post("/import-excel")
+async def import_overseas_excel(token: str, file: UploadFile = File(...)):
+    """주문 엑셀 1건(합포)을 접수 입력값으로 바꾼다. 없는 항목은 비워 둔다."""
+    _get_user(token)
+    raw = await file.read()
+    try:
+        groups = parse_order_workbook(raw, filename=file.filename or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"groups": groups}
 
 
 @router.post("/preview")

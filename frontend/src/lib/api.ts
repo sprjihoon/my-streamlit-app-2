@@ -1931,6 +1931,53 @@ export async function quoteOverseasShipping(
   }>(`/overseas-shipping/quote${overseasQuery(token, extra)}`);
 }
 
+export interface OverseasExcelItem {
+  name_en: string;
+  quantity: number;
+  unit_price_usd: number;
+  hs_code: string;
+  origin_country: string;
+}
+
+export interface OverseasExcelGroup {
+  bundle_no: string;
+  receivename: string;
+  receivetelno: string;
+  receivemail: string;
+  countrycd: string;
+  receivezipcode: string;
+  receiveaddr1: string;
+  receiveaddr2: string;
+  receiveaddr3: string;
+  notes: string;
+  totweight: number;
+  boxlength: number;
+  boxwidth: number;
+  boxheight: number;
+  items: OverseasExcelItem[];
+  missing: string[];
+}
+
+export async function importOverseasExcel(token: string, file: File) {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_BASE}/overseas-shipping/import-excel${overseasQuery(token)}`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!response.ok) {
+    let msg = `Upload Error: ${response.status}`;
+    try {
+      const data = await response.json();
+      msg = data.detail || data.message || msg;
+    } catch {
+      msg = (await response.text()) || msg;
+    }
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return response.json() as Promise<{ groups: OverseasExcelGroup[] }>;
+}
+
 export async function previewOverseasShipping(token: string, payload: OverseasShippingPayload) {
   return fetchApi<{ ok: boolean; preview: OverseasShippingPreview }>(
     `/overseas-shipping/preview${overseasQuery(token)}`,

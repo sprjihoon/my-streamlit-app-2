@@ -223,6 +223,8 @@ get_res_info(order_no, req_ymd, req_type="2")
   → GET /overseas-shipping/nations       배송방법별 우체국 발송 가능 국가
   → GET /overseas-shipping/quote         우체국 예상요금 (후납, 화면 표시)
   → GET /overseas-shipping/saved-addresses  기본 주소 자동입력
+  → 주문 엑셀 업로드 (합포 1건)  POST /overseas-shipping/import-excel
+  → 파일에 있는 수취인·주소·품목만 채우고, 없는 칸은 비워 직접 입력
   → 발송인 이름 수정 (화면 기본값은 EMS_SENDER_NAME, 없으면 스프링풀필먼트)
   → 구글 Places 자동완성 + Address Validation 추천
   → 화물/서류 선택. 서류는 박스 크기를 넣지 않는다
@@ -240,6 +242,20 @@ get_res_info(order_no, req_ymd, req_type="2")
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
 - 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다. 접수 `regData`는 SEED128, EUC-KR이다.
 - 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 화물·서류 예상요금을 나눠 보여 준다.
+
+### 주문 엑셀로 입력
+
+접수 화면의 **엑셀 업로드**는 주문 내려받기 파일(HTML로 저장된 `.xls` 또는 `.xlsx`)을 합포번호 기준으로 접수 1건으로 읽는다. 같은 합포의 상품 행은 세관 인보이스 품목이다.
+
+| 엑셀 | 접수 화면 |
+|---|---|
+| 수령자, 수령자전화 | 수취인 이름, 연락처 |
+| 배송지주소 | 국가, 우편번호, 주/도, 시/군, 상세주소. 우편번호 칸이 비어 있으면 주소 문장에서 읽는다 |
+| 메모 | 메모 |
+| 실제 상품명, 판매개수 | 품목명, 수량. 저장된 HS와 한글·영문 이름이 같으면 HS도 채운다 |
+| 원산지 `국내` 또는 국내 지역명 | 원산지 `KR`. 비어 있으면 비워 둔다 |
+
+중량, 박스 크기, 이메일, 단가 USD, HS코드는 이 파일에 없거나 금액이 0이라 접수 값으로 쓰지 않는다. 그 칸은 비워 두고 직원이 직접 입력한다. 발송인과 배송방법은 화면에 있던 값을 유지한다. 합포가 여러 개면 그중 1건을 고른 뒤 입력란을 채운다.
 
 ### 배송비와 관세 선납
 
@@ -285,6 +301,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-addresses` | 해외 수취인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-senders` | 발송인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-hs` | 저장 HS코드 목록 |
+| `POST` | `/overseas-shipping/import-excel` | 주문 엑셀을 접수 1건 입력값으로 변환. 없는 항목은 비움 |
 | `POST` | `/overseas-shipping/preview` | 확인용 미리보기 (미기록) |
 | `GET` | `/overseas-shipping` | 접수 목록 |
 | `POST` | `/overseas-shipping` | 확인 후 접수 |
@@ -317,10 +334,10 @@ Vercel:
 ### 테스트
 
 ```bash
-python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow.py tests/test_google_places.py -v
+python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow.py tests/test_overseas_order_excel.py tests/test_google_places.py -v
 ```
 
-화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 영문 변환, 휴대전화 4칸, 서류 HS·박스 생략, 주소록, HS 완성, 출력서류 재출력, 구글 주소 파싱·Address Validation을 검증한다.
+화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 영문 변환, 휴대전화 4칸, 서류 HS·박스 생략, 주소록, HS 완성, 출력서류 재출력, 구글 주소 파싱·Address Validation, 주문 엑셀 1건 변환과 빈 항목 유지를 검증한다.
 
 ---
 

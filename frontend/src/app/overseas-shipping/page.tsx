@@ -12,6 +12,7 @@ import {
   deleteOverseasSavedAddress,
   deleteOverseasSavedSender,
   getOverseasShippingMeta,
+  importOverseasExcel,
   listOverseasNations,
   listOverseasSavedAddresses,
   listOverseasSavedHs,
@@ -23,6 +24,7 @@ import {
   saveOverseasSender,
   searchOverseasItemCategories,
   type OverseasDutyQuote,
+  type OverseasExcelGroup,
   type OverseasInvoiceItem,
   type OverseasQuotePart,
   type OverseasSavedAddress,
@@ -177,6 +179,10 @@ export default function OverseasShippingPage() {
   const [selectedSenderId, setSelectedSenderId] = useState('');
   const [savedHs, setSavedHs] = useState<ItemCategory[]>([]);
   const [form, setForm] = useState<OverseasShippingPayload>(emptyForm());
+  const [excelGroups, setExcelGroups] = useState<OverseasExcelGroup[]>([]);
+  const [excelName, setExcelName] = useState('');
+  const [excelLoading, setExcelLoading] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
   const [hsQuery, setHsQuery] = useState<Record<number, string>>({});
   const [hsOpen, setHsOpen] = useState<number | null>(null);
   const [hsMatches, setHsMatches] = useState<Record<number, ItemCategory[]>>({});
@@ -647,6 +653,85 @@ export default function OverseasShippingPage() {
     }
   }
 
+  function applyExcelGroup(group: OverseasExcelGroup) {
+    const allowed = !group.countrycd || nations.some((n) => n.nationcd === group.countrycd) || nations.length === 0;
+    if (group.countrycd && !allowed) {
+      window.alert(`엑셀의 국가 ${group.countrycd} 는 현재 배송방법으로 발송할 수 없습니다. 배송방법을 바꾸거나 국가를 직접 선택하세요.`);
+    }
+    const items = (group.items.length ? group.items : [newItem()]).map((item) => {
+      const hit = [...savedHs, ...ITEM_CATEGORIES].find(
+        (cat) => cat.name_ko === item.name_en || cat.name_en.toLowerCase() === item.name_en.toLowerCase(),
+      );
+      return {
+        name_en: hit?.name_en || item.name_en,
+        quantity: item.quantity || 1,
+        unit_price_usd: item.unit_price_usd || 0,
+        hs_code: item.hs_code || hit?.hs_code || '',
+        origin_country: item.origin_country || (hit?.origin_country ?? ''),
+      };
+    });
+    setSelectedSavedId('');
+    setNationQuery('');
+    setForm((prev) => ({
+      ...prev,
+      countrycd: allowed && group.countrycd ? group.countrycd : prev.countrycd,
+      receivename: group.receivename,
+      receivetelno: group.receivetelno,
+      receivemail: group.receivemail || '',
+      receivezipcode: group.receivezipcode,
+      receiveaddr1: group.receiveaddr1,
+      receiveaddr2: group.receiveaddr2,
+      receiveaddr3: group.receiveaddr3,
+      totweight: group.totweight || 0,
+      boxlength: group.boxlength || 0,
+      boxwidth: group.boxwidth || 0,
+      boxheight: group.boxheight || 0,
+      notes: group.notes || '',
+      items,
+    }));
+    const nation = nations.find((n) => n.nationcd === group.countrycd);
+    const filled = [
+      group.receivename ? `수취인 ${group.receivename}` : '',
+      group.receivetelno ? '연락처' : '',
+      group.countrycd ? `국가 ${nation?.nationnm || group.countrycd}` : '',
+      group.receivezipcode ? `우편번호 ${group.receivezipcode}` : '',
+      group.receiveaddr3 ? '주소' : '',
+      items.length ? `품목 ${items.length}개` : '',
+    ].filter(Boolean);
+    const blank = group.missing.length ? ` 비어 있는 항목: ${group.missing.join(', ')}.` : '';
+    setError(null);
+    setSuccess(`엑셀 1건을 입력란에 채웠습니다. ${filled.join(' · ')}.${blank} 빈 칸을 채운 뒤 접수하세요.`);
+  }
+
+  async function handleExcelFile(file: File | null) {
+    if (!file || !token) return;
+    setExcelLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await importOverseasExcel(token, file);
+      const groups = res.groups || [];
+      if (!groups.length) {
+        setError('엑셀에서 접수할 주문을 찾지 못했습니다.');
+        setExcelGroups([]);
+        return;
+      }
+      setExcelName(file.name);
+      setExcelGroups(groups);
+      if (groups.length === 1) {
+        applyExcelGroup(groups[0]);
+      } else {
+        setSuccess(`합포 ${groups.length}건이 있습니다. 접수할 1건을 선택하세요.`);
+      }
+    } catch (err) {
+      setExcelGroups([]);
+      setError(parseApiError(err));
+    } finally {
+      setExcelLoading(false);
+      if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  }
+
   async function handleSubmit() {
     setSaving(true);
     setError(null);
@@ -782,7 +867,45 @@ export default function OverseasShippingPage() {
           {GMAPS_KEY ? ' · 구글 주소검색 가능' : ' · 구글 주소키 없음(직접 입력)'}
         </p>
 
-        <FormSection title="발송인" first>
+        <FormSection title="주문 엑셀" first>
+          <p className="text-muted" style={{ marginTop: 0 }}>
+            합포 1건의 주문 엑셀을 올리면 수취인, 주소, 품목을 채웁니다. 중량, 박스 크기, 단가 USD, HS코드처럼 파일에 없는 값은 비워 둡니다.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              style={{ display: 'none' }}
+              onChange={(e) => void handleExcelFile(e.target.files?.[0] || null)}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={excelLoading}
+              onClick={() => excelInputRef.current?.click()}
+            >
+              {excelLoading ? '읽는 중...' : '엑셀 업로드'}
+            </button>
+            {excelName && <span className="text-muted">{excelName}</span>}
+          </div>
+          {excelGroups.length > 1 && (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+              {excelGroups.map((group, index) => (
+                <button
+                  key={`${group.bundle_no}-${index}`}
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => applyExcelGroup(group)}
+                >
+                  {group.bundle_no || '합포'} · {group.receivename || '수취인 없음'} · 품목 {group.items.length}
+                </button>
+              ))}
+            </div>
+          )}
+        </FormSection>
+
+        <FormSection title="발송인">
         <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <label style={{ flex: '1 1 240px' }}>
             저장된 발송인
@@ -1117,7 +1240,8 @@ export default function OverseasShippingPage() {
               type="number"
               min={1}
               style={inputStyle}
-              value={form.totweight}
+              value={form.totweight || ''}
+              placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, totweight: parseInt(e.target.value, 10) || 0 }))}
             />
             {isDocument && (
@@ -1139,7 +1263,8 @@ export default function OverseasShippingPage() {
               type="number"
               min={1}
               style={inputStyle}
-              value={form.boxlength}
+              value={form.boxlength || ''}
+              placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, boxlength: parseInt(e.target.value, 10) || 0 }))}
             />
           </label>
@@ -1149,7 +1274,8 @@ export default function OverseasShippingPage() {
               type="number"
               min={1}
               style={inputStyle}
-              value={form.boxwidth}
+              value={form.boxwidth || ''}
+              placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, boxwidth: parseInt(e.target.value, 10) || 0 }))}
             />
           </label>
@@ -1159,7 +1285,8 @@ export default function OverseasShippingPage() {
               type="number"
               min={1}
               style={inputStyle}
-              value={form.boxheight}
+              value={form.boxheight || ''}
+              placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, boxheight: parseInt(e.target.value, 10) || 0 }))}
             />
           </label>
@@ -1260,7 +1387,8 @@ export default function OverseasShippingPage() {
                   min={0.01}
                   step="0.01"
                   style={inputStyle}
-                  value={item.unit_price_usd}
+                  value={item.unit_price_usd || ''}
+                  placeholder="직접 입력"
                   onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })}
                 />
               </label>
@@ -1282,7 +1410,7 @@ export default function OverseasShippingPage() {
               </label>
               <label>
                 원산지
-                <input style={inputStyle} value={item.origin_country || 'KR'} onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
+                <input style={inputStyle} value={item.origin_country || ''} placeholder="KR" onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
               </label>
               <button
                 type="button"
