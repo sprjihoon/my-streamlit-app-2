@@ -1811,6 +1811,8 @@ export interface OverseasShippingItem {
   req_no: string;
   receive_seq: string;
   ems_fee: string;
+  ddp_krw?: number;
+  spent_total?: number;
   post_office: string;
   status: string;
   is_test: boolean;
@@ -2020,6 +2022,13 @@ export async function cancelOverseasShipping(token: string, id: number) {
   return fetchApi<{ success: boolean; already?: boolean; message?: string }>(
     `/overseas-shipping/${id}/cancel${overseasQuery(token, '&confirm=true')}`,
     { method: 'POST' }
+  );
+}
+
+export async function deleteOverseasShipping(token: string, id: number) {
+  return fetchApi<{ success: boolean; message?: string }>(
+    `/overseas-shipping/${id}${overseasQuery(token)}`,
+    { method: 'DELETE' }
   );
 }
 

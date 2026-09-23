@@ -7,6 +7,7 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
   cancelOverseasShipping,
+  deleteOverseasShipping,
   listOverseasShipments,
   type OverseasShippingItem,
 } from '@/lib/api';
@@ -31,6 +32,12 @@ const METHOD_LABEL: Record<string, string> = {
   KPACKET: 'K-Packet',
 };
 
+function won(value: number | string | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '-';
+  return `${Math.round(n).toLocaleString()}원`;
+}
+
 export default function OverseasShippingListPage() {
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -38,6 +45,7 @@ export default function OverseasShippingListPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [items, setItems] = useState<OverseasShippingItem[]>([]);
   const [query, setQuery] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   async function loadList(tok: string) {
     const res = await listOverseasShipments(tok);
@@ -47,6 +55,7 @@ export default function OverseasShippingListPage() {
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
     setToken(stored);
+    setIsAdmin(localStorage.getItem('isAdmin') === 'true');
     if (!stored) {
       setError('로그인이 필요합니다.');
       setLoading(false);
@@ -62,6 +71,23 @@ export default function OverseasShippingListPage() {
       }
     })();
   }, []);
+
+  async function handleDelete(item: OverseasShippingItem) {
+    const live = item.status !== 'canceled' && !item.is_test;
+    const ask = live
+      ? `등기번호 ${item.tracking_no || item.order_no} 접수를 우체국에서 취소한 뒤 목록에서 삭제할까요?`
+      : `등기번호 ${item.tracking_no || item.order_no} 접수를 목록에서 삭제할까요?`;
+    if (!window.confirm(ask)) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await deleteOverseasShipping(token, item.id);
+      setSuccess(result.message || '삭제했습니다.');
+      await loadList(token);
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
 
   async function handleCancel(item: OverseasShippingItem) {
     if (!window.confirm(`등기번호 ${item.tracking_no || item.order_no} 접수를 취소할까요?`)) return;
@@ -92,7 +118,7 @@ export default function OverseasShippingListPage() {
     <div className="overseas-page">
       <PageHeader
         title="해외배송 접수목록"
-        subtitle="행을 누르면 접수한 입력값을 그대로 봅니다. 출력서류는 각 행 버튼으로 다시 인쇄할 수 있습니다."
+        subtitle="행을 누르면 입력값을 그대로 봅니다. 지출은 요금, DDP, 합계입니다."
       />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
@@ -131,7 +157,7 @@ export default function OverseasShippingListPage() {
                   <th>국가</th>
                   <th>수취인</th>
                   <th>등기번호</th>
-                  <th>요금</th>
+                  <th>지출</th>
                   <th>상태</th>
                   <th>접수자</th>
                   <th>출력서류</th>
@@ -149,7 +175,11 @@ export default function OverseasShippingListPage() {
                     <td>{it.countrycd}</td>
                     <td>{it.recipient_name}</td>
                     <td style={{ fontFamily: 'monospace' }}>{it.tracking_no || '-'}</td>
-                    <td>{it.ems_fee ? `${Number(it.ems_fee).toLocaleString()}원` : '-'}</td>
+                    <td style={{ whiteSpace: 'nowrap', lineHeight: 1.45, fontSize: '0.85rem' }}>
+                      <div>요금 {won(it.ems_fee)}</div>
+                      <div>DDP {won(it.ddp_krw)}</div>
+                      <div><strong>합계 {won(it.spent_total)}</strong></div>
+                    </td>
                     <td>{it.status === 'canceled' ? '취소' : it.is_test ? '테스트' : '접수'}</td>
                     <td>{it.created_by}</td>
                     <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
@@ -159,6 +189,11 @@ export default function OverseasShippingListPage() {
                       {it.status !== 'canceled' && (
                         <button type="button" className="btn btn-secondary" style={{ marginLeft: '0.35rem' }} onClick={() => handleCancel(it)}>
                           취소
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button type="button" className="btn btn-secondary" style={{ marginLeft: '0.35rem' }} onClick={() => handleDelete(it)}>
+                          삭제
                         </button>
                       )}
                     </td>

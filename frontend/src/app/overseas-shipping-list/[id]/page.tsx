@@ -8,6 +8,7 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
   cancelOverseasShipping,
+  deleteOverseasShipping,
   getOverseasShipment,
   type OverseasShippingItem,
 } from '@/lib/api';
@@ -51,6 +52,12 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+function won(value: number | string | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '-';
+  return `${Math.round(n).toLocaleString()}원`;
+}
+
 export default function OverseasShippingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [token, setToken] = useState('');
@@ -58,10 +65,12 @@ export default function OverseasShippingDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [item, setItem] = useState<OverseasShippingItem | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
     setToken(stored);
+    setIsAdmin(localStorage.getItem('isAdmin') === 'true');
     const shipmentId = Number(id);
     if (!stored) {
       setError('로그인이 필요합니다.');
@@ -83,6 +92,23 @@ export default function OverseasShippingDetailPage() {
       }
     })();
   }, [id]);
+
+  async function handleDelete() {
+    if (!item || !token) return;
+    const live = item.status !== 'canceled' && !item.is_test;
+    const ask = live
+      ? `등기번호 ${item.tracking_no || item.order_no} 접수를 우체국에서 취소한 뒤 목록에서 삭제할까요?`
+      : `등기번호 ${item.tracking_no || item.order_no} 접수를 목록에서 삭제할까요?`;
+    if (!window.confirm(ask)) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      await deleteOverseasShipping(token, item.id);
+      window.location.href = '/overseas-shipping-list';
+    } catch (err) {
+      setError(parseApiError(err));
+    }
+  }
 
   async function handleCancel() {
     if (!item || !token) return;
@@ -123,11 +149,16 @@ export default function OverseasShippingDetailPage() {
             {item.status !== 'canceled' && (
               <button type="button" className="btn btn-secondary" onClick={handleCancel}>취소</button>
             )}
+            {isAdmin && (
+              <button type="button" className="btn btn-secondary" onClick={handleDelete}>삭제</button>
+            )}
           </div>
           <Card title={`${METHOD_LABEL[item.shipping_method] || item.shipping_method} · ${item.contents_label || '화물'} · ${status}`}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
               <Field label="등기번호" value={item.tracking_no || '-'} />
-              <Field label="요금" value={item.ems_fee ? `${Number(item.ems_fee).toLocaleString()}원` : '-'} />
+              <Field label="요금" value={won(item.ems_fee)} />
+              <Field label="DDP" value={won(item.ddp_krw)} />
+              <Field label="합계" value={won(item.spent_total)} />
               <Field label="접수자" value={item.created_by || ''} />
               <Field label="우체국" value={item.post_office || ''} />
             </div>

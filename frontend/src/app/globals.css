@@ -700,12 +700,79 @@ tbody tr:hover { background: #f7f8fd; }
   padding-left: 0.35rem;
   padding-right: 0.35rem;
 }
-.overseas-item-row {
-  display: grid;
-  grid-template-columns: minmax(140px, 1.2fr) minmax(140px, 1.4fr) 68px 88px 108px 56px auto auto;
-  gap: 0.45rem;
-  margin-bottom: 0.75rem;
-  align-items: end;
+.overseas-invoice-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+}
+.overseas-invoice-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.overseas-invoice-table th,
+.overseas-invoice-table td {
+  padding: 0.4rem 0.35rem;
+  text-align: left;
+  vertical-align: top;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+.overseas-invoice-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-muted);
+  font-weight: 700;
+}
+.overseas-invoice-bulk td {
+  background: #f8fafc;
+}
+.overseas-bulk-cell {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.overseas-bulk-cell .btn {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.75rem;
+}
+.overseas-invoice-table td {
+  position: relative;
+}
+.overseas-hs-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% - 2px);
+  left: 0.35rem;
+  min-width: 280px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+}
+.overseas-hs-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.7rem;
+  border: 0;
+  background: #fff;
+  cursor: pointer;
+}
+.overseas-hs-menu button:hover {
+  background: var(--color-brand-light);
+}
+.overseas-row-actions {
+  display: flex;
+  gap: 0.3rem;
+  white-space: nowrap;
 }
 @media (max-width: 1100px) {
   .overseas-intake {

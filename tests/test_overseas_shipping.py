@@ -16,6 +16,7 @@ from backend.app.api.overseas_shipping import (
     delete_saved_overseas_address,
     delete_saved_overseas_hs,
     delete_saved_overseas_sender,
+    delete_overseas,
     list_overseas,
     get_overseas,
     list_saved_overseas_addresses,
@@ -204,6 +205,8 @@ def test_create_requires_confirm_then_saves_mock(isolated_runtime):
     assert len(items) == 1
     assert items[0]["status"] == "requested"
     assert items[0]["countrycd"] == "JP"
+    assert items[0]["ddp_krw"] == 0
+    assert items[0]["spent_total"] == int(float(items[0]["ems_fee"] or 0))
     assert items[0]["items"][0]["name_en"] == "Clothing"
 
     again = create_overseas(_req(confirm=True), token)
@@ -904,3 +907,48 @@ def test_shipment_detail_keeps_product_name_apart_from_hs_item(isolated_runtime)
     )
     assert params["contents"] == "Lip cosmetics"
     assert "PDRN" not in params["contents"]
+
+
+def test_list_shows_ddp_and_only_admin_can_delete(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    created = create_overseas(
+        _req(
+            confirm=True,
+            countrycd="GB",
+            receivename="Alex Morgan",
+            receivetelno="+442087594321",
+            receivezipcode="UB7 0HJ",
+            receiveaddr1="England",
+            receiveaddr2="West Drayton",
+            receiveaddr3="1 Test Road",
+        ),
+        token,
+    )
+    row = list_overseas(token)["items"][0]
+    assert row["ddp_krw"] > 0
+    assert row["spent_total"] == int(float(row["ems_fee"])) + row["ddp_krw"]
+    detail = get_overseas(created["id"], token)
+    assert detail["ddp_krw"] == row["ddp_krw"]
+    assert detail["spent_total"] == row["spent_total"]
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute("UPDATE overseas_shipping_requests SET ddp_krw=NULL WHERE id=?", (created["id"],))
+        con.commit()
+    recomputed = list_overseas(token)["items"][0]
+    assert recomputed["ddp_krw"] == row["ddp_krw"]
+    assert recomputed["spent_total"] == row["spent_total"]
+    try:
+        delete_overseas(created["id"], token)
+        raise AssertionError("staff cannot delete")
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute("UPDATE users SET is_admin=1 WHERE user_id=1")
+        con.commit()
+    deleted = delete_overseas(created["id"], token)
+    assert deleted["success"] is True
+    assert list_overseas(token)["items"] == []
+    try:
+        get_overseas(created["id"], token)
+        raise AssertionError("deleted shipment stays gone")
+    except HTTPException as exc:
+        assert exc.status_code == 404

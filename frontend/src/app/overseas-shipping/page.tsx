@@ -56,6 +56,34 @@ const fieldGrid: React.CSSProperties = {
   gap: '0.75rem',
 };
 
+function HsMenu({
+  items,
+  activeName,
+  onPick,
+}: {
+  items: ItemCategory[];
+  activeName?: string;
+  onPick: (cat: ItemCategory) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="overseas-hs-menu">
+      {items.map((cat) => (
+        <button
+          key={cat.id}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onPick(cat)}
+          style={{ background: activeName && cat.name_en === activeName ? 'var(--color-brand-light)' : undefined }}
+        >
+          {cat.saved ? '[저장] ' : ''}{cat.name_ko} · {cat.name_en}
+          {cat.hs_code ? ` · HS ${cat.hs_code}` : ''}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function FormSection({
   title,
   first,
@@ -186,6 +214,16 @@ export default function OverseasShippingPage() {
   const [hsQuery, setHsQuery] = useState<Record<number, string>>({});
   const [hsOpen, setHsOpen] = useState<number | null>(null);
   const [hsMatches, setHsMatches] = useState<Record<number, ItemCategory[]>>({});
+  const [pickedRows, setPickedRows] = useState<Record<number, boolean>>({});
+  const [bulkItem, setBulkItem] = useState({
+    product_name: '',
+    name_en: '',
+    quantity: '',
+    unit_price_usd: '',
+    hs_code: '',
+    origin_country: '',
+  });
+  const [bulkHsOpen, setBulkHsOpen] = useState(false);
   const hsTimer = useRef<Record<number, number>>({});
   const [validating, setValidating] = useState(false);
   const [addressHint, setAddressHint] = useState<string | null>(null);
@@ -520,6 +558,109 @@ export default function OverseasShippingPage() {
     }));
   }
 
+  function applyToPicked(patch: Partial<OverseasInvoiceItem> | ((item: OverseasInvoiceItem) => Partial<OverseasInvoiceItem>)) {
+    if (!form.items.some((_, i) => pickedRows[i])) {
+      window.alert('값을 넣을 행을 선택하세요.');
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item, i) => {
+        if (!pickedRows[i]) return item;
+        const next = typeof patch === 'function' ? patch(item) : patch;
+        return { ...item, ...next };
+      }),
+    }));
+  }
+
+  function applyBulkProduct() {
+    const value = bulkItem.product_name.trim();
+    if (!value) {
+      window.alert('제품명을 입력하세요.');
+      return;
+    }
+    applyToPicked({ product_name: value });
+  }
+
+  function applyBulkName() {
+    const value = bulkItem.name_en.trim();
+    if (!value) {
+      window.alert('품목을 입력하세요.');
+      return;
+    }
+    const hit = [...savedHs, ...ITEM_CATEGORIES].find(
+      (cat) => cat.name_ko === value || cat.name_en.toLowerCase() === value.toLowerCase(),
+    );
+    applyToPicked({
+      name_en: hit?.name_en || value,
+      ...(hit?.hs_code ? { hs_code: hit.hs_code } : {}),
+      ...(hit?.origin_country ? { origin_country: hit.origin_country } : {}),
+    });
+    setBulkHsOpen(false);
+  }
+
+  function applyBulkQuantity() {
+    const quantity = parseInt(bulkItem.quantity, 10);
+    if (!quantity || quantity < 1) {
+      window.alert('수량을 입력하세요.');
+      return;
+    }
+    applyToPicked({ quantity });
+  }
+
+  function applyBulkPrice() {
+    const unit_price_usd = parseFloat(bulkItem.unit_price_usd);
+    if (!unit_price_usd || unit_price_usd <= 0) {
+      window.alert('단가 USD를 입력하세요.');
+      return;
+    }
+    applyToPicked({ unit_price_usd });
+  }
+
+  function applyBulkHs() {
+    const hs = bulkItem.hs_code.replace(/\D/g, '');
+    if (!hs) {
+      window.alert('HS코드를 입력하세요.');
+      return;
+    }
+    applyToPicked({ hs_code: hs });
+  }
+
+  function applyBulkOrigin() {
+    const origin = bulkItem.origin_country.trim().toUpperCase();
+    if (!origin) {
+      window.alert('원산지를 입력하세요.');
+      return;
+    }
+    applyToPicked({ origin_country: origin });
+  }
+
+  function deletePickedRows() {
+    if (!form.items.some((_, i) => pickedRows[i])) {
+      window.alert('삭제할 행을 선택하세요.');
+      return;
+    }
+    setForm((prev) => {
+      const next = prev.items.filter((_, i) => !pickedRows[i]);
+      return { ...prev, items: next.length ? next : [newItem()] };
+    });
+    setPickedRows({});
+    setHsOpen(null);
+  }
+
+  function deleteItemRow(index: number) {
+    setPickedRows((prev) => {
+      const next: Record<number, boolean> = {};
+      Object.entries(prev).forEach(([key, on]) => {
+        const i = Number(key);
+        if (!on || i === index) return;
+        next[i > index ? i - 1 : i] = true;
+      });
+      return next;
+    });
+    setForm((prev) => ({ ...prev, items: prev.items.filter((_, idx) => idx !== index) }));
+  }
+
   function pickCategory(index: number, cat: ItemCategory) {
     updateItem(index, {
       name_en: cat.id === 'other' ? '' : cat.name_en,
@@ -676,6 +817,7 @@ export default function OverseasShippingPage() {
     });
     setSelectedSavedId('');
     setNationQuery('');
+    setPickedRows({});
     setForm((prev) => ({
       ...prev,
       countrycd: allowed && group.countrycd ? group.countrycd : prev.countrycd,
@@ -779,6 +921,7 @@ export default function OverseasShippingPage() {
         setSuccess(`${label} 완료. 등기번호 ${result.tracking_no}${result.ems_fee ? ` · 요금 ${Number(result.ems_fee).toLocaleString()}원` : ''}. 출력서류는 아래 버튼 또는 접수목록에서 다시 인쇄할 수 있습니다.`);
         const senderName = form.sender_name || defaultSender;
         const next = emptyForm(senderName);
+        setPickedRows({});
         next.sender_zipcode = form.sender_zipcode;
         next.sender_addr1 = form.sender_addr1;
         next.sender_addr2 = form.sender_addr2;
@@ -1308,146 +1451,6 @@ export default function OverseasShippingPage() {
         </FormSection>
       </Card>
 
-      <Card title="세관 인보이스">
-        <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
-          {isDocument
-            ? '서류도 내용품명(영문)을 입력하세요. 예: Documents. '
-            : '제품명은 주문 상품이고, 품목은 HS 품목입니다. 한글·영문·HS 6자리로 검색합니다. '}
-          <a href="/overseas-hs-codes">HS코드 목록</a>
-        </p>
-        {form.items.map((item, i) => {
-          const q = hsQuery[i] ?? '';
-          const matches = (hsMatches[i] || searchItemCategories(q || item.name_en || item.hs_code || '', savedHs)).slice(0, 12);
-          return (
-            <div
-              key={i}
-              className="overseas-item-row"
-            >
-              <label>
-                제품명
-                <input
-                  style={inputStyle}
-                  value={item.product_name || ''}
-                  placeholder="주문 상품명"
-                  onChange={(e) => updateItem(i, { product_name: e.target.value })}
-                />
-              </label>
-              <label style={{ position: 'relative' }}>
-                품목 (한글/영문/HS 검색)
-                <input
-                  style={inputStyle}
-                  value={item.name_en}
-                  placeholder="의류, Clothing, 610910"
-                  onFocus={() => searchHs(i, q || item.name_en || item.hs_code || '')}
-                  onChange={(e) => {
-                    updateItem(i, { name_en: e.target.value });
-                    searchHs(i, e.target.value);
-                    const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.name_en.toLowerCase() === e.target.value.toLowerCase());
-                    if (hit?.hs_code) updateItem(i, { name_en: e.target.value, hs_code: hit.hs_code, origin_country: hit.origin_country || item.origin_country });
-                  }}
-                />
-                {hsOpen === i && matches.length > 0 && (
-                  <div style={{
-                    position: 'absolute',
-                    zIndex: 20,
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    background: '#fff',
-                    border: '1px solid var(--border)',
-                    borderRadius: 8,
-                    maxHeight: 220,
-                    overflowY: 'auto',
-                    boxShadow: 'var(--shadow-md)',
-                  }}>
-                    {matches.map((cat) => (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => pickCategory(i, cat)}
-                        style={{
-                          display: 'block',
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '0.45rem 0.7rem',
-                          border: 0,
-                          background: cat.name_en === item.name_en ? 'var(--color-brand-light)' : '#fff',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {cat.saved ? '[저장] ' : ''}{cat.name_ko} · {cat.name_en}
-                        {cat.hs_code ? ` · HS ${cat.hs_code}` : ''}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </label>
-              <label>
-                수량
-                <input
-                  type="number"
-                  min={1}
-                  style={inputStyle}
-                  value={item.quantity}
-                  onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value, 10) || 1 })}
-                />
-              </label>
-              <label>
-                단가 USD
-                <input
-                  type="number"
-                  min={0.01}
-                  step="0.01"
-                  style={inputStyle}
-                  value={item.unit_price_usd || ''}
-                  placeholder="직접 입력"
-                  onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })}
-                />
-              </label>
-              <label>
-                HS코드
-                <input
-                  style={inputStyle}
-                  value={item.hs_code || ''}
-                  placeholder="6자리"
-                  onFocus={() => searchHs(i, item.hs_code || q || item.name_en || '')}
-                  onChange={(e) => {
-                    const hs = e.target.value.replace(/\D/g, '');
-                    updateItem(i, { hs_code: hs });
-                    searchHs(i, hs);
-                    const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.hs_code === hs);
-                    if (hit) updateItem(i, { hs_code: hs, name_en: item.name_en || hit.name_en });
-                  }}
-                />
-              </label>
-              <label>
-                원산지
-                <input style={inputStyle} value={item.origin_country || ''} placeholder="KR" onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
-              </label>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => handleSaveHs(i)}
-              >
-                HS 저장
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={form.items.length <= 1}
-                onClick={() => setForm((p) => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }))}
-              >
-                삭제
-              </button>
-            </div>
-          );
-        })}
-        <button type="button" className="btn btn-secondary" onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
-          품목 추가
-        </button>
-      </Card>
-
       </div>
       <aside className="overseas-intake-aside">
       <Card title="배송요금">
@@ -1579,6 +1582,180 @@ export default function OverseasShippingPage() {
       </Card>
       </aside>
       </div>
+
+      <Card title="세관 인보이스">
+        <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+          {isDocument
+            ? '서류도 내용품명(영문)을 입력하세요. 예: Documents. '
+            : '제품명은 주문 상품이고, 품목은 HS 품목입니다. 한글·영문·HS 6자리로 검색합니다. '}
+          체크한 행에는 칸마다 같은 값을 한 번에 넣을 수 있고, 고른 행은 한 번에 지울 수 있습니다.{' '}
+          <a href="/overseas-hs-codes">HS코드 목록</a>
+        </p>
+        <div className="overseas-invoice-scroll">
+          <table className="overseas-invoice-table">
+            <thead>
+              <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="인보이스 행 전체 선택"
+                    checked={form.items.length > 0 && form.items.every((_, i) => pickedRows[i])}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setPickedRows(Object.fromEntries(form.items.map((_, i) => [i, on])));
+                    }}
+                  />
+                </th>
+                <th>제품명</th>
+                <th>품목</th>
+                <th>수량</th>
+                <th>단가 USD</th>
+                <th>HS코드</th>
+                <th>원산지</th>
+                <th />
+              </tr>
+              <tr className="overseas-invoice-bulk">
+                <td />
+                <td>
+                  <div className="overseas-bulk-cell">
+                    <input style={inputStyle} aria-label="제품명 일괄" value={bulkItem.product_name} placeholder="같은 제품명" onChange={(e) => setBulkItem((p) => ({ ...p, product_name: e.target.value }))} />
+                    <button type="button" className="btn btn-secondary" onClick={applyBulkProduct}>넣기</button>
+                  </div>
+                </td>
+                <td>
+                  <div className="overseas-bulk-cell">
+                    <input
+                      style={inputStyle}
+                      aria-label="품목 일괄"
+                      value={bulkItem.name_en}
+                      placeholder="같은 HS 품목"
+                      onFocus={() => setBulkHsOpen(true)}
+                      onChange={(e) => {
+                        setBulkItem((p) => ({ ...p, name_en: e.target.value }));
+                        setBulkHsOpen(true);
+                      }}
+                    />
+                    <button type="button" className="btn btn-secondary" onClick={applyBulkName}>넣기</button>
+                  </div>
+                  <HsMenu
+                    items={bulkHsOpen ? searchItemCategories(bulkItem.name_en, savedHs).slice(0, 12) : []}
+                    activeName={bulkItem.name_en}
+                    onPick={(cat) => {
+                      setBulkItem((p) => ({
+                        ...p,
+                        name_en: cat.name_en,
+                        hs_code: cat.hs_code || p.hs_code,
+                        origin_country: cat.origin_country || p.origin_country,
+                      }));
+                      setBulkHsOpen(false);
+                    }}
+                  />
+                </td>
+                <td>
+                  <div className="overseas-bulk-cell">
+                    <input style={inputStyle} aria-label="수량 일괄" type="number" min={1} value={bulkItem.quantity} placeholder="수량" onChange={(e) => setBulkItem((p) => ({ ...p, quantity: e.target.value }))} />
+                    <button type="button" className="btn btn-secondary" onClick={applyBulkQuantity}>넣기</button>
+                  </div>
+                </td>
+                <td>
+                  <div className="overseas-bulk-cell">
+                    <input style={inputStyle} aria-label="단가 일괄" type="number" min={0.01} step="0.01" value={bulkItem.unit_price_usd} placeholder="USD" onChange={(e) => setBulkItem((p) => ({ ...p, unit_price_usd: e.target.value }))} />
+                    <button type="button" className="btn btn-secondary" onClick={applyBulkPrice}>넣기</button>
+                  </div>
+                </td>
+                <td>
+                  <div className="overseas-bulk-cell">
+                    <input style={inputStyle} aria-label="HS 일괄" value={bulkItem.hs_code} placeholder="6자리" onChange={(e) => setBulkItem((p) => ({ ...p, hs_code: e.target.value.replace(/\D/g, '') }))} />
+                    <button type="button" className="btn btn-secondary" onClick={applyBulkHs}>넣기</button>
+                  </div>
+                </td>
+                <td>
+                  <div className="overseas-bulk-cell">
+                    <input style={inputStyle} aria-label="원산지 일괄" value={bulkItem.origin_country} placeholder="KR" onChange={(e) => setBulkItem((p) => ({ ...p, origin_country: e.target.value }))} />
+                    <button type="button" className="btn btn-secondary" onClick={applyBulkOrigin}>넣기</button>
+                  </div>
+                </td>
+                <td>
+                  <button type="button" className="btn btn-secondary" onClick={deletePickedRows}>선택 삭제</button>
+                </td>
+              </tr>
+            </thead>
+            <tbody>
+              {form.items.map((item, i) => {
+                const q = hsQuery[i] ?? '';
+                const matches = (hsMatches[i] || searchItemCategories(q || item.name_en || item.hs_code || '', savedHs)).slice(0, 12);
+                return (
+                  <tr key={i}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`${i + 1}행 선택`}
+                        checked={!!pickedRows[i]}
+                        onChange={(e) => setPickedRows((prev) => ({ ...prev, [i]: e.target.checked }))}
+                      />
+                    </td>
+                    <td>
+                      <input style={inputStyle} aria-label={`${i + 1}행 제품명`} value={item.product_name || ''} placeholder="주문 상품명" onChange={(e) => updateItem(i, { product_name: e.target.value })} />
+                    </td>
+                    <td>
+                      <input
+                        style={inputStyle}
+                        aria-label={`${i + 1}행 품목`}
+                        value={item.name_en}
+                        placeholder="의류, Clothing, 610910"
+                        onFocus={() => searchHs(i, q || item.name_en || item.hs_code || '')}
+                        onChange={(e) => {
+                          updateItem(i, { name_en: e.target.value });
+                          searchHs(i, e.target.value);
+                          const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.name_en.toLowerCase() === e.target.value.toLowerCase());
+                          if (hit?.hs_code) updateItem(i, { name_en: e.target.value, hs_code: hit.hs_code, origin_country: hit.origin_country || item.origin_country });
+                        }}
+                      />
+                      {hsOpen === i && (
+                        <HsMenu items={matches} activeName={item.name_en} onPick={(cat) => pickCategory(i, cat)} />
+                      )}
+                    </td>
+                    <td>
+                      <input style={inputStyle} aria-label={`${i + 1}행 수량`} type="number" min={1} value={item.quantity} onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value, 10) || 1 })} />
+                    </td>
+                    <td>
+                      <input style={inputStyle} aria-label={`${i + 1}행 단가`} type="number" min={0.01} step="0.01" value={item.unit_price_usd || ''} placeholder="USD" onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })} />
+                    </td>
+                    <td>
+                      <input
+                        style={inputStyle}
+                        aria-label={`${i + 1}행 HS코드`}
+                        value={item.hs_code || ''}
+                        placeholder="6자리"
+                        onFocus={() => searchHs(i, item.hs_code || q || item.name_en || '')}
+                        onChange={(e) => {
+                          const hs = e.target.value.replace(/\D/g, '');
+                          updateItem(i, { hs_code: hs });
+                          searchHs(i, hs);
+                          const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.hs_code === hs);
+                          if (hit) updateItem(i, { hs_code: hs, name_en: item.name_en || hit.name_en });
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input style={inputStyle} aria-label={`${i + 1}행 원산지`} value={item.origin_country || ''} placeholder="KR" onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
+                    </td>
+                    <td>
+                      <div className="overseas-row-actions">
+                        <button type="button" className="btn btn-secondary" onClick={() => handleSaveHs(i)}>HS 저장</button>
+                        <button type="button" className="btn btn-secondary" disabled={form.items.length <= 1} onClick={() => deleteItemRow(i)}>삭제</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" className="btn btn-secondary" style={{ marginTop: '0.75rem' }} onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
+          품목 추가
+        </button>
+      </Card>
     </div>
   );
 }

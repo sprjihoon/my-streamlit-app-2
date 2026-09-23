@@ -209,6 +209,10 @@ def ensure_overseas_tables() -> None:
             con.execute(
                 "ALTER TABLE overseas_shipping_requests ADD COLUMN contents_type TEXT DEFAULT 'parcel'"
             )
+        try:
+            con.execute("SELECT ddp_krw FROM overseas_shipping_requests LIMIT 1")
+        except Exception:
+            con.execute("ALTER TABLE overseas_shipping_requests ADD COLUMN ddp_krw INTEGER")
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS overseas_saved_addresses (
@@ -766,6 +770,7 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         "created_at",
         "canceled_at",
         "canceled_by",
+        "ddp_krw",
     ]
     data = dict(zip(keys, row))
     data["is_test"] = bool(data["is_test"])
@@ -775,7 +780,51 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         data["items"] = json.loads(data.pop("item_list") or "[]")
     except json.JSONDecodeError:
         data["items"] = []
+    _attach_spend(data)
     return data
+
+
+def _customs_value_usd(items: list[dict[str, Any]]) -> float:
+    total = 0.0
+    for item in items or []:
+        try:
+            price = float(item.get("unit_price_usd") or 0)
+            qty = int(item.get("quantity") or 1)
+        except (TypeError, ValueError):
+            continue
+        total += price * qty
+    return total
+
+
+def _ddp_krw_for(countrycd: str, shipping_method: str, items: list[dict[str, Any]]) -> int:
+    duty = calculate_duty_deposit(
+        country_code=countrycd,
+        customs_value_usd=_customs_value_usd(items),
+        duty_prepaid_requested=True,
+        shipping_method=shipping_method,
+    )
+    if not duty.get("dutyPrepaid"):
+        return 0
+    return int(duty.get("depositKrw") or 0)
+
+
+def _attach_spend(data: dict[str, Any]) -> None:
+    stored = data.get("ddp_krw")
+    if stored is None or stored == "":
+        ddp = _ddp_krw_for(
+            str(data.get("countrycd") or ""),
+            str(data.get("shipping_method") or ""),
+            list(data.get("items") or []),
+        )
+    else:
+        ddp = int(stored or 0)
+    fee_raw = str(data.get("ems_fee") or "").strip()
+    try:
+        fee = int(float(fee_raw)) if fee_raw else 0
+    except ValueError:
+        fee = 0
+    data["ddp_krw"] = ddp
+    data["spent_total"] = fee + ddp
 
 
 @router.get("/meta")
@@ -1195,7 +1244,8 @@ def list_overseas(token: str, limit: int = 500):
                    recipient_addr1, recipient_addr2, recipient_addr3,
                    totweight, boxlength, boxwidth, boxheight, item_list,
                    tracking_no, req_no, receive_seq, ems_fee, post_office,
-                   status, is_test, notes, created_by, created_at, canceled_at, canceled_by
+                   status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
+                   ddp_krw
             FROM overseas_shipping_requests
             ORDER BY id DESC
             LIMIT ?
@@ -1216,7 +1266,7 @@ def _load_shipment(shipment_id: int) -> tuple[dict[str, Any], dict[str, Any] | N
                    totweight, boxlength, boxwidth, boxheight, item_list,
                    tracking_no, req_no, receive_seq, ems_fee, post_office,
                    status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
-                   apply_snapshot
+                   ddp_krw, apply_snapshot
             FROM overseas_shipping_requests
             WHERE id = ?
             """,
@@ -1325,6 +1375,11 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         raise HTTPException(status_code=502, detail="우체국이 등기번호를 반환하지 않았습니다.")
 
     fee = result.get("prerecevprc") or "0"
+    ddp_krw = _ddp_krw_for(
+        validated["countrycd"],
+        validated["method"]["code"],
+        list(validated.get("items") or []),
+    )
     created_at = datetime.now(KST).isoformat(timespec="seconds")
     with get_connection() as con:
         cur = con.execute(
@@ -1335,8 +1390,8 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
                 recipient_addr1, recipient_addr2, recipient_addr3,
                 totweight, boxlength, boxwidth, boxheight, item_list,
                 tracking_no, req_no, receive_seq, ems_fee, post_office,
-                status, is_test, apply_snapshot, notes, created_by, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                status, is_test, apply_snapshot, notes, created_by, created_at, ddp_krw
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 order_no,
@@ -1368,6 +1423,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
                 validated.get("notes") or "",
                 user["nickname"],
                 created_at,
+                ddp_krw,
             ),
         )
         row_id = cur.lastrowid
@@ -1481,3 +1537,26 @@ def cancel_overseas(shipment_id: int, token: str, confirm: bool = False):
         )
         con.commit()
     return {"success": True, "message": "해외배송 접수를 취소했습니다."}
+
+
+@router.delete("/{shipment_id}")
+def delete_overseas(shipment_id: int, token: str):
+    """관리자만 접수 행을 목록에서 지운다. 실접수는 우체국 취소 후에 삭제한다."""
+    user = _get_user(token)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자만 접수 내역을 삭제할 수 있습니다.")
+    data, _snapshot = _load_shipment(shipment_id)
+    if data["status"] != "canceled" and not data["is_test"]:
+        cancel_overseas(shipment_id, token, confirm=True)
+    with get_connection() as con:
+        con.execute("DELETE FROM overseas_shipping_requests WHERE id=?", (shipment_id,))
+        con.commit()
+    add_log(
+        action_type="해외배송삭제",
+        target_type="overseas_shipping",
+        target_id=str(shipment_id),
+        target_name=str(data.get("tracking_no") or data.get("order_no") or ""),
+        user_nickname=user["nickname"],
+        details=f"{data.get('recipient_name') or ''} / {data.get('countrycd') or ''} 삭제",
+    )
+    return {"success": True, "message": "접수 내역을 삭제했습니다."}

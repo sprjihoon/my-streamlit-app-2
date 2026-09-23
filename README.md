@@ -228,7 +228,8 @@ get_res_info(order_no, req_ymd, req_type="2")
   → 발송인 이름 수정 (화면 기본값은 EMS_SENDER_NAME, 없으면 스프링풀필먼트)
   → 구글 Places 자동완성 + Address Validation 추천
   → 화물/서류 선택. 서류는 박스 크기를 넣지 않는다
-  → 품목 한글/영문/HS 검색으로 인보이스·HS코드 완성
+  → 접수 칸 아래 세관 인보이스 표에서 제품명·HS 품목·수량·단가·HS코드·원산지를 입력
+  → 체크한 행에는 칸마다 같은 값을 한 번에 넣고, 고른 행은 한 번에 지운다
   → POST /overseas-shipping/preview      확인 전 DB·우체국 미기록
   → 확인 후 POST /overseas-shipping      eship.epost.go.kr 즉시 접수
   → GET /overseas-shipping/{id}/label    CN22 출력서류 (JSON/HTML)
@@ -242,6 +243,8 @@ get_res_info(order_no, req_ymd, req_type="2")
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
 - 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다. 접수 `regData`는 SEED128, EUC-KR이다.
 - 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 화물·서류 예상요금을 나눠 보여 준다.
+- 접수목록의 지출 칸은 우체국 요금, 미국·영국 DDP, 그 합계를 보여 준다. DDP는 접수 당시 계산값을 저장하고, 예전 건은 저장값이 없으면 같은 식으로 다시 계산한다.
+- 관리자만 접수 행을 삭제할 수 있다. 아직 취소되지 않은 실접수는 우체국 취소가 된 뒤에 목록에서 지운다.
 
 ### 주문 엑셀로 입력
 
@@ -304,11 +307,12 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-hs` | 저장 HS코드 목록 |
 | `POST` | `/overseas-shipping/import-excel` | 주문 엑셀을 접수 1건 입력값으로 변환. 없는 항목은 비움 |
 | `POST` | `/overseas-shipping/preview` | 확인용 미리보기 (미기록) |
-| `GET` | `/overseas-shipping` | 접수 목록 |
-| `GET` | `/overseas-shipping/{id}` | 접수 1건 상세. 제품명·HS 품목·수취인·박스를 입력값 그대로 돌려준다 |
+| `GET` | `/overseas-shipping` | 접수 목록. 각 건에 요금, DDP, 합계(`spent_total`) |
+| `GET` | `/overseas-shipping/{id}` | 접수 1건 상세. 제품명·HS 품목·수취인·박스·지출을 입력값 그대로 돌려준다 |
 | `POST` | `/overseas-shipping` | 확인 후 접수 |
 | `GET` | `/overseas-shipping/{id}/label` | 출력서류 CN22 (JSON, `format=html` 이면 인쇄 HTML) |
 | `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |
+| `DELETE` | `/overseas-shipping/{id}` | 관리자만 목록에서 삭제. 실접수는 우체국 취소 후 삭제 |
 
 우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, tillion이 CN22 형식 출력서류를 만들어 인쇄한다. 화면은 `/overseas-print/{id}` 이다. 접수 직후의 **출력서류 인쇄**와 접수목록 각 행의 **출력서류**가 같은 페이지를 연다. 취소된 건도 출력서류 버튼은 남고, 서류 위에 취소된 접수라고 표시한다.
 
