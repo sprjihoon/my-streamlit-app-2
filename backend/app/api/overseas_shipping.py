@@ -81,6 +81,7 @@ def _nations_payload(premiumcd: str) -> dict[str, Any]:
 
 
 class InvoiceItem(BaseModel):
+    product_name: str = ""
     name_en: str
     quantity: int = 1
     unit_price_usd: float
@@ -1204,10 +1205,7 @@ def list_overseas(token: str, limit: int = 500):
     return {"items": [_row_to_dict(row) for row in rows]}
 
 
-@router.get("/{shipment_id}/label")
-def overseas_label(shipment_id: int, token: str, format: str = "json"):
-    """접수 저장본으로 CN22 출력서류를 내려준다. 우체국 PDF API는 없다."""
-    _get_user(token)
+def _load_shipment(shipment_id: int) -> tuple[dict[str, Any], dict[str, Any] | None]:
     ensure_overseas_tables()
     with get_connection() as con:
         row = con.execute(
@@ -1236,6 +1234,34 @@ def overseas_label(shipment_id: int, token: str, format: str = "json"):
                 snapshot = parsed
         except json.JSONDecodeError:
             snapshot = None
+    snap = snapshot or {}
+    data["sender_zipcode"] = str(snap.get("senderzipcode") or "")
+    data["sender_addr1"] = str(snap.get("senderaddr1") or "")
+    data["sender_addr2"] = str(snap.get("senderaddr2") or "")
+    data["sender_addr3"] = str(snap.get("senderaddr3") or "")
+    data["sender_tel"] = format_sender_tel(
+        {
+            "tel2": str(snap.get("sendertelno2") or ""),
+            "tel3": str(snap.get("sendertelno3") or ""),
+            "tel4": str(snap.get("sendertelno4") or ""),
+        }
+    )
+    return data, snapshot
+
+
+@router.get("/{shipment_id}")
+def get_overseas(shipment_id: int, token: str):
+    """접수 1건을 입력 당시 값 그대로 돌려준다."""
+    _get_user(token)
+    data, _snapshot = _load_shipment(shipment_id)
+    return data
+
+
+@router.get("/{shipment_id}/label")
+def overseas_label(shipment_id: int, token: str, format: str = "json"):
+    """접수 저장본으로 CN22 출력서류를 내려준다. 우체국 PDF API는 없다."""
+    _get_user(token)
+    data, snapshot = _load_shipment(shipment_id)
     label = build_shipment_label(data, snapshot=snapshot)
     if (format or "json").lower() == "html":
         return HTMLResponse(render_label_html(label))

@@ -88,11 +88,12 @@ def test_html_xls_fills_one_shipment_and_leaves_gaps():
     assert group["notes"] == "말레이시아 샘플"
     assert group["totweight"] == 0
     assert group["boxlength"] == 0
-    assert [item["name_en"] for item in group["items"]] == [
+    assert [item["product_name"] for item in group["items"]] == [
         "PDRN 틴티드 립 앰플 새틴",
         "PDRN 틴티드 립 앰플 자나",
         "CCF 로즈 밀크 에센스 프렙",
     ]
+    assert all(item["name_en"] == "" for item in group["items"])
     assert group["items"][0]["quantity"] == 1
     assert group["items"][0]["unit_price_usd"] == 0
     assert group["items"][0]["hs_code"] == ""
@@ -104,6 +105,7 @@ def test_html_xls_fills_one_shipment_and_leaves_gaps():
     assert "총중량(g)" in missing
     assert "가로(cm)" in missing
     assert "단가 USD" in missing
+    assert "HS 품목" in missing
     assert "HS코드" in missing
     assert "원산지" in missing
     assert "국가" not in missing
@@ -155,7 +157,8 @@ def test_xlsx_upload_endpoint(isolated_runtime):
     groups = response.json()["groups"]
     assert len(groups) == 1
     assert groups[0]["countrycd"] == "MY"
-    assert groups[0]["items"][0]["name_en"] == "Lip Ampoule"
+    assert groups[0]["items"][0]["product_name"] == "Lip Ampoule"
+    assert groups[0]["items"][0]["name_en"] == ""
     assert groups[0]["items"][0]["unit_price_usd"] == 0
 
 
@@ -171,6 +174,9 @@ def test_sample_workbook_is_one_shipment():
     assert group["receiveaddr1"] == "Johor"
     assert group["receiveaddr2"] == "Johor Bahru"
     assert len(group["items"]) == 21
+    assert group["items"][0]["product_name"] == "PDRN 틴티드 립 앰플 새틴"
+    assert all(item["name_en"] == "" for item in group["items"])
+    assert all(item["quantity"] == 1 for item in group["items"])
     assert all(item["unit_price_usd"] == 0 for item in group["items"])
     assert all(not item["hs_code"] for item in group["items"])
     assert group["totweight"] == 0

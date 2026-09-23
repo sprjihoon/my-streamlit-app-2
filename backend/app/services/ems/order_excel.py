@@ -133,7 +133,7 @@ def build_shipment(records: list[dict[str, str]]) -> dict[str, Any]:
         address["countrycd"] = _country_in_text(first.get("메모", ""))
     phone = first.get("수령자전화") or first.get("수령자전화2") or ""
     items = [_item_from_row(row) for row in records]
-    items = [item for item in items if item["name_en"]]
+    items = [item for item in items if item["product_name"]]
     missing = _missing_fields(address, phone, items)
     bundle = first.get("합포번호") or first.get("관리번호") or ""
     return {
@@ -257,7 +257,8 @@ def _item_from_row(row: dict[str, str]) -> dict[str, Any]:
     if quantity < 1:
         quantity = 1
     return {
-        "name_en": name[:80],
+        "product_name": name[:80],
+        "name_en": "",
         "quantity": quantity,
         "unit_price_usd": 0,
         "hs_code": "",
@@ -373,6 +374,8 @@ def _missing_fields(address: dict[str, str], phone: str, items: list[dict[str, A
         missing.append("품목")
     elif any(not item.get("unit_price_usd") for item in items):
         missing.append("단가 USD")
+    if items and any(not item.get("name_en") for item in items):
+        missing.append("HS 품목")
     if items and any(not item.get("hs_code") for item in items):
         missing.append("HS코드")
     if items and any(not item.get("origin_country") for item in items):

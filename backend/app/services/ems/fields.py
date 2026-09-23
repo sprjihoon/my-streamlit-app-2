@@ -258,8 +258,10 @@ def serialize_invoice_items(
             raise ValueError("인보이스 단가(USD)는 0보다 커야 합니다.")
         hs = re.sub(r"\D", "", str(raw.get("hs_code") or ""))
         origin = (str(raw.get("origin_country") or "KR").strip().upper() or "KR")[:2]
+        product_name = str(raw.get("product_name") or "").strip()[:80]
         cleaned.append(
             {
+                "product_name": product_name,
                 "name_en": name,
                 "quantity": qty,
                 "unit_price_usd": price,

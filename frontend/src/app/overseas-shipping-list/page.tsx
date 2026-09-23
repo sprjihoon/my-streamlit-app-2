@@ -92,7 +92,7 @@ export default function OverseasShippingListPage() {
     <div className="overseas-page">
       <PageHeader
         title="해외배송 접수목록"
-        subtitle="접수한 건은 각 행의 출력서류 버튼으로 언제든 다시 인쇄할 수 있습니다."
+        subtitle="행을 누르면 접수한 입력값을 그대로 봅니다. 출력서류는 각 행 버튼으로 다시 인쇄할 수 있습니다."
       />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
@@ -139,7 +139,11 @@ export default function OverseasShippingListPage() {
               </thead>
               <tbody>
                 {visible.map((it) => (
-                  <tr key={it.id}>
+                  <tr
+                    key={it.id}
+                    onClick={() => { window.location.href = `/overseas-shipping-list/${it.id}`; }}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <td>{(it.created_at || '').replace('T', ' ').slice(0, 16)}</td>
                     <td>{METHOD_LABEL[it.shipping_method] || it.shipping_method}{it.contents_label ? ` · ${it.contents_label}` : ''}</td>
                     <td>{it.countrycd}</td>
@@ -148,7 +152,7 @@ export default function OverseasShippingListPage() {
                     <td>{it.ems_fee ? `${Number(it.ems_fee).toLocaleString()}원` : '-'}</td>
                     <td>{it.status === 'canceled' ? '취소' : it.is_test ? '테스트' : '접수'}</td>
                     <td>{it.created_by}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
+                    <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
                       <a href={`/overseas-print/${it.id}`} className="btn btn-primary" target="_blank" rel="noreferrer">
                         출력서류
                       </a>

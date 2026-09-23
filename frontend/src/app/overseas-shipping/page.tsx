@@ -105,7 +105,7 @@ function parseApiError(err: unknown): string {
 }
 
 function newItem(): OverseasInvoiceItem {
-  return { name_en: '', quantity: 1, unit_price_usd: 20, hs_code: '', origin_country: 'KR' };
+  return { product_name: '', name_en: '', quantity: 1, unit_price_usd: 20, hs_code: '', origin_country: 'KR' };
 }
 
 function emptyForm(senderName = '스프링풀필먼트'): OverseasShippingPayload {
@@ -659,11 +659,15 @@ export default function OverseasShippingPage() {
       window.alert(`엑셀의 국가 ${group.countrycd} 는 현재 배송방법으로 발송할 수 없습니다. 배송방법을 바꾸거나 국가를 직접 선택하세요.`);
     }
     const items = (group.items.length ? group.items : [newItem()]).map((item) => {
-      const hit = [...savedHs, ...ITEM_CATEGORIES].find(
-        (cat) => cat.name_ko === item.name_en || cat.name_en.toLowerCase() === item.name_en.toLowerCase(),
-      );
+      const orderName = (item.product_name || '').trim();
+      const hit = orderName
+        ? [...savedHs, ...ITEM_CATEGORIES].find(
+          (cat) => cat.name_ko === orderName || cat.name_en.toLowerCase() === orderName.toLowerCase(),
+        )
+        : undefined;
       return {
-        name_en: hit?.name_en || item.name_en,
+        product_name: orderName,
+        name_en: hit?.name_en || '',
         quantity: item.quantity || 1,
         unit_price_usd: item.unit_price_usd || 0,
         hs_code: item.hs_code || hit?.hs_code || '',
@@ -696,7 +700,7 @@ export default function OverseasShippingPage() {
       group.countrycd ? `국가 ${nation?.nationnm || group.countrycd}` : '',
       group.receivezipcode ? `우편번호 ${group.receivezipcode}` : '',
       group.receiveaddr3 ? '주소' : '',
-      items.length ? `품목 ${items.length}개` : '',
+      items.length ? `수량 ${items.length}줄` : '',
     ].filter(Boolean);
     const blank = group.missing.length ? ` 비어 있는 항목: ${group.missing.join(', ')}.` : '';
     setError(null);
@@ -869,7 +873,7 @@ export default function OverseasShippingPage() {
 
         <FormSection title="주문 엑셀" first>
           <p className="text-muted" style={{ marginTop: 0 }}>
-            합포 1건의 주문 엑셀을 올리면 수취인, 주소, 품목을 채웁니다. 중량, 박스 크기, 단가 USD, HS코드처럼 파일에 없는 값은 비워 둡니다.
+            합포 1건의 주문 엑셀을 올리면 수취인, 주소, 제품명, 수량을 채웁니다. 품목란은 HS 품목이라 비워 둡니다.
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <input
@@ -1308,7 +1312,7 @@ export default function OverseasShippingPage() {
         <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
           {isDocument
             ? '서류도 내용품명(영문)을 입력하세요. 예: Documents. '
-            : '한글·영문·HS 6자리로 검색하면 저장된 품목과 HS 목록이 나옵니다. '}
+            : '제품명은 주문 상품이고, 품목은 HS 품목입니다. 한글·영문·HS 6자리로 검색합니다. '}
           <a href="/overseas-hs-codes">HS코드 목록</a>
         </p>
         {form.items.map((item, i) => {
@@ -1319,6 +1323,15 @@ export default function OverseasShippingPage() {
               key={i}
               className="overseas-item-row"
             >
+              <label>
+                제품명
+                <input
+                  style={inputStyle}
+                  value={item.product_name || ''}
+                  placeholder="주문 상품명"
+                  onChange={(e) => updateItem(i, { product_name: e.target.value })}
+                />
+              </label>
               <label style={{ position: 'relative' }}>
                 품목 (한글/영문/HS 검색)
                 <input

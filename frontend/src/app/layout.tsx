@@ -100,17 +100,20 @@ function NavGroup({
         maxHeight: open ? `${items.length * 40}px` : '0px',
         transition: 'max-height 0.25s ease',
       }}>
-        {items.map(item => (
+        {items.map(item => {
+          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          return (
           <Link
             key={item.href}
             href={item.href}
-            className={pathname === item.href ? 'active' : ''}
+            className={active ? 'active' : ''}
             style={{ paddingLeft: '1rem', fontSize: '0.8375rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           >
-            <span style={{ display: 'flex', alignItems: 'center', opacity: pathname === item.href ? 1 : 0.65, flexShrink: 0 }}>{item.icon}</span>
+            <span style={{ display: 'flex', alignItems: 'center', opacity: active ? 1 : 0.65, flexShrink: 0 }}>{item.icon}</span>
             <span>{item.label}</span>
           </Link>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ from backend.app.api.overseas_shipping import (
     delete_saved_overseas_hs,
     delete_saved_overseas_sender,
     list_overseas,
+    get_overseas,
     list_saved_overseas_addresses,
     list_saved_overseas_hs,
     list_saved_overseas_senders,
@@ -130,6 +131,7 @@ def test_invoice_semicolon_and_english_name():
         800,
     )
     assert packed["contents"] == "Shoes"
+    assert packed["items"][0]["product_name"] == ""
     assert packed["number"] == "1"
     assert packed["weight"] == "800"
     assert packed["EM_gubun"] == "Merchandise"
@@ -869,3 +871,36 @@ def test_sender_mobile_and_contract_approval_numbers(monkeypatch):
     assert approval_no_for("31") == "70020C0247"
     assert approval_no_for("32") == "70020C0247"
     assert approval_no_for("14") == "70020J0048"
+
+
+def test_shipment_detail_keeps_product_name_apart_from_hs_item(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    created = create_overseas(
+        _req(
+            confirm=True,
+            test_mode=True,
+            items=[{
+                "product_name": "PDRN 틴티드 립 앰플 새틴",
+                "name_en": "Lip cosmetics",
+                "quantity": 3,
+                "unit_price_usd": 12,
+                "hs_code": "330410",
+                "origin_country": "KR",
+            }],
+        ),
+        token,
+    )
+    detail = get_overseas(created["id"], token)
+    assert detail["items"][0]["product_name"] == "PDRN 틴티드 립 앰플 새틴"
+    assert detail["items"][0]["name_en"] == "Lip cosmetics"
+    assert detail["items"][0]["quantity"] == 3
+    assert detail["recipient_name"] == "Hong Gildong"
+    assert detail["sender_name"]
+    params = json.loads(
+        sqlite3.connect(isolated_runtime["db"]).execute(
+            "SELECT apply_snapshot FROM overseas_shipping_requests WHERE id=?",
+            (created["id"],),
+        ).fetchone()[0]
+    )
+    assert params["contents"] == "Lip cosmetics"
+    assert "PDRN" not in params["contents"]

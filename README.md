@@ -213,7 +213,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 
 창고 직원이 tillion에서 **결제 없이** 우체국 해외발송을 바로 접수한다. 고객 앱(Infront)의 결제·보관료 게이트는 없다.
 
-화면: `/overseas-shipping` (접수), `/overseas-shipping-list` (목록·취소), `/overseas-senders`, `/overseas-recipients`, `/overseas-hs-codes`
+화면: `/overseas-shipping` (접수), `/overseas-shipping-list` (목록·취소), `/overseas-shipping-list/{id}` (접수 상세), `/overseas-senders`, `/overseas-recipients`, `/overseas-hs-codes`
 
 ### 접수 흐름
 
@@ -252,10 +252,11 @@ get_res_info(order_no, req_ymd, req_type="2")
 | 수령자, 수령자전화 | 수취인 이름, 연락처 |
 | 배송지주소 | 국가, 우편번호, 주/도, 시/군, 상세주소. 우편번호 칸이 비어 있으면 주소 문장에서 읽는다 |
 | 메모 | 메모 |
-| 실제 상품명, 판매개수 | 품목명, 수량. 저장된 HS와 한글·영문 이름이 같으면 HS도 채운다 |
+| 판매개수 | 세관 인보이스 수량 |
+| 실제 상품명 | 제품명. 접수에 저장되고 상세 화면에서 다시 본다. HS 품목란에는 넣지 않는다. 저장된 HS와 이름이 같을 때만 그 품목을 채운다 |
 | 원산지 `국내` 또는 국내 지역명 | 원산지 `KR`. 비어 있으면 비워 둔다 |
 
-중량, 박스 크기, 이메일, 단가 USD, HS코드는 이 파일에 없거나 금액이 0이라 접수 값으로 쓰지 않는다. 그 칸은 비워 두고 직원이 직접 입력한다. 발송인과 배송방법은 화면에 있던 값을 유지한다. 합포가 여러 개면 그중 1건을 고른 뒤 입력란을 채운다.
+중량, 박스 크기, 이메일, 단가 USD, HS코드는 이 파일에 없거나 금액이 0이라 접수 값으로 쓰지 않는다. 그 칸은 비워 두고 직원이 직접 입력한다. 발송인과 배송방법은 화면에 있던 값을 유지한다. 합포가 여러 개면 그중 1건을 고른 뒤 입력란을 채운다. 접수목록에서 행을 누르면 `/overseas-shipping-list/{id}` 에서 제품명과 HS 품목을 포함한 입력값을 다시 본다.
 
 ### 배송비와 관세 선납
 
@@ -304,6 +305,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `POST` | `/overseas-shipping/import-excel` | 주문 엑셀을 접수 1건 입력값으로 변환. 없는 항목은 비움 |
 | `POST` | `/overseas-shipping/preview` | 확인용 미리보기 (미기록) |
 | `GET` | `/overseas-shipping` | 접수 목록 |
+| `GET` | `/overseas-shipping/{id}` | 접수 1건 상세. 제품명·HS 품목·수취인·박스를 입력값 그대로 돌려준다 |
 | `POST` | `/overseas-shipping` | 확인 후 접수 |
 | `GET` | `/overseas-shipping/{id}/label` | 출력서류 CN22 (JSON, `format=html` 이면 인쇄 HTML) |
 | `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |

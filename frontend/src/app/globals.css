@@ -702,7 +702,7 @@ tbody tr:hover { background: #f7f8fd; }
 }
 .overseas-item-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.5fr) 68px 88px 108px 56px auto auto;
+  grid-template-columns: minmax(140px, 1.2fr) minmax(140px, 1.4fr) 68px 88px 108px 56px auto auto;
   gap: 0.45rem;
   margin-bottom: 0.75rem;
   align-items: end;

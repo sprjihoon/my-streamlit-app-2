@@ -1740,6 +1740,7 @@ export async function deleteSavedRecipient(token: string, id: number) {
 // ─────────────────────────────────────────────────────────────────
 
 export interface OverseasInvoiceItem {
+  product_name?: string;
   name_en: string;
   quantity: number;
   unit_price_usd: number;
@@ -1801,6 +1802,11 @@ export interface OverseasShippingItem {
   boxwidth: number;
   boxheight: number;
   items: OverseasInvoiceItem[];
+  sender_zipcode?: string;
+  sender_addr1?: string;
+  sender_addr2?: string;
+  sender_addr3?: string;
+  sender_tel?: string;
   tracking_no: string;
   req_no: string;
   receive_seq: string;
@@ -1932,6 +1938,7 @@ export async function quoteOverseasShipping(
 }
 
 export interface OverseasExcelItem {
+  product_name: string;
   name_en: string;
   quantity: number;
   unit_price_usd: number;
@@ -1987,6 +1994,10 @@ export async function previewOverseasShipping(token: string, payload: OverseasSh
 
 export async function listOverseasShipments(token: string) {
   return fetchApi<{ items: OverseasShippingItem[] }>(`/overseas-shipping${overseasQuery(token)}`);
+}
+
+export async function getOverseasShipment(token: string, id: number) {
+  return fetchApi<OverseasShippingItem>(`/overseas-shipping/${id}${overseasQuery(token)}`);
 }
 
 export async function createOverseasShipping(token: string, payload: OverseasShippingPayload) {
