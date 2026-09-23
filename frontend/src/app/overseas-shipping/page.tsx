@@ -1311,124 +1311,106 @@ export default function OverseasShippingPage() {
       <aside className="overseas-intake-aside">
       <Card title="배송요금">
         <div style={{
-          padding: '0.9rem 1rem',
-          border: '2px solid #cbd5e1',
-          borderRadius: 10,
-          background: quoteError && quoteFee == null ? '#fef2f2' : '#f8fafc',
+          display: 'grid',
+          gap: 8,
+          background: quoteError && quoteFee == null ? '#fef2f2' : 'transparent',
+          borderRadius: 8,
         }}>
-          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em' }}>
-            우체국 예상요금 + 관세 선납 (후납)
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr',
-            gap: 8,
-            marginTop: 8,
-          }}>
+          <button
+            type="button"
+            className={`fee-choice${!isDocument ? ' is-selected' : ''}`}
+            onClick={() => setContentsType('parcel')}
+          >
+            <span>
+              <span className="fee-choice-label">화물</span>
+            </span>
+            {quoteLoading && !quoteParcel ? (
+              <span className="text-muted">조회 중</span>
+            ) : quoteParcel && !quoteParcel.ok ? (
+              <span style={{ color: '#b91c1c', fontWeight: 600, fontSize: '0.8rem' }}>{quoteParcel.error}</span>
+            ) : quoteParcel?.totalFee != null ? (
+              <span className="fee-choice-price">{quoteParcel.totalFee.toLocaleString()}원</span>
+            ) : (
+              <span className="text-muted">중량 입력</span>
+            )}
+          </button>
+          {canDocument && (
             <button
               type="button"
-              onClick={() => setContentsType('parcel')}
-              style={{
-                textAlign: 'left',
-                padding: '0.75rem 0.85rem',
-                border: !isDocument ? '2px solid #0f172a' : '1px solid #cbd5e1',
-                borderRadius: 8,
-                background: '#fff',
-                cursor: 'pointer',
-              }}
+              className={`fee-choice${isDocument ? ' is-selected' : ''}`}
+              onClick={() => setContentsType('document')}
             >
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b' }}>화물 (비서류)</div>
-              {quoteLoading && !quoteParcel ? (
-                <div style={{ marginTop: 4 }}>조회 중...</div>
-              ) : quoteParcel && !quoteParcel.ok ? (
-                <div style={{ marginTop: 4, color: '#b91c1c', fontWeight: 600, fontSize: '0.85rem' }}>{quoteParcel.error}</div>
-              ) : quoteParcel?.totalFee != null ? (
-                <div style={{ marginTop: 4, fontSize: '1.25rem', fontWeight: 800 }}>
-                  {quoteParcel.totalFee.toLocaleString()}원
-                </div>
+              <span>
+                <span className="fee-choice-label">서류</span>
+                {quoteDocument?.ok && quoteDocument.totweight ? (
+                  <span className="fee-choice-note">{quoteDocument.totweight}g 구간</span>
+                ) : null}
+              </span>
+              {quoteLoading && !quoteDocument ? (
+                <span className="text-muted">조회 중</span>
+              ) : quoteDocument && !quoteDocument.ok ? (
+                <span style={{ color: '#b91c1c', fontWeight: 600, fontSize: '0.8rem' }}>{quoteDocument.error}</span>
+              ) : quoteDocument?.totalFee != null ? (
+                <span className="fee-choice-price">{quoteDocument.totalFee.toLocaleString()}원</span>
               ) : (
-                <div className="text-muted" style={{ marginTop: 4 }}>중량을 입력하세요</div>
+                <span className="text-muted">중량 입력</span>
               )}
             </button>
-            {canDocument && (
-              <button
-                type="button"
-                onClick={() => setContentsType('document')}
-                style={{
-                  textAlign: 'left',
-                  padding: '0.75rem 0.85rem',
-                  border: isDocument ? '2px solid #0f172a' : '1px solid #cbd5e1',
-                  borderRadius: 8,
-                  background: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b' }}>서류</div>
-                {quoteLoading && !quoteDocument ? (
-                  <div style={{ marginTop: 4 }}>조회 중...</div>
-                ) : quoteDocument && !quoteDocument.ok ? (
-                  <div style={{ marginTop: 4, color: '#b91c1c', fontWeight: 600, fontSize: '0.85rem' }}>{quoteDocument.error}</div>
-                ) : quoteDocument?.totalFee != null ? (
-                  <div style={{ marginTop: 4, fontSize: '1.25rem', fontWeight: 800 }}>
-                    {quoteDocument.totalFee.toLocaleString()}원
-                    {quoteDocument.totweight ? (
-                      <span className="text-muted" style={{ fontSize: '0.78rem', fontWeight: 600, marginLeft: 6 }}>
-                        {quoteDocument.totweight}g 구간
-                      </span>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="text-muted" style={{ marginTop: 4 }}>중량을 입력하세요</div>
-                )}
-              </button>
-            )}
-          </div>
-          {quoteLoading ? (
-            <div style={{ marginTop: 8, fontSize: '0.9rem' }}>요금 조회 중...</div>
-          ) : quoteError && quoteFee == null ? (
-            <div style={{ marginTop: 8, color: '#b91c1c', fontWeight: 600 }}>{quoteError}</div>
-          ) : quoteFee != null ? (
-            <>
-              {quoteDuty?.dutyPrepaid && quoteDuty.depositKrw > 0 && (
-                <div style={{ marginTop: 8, fontSize: '0.9rem', color: '#047857' }}>
-                  <div>
-                    관세 선납(DDP) <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
-                    {quoteDuty.estimateUsd > 0 ? ` · USD ${quoteDuty.estimateUsd.toFixed(2)}` : ''}
-                    {quoteDuty.ddpPath === 'premium' ? ' · FedEx DDP' : quoteDuty.ddpPath === 'postal' ? ' · 우체국 postal DDP' : ''}
-                  </div>
-                  {quoteDuty.bufferKrw ? (
-                    <div style={{ marginTop: 2, fontSize: '0.85rem' }}>
-                      버퍼 10% <strong>{quoteDuty.bufferKrw.toLocaleString()}원</strong>
-                      <span style={{ fontWeight: 500 }}> (DDP에 포함)</span>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              {quoteDuty?.ineligibleReason && (
-                <div style={{ marginTop: 4, fontSize: '0.82rem', color: '#b45309', fontWeight: 600 }}>
-                  {quoteDuty.ineligibleReason}
-                </div>
-              )}
-              {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
-                <div className="text-muted" style={{ marginTop: 4, fontSize: '0.82rem' }}>
-                  인보이스 신고가액을 입력하면 미국·영국 관세 선납(DDP) 금액이 나옵니다.
-                </div>
-              )}
-              <div style={{ marginTop: 8, fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
-                {(quoteTotal ?? quoteFee).toLocaleString()}원
-              </div>
-              <div className="text-muted" style={{ fontSize: '0.8rem', marginTop: 2 }}>
-                {isDocument ? '서류' : '화물'} 선택
-                {' · '}{quoteLive ? '우체국 API' : '테스트 요금'}
-                {quoteDuty?.dutyPrepaid ? ' + DDP 예상' : ''}
-                {' · '}{methodName} / {form.countrycd} · {form.totweight}g
-                · 고객 결제 없음(후납)
-              </div>
-            </>
-          ) : (
-            <div className="text-muted" style={{ marginTop: 8 }}>중량을 입력하면 우체국 요금이 표시됩니다.</div>
           )}
         </div>
+        {quoteLoading && quoteFee == null ? (
+          <div style={{ marginTop: 8, fontSize: '0.9rem' }}>요금 조회 중...</div>
+        ) : quoteError && quoteFee == null ? (
+          <div style={{ marginTop: 8, color: '#b91c1c', fontWeight: 600 }}>{quoteError}</div>
+        ) : quoteFee != null ? (
+          <div className="fee-lines">
+            <div className="fee-line">
+              <span>우체국 배송비</span>
+              <strong>{quoteFee.toLocaleString()}원</strong>
+            </div>
+            {quoteDuty?.dutyPrepaid && quoteDuty.depositKrw > 0 && (
+              <>
+                <div className="fee-line">
+                  <span>
+                    관세 선납
+                    <span className="fee-choice-note">
+                      {quoteDuty.ddpPath === 'premium' ? 'FedEx' : '우체국'}
+                      {quoteDuty.estimateUsd > 0 ? ` · USD ${quoteDuty.estimateUsd.toFixed(2)}` : ''}
+                    </span>
+                  </span>
+                  <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
+                </div>
+                {quoteDuty.bufferKrw ? (
+                  <div className="fee-line is-sub">
+                    <span>버퍼 10% (포함)</span>
+                    <strong>{quoteDuty.bufferKrw.toLocaleString()}원</strong>
+                  </div>
+                ) : null}
+              </>
+            )}
+            {quoteDuty?.ineligibleReason && (
+              <div style={{ fontSize: '0.8rem', color: '#b45309', fontWeight: 600 }}>
+                {quoteDuty.ineligibleReason}
+              </div>
+            )}
+            {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
+              <div className="text-muted" style={{ fontSize: '0.8rem' }}>
+                신고가액을 입력하면 관세 선납이 나옵니다.
+              </div>
+            )}
+            <div className="fee-line is-total">
+              <span>합계</span>
+              <strong>{(quoteTotal ?? quoteFee).toLocaleString()}원</strong>
+            </div>
+            <div className="fee-meta">
+              {isDocument ? '서류' : '화물'} · {methodName} · {form.countrycd} · {form.totweight}g
+              <br />
+              {quoteLive ? '우체국 요금' : '테스트 요금'} · 후납 · 고객 결제 없음
+            </div>
+          </div>
+        ) : (
+          <div className="text-muted" style={{ marginTop: 8 }}>중량을 입력하면 우체국 요금이 표시됩니다.</div>
+        )}
       </Card>
 
       <Card title="접수">
@@ -1446,7 +1428,7 @@ export default function OverseasShippingPage() {
           <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={saving} style={{ width: '100%' }}>
             {saving ? '접수 중...' : liveReady && !form.test_mode ? '해외배송 접수' : '테스트 접수'}
           </button>
-          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          <div className="fee-links">
             <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
             <a href="/overseas-senders" className="btn btn-secondary">발송인</a>
             <a href="/overseas-recipients" className="btn btn-secondary">수취인</a>

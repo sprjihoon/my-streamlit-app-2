@@ -600,7 +600,7 @@ tbody tr:hover { background: #f7f8fd; }
 }
 .overseas-intake {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 420px;
   gap: 1.15rem;
   align-items: start;
 }
@@ -610,6 +610,95 @@ tbody tr:hover { background: #f7f8fd; }
 }
 .overseas-intake-aside .card {
   margin-bottom: 0.85rem;
+}
+.fee-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.7rem 0.8rem;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+}
+.fee-choice.is-selected {
+  border: 2px solid #0f172a;
+}
+.fee-choice-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #64748b;
+}
+.fee-choice-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.fee-choice-price {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.fee-lines {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.fee-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.86rem;
+  color: #334155;
+}
+.fee-line strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fee-line.is-sub {
+  padding-left: 0.65rem;
+  font-size: 0.8rem;
+  color: #047857;
+}
+.fee-line.is-total {
+  margin-top: 0.25rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #e2e8f0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+.fee-line.is-total strong {
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.fee-meta {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.45;
+}
+.fee-links {
+  display: flex;
+  gap: 0.4rem;
+}
+.fee-links .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
 }
 .overseas-item-row {
   display: grid;
