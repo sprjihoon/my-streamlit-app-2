@@ -112,7 +112,7 @@ export default function OverseasShippingDetailPage() {
 
   async function handleCancel() {
     if (!item || !token) return;
-    if (!window.confirm(`등기번호 ${item.tracking_no || item.order_no} 접수를 취소할까요?`)) return;
+    if (!window.confirm(`등기번호 ${item.tracking_no || item.order_no} 접수를 취소할까요?\n우체국에 접수된 건은 우체국 접수도 함께 취소합니다.`)) return;
     setError(null);
     setSuccess(null);
     try {
@@ -147,7 +147,7 @@ export default function OverseasShippingDetailPage() {
             <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
             <a href={`/overseas-print/${item.id}`} className="btn btn-primary" target="_blank" rel="noreferrer">출력서류</a>
             {item.status !== 'canceled' && (
-              <button type="button" className="btn btn-secondary" onClick={handleCancel}>취소</button>
+              <button type="button" className="btn btn-primary" onClick={handleCancel}>접수 취소</button>
             )}
             {isAdmin && (
               <button type="button" className="btn btn-secondary" onClick={handleDelete}>삭제</button>

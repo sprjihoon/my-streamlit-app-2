@@ -769,10 +769,16 @@ tbody tr:hover { background: #f7f8fd; }
 .overseas-hs-menu button:hover {
   background: var(--color-brand-light);
 }
-.overseas-row-actions {
-  display: flex;
-  gap: 0.3rem;
-  white-space: nowrap;
+.overseas-list-table .overseas-list-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: #fff;
+  box-shadow: -8px 0 10px rgba(255, 255, 255, 0.95);
+}
+.overseas-list-table thead .overseas-list-actions {
+  z-index: 2;
+  background: var(--bg-muted);
 }
 @media (max-width: 1100px) {
   .overseas-intake {

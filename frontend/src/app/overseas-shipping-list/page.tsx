@@ -90,7 +90,7 @@ export default function OverseasShippingListPage() {
   }
 
   async function handleCancel(item: OverseasShippingItem) {
-    if (!window.confirm(`등기번호 ${item.tracking_no || item.order_no} 접수를 취소할까요?`)) return;
+    if (!window.confirm(`등기번호 ${item.tracking_no || item.order_no} 접수를 취소할까요?\n우체국에 접수된 건은 우체국 접수도 함께 취소합니다.`)) return;
     setError(null);
     setSuccess(null);
     try {
@@ -148,7 +148,7 @@ export default function OverseasShippingListPage() {
         ) : visible.length === 0 ? (
           <p className="text-muted">검색 결과가 없습니다.</p>
         ) : (
-          <div className="table-container">
+          <div className="table-container overseas-list-table">
             <table>
               <thead>
                 <tr>
@@ -160,7 +160,7 @@ export default function OverseasShippingListPage() {
                   <th>지출</th>
                   <th>상태</th>
                   <th>접수자</th>
-                  <th>출력서류</th>
+                  <th className="overseas-list-actions">관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -182,17 +182,33 @@ export default function OverseasShippingListPage() {
                     </td>
                     <td>{it.status === 'canceled' ? '취소' : it.is_test ? '테스트' : '접수'}</td>
                     <td>{it.created_by}</td>
-                    <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
-                      <a href={`/overseas-print/${it.id}`} className="btn btn-primary" target="_blank" rel="noreferrer">
+                    <td className="overseas-list-actions" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                      <a href={`/overseas-print/${it.id}`} className="btn btn-secondary" target="_blank" rel="noreferrer">
                         출력서류
                       </a>
                       {it.status !== 'canceled' && (
-                        <button type="button" className="btn btn-secondary" style={{ marginLeft: '0.35rem' }} onClick={() => handleCancel(it)}>
-                          취소
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ marginLeft: '0.35rem' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleCancel(it);
+                          }}
+                        >
+                          접수 취소
                         </button>
                       )}
                       {isAdmin && (
-                        <button type="button" className="btn btn-secondary" style={{ marginLeft: '0.35rem' }} onClick={() => handleDelete(it)}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ marginLeft: '0.35rem' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(it);
+                          }}
+                        >
                           삭제
                         </button>
                       )}

@@ -235,7 +235,7 @@ get_res_info(order_no, req_ymd, req_type="2")
   → GET /overseas-shipping/{id}/label    CN22 출력서류 (JSON/HTML)
   → 화면 /overseas-print/{id} 에서 인쇄
   → 접수목록에서 같은 서류를 다시 연다 (취소 후에도 가능)
-  → 목록에서 확인 후 취소
+  → 목록의 관리 칸에서 접수 취소를 누른다. 실접수는 우체국 취소 후 상태를 취소로 바꾼다. 취소된 건도 출력서류는 남는다
 ```
 
 - 확인(`confirm=true`) 전에는 접수·취소를 쓰지 않는다.
