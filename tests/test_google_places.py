@@ -79,6 +79,35 @@ def test_gb_validation_uses_admin_component_when_postal_area_missing():
     assert suggested["suggestedZip"] == "UB7 0HJ"
 
 
+def test_validation_prefers_english_latin_address():
+    suggested = suggested_from_validation({
+        "result": {
+            "address": {
+                "formattedAddress": "東京都渋谷区",
+                "postalAddress": {
+                    "addressLines": ["渋谷"],
+                    "locality": "渋谷区",
+                    "administrativeArea": "東京都",
+                    "postalCode": "150-0002",
+                },
+            },
+            "englishLatinAddress": {
+                "formattedAddress": "Shibuya, Tokyo, Japan",
+                "postalAddress": {
+                    "addressLines": ["Shibuya"],
+                    "locality": "Shibuya",
+                    "administrativeArea": "Tokyo",
+                    "postalCode": "150-0002",
+                },
+            },
+        }
+    })
+    assert suggested["suggestedAddr3"] == "Shibuya"
+    assert suggested["suggestedAddr2"] == "Shibuya"
+    assert suggested["suggestedAddr1"] == "Tokyo"
+    assert suggested["formattedAddress"] == "Shibuya, Tokyo, Japan"
+
+
 def test_google_address_validation_live_or_reachable():
     key = google_maps_api_key()
     if not key:

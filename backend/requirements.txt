@@ -34,6 +34,7 @@ pdfplumber>=0.10.0
 # Environment & Configuration
 # ─────────────────────────────────────
 python-dotenv==1.0.1
+anyascii==0.3.2
 
 # ─────────────────────────────────────
 # Production Server (optional)

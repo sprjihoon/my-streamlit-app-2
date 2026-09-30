@@ -50,6 +50,29 @@ const inputStyle: React.CSSProperties = {
   fontSize: '0.9rem',
 };
 
+const fieldErrorStyle: React.CSSProperties = {
+  ...inputStyle,
+  borderColor: '#dc2626',
+  background: '#fef2f2',
+};
+
+type ApiFieldError = { field: string; label: string; chars: string };
+
+function readApiFailure(err: unknown): { message: string; fieldErrors: ApiFieldError[] } {
+  const raw = err instanceof Error ? err.message : String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    const detail = parsed?.detail;
+    if (detail && typeof detail === 'object') {
+      const fieldErrors = Array.isArray(detail.field_errors) ? detail.field_errors : [];
+      return { message: String(detail.message || parseApiError(err)), fieldErrors };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { message: parseApiError(err), fieldErrors: [] };
+}
+
 const fieldGrid: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '1fr 1fr',
@@ -183,6 +206,9 @@ export default function OverseasShippingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fieldNotes, setFieldNotes] = useState<Record<string, string>>({});
+  const [addressRewrites, setAddressRewrites] = useState<Record<string, { before: string; after: string }>>({});
   const [success, setSuccess] = useState<string | null>(null);
   const [printId, setPrintId] = useState<number | null>(null);
   const [liveReady, setLiveReady] = useState(false);
@@ -457,7 +483,7 @@ export default function OverseasShippingPage() {
       return;
     }
     if (!supportsAddressValidation(countrycd)) {
-      if (!silent) window.alert(`${countrycd} 국가는 구글 주소검증을 지원하지 않습니다.`);
+      setAddressHint(`${countrycd}는 구글 주소검증이 없습니다. 접수할 때 영문으로 바꿉니다.`);
       return;
     }
 
@@ -557,6 +583,44 @@ export default function OverseasShippingPage() {
     } catch (err) {
       setError(parseApiError(err));
     }
+  }
+
+  function clearMark(field: string) {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    setFieldNotes((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    setAddressRewrites((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function styleFor(field: string): React.CSSProperties {
+    return fieldErrors[field] ? fieldErrorStyle : inputStyle;
+  }
+
+  function FieldMark({ field }: { field: string }) {
+    if (fieldErrors[field]) {
+      const text = field === 'receivemail'
+        ? '영문 이메일로 입력해주세요.'
+        : `우체국에 넣을 수 없는 문자: ${fieldErrors[field]}`;
+      return <span style={{ color: '#b91c1c', fontSize: '0.78rem', fontWeight: 600 }}>{text}</span>;
+    }
+    if (fieldNotes[field]) {
+      return <span style={{ color: '#1d4ed8', fontSize: '0.78rem' }}>{fieldNotes[field]}</span>;
+    }
+    return null;
   }
 
   function updateItem(index: number, patch: Partial<OverseasInvoiceItem>) {
@@ -889,11 +953,21 @@ export default function OverseasShippingPage() {
   async function handleSubmit() {
     setSaving(true);
     setError(null);
+    setFieldErrors({});
     setSuccess(null);
     setPrintId(null);
     try {
       const previewRes = await previewOverseasShipping(token, form);
       const p = previewRes.preview;
+      const notes: Record<string, string> = {};
+      for (const row of p.text_corrections || []) {
+        if (row.field) notes[row.field] = `${row.before} → ${row.after}`;
+      }
+      for (const [field, row] of Object.entries(addressRewrites)) {
+        const current = String((form as unknown as Record<string, unknown>)[field] ?? '');
+        if (!notes[field] && current === row.after) notes[field] = `${row.before} → ${row.after}`;
+      }
+      setFieldNotes(notes);
       const feeText = p.expected_fee != null ? `${p.expected_fee.toLocaleString()}원` : '조회 실패(접수는 가능)';
       const duty = p.duty;
       const dutyLine = duty?.dutyPrepaid && duty.depositKrw
@@ -908,7 +982,24 @@ export default function OverseasShippingPage() {
         ? `\n합계: ${(p.expected_fee + duty.depositKrw).toLocaleString()}원`
         : '';
       const mode = liveReady && !form.test_mode ? '실접수' : '테스트 접수';
-      const fixes = (p.text_corrections || [])
+      const seen = new Set<string>();
+      const fixRows = [
+        ...(p.text_corrections || []).map((c) => ({ label: c.label, before: c.before, after: c.after })),
+        ...Object.entries(addressRewrites)
+          .filter(([field]) => !(p.text_corrections || []).some((c) => c.field === field))
+          .filter(([field, row]) => String((form as unknown as Record<string, unknown>)[field] ?? '') === row.after)
+          .map(([field, row]) => ({
+            label: field === 'receiveaddr1' ? '주/도' : field === 'receiveaddr2' ? '시/군' : field === 'receiveaddr3' ? '상세주소' : field,
+            before: row.before,
+            after: row.after,
+          })),
+      ].filter((row) => {
+        const key = `${row.label}:${row.before}:${row.after}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const fixes = fixRows
         .map((c) => `${c.label}: ${c.before} → ${c.after}`)
         .join('\n');
       const fixBlock = fixes ? `\n우체국에 넣을 수 있게 아래처럼 바꿉니다.\n${fixes}\n` : '';
@@ -948,7 +1039,9 @@ export default function OverseasShippingPage() {
         await reloadSaved(token);
       }
     } catch (err) {
-      setError(parseApiError(err));
+      const failure = readApiFailure(err);
+      setError(failure.message);
+      setFieldErrors(Object.fromEntries(failure.fieldErrors.map((row) => [row.field, row.chars])));
     } finally {
       setSaving(false);
     }
@@ -999,6 +1092,16 @@ export default function OverseasShippingPage() {
           suggested={suggestion.suggested}
           onKeepOriginal={() => setSuggestion(null)}
           onUseSuggested={() => {
+            const nextRewrites: Record<string, { before: string; after: string }> = {};
+            const pairs: Array<[string, string, string]> = [
+              ['receiveaddr1', suggestion.original.addr1, suggestion.suggested.addr1],
+              ['receiveaddr2', suggestion.original.addr2, suggestion.suggested.addr2],
+              ['receiveaddr3', suggestion.original.addr3, suggestion.suggested.addr3],
+            ];
+            for (const [field, before, after] of pairs) {
+              if (before && after && before !== after) nextRewrites[field] = { before, after };
+            }
+            setAddressRewrites((prev) => ({ ...prev, ...nextRewrites }));
             setForm((prev) => ({
               ...prev,
               receiveaddr3: suggestion.suggested.addr3 || prev.receiveaddr3,
@@ -1123,26 +1226,29 @@ export default function OverseasShippingPage() {
           <label>
             발송인 시/도
             <input
-              style={inputStyle}
+              style={styleFor('sender_addr1')}
               value={form.sender_addr1 || ''}
-              onChange={(e) => setForm((p) => ({ ...p, sender_addr1: e.target.value }))}
+              onChange={(e) => { clearMark('sender_addr1'); setForm((p) => ({ ...p, sender_addr1: e.target.value })); }}
             />
+            <FieldMark field="sender_addr1" />
           </label>
           <label>
             발송인 구/군
             <input
-              style={inputStyle}
+              style={styleFor('sender_addr2')}
               value={form.sender_addr2 || ''}
-              onChange={(e) => setForm((p) => ({ ...p, sender_addr2: e.target.value }))}
+              onChange={(e) => { clearMark('sender_addr2'); setForm((p) => ({ ...p, sender_addr2: e.target.value })); }}
             />
+            <FieldMark field="sender_addr2" />
           </label>
           <label>
             발송인 상세주소
             <input
-              style={inputStyle}
+              style={styleFor('sender_addr3')}
               value={form.sender_addr3 || ''}
-              onChange={(e) => setForm((p) => ({ ...p, sender_addr3: e.target.value }))}
+              onChange={(e) => { clearMark('sender_addr3'); setForm((p) => ({ ...p, sender_addr3: e.target.value })); }}
             />
+            <FieldMark field="sender_addr3" />
           </label>
           <label>
             발송인 별칭
@@ -1286,11 +1392,12 @@ export default function OverseasShippingPage() {
           <label>
             수취인 이름 (영문)
             <input
-              style={inputStyle}
+              style={styleFor('receivename')}
               value={form.receivename}
               placeholder="Hong Gildong"
-              onChange={(e) => setForm((p) => ({ ...p, receivename: e.target.value }))}
+              onChange={(e) => { clearMark('receivename'); setForm((p) => ({ ...p, receivename: e.target.value })); }}
             />
+            <FieldMark field="receivename" />
           </label>
           <label>
             연락처
@@ -1304,10 +1411,11 @@ export default function OverseasShippingPage() {
           <label>
             이메일
             <input
-              style={inputStyle}
+              style={styleFor('receivemail')}
               value={form.receivemail}
-              onChange={(e) => setForm((p) => ({ ...p, receivemail: e.target.value }))}
+              onChange={(e) => { clearMark('receivemail'); setForm((p) => ({ ...p, receivemail: e.target.value })); }}
             />
+            <FieldMark field="receivemail" />
           </label>
           <label>
             우편번호
@@ -1321,33 +1429,36 @@ export default function OverseasShippingPage() {
           <label>
             주/도 (영문){validating ? ' · 확인 중...' : ''}
             <input
-              style={inputStyle}
+              style={styleFor('receiveaddr1')}
               value={form.receiveaddr1}
               placeholder="Tokyo"
-              onChange={(e) => setForm((p) => ({ ...p, receiveaddr1: e.target.value }))}
+              onChange={(e) => { clearMark('receiveaddr1'); setForm((p) => ({ ...p, receiveaddr1: e.target.value })); }}
             />
+            <FieldMark field="receiveaddr1" />
           </label>
           <label>
             시/군 (영문)
             <input
-              style={inputStyle}
+              style={styleFor('receiveaddr2')}
               value={form.receiveaddr2}
               placeholder="Shibuya-ku"
-              onChange={(e) => setForm((p) => ({ ...p, receiveaddr2: e.target.value }))}
+              onChange={(e) => { clearMark('receiveaddr2'); setForm((p) => ({ ...p, receiveaddr2: e.target.value })); }}
             />
+            <FieldMark field="receiveaddr2" />
           </label>
           <div style={{ gridColumn: '1 / -1' }}>
             <label>
               상세주소 (영문){GMAPS_KEY ? ' · 구글 검색' : ''}{validating ? ' · 검증 중...' : ''}
               <input
                 ref={addr3Ref}
-                style={inputStyle}
+                style={styleFor('receiveaddr3')}
                 value={form.receiveaddr3}
                 placeholder="1-2-3 Example Street Apt 101"
                 autoComplete="off"
-                onChange={(e) => setForm((p) => ({ ...p, receiveaddr3: e.target.value }))}
+                onChange={(e) => { clearMark('receiveaddr3'); setForm((p) => ({ ...p, receiveaddr3: e.target.value })); }}
                 onBlur={() => void triggerAddressValidation({ silent: true })}
               />
+              <FieldMark field="receiveaddr3" />
             </label>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.55rem' }}>
               <button
@@ -1458,10 +1569,11 @@ export default function OverseasShippingPage() {
           <label style={{ gridColumn: '1 / -1' }}>
             메모
             <input
-              style={inputStyle}
+              style={styleFor('notes')}
               value={form.notes}
-              onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+              onChange={(e) => { clearMark('notes'); setForm((p) => ({ ...p, notes: e.target.value })); }}
             />
+            <FieldMark field="notes" />
           </label>
         </div>
         </FormSection>
@@ -1717,22 +1829,25 @@ export default function OverseasShippingPage() {
                       />
                     </td>
                     <td>
-                      <input style={inputStyle} aria-label={`${i + 1}행 제품명`} value={item.product_name || ''} placeholder="주문 상품명" onChange={(e) => updateItem(i, { product_name: e.target.value })} />
+                      <input style={styleFor(`items.${i}.product_name`)} aria-label={`${i + 1}행 제품명`} value={item.product_name || ''} placeholder="주문 상품명" onChange={(e) => { clearMark(`items.${i}.product_name`); updateItem(i, { product_name: e.target.value }); }} />
+                      <FieldMark field={`items.${i}.product_name`} />
                     </td>
                     <td>
                       <input
-                        style={inputStyle}
+                        style={styleFor(`items.${i}.name_en`)}
                         aria-label={`${i + 1}행 품목`}
                         value={item.name_en}
                         placeholder="의류, Clothing, 610910"
                         onFocus={() => searchHs(i, q || item.name_en || item.hs_code || '')}
                         onChange={(e) => {
+                          clearMark(`items.${i}.name_en`);
                           updateItem(i, { name_en: e.target.value });
                           searchHs(i, e.target.value);
                           const hit = [...savedHs, ...ITEM_CATEGORIES].find((c) => c.name_en.toLowerCase() === e.target.value.toLowerCase());
                           if (hit?.hs_code) updateItem(i, { name_en: e.target.value, hs_code: hit.hs_code, origin_country: hit.origin_country || item.origin_country });
                         }}
                       />
+                      <FieldMark field={`items.${i}.name_en`} />
                       {hsOpen === i && (
                         <HsMenu items={matches} activeName={item.name_en} onPick={(cat) => pickCategory(i, cat)} />
                       )}

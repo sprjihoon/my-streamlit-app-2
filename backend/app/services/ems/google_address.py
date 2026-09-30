@@ -90,14 +90,23 @@ def _component_text(components: list[dict[str, Any]], type_name: str) -> str:
     return ""
 
 
+def _address_usable(address: dict[str, Any]) -> bool:
+    postal = address.get("postalAddress") or {}
+    lines = [str(line).strip() for line in (postal.get("addressLines") or []) if str(line).strip()]
+    return bool(lines or str(address.get("formattedAddress") or "").strip())
+
+
 def suggested_from_validation(data: dict[str, Any]) -> dict[str, str]:
     """Address Validation 응답에서 상세주소·시/군·주/도를 나눈다.
 
+    영문 주소(englishLatinAddress)가 있으면 그 주소를 추천으로 쓴다.
     영국처럼 postalAddress.administrativeArea 가 비면 addressComponents 의
     administrative_area_level_1(England)을 주/도로 쓴다.
     """
     result = (data or {}).get("result") or {}
-    address = result.get("address") or {}
+    english = result.get("englishLatinAddress") or {}
+    local = result.get("address") or {}
+    address = english if _address_usable(english) else local
     postal = address.get("postalAddress") or {}
     components = list(address.get("addressComponents") or [])
     lines = [str(line).strip() for line in (postal.get("addressLines") or []) if str(line).strip()]
@@ -132,7 +141,8 @@ def validate_address_with_google(
         "address": {
             "regionCode": addr.get("countryCode") or addr.get("country_code") or "",
             "addressLines": address_lines,
-        }
+        },
+        "languageOptions": {"returnEnglishLatinAddress": True},
     }).encode("utf-8")
     req = urllib.request.Request(
         f"https://addressvalidation.googleapis.com/v1:validateAddress?key={api_key}",

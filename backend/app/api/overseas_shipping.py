@@ -38,6 +38,7 @@ from backend.app.services.ems.fields import (
     resolve_method,
     resolve_sender,
     sort_nations,
+    EpostTextError,
     validate_apply_input,
     validate_countrycd,
 )
@@ -285,6 +286,11 @@ def _http_error(exc: Exception, status: int = 400) -> HTTPException:
         return exc
     if isinstance(exc, EmsApiError):
         return HTTPException(status_code=502, detail=str(exc))
+    if isinstance(exc, EpostTextError):
+        return HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "field_errors": exc.errors},
+        )
     return HTTPException(status_code=status, detail=str(exc))
 
 

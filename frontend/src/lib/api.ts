@@ -1848,7 +1848,7 @@ export interface OverseasShippingPreview {
   duty?: OverseasDutyQuote;
   is_test: boolean;
   notes: string;
-  text_corrections?: Array<{ label: string; before: string; after: string }>;
+  text_corrections?: Array<{ field?: string; label: string; before: string; after: string }>;
 }
 
 export interface OverseasDutyQuote {

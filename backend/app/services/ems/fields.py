@@ -7,6 +7,8 @@ import re
 import unicodedata
 from typing import Any
 
+from anyascii import anyascii
+
 from backend.app.services.ems.dimension_limits import (
     chargeable_weight_g,
     snap_doc_weight_g,
@@ -330,6 +332,17 @@ _EPOST_FOLDS = str.maketrans(
 )
 
 
+class EpostTextError(ValueError):
+    """우체국 문자로 못 바꾼 칸. 화면은 field 로 그 입력칸만 표시한다."""
+
+    def __init__(self, errors: list[dict[str, str]]):
+        self.errors = errors
+        shown = ", ".join(f"{row['label']}: {row['chars']}" for row in errors)
+        super().__init__(
+            f"우체국 접수에 넣을 수 없는 문자가 있습니다 ({shown}). 영문·숫자·한글로 바꿔주세요."
+        )
+
+
 def _euc_kr_ok(text: str) -> bool:
     try:
         text.encode("euc-kr")
@@ -338,35 +351,113 @@ def _euc_kr_ok(text: str) -> bool:
     return True
 
 
-def to_euc_kr_text(value: str) -> str:
-    """ü, ß 처럼 EUC-KR에 없는 글자를 영문으로 접는다. 한글 음절은 분해하지 않는다."""
+def _nfkd_ascii(ch: str) -> str:
+    return "".join(
+        part
+        for part in unicodedata.normalize("NFKD", ch)
+        if not unicodedata.combining(part)
+    )
+
+
+def _roman_ok(roman: str) -> bool:
+    """한자·태국어 등을 영문 알파벳으로만 받는다. 이모지 별칭(:grinning:)은 거절한다."""
+    if not roman or ":" in roman:
+        return False
+    return all(ch.isascii() and (ch.isalnum() or ch in " -'") for ch in roman)
+
+
+def _should_romanize(ch: str) -> bool:
+    """한글은 우체국이 받는다. 한자·가나·태국어·아랍어는 영문으로 묶어서 바꾼다."""
+    o = ord(ch)
+    if 0xAC00 <= o <= 0xD7A3 or 0x1100 <= o <= 0x11FF or 0x3130 <= o <= 0x318F:
+        return False
+    return (
+        0x3040 <= o <= 0x30FF
+        or 0x3400 <= o <= 0x4DBF
+        or 0x4E00 <= o <= 0x9FFF
+        or 0xF900 <= o <= 0xFAFF
+        or 0x0E00 <= o <= 0x0E7F
+        or 0x0600 <= o <= 0x06FF
+        or 0x0750 <= o <= 0x077F
+        or 0x0590 <= o <= 0x05FF
+        or 0x0900 <= o <= 0x097F
+    )
+
+
+def _fold_epost_text(value: str) -> tuple[str, str]:
+    """EUC-KR로 들어가는 문자열과, 끝까지 못 바꾼 글자."""
+    text = value.translate(_EPOST_FOLDS)
     out: list[str] = []
-    for ch in value.translate(_EPOST_FOLDS):
-        if _euc_kr_ok(ch):
+    bad: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if not _should_romanize(ch) and _euc_kr_ok(ch):
             out.append(ch)
+            i += 1
             continue
         if unicodedata.combining(ch):
+            i += 1
             continue
-        folded = "".join(
-            part
-            for part in unicodedata.normalize("NFKD", ch)
-            if not unicodedata.combining(part)
-        )
-        if folded and folded != ch and _euc_kr_ok(folded):
+        folded = _nfkd_ascii(ch)
+        if not _should_romanize(ch) and folded and folded != ch and _euc_kr_ok(folded):
             out.append(folded)
+            i += 1
             continue
+        j = i + 1
+        while j < len(text):
+            nxt = text[j]
+            if _should_romanize(nxt):
+                j += 1
+                continue
+            if _euc_kr_ok(nxt) or unicodedata.combining(nxt):
+                break
+            nxt_folded = _nfkd_ascii(nxt)
+            if nxt_folded and nxt_folded != nxt and _euc_kr_ok(nxt_folded):
+                break
+            j += 1
+        run = text[i:j]
+        roman = anyascii(run).strip()
+        if _roman_ok(roman) and _euc_kr_ok(roman):
+            out.append(roman)
+        else:
+            bad.append(run)
+        i = j
+    return "".join(out), "".join(bad)
+
+
+def to_euc_kr_text(value: str) -> str:
+    """ü, ß 는 ae/oe/ue 로, 한자·태국어는 영문으로 접는다. 한글 음절은 그대로 둔다."""
+    converted, bad = _fold_epost_text(value)
+    if bad:
         raise ValueError(
-            f"우체국 접수에 넣을 수 없는 문자가 있습니다 ({ch}). 영문·숫자·한글로 바꿔주세요."
+            f"우체국 접수에 넣을 수 없는 문자가 있습니다 ({bad}). 영문·숫자·한글로 바꿔주세요."
         )
-    return "".join(out)
+    return converted
 
 
-def _fit_epost_text(corrections: list[dict[str, str]], label: str, value: str) -> str:
-    """우체국에 넣기 전에 고친다. 고친 내용은 확인 창에 보여 준다."""
+def _fit_epost_text(
+    corrections: list[dict[str, str]],
+    problems: list[dict[str, str]],
+    label: str,
+    field: str,
+    value: str,
+) -> str:
+    """우체국에 넣기 전에 고친다. 고친 내용은 확인 창에, 못 고친 글자는 입력칸에 보여 준다."""
     original = value or ""
-    corrected = to_euc_kr_text(original) if original else ""
-    if original and corrected != original:
-        corrections.append({"label": label, "before": original, "after": corrected})
+    if not original:
+        return ""
+    corrected, bad = _fold_epost_text(original)
+    if bad:
+        problems.append({"field": field, "label": label, "chars": bad})
+        return original
+    if corrected != original:
+        corrections.append({
+            "field": field,
+            "label": label,
+            "before": original,
+            "after": corrected,
+        })
     return corrected
 
 
@@ -606,41 +697,64 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError(volume_err.replace("중량 초과", "부피중량 초과", 1))
 
     corrections: list[dict[str, str]] = []
+    problems: list[dict[str, str]] = []
     receivename = _fit_epost_text(
-        corrections, "수취인", validate_recipient_name(str(data.get("receivename") or ""))
+        corrections, problems, "수취인", "receivename",
+        validate_recipient_name(str(data.get("receivename") or "")),
     )
-    addr1 = _fit_epost_text(corrections, "주/도", (str(data.get("receiveaddr1") or "")).strip())
-    addr2 = _fit_epost_text(corrections, "시/군", (str(data.get("receiveaddr2") or "")).strip())
-    addr3 = _fit_epost_text(corrections, "상세주소", (str(data.get("receiveaddr3") or "")).strip())
-    if len(addr3) < 2:
-        raise ValueError("수취인 상세주소(도로명+번지)를 입력해주세요.")
-    if not addr1 and not addr2:
-        raise ValueError("수취인 주/도 또는 시/군 주소를 입력해주세요.")
+    addr1 = _fit_epost_text(
+        corrections, problems, "주/도", "receiveaddr1", (str(data.get("receiveaddr1") or "")).strip()
+    )
+    addr2 = _fit_epost_text(
+        corrections, problems, "시/군", "receiveaddr2", (str(data.get("receiveaddr2") or "")).strip()
+    )
+    addr3 = _fit_epost_text(
+        corrections, problems, "상세주소", "receiveaddr3", (str(data.get("receiveaddr3") or "")).strip()
+    )
 
     raw_items = []
     for index, raw in enumerate(list(data.get("items") or []), start=1):
         item = dict(raw)
         item["product_name"] = _fit_epost_text(
-            corrections, f"{index}행 제품명", str(item.get("product_name") or "").strip()
+            corrections, problems, f"{index}행 제품명", f"items.{index - 1}.product_name",
+            str(item.get("product_name") or "").strip(),
         )
         item["name_en"] = _fit_epost_text(
-            corrections, f"{index}행 품목", str(item.get("name_en") or "").strip()
+            corrections, problems, f"{index}행 품목", f"items.{index - 1}.name_en",
+            str(item.get("name_en") or "").strip(),
         )
         raw_items.append(item)
     invoice = serialize_invoice_items(raw_items, chargeable_weight, contents_type=kind)
-    notes = _fit_epost_text(corrections, "메모", str(data.get("notes") or "").strip())
+    notes = _fit_epost_text(corrections, problems, "메모", "notes", str(data.get("notes") or "").strip())
     mail = str(data.get("receivemail") or "").strip()
     if mail and not _euc_kr_ok(mail):
-        raise ValueError("이메일에 우체국에 넣을 수 없는 문자가 있습니다. 영문 이메일로 입력해주세요.")
+        bad_mail = "".join(ch for ch in mail if not _euc_kr_ok(ch))
+        problems.append({"field": "receivemail", "label": "이메일", "chars": bad_mail or mail})
 
     sender = apply_sender_override(resolve_sender(), data)
     sender = dict(sender)
+    for key, label, field in (
+        ("addr1", "발송인 시/도", "sender_addr1"),
+        ("addr2", "발송인 구/군", "sender_addr2"),
+        ("addr3", "발송인 상세주소", "sender_addr3"),
+    ):
+        sender[key] = _fit_epost_text(corrections, problems, label, field, str(sender.get(key) or ""))
+    if problems:
+        raise EpostTextError(problems)
+    if len(addr3) < 2:
+        raise ValueError("수취인 상세주소(도로명+번지)를 입력해주세요.")
+    if not addr1 and not addr2:
+        raise ValueError("수취인 주/도 또는 시/군 주소를 입력해주세요.")
+
     posted_name = epost_sender_name(sender["name"])
     if posted_name != sender["name"]:
-        corrections.append({"label": "발송인", "before": sender["name"], "after": posted_name})
+        corrections.append({
+            "field": "sender_name",
+            "label": "발송인",
+            "before": sender["name"],
+            "after": posted_name,
+        })
     sender["post_name"] = posted_name
-    for key, label in (("addr1", "발송인 시/도"), ("addr2", "발송인 구/군"), ("addr3", "발송인 상세주소")):
-        sender[key] = _fit_epost_text(corrections, label, str(sender.get(key) or ""))
     return {
         "method": method,
         "contents_type": kind,

@@ -238,7 +238,42 @@ def test_preview_warns_and_corrects_before_epost(isolated_runtime):
         raise AssertionError("emoji should be rejected before apply")
     except HTTPException as exc:
         assert exc.status_code == 400
-        assert "넣을 수 없는 문자" in str(exc.detail)
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        assert "넣을 수 없는 문자" in str(detail.get("message") or detail)
+        fields = {row["field"]: row for row in detail.get("field_errors") or []}
+        assert "😀" in fields["receivename"]["chars"]
+
+
+def test_preview_romanizes_cjk_and_keeps_hangul(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    body = preview_overseas(
+        _req(
+            receivename="홍길동",
+            receiveaddr1="東京都",
+            receiveaddr2="渋谷区",
+            receiveaddr3="渋谷 1-1-1",
+            notes="กรุงเทพ",
+            items=[{
+                "product_name": "北京市",
+                "name_en": "Clothing",
+                "quantity": 1,
+                "unit_price_usd": 12,
+                "hs_code": "610910",
+                "origin_country": "KR",
+            }],
+        ),
+        token,
+    )
+    preview = body["preview"]
+    assert preview["recipient_name"] == "홍길동"
+    assert "SeGuQu" in preview["recipient_addr"]
+    assert "DongJingDou" in preview["recipient_addr"]
+    labels = {row["label"]: row for row in preview["text_corrections"]}
+    assert labels["시/군"]["after"] == "SeGuQu"
+    assert labels["주/도"]["after"] == "DongJingDou"
+    assert labels["메모"]["after"] == "krungethph"
+    assert labels["1행 제품명"]["after"] == "BeiJingShi"
+    assert "수취인" not in labels
 
 
 def test_preview_does_not_write(isolated_runtime):

@@ -176,17 +176,21 @@ export async function validateAddressWithGoogle(
             regionCode: addr.countryCode,
             addressLines,
           },
+          languageOptions: { returnEnglishLatinAddress: true },
         }),
       }
     );
     if (!res.ok) return null;
     const data = await res.json();
     const result = data?.result;
-    if (!result?.address) return null;
-    const postalAddr = result.address.postalAddress ?? {};
+    if (!result?.address && !result?.englishLatinAddress) return null;
+    const english = result.englishLatinAddress;
+    const englishLines = (english?.postalAddress?.addressLines ?? []).map((line: string) => String(line || '').trim()).filter(Boolean);
+    const block = (englishLines.length || english?.formattedAddress) ? english : result.address;
+    const postalAddr = block?.postalAddress ?? {};
     const lines: string[] = (postalAddr.addressLines ?? []).map((line: string) => String(line || '').trim()).filter(Boolean);
     const components: Array<{ componentType?: string; componentName?: { text?: string } | string }> =
-      result.address.addressComponents ?? [];
+      block?.addressComponents ?? [];
     const componentText = (type: string) => {
       const found = components.find((c) => c.componentType === type);
       const name = found?.componentName;
@@ -198,7 +202,7 @@ export async function validateAddressWithGoogle(
     const suggestedAddr2: string = (postalAddr.locality ?? '').trim() || componentText('postal_town') || componentText('locality');
     const suggestedAddr1: string = (postalAddr.administrativeArea ?? '').trim() || componentText('administrative_area_level_1');
     const suggestedZip: string = postalAddr.postalCode ?? '';
-    const formattedAddress: string = result.address.formattedAddress ?? "";
+    const formattedAddress: string = block?.formattedAddress ?? "";
     const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
     const isSame =
       normalize(suggestedAddr3) === normalize(addr.addr3) &&
