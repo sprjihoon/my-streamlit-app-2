@@ -36,6 +36,7 @@ from backend.app.api.overseas_shipping import (
     update_saved_overseas_sender,
 )
 from backend.app.services.ems.client import approval_no_for, mock_apply_ems
+from backend.app.services.epost.seed128 import seed128_encrypt
 from backend.app.services.ems.dimension_limits import validate_shipping_dimensions, validate_weight
 from backend.app.services.ems.fields import (
     apply_sender_override,
@@ -44,6 +45,7 @@ from backend.app.services.ems.fields import (
     resolve_sender,
     epost_sender_name,
     hs_code_for_epost,
+    to_euc_kr_text,
     sender_mobile_parts,
     format_recipient_tel,
     split_recipient_tel,
@@ -178,6 +180,65 @@ def test_build_ems_params_skips_empty_and_keeps_order():
     assert "premiumcd=31" in plain
     assert "snd_message" not in plain
     assert plain.index("custno") < plain.index("premiumcd")
+
+
+def test_latin_accents_fold_into_euc_kr_before_encrypt():
+    plain = build_ems_params(
+        {
+            "receivename": "Jürgen Müller",
+            "receiveaddr3": "Düsseldorf Straße 12",
+            "contents": "Printed Documents",
+        }
+    )
+    assert "Juergen Mueller" in plain
+    assert "Duesseldorf Strasse 12" in plain
+    assert "ü" not in plain
+    assert "ß" not in plain
+    plain.encode("euc-kr")
+    seed128_encrypt(plain, "testkey123456789", encoding="euc-kr")
+    assert to_euc_kr_text("홍길동") == "홍길동"
+    try:
+        build_ems_params({"receivename": "Hong 😀"})
+        raise AssertionError("emoji should fail")
+    except ValueError as exc:
+        assert "넣을 수 없는 문자" in str(exc)
+
+
+def test_preview_warns_and_corrects_before_epost(isolated_runtime):
+    token = _seed_user(isolated_runtime["db"])
+    body = preview_overseas(
+        _req(
+            receivename="Jürgen Müller",
+            receiveaddr1="Nordrhein-Westfalen",
+            receiveaddr2="Düsseldorf",
+            receiveaddr3="Königsallee 1",
+            notes="Bitte übergabe",
+            items=[{
+                "product_name": "Lippenstift",
+                "name_en": "Lip crème",
+                "quantity": 1,
+                "unit_price_usd": 12,
+                "hs_code": "330410",
+                "origin_country": "KR",
+            }],
+        ),
+        token,
+    )
+    preview = body["preview"]
+    assert preview["recipient_name"] == "Juergen Mueller"
+    assert "Duesseldorf" in preview["recipient_addr"]
+    assert "Koenigsallee" in preview["recipient_addr"]
+    labels = {row["label"]: row for row in preview["text_corrections"]}
+    assert labels["수취인"]["after"] == "Juergen Mueller"
+    assert labels["시/군"]["before"] == "Düsseldorf"
+    assert labels["1행 품목"]["after"] == "Lip creme"
+    assert "메모" in labels
+    try:
+        preview_overseas(_req(receivename="Hong 😀"), token)
+        raise AssertionError("emoji should be rejected before apply")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "넣을 수 없는 문자" in str(exc.detail)
 
 
 def test_preview_does_not_write(isolated_runtime):

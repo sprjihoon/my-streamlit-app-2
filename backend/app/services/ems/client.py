@@ -20,7 +20,7 @@ from backend.app.services.ems.dimension_limits import (
     validate_shipping_dimensions,
     validate_weight,
 )
-from backend.app.services.ems.fields import build_ems_params, env_clean
+from backend.app.services.ems.fields import build_ems_params, env_clean, to_euc_kr_text
 from backend.app.services.epost.seed128 import seed128_encrypt
 
 EMS_BASE = "https://eship.epost.go.kr"
@@ -172,8 +172,16 @@ def _post_encrypted(endpoint: str, params: dict[str, Any], timeout: float = 10.0
         raise EmsApiError("EMS_SECURITY_KEY 환경변수가 설정되지 않았습니다.")
     if not _key():
         raise EmsApiError("EMS_API_KEY 환경변수가 설정되지 않았습니다.")
-    plain = build_ems_params(params)
-    encrypted = seed128_encrypt(plain, sec, encoding="euc-kr")
+    try:
+        plain = to_euc_kr_text(build_ems_params(params))
+    except ValueError as exc:
+        raise EmsApiError(str(exc)) from exc
+    try:
+        encrypted = seed128_encrypt(plain, sec, encoding="euc-kr")
+    except UnicodeEncodeError as exc:
+        raise EmsApiError(
+            "우체국 접수에 넣을 수 없는 문자가 있습니다. 영문·숫자·한글로 바꿔주세요."
+        ) from exc
     form_body = urlencode({"key": _key(), "regData": encrypted})
     url = f"{EMS_BASE}/{endpoint}"
     if EPOST_RELAY_URL and EPOST_RELAY_SECRET:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from typing import Any
 
 from backend.app.services.ems.dimension_limits import (
@@ -289,6 +290,85 @@ def serialize_invoice_items(
     }
 
 
+# 우체국 접수 본문은 EUC-KR이다. 분해되지 않는 라틴 문자는 여기서 영문으로 바꾼다.
+_EPOST_FOLDS = str.maketrans(
+    {
+        "ä": "ae",
+        "Ä": "Ae",
+        "ö": "oe",
+        "Ö": "Oe",
+        "ü": "ue",
+        "Ü": "Ue",
+        "ß": "ss",
+        "ẞ": "SS",
+        "æ": "ae",
+        "Æ": "AE",
+        "œ": "oe",
+        "Œ": "OE",
+        "ø": "o",
+        "Ø": "O",
+        "ł": "l",
+        "Ł": "L",
+        "đ": "d",
+        "Đ": "D",
+        "ð": "d",
+        "Ð": "D",
+        "þ": "th",
+        "Þ": "Th",
+        "ı": "i",
+        "–": "-",
+        "—": "-",
+        "−": "-",
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "…": "...",
+        "\u00a0": " ",
+    }
+)
+
+
+def _euc_kr_ok(text: str) -> bool:
+    try:
+        text.encode("euc-kr")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def to_euc_kr_text(value: str) -> str:
+    """ü, ß 처럼 EUC-KR에 없는 글자를 영문으로 접는다. 한글 음절은 분해하지 않는다."""
+    out: list[str] = []
+    for ch in value.translate(_EPOST_FOLDS):
+        if _euc_kr_ok(ch):
+            out.append(ch)
+            continue
+        if unicodedata.combining(ch):
+            continue
+        folded = "".join(
+            part
+            for part in unicodedata.normalize("NFKD", ch)
+            if not unicodedata.combining(part)
+        )
+        if folded and folded != ch and _euc_kr_ok(folded):
+            out.append(folded)
+            continue
+        raise ValueError(
+            f"우체국 접수에 넣을 수 없는 문자가 있습니다 ({ch}). 영문·숫자·한글로 바꿔주세요."
+        )
+    return "".join(out)
+
+
+def _fit_epost_text(corrections: list[dict[str, str]], label: str, value: str) -> str:
+    """우체국에 넣기 전에 고친다. 고친 내용은 확인 창에 보여 준다."""
+    original = value or ""
+    corrected = to_euc_kr_text(original) if original else ""
+    if original and corrected != original:
+        corrections.append({"label": label, "before": original, "after": corrected})
+    return corrected
+
+
 def _sv(val: Any) -> str:
     if isinstance(val, bool):
         return "Y" if val else "N"
@@ -296,7 +376,7 @@ def _sv(val: Any) -> str:
         return str(int(val)) if val.is_integer() else str(val)
     if isinstance(val, int):
         return str(val)
-    return str(val)
+    return to_euc_kr_text(str(val))
 
 
 def build_ems_params(params: dict[str, Any]) -> str:
@@ -510,19 +590,42 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         if boxlength < 1 or boxwidth < 1 or boxheight < 1:
             raise ValueError("화물(비서류)은 박스 크기(가로·세로·높이)를 입력해주세요.")
 
-    receivename = validate_recipient_name(str(data.get("receivename") or ""))
-    addr1 = (str(data.get("receiveaddr1") or "")).strip()
-    addr2 = (str(data.get("receiveaddr2") or "")).strip()
-    addr3 = (str(data.get("receiveaddr3") or "")).strip()
+    corrections: list[dict[str, str]] = []
+    receivename = _fit_epost_text(
+        corrections, "수취인", validate_recipient_name(str(data.get("receivename") or ""))
+    )
+    addr1 = _fit_epost_text(corrections, "주/도", (str(data.get("receiveaddr1") or "")).strip())
+    addr2 = _fit_epost_text(corrections, "시/군", (str(data.get("receiveaddr2") or "")).strip())
+    addr3 = _fit_epost_text(corrections, "상세주소", (str(data.get("receiveaddr3") or "")).strip())
     if len(addr3) < 2:
         raise ValueError("수취인 상세주소(도로명+번지)를 입력해주세요.")
     if not addr1 and not addr2:
         raise ValueError("수취인 주/도 또는 시/군 주소를 입력해주세요.")
 
-    invoice = serialize_invoice_items(
-        list(data.get("items") or []), totweight, contents_type=kind
-    )
+    raw_items = []
+    for index, raw in enumerate(list(data.get("items") or []), start=1):
+        item = dict(raw)
+        item["product_name"] = _fit_epost_text(
+            corrections, f"{index}행 제품명", str(item.get("product_name") or "").strip()
+        )
+        item["name_en"] = _fit_epost_text(
+            corrections, f"{index}행 품목", str(item.get("name_en") or "").strip()
+        )
+        raw_items.append(item)
+    invoice = serialize_invoice_items(raw_items, totweight, contents_type=kind)
+    notes = _fit_epost_text(corrections, "메모", str(data.get("notes") or "").strip())
+    mail = str(data.get("receivemail") or "").strip()
+    if mail and not _euc_kr_ok(mail):
+        raise ValueError("이메일에 우체국에 넣을 수 없는 문자가 있습니다. 영문 이메일로 입력해주세요.")
+
     sender = apply_sender_override(resolve_sender(), data)
+    sender = dict(sender)
+    posted_name = epost_sender_name(sender["name"])
+    if posted_name != sender["name"]:
+        corrections.append({"label": "발송인", "before": sender["name"], "after": posted_name})
+    sender["post_name"] = posted_name
+    for key, label in (("addr1", "발송인 시/도"), ("addr2", "발송인 구/군"), ("addr3", "발송인 상세주소")):
+        sender[key] = _fit_epost_text(corrections, label, str(sender.get(key) or ""))
     return {
         "method": method,
         "contents_type": kind,
@@ -538,11 +641,12 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         "receiveaddr2": addr2,
         "receiveaddr3": addr3,
         "receivetelno": re.sub(r"[^\d+]", "", str(data.get("receivetelno") or "")),
-        "receivemail": str(data.get("receivemail") or "").strip(),
-        "notes": str(data.get("notes") or "").strip(),
+        "receivemail": mail,
+        "notes": notes,
         "invoice": invoice,
         "sender": sender,
         "items": invoice["items"],
+        "text_corrections": corrections,
     }
 
 
@@ -564,7 +668,7 @@ def build_apply_params(validated: dict[str, Any], *, order_no: str, custno: str,
         "boyn": "N",
         "boprc": 0,
         "orderno": order_no,
-        "sender": epost_sender_name(sender["name"]),
+        "sender": sender.get("post_name") or epost_sender_name(sender["name"]),
         "senderzipcode": sender["zipcode"],
         "senderaddr1": sender["addr1"],
         "senderaddr2": sender["addr2"],

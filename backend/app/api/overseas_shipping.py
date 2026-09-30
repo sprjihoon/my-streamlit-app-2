@@ -703,7 +703,7 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
         ),
         "em_ee": method["em_ee"],
         "countrycd": validated["countrycd"],
-        "sender_name": sender["name"],
+        "sender_name": sender.get("post_name") or sender["name"],
         "recipient_name": validated["receivename"],
         "recipient_phone": validated["receivetelno"],
         "recipient_email": validated["receivemail"],
@@ -720,7 +720,6 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
         "boxwidth": validated["boxwidth"],
         "boxheight": validated["boxheight"],
         "items": validated["items"],
-        "sender_name": sender["name"],
         "sender_addr": f"{sender['addr1']}, {sender['addr2']}, {sender['addr3']} {sender['zipcode']}",
         "expected_fee": fee,
         "duty": calculate_duty_deposit(
@@ -734,6 +733,7 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
         ),
         "is_test": is_test,
         "notes": validated.get("notes") or "",
+        "text_corrections": list(validated.get("text_corrections") or []),
     }
 
 
@@ -1351,13 +1351,13 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         }
 
     order_no = f"TIL-{int(time.time() * 1000)}"
-    params = build_apply_params(
-        validated,
-        order_no=order_no,
-        custno=env_clean("EMS_CUSTOMER_NO") or "TEST",
-        apprno=approval_no_for(validated["method"]["premiumcd"]) or "0000000000",
-    )
     try:
+        params = build_apply_params(
+            validated,
+            order_no=order_no,
+            custno=env_clean("EMS_CUSTOMER_NO") or "TEST",
+            apprno=approval_no_for(validated["method"]["premiumcd"]) or "0000000000",
+        )
         result = (
             apply_ems(params)
             if live
@@ -1367,6 +1367,8 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
                 validated["countrycd"],
             )
         )
+    except ValueError as exc:
+        raise _http_error(exc) from exc
     except EmsApiError as exc:
         raise _http_error(exc) from exc
 

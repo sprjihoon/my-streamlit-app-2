@@ -900,6 +900,10 @@ export default function OverseasShippingPage() {
         ? `\n합계: ${(p.expected_fee + duty.depositKrw).toLocaleString()}원`
         : '';
       const mode = liveReady && !form.test_mode ? '실접수' : '테스트 접수';
+      const fixes = (p.text_corrections || [])
+        .map((c) => `${c.label}: ${c.before} → ${c.after}`)
+        .join('\n');
+      const fixBlock = fixes ? `\n우체국에 넣을 수 있게 아래처럼 바꿉니다.\n${fixes}\n` : '';
       const ok = window.confirm(
         `${mode} 할까요?\n\n` +
           `발송인: ${p.sender_name}\n` +
@@ -909,7 +913,7 @@ export default function OverseasShippingPage() {
           (p.contents_type === 'document'
             ? `무게: ${p.totweight}g (서류)\n`
             : `무게: ${p.totweight}g · ${p.boxlength}×${p.boxwidth}×${p.boxheight}cm\n`) +
-          `예상요금: ${feeText}${dutyLine}${totalLine}\n\n결제 없이 우체국에 바로 접수됩니다.`,
+          `예상요금: ${feeText}${dutyLine}${totalLine}${fixBlock}\n\n결제 없이 우체국에 바로 접수됩니다.`,
       );
       if (!ok) return;
       const result = await createOverseasShipping(token, form);
