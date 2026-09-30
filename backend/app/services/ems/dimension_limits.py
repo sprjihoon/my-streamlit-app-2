@@ -6,6 +6,7 @@ Infront apps/web/lib/ems/dimension-limits.ts 와 동일 계약.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -172,6 +173,42 @@ def validate_shipping_dimensions(
     if not rules:
         return None
     return validate_box_dimensions(rules, boxlength, boxwidth, boxheight)
+
+
+def volumetric_weight_g(
+    premiumcd: str,
+    length_cm: float,
+    width_cm: float,
+    height_cm: float,
+) -> int | None:
+    """부피중량(g). EMS는 cm³/6000kg, EMS 프리미엄은 cm³/5000kg.
+
+    K-Packet은 우체국 규정상 실중량만 받는다.
+    """
+    if str(premiumcd or "") == "14":
+        return None
+    if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
+        return None
+    grams_per_cm3 = 5 if str(premiumcd) == "32" else 6
+    return math.ceil((length_cm * width_cm * height_cm) / grams_per_cm3)
+
+
+def chargeable_weight_g(
+    premiumcd: str,
+    em_ee: str | None,
+    actual_g: int,
+    length_cm: float = 0,
+    width_cm: float = 0,
+    height_cm: float = 0,
+) -> tuple[int, int | None]:
+    """실중량과 부피중량 중 큰 값을 운임 중량으로 쓴다. 서류는 실중량만."""
+    actual = int(actual_g or 0)
+    if em_ee == "ee":
+        return actual, None
+    volume = volumetric_weight_g(premiumcd, length_cm, width_cm, height_cm)
+    if volume is None:
+        return actual, None
+    return max(actual, volume), volume
 
 
 def validate_weight(premiumcd: str, em_ee: str | None, totweight_g: int) -> str | None:

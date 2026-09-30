@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 import httpx
 
 from backend.app.services.ems.dimension_limits import (
+    chargeable_weight_g,
     snap_doc_weight_g,
     validate_shipping_dimensions,
     validate_weight,
@@ -200,10 +201,20 @@ def get_shipping_quote(
     boxheight: int | None = None,
 ) -> dict[str, int]:
     is_doc = em_ee == "ee"
-    weight_err = validate_weight(premiumcd, em_ee, totweight)
+    chargeable, _volume = chargeable_weight_g(
+        premiumcd,
+        em_ee,
+        totweight,
+        int(boxlength or 0),
+        int(boxwidth or 0),
+        int(boxheight or 0),
+    )
+    weight_err = validate_weight(premiumcd, em_ee, chargeable if not is_doc else totweight)
     if weight_err:
+        if not is_doc and chargeable > totweight and weight_err.startswith("중량 초과"):
+            weight_err = weight_err.replace("중량 초과", "부피중량 초과", 1)
         raise EmsApiError(weight_err)
-    quote_weight = snap_doc_weight_g(totweight) if is_doc else totweight
+    quote_weight = snap_doc_weight_g(totweight) if is_doc else chargeable
     if not is_doc and boxlength and boxwidth and boxheight:
         dim_err = validate_shipping_dimensions(
             premiumcd, em_ee, countrycd, boxlength, boxwidth, boxheight

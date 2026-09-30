@@ -1836,6 +1836,8 @@ export interface OverseasShippingPreview {
   recipient_zip: string;
   recipient_addr: string;
   totweight: number;
+  volume_weight?: number | null;
+  chargeable_weight?: number;
   boxlength: number;
   boxwidth: number;
   boxheight: number;
@@ -1894,6 +1896,9 @@ export type OverseasQuotePart = {
   ok: boolean;
   totalFee: number | null;
   totweight: number;
+  actual_weight?: number;
+  volume_weight?: number | null;
+  chargeable_weight?: number;
   em_ee: string;
   error: string | null;
 };
@@ -1932,6 +1937,9 @@ export async function quoteOverseasShipping(
     em_ee: string;
     countrycd: string;
     totweight: number;
+    actual_weight?: number;
+    volume_weight?: number | null;
+    chargeable_weight?: number;
     error: string | null;
     duty?: OverseasDutyQuote;
     payableTotal?: number | null;

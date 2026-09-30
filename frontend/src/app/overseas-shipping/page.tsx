@@ -194,6 +194,8 @@ export default function OverseasShippingPage() {
   const [nationQuery, setNationQuery] = useState('');
   const [quoteFee, setQuoteFee] = useState<number | null>(null);
   const [quoteLive, setQuoteLive] = useState(false);
+  const [quoteVolume, setQuoteVolume] = useState<number | null>(null);
+  const [quoteChargeable, setQuoteChargeable] = useState<number | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteDuty, setQuoteDuty] = useState<OverseasDutyQuote | null>(null);
@@ -371,6 +373,8 @@ export default function OverseasShippingPage() {
         setQuoteTotal(null);
         setQuoteParcel(null);
         setQuoteDocument(null);
+        setQuoteVolume(null);
+        setQuoteChargeable(null);
       }
       return;
     }
@@ -398,6 +402,8 @@ export default function OverseasShippingPage() {
         setQuoteTotal(res.payableTotal ?? null);
         setQuoteParcel(res.parcel || null);
         setQuoteDocument(res.document ?? null);
+        setQuoteVolume(res.volume_weight ?? null);
+        setQuoteChargeable(res.chargeable_weight ?? null);
         if (res.ok && res.totalFee != null) {
           setQuoteFee(res.totalFee);
           setQuoteError(null);
@@ -412,6 +418,8 @@ export default function OverseasShippingPage() {
           setQuoteTotal(null);
           setQuoteParcel(null);
           setQuoteDocument(null);
+          setQuoteVolume(null);
+          setQuoteChargeable(null);
           setQuoteError(parseApiError(err));
         }
       } finally {
@@ -912,7 +920,11 @@ export default function OverseasShippingPage() {
           `주소: ${p.recipient_addr}\n` +
           (p.contents_type === 'document'
             ? `무게: ${p.totweight}g (서류)\n`
-            : `무게: ${p.totweight}g · ${p.boxlength}×${p.boxwidth}×${p.boxheight}cm\n`) +
+            : `실중량: ${p.totweight}g` +
+              (p.volume_weight
+                ? ` · 부피중량 ${p.volume_weight.toLocaleString()}g · 적용 ${((p.chargeable_weight ?? p.totweight)).toLocaleString()}g`
+                : '') +
+              ` · ${p.boxlength}×${p.boxwidth}×${p.boxheight}cm\n`) +
           `예상요금: ${feeText}${dutyLine}${totalLine}${fixBlock}\n\n결제 없이 우체국에 바로 접수됩니다.`,
       );
       if (!ok) return;
@@ -1551,7 +1563,13 @@ export default function OverseasShippingPage() {
               <strong>{(quoteTotal ?? quoteFee).toLocaleString()}원</strong>
             </div>
             <div className="fee-meta">
-              {isDocument ? '서류' : '화물'} · {methodName} · {form.countrycd} · {form.totweight}g
+              {isDocument ? '서류' : '화물'} · {methodName} · {form.countrycd} · 실중량 {form.totweight}g
+              {!isDocument && quoteVolume ? (
+                <>
+                  <br />
+                  부피중량 {quoteVolume.toLocaleString()}g · 적용 {(quoteChargeable ?? form.totweight).toLocaleString()}g
+                </>
+              ) : null}
               <br />
               {quoteLive ? '우체국 요금' : '테스트 요금'} · 후납 · 고객 결제 없음
             </div>

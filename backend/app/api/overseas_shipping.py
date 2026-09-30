@@ -41,7 +41,11 @@ from backend.app.services.ems.fields import (
     validate_apply_input,
     validate_countrycd,
 )
-from backend.app.services.ems.dimension_limits import snap_doc_weight_g, validate_weight
+from backend.app.services.ems.dimension_limits import (
+    chargeable_weight_g,
+    snap_doc_weight_g,
+    validate_weight,
+)
 from backend.app.services.ems.duty_deposit import calculate_duty_deposit
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
@@ -641,7 +645,10 @@ def _quote_shipping(
     live: bool,
 ) -> dict[str, Any]:
     is_doc = em_ee == "ee"
-    quote_weight = snap_doc_weight_g(totweight) if is_doc else totweight
+    chargeable, volume = chargeable_weight_g(
+        premiumcd, em_ee, totweight, boxlength, boxwidth, boxheight
+    )
+    quote_weight = snap_doc_weight_g(totweight) if is_doc else chargeable
     try:
         if live:
             quoted = get_shipping_quote(
@@ -655,14 +662,19 @@ def _quote_shipping(
             )
             fee = int(quoted["totalFee"])
         else:
-            weight_err = validate_weight(premiumcd, em_ee, totweight)
+            weight_err = validate_weight(premiumcd, em_ee, quote_weight)
             if weight_err:
+                if volume and volume > totweight and weight_err.startswith("중량 초과"):
+                    weight_err = weight_err.replace("중량 초과", "부피중량 초과", 1)
                 raise ValueError(weight_err)
             fee = mock_quote_fee(quote_weight, premiumcd, em_ee)
         return {
             "ok": True,
             "totalFee": fee,
             "totweight": quote_weight,
+            "actual_weight": totweight,
+            "volume_weight": volume,
+            "chargeable_weight": quote_weight,
             "em_ee": em_ee,
             "error": None,
         }
@@ -671,6 +683,9 @@ def _quote_shipping(
             "ok": False,
             "totalFee": None,
             "totweight": quote_weight,
+            "actual_weight": totweight,
+            "volume_weight": volume,
+            "chargeable_weight": quote_weight,
             "em_ee": em_ee,
             "error": str(exc),
         }
@@ -716,6 +731,8 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
             ) if p
         ),
         "totweight": validated["totweight"],
+        "volume_weight": validated.get("volume_weight"),
+        "chargeable_weight": validated.get("chargeable_weight") or validated["totweight"],
         "boxlength": validated["boxlength"],
         "boxwidth": validated["boxwidth"],
         "boxheight": validated["boxheight"],
@@ -943,6 +960,9 @@ def overseas_quote(
         "em_ee": selected_method["em_ee"],
         "countrycd": country,
         "totweight": selected.get("totweight") or totweight,
+        "actual_weight": selected.get("actual_weight") or totweight,
+        "volume_weight": selected.get("volume_weight"),
+        "chargeable_weight": selected.get("chargeable_weight") or selected.get("totweight") or totweight,
         "error": selected.get("error"),
         "duty": duty,
         "payableTotal": (shipping + ddp) if selected.get("ok") else None,

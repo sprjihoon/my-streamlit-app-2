@@ -8,6 +8,7 @@ import unicodedata
 from typing import Any
 
 from backend.app.services.ems.dimension_limits import (
+    chargeable_weight_g,
     snap_doc_weight_g,
     validate_shipping_dimensions,
     validate_weight,
@@ -581,6 +582,8 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
     boxlength = float(data.get("boxlength") or 0)
     boxwidth = float(data.get("boxwidth") or 0)
     boxheight = float(data.get("boxheight") or 0)
+    volume_weight: int | None = None
+    chargeable_weight = totweight
     if not is_doc:
         dim_err = validate_shipping_dimensions(
             method["premiumcd"], method["em_ee"], countrycd, boxlength, boxwidth, boxheight
@@ -589,6 +592,18 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(dim_err)
         if boxlength < 1 or boxwidth < 1 or boxheight < 1:
             raise ValueError("화물(비서류)은 박스 크기(가로·세로·높이)를 입력해주세요.")
+        chargeable_weight, volume_weight = chargeable_weight_g(
+            method["premiumcd"],
+            method["em_ee"],
+            totweight,
+            boxlength,
+            boxwidth,
+            boxheight,
+        )
+        if chargeable_weight > totweight:
+            volume_err = validate_weight(method["premiumcd"], method["em_ee"], chargeable_weight)
+            if volume_err:
+                raise ValueError(volume_err.replace("중량 초과", "부피중량 초과", 1))
 
     corrections: list[dict[str, str]] = []
     receivename = _fit_epost_text(
@@ -612,7 +627,7 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
             corrections, f"{index}행 품목", str(item.get("name_en") or "").strip()
         )
         raw_items.append(item)
-    invoice = serialize_invoice_items(raw_items, totweight, contents_type=kind)
+    invoice = serialize_invoice_items(raw_items, chargeable_weight, contents_type=kind)
     notes = _fit_epost_text(corrections, "메모", str(data.get("notes") or "").strip())
     mail = str(data.get("receivemail") or "").strip()
     if mail and not _euc_kr_ok(mail):
@@ -632,6 +647,8 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         "contents_label": contents_label(kind),
         "countrycd": countrycd,
         "totweight": totweight,
+        "volume_weight": volume_weight,
+        "chargeable_weight": chargeable_weight,
         "boxlength": 0 if is_doc else int(boxlength),
         "boxwidth": 0 if is_doc else int(boxwidth),
         "boxheight": 0 if is_doc else int(boxheight),
@@ -661,7 +678,7 @@ def build_apply_params(validated: dict[str, Any], *, order_no: str, custno: str,
         "premiumcd": method["premiumcd"],
         "em_ee": method["em_ee"],
         "countrycd": validated["countrycd"],
-        "totweight": validated["totweight"],
+        "totweight": validated.get("chargeable_weight") or validated["totweight"],
         "boxlength": None if is_doc else validated["boxlength"],
         "boxwidth": None if is_doc else validated["boxwidth"],
         "boxheight": None if is_doc else validated["boxheight"],

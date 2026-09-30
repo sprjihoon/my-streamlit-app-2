@@ -380,6 +380,41 @@ def test_nations_and_quote_use_epost_when_credentials(isolated_runtime, monkeypa
     clear_nation_cache()
 
 
+def test_chargeable_weight_is_the_heavier_of_volume_and_actual():
+    from backend.app.services.ems.dimension_limits import chargeable_weight_g, volumetric_weight_g
+
+    assert volumetric_weight_g("31", 30, 25, 15) == 1875
+    assert volumetric_weight_g("32", 30, 25, 15) == 2250
+    assert volumetric_weight_g("14", 30, 25, 15) is None
+    chargeable, volume = chargeable_weight_g("31", "em", 500, 30, 25, 15)
+    assert volume == 1875
+    assert chargeable == 1875
+    heavier_actual, _volume = chargeable_weight_g("31", "em", 3000, 30, 25, 15)
+    assert heavier_actual == 3000
+
+    validated = validate_apply_input(_req(totweight=500, boxlength=30, boxwidth=25, boxheight=15).model_dump())
+    assert validated["totweight"] == 500
+    assert validated["volume_weight"] == 1875
+    assert validated["chargeable_weight"] == 1875
+    params = build_apply_params(validated, order_no="TIL-1", custno="1", apprno="1")
+    assert params["totweight"] == 1875
+    assert params["weight"] == "1875"
+
+    kpacket = validate_apply_input(
+        _req(shipping_method="KPACKET", totweight=500, boxlength=20, boxwidth=15, boxheight=10).model_dump()
+    )
+    assert kpacket["volume_weight"] is None
+    assert kpacket["chargeable_weight"] == 500
+
+    quoted = None
+    try:
+        validate_apply_input(_req(totweight=500, boxlength=100, boxwidth=50, boxheight=40).model_dump())
+        raise AssertionError("over volume should fail")
+    except ValueError as exc:
+        assert "부피중량 초과" in str(exc)
+    assert quoted is None
+
+
 def test_quote_mock_without_ems_keys(isolated_runtime):
     token = _seed_user(isolated_runtime["db"])
     quoted = overseas_quote(token, shipping_method="KPACKET", countrycd="JP", totweight=500)
