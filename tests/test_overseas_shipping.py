@@ -1232,6 +1232,9 @@ def test_kpacket_pdf_lands_on_epost_answer_sheet():
     left = 100 + min(dark_x) / 4
     right = 100 + max(dark_x) / 4
     assert left < 114 and right > 258, (left, right)
+    gap = doc[0].get_pixmap(matrix=fitz.Matrix(4, 4), clip=fitz.Rect(120, 173.2, 250, 175.6), alpha=False)
+    gap_dark = sum(1 for i in range(0, len(gap.samples), 3) if gap.samples[i] < 80)
+    assert gap_dark == 0
 
     other = render_label_pdf(
         {

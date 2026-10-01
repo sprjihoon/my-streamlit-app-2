@@ -454,7 +454,7 @@ def _barcode_pixmap(value: str) -> fitz.Pixmap:
     canvas.save()
     src = fitz.open(stream=packet.getvalue(), filetype="pdf")
     try:
-        return src[0].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        return src[0].get_pixmap(matrix=fitz.Matrix(8, 8), alpha=False)
     finally:
         src.close()
 
@@ -551,9 +551,10 @@ def _premium_shown_weights(data: dict[str, Any]) -> tuple[int, int]:
     return max(raw, premium_volume), shown_volume
 
 
-_KPACKET_BARCODE = (98.16, 149.04, 274.08, 172.68)
+# 양식 바코드는 172.68까지 있어서, 172.68에서 자르면 맨 아래 막대가 한 줄 남는다.
+_KPACKET_BARCODE = (98.16, 149.04, 274.08, 174.0)
 # 답안지 바코드 막대. 칸 비율을 지키면 가운데만 그려져 좌우가 잘린 것처럼 보인다.
-_KPACKET_BARCODE_BARS = (111.25, 149.25, 260.50, 172.25)
+_KPACKET_BARCODE_BARS = (111.25, 149.25, 260.50, 172.68)
 _KPACKET_COVERS = (
     (68.4, 337.7, 210.0, 347.4),
     (126.5, 347.5, 211.5, 360.2),
@@ -687,6 +688,7 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
     # POST Exprès(빨간 방패, 흰 글자)를 표 선과 데이터보다 나중에 그려 선 위에 올린다.
     _restamp_images(page, stamps)
     if barcode.width:
+        page.draw_rect(fitz.Rect(*_KPACKET_BARCODE), color=(1, 1, 1), fill=(1, 1, 1), width=0)
         page.insert_image(
             fitz.Rect(*_KPACKET_BARCODE_BARS),
             pixmap=_trim_white(barcode),
