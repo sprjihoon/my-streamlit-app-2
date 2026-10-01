@@ -491,7 +491,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'B{current_row}:C{current_row}')
         ws[f'B{current_row}'] = doc_number
         ws[f'B{current_row}'].font = body_font
-        ws[f'B{current_row}'].border = thin_border
+        _apply_range_border(ws, f'B{current_row}:C{current_row}', thin_border)
         ws[f'D{current_row}'] = "청구일자"
         ws[f'D{current_row}'].font = header_font
         ws[f'D{current_row}'].fill = gray_fill
@@ -499,7 +499,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'E{current_row}:F{current_row}')
         ws[f'E{current_row}'] = invoice_date
         ws[f'E{current_row}'].font = body_font
-        ws[f'E{current_row}'].border = thin_border
+        _apply_range_border(ws, f'E{current_row}:F{current_row}', thin_border)
         current_row += 1
         
         # 3. 수신/건명
@@ -510,7 +510,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'B{current_row}:F{current_row}')
         ws[f'B{current_row}'] = recipient_name
         ws[f'B{current_row}'].font = body_font
-        ws[f'B{current_row}'].border = thin_border
+        _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
         current_row += 1
         
         ws[f'A{current_row}'] = "건명"
@@ -520,7 +520,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'B{current_row}:F{current_row}')
         ws[f'B{current_row}'] = title
         ws[f'B{current_row}'].font = body_font
-        ws[f'B{current_row}'].border = thin_border
+        _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
         current_row += 1
         
         # 4. 공급자 정보
@@ -529,6 +529,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws[f'A{current_row}'].fill = gray_fill
         ws[f'A{current_row}'].border = thin_border
         ws.merge_cells(f'A{current_row}:A{current_row+2}')
+        _apply_range_border(ws, f'A{current_row}:A{current_row+2}', thin_border)
         
         ws[f'B{current_row}'] = "사업자번호"
         ws[f'B{current_row}'].font = small_font
@@ -544,7 +545,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'E{current_row}:F{current_row}')
         ws[f'E{current_row}'] = company_name
         ws[f'E{current_row}'].font = small_font
-        ws[f'E{current_row}'].border = thin_border
+        _apply_range_border(ws, f'E{current_row}:F{current_row}', thin_border)
         current_row += 1
         
         ws[f'B{current_row}'] = "소재지"
@@ -554,7 +555,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'C{current_row}:F{current_row}')
         ws[f'C{current_row}'] = address
         ws[f'C{current_row}'].font = small_font
-        ws[f'C{current_row}'].border = thin_border
+        _apply_range_border(ws, f'C{current_row}:F{current_row}', thin_border)
         current_row += 1
         
         ws[f'B{current_row}'] = "업태"
@@ -571,7 +572,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'E{current_row}:F{current_row}')
         ws[f'E{current_row}'] = business_item
         ws[f'E{current_row}'].font = small_font
-        ws[f'E{current_row}'].border = thin_border
+        _apply_range_border(ws, f'E{current_row}:F{current_row}', thin_border)
         current_row += 2
         
         # 5. 항목 테이블 헤더
@@ -647,7 +648,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'B{current_row}:F{current_row}')
         ws[f'B{current_row}'] = payment_deadline
         ws[f'B{current_row}'].font = body_font
-        ws[f'B{current_row}'].border = thin_border
+        _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
         current_row += 1
         
         ws[f'A{current_row}'] = "계좌정보"
@@ -657,7 +658,7 @@ async def export_single_invoice_xlsx(invoice_id: int):
         ws.merge_cells(f'B{current_row}:F{current_row}')
         ws[f'B{current_row}'] = f"{bank_name}  {account_number}  {account_holder}"
         ws[f'B{current_row}'].font = body_font
-        ws[f'B{current_row}'].border = thin_border
+        _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
         current_row += 3
         
         # 8. 하단 - 위와 같이 청구합니다
@@ -1036,6 +1037,19 @@ async def delete_invoices_batch(invoice_ids: List[int], token: Optional[str] = N
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _apply_range_border(ws, cell_range: str, border) -> None:
+    """병합 범위의 모든 칸에 테두리를 그린다.
+
+    openpyxl은 좌상단 칸만 칠하면 오른쪽·아래 선이 빠진다.
+    """
+    from openpyxl.utils import range_boundaries
+
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+    for row in range(min_row, max_row + 1):
+        for col in range(min_col, max_col + 1):
+            ws.cell(row=row, column=col).border = border
+
+
 def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     """인보이스 시트 생성 헬퍼 함수 (PDF와 동일한 양식)"""
     from datetime import datetime
@@ -1119,7 +1133,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'B{current_row}:C{current_row}')
     ws[f'B{current_row}'] = doc_number
     ws[f'B{current_row}'].font = body_font
-    ws[f'B{current_row}'].border = thin_border
+    _apply_range_border(ws, f'B{current_row}:C{current_row}', thin_border)
     ws[f'D{current_row}'] = "청구일자"
     ws[f'D{current_row}'].font = header_font
     ws[f'D{current_row}'].fill = gray_fill
@@ -1127,7 +1141,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'E{current_row}:F{current_row}')
     ws[f'E{current_row}'] = invoice_date
     ws[f'E{current_row}'].font = body_font
-    ws[f'E{current_row}'].border = thin_border
+    _apply_range_border(ws, f'E{current_row}:F{current_row}', thin_border)
     current_row += 1
     
     # 3. 수신/건명
@@ -1138,7 +1152,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'B{current_row}:F{current_row}')
     ws[f'B{current_row}'] = recipient_name
     ws[f'B{current_row}'].font = body_font
-    ws[f'B{current_row}'].border = thin_border
+    _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
     current_row += 1
     
     ws[f'A{current_row}'] = "건명"
@@ -1148,7 +1162,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'B{current_row}:F{current_row}')
     ws[f'B{current_row}'] = title
     ws[f'B{current_row}'].font = body_font
-    ws[f'B{current_row}'].border = thin_border
+    _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
     current_row += 1
     
     # 4. 공급자 정보
@@ -1157,6 +1171,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws[f'A{current_row}'].fill = gray_fill
     ws[f'A{current_row}'].border = thin_border
     ws.merge_cells(f'A{current_row}:A{current_row+2}')
+    _apply_range_border(ws, f'A{current_row}:A{current_row+2}', thin_border)
     
     ws[f'B{current_row}'] = "사업자번호"
     ws[f'B{current_row}'].font = small_font
@@ -1172,7 +1187,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'E{current_row}:F{current_row}')
     ws[f'E{current_row}'] = company_name
     ws[f'E{current_row}'].font = small_font
-    ws[f'E{current_row}'].border = thin_border
+    _apply_range_border(ws, f'E{current_row}:F{current_row}', thin_border)
     current_row += 1
     
     ws[f'B{current_row}'] = "소재지"
@@ -1182,7 +1197,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'C{current_row}:F{current_row}')
     ws[f'C{current_row}'] = address
     ws[f'C{current_row}'].font = small_font
-    ws[f'C{current_row}'].border = thin_border
+    _apply_range_border(ws, f'C{current_row}:F{current_row}', thin_border)
     current_row += 1
     
     ws[f'B{current_row}'] = "업태"
@@ -1199,7 +1214,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'E{current_row}:F{current_row}')
     ws[f'E{current_row}'] = business_item
     ws[f'E{current_row}'].font = small_font
-    ws[f'E{current_row}'].border = thin_border
+    _apply_range_border(ws, f'E{current_row}:F{current_row}', thin_border)
     current_row += 2
     
     # 5. 항목 테이블 헤더
@@ -1277,7 +1292,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'B{current_row}:F{current_row}')
     ws[f'B{current_row}'] = payment_deadline
     ws[f'B{current_row}'].font = body_font
-    ws[f'B{current_row}'].border = thin_border
+    _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
     current_row += 1
     
     ws[f'A{current_row}'] = "계좌정보"
@@ -1287,7 +1302,7 @@ def _create_invoice_sheet(ws, invoice_data: dict, items_df, company_info: dict):
     ws.merge_cells(f'B{current_row}:F{current_row}')
     ws[f'B{current_row}'] = f"{bank_name}  {account_number}  {account_holder}"
     ws[f'B{current_row}'].font = body_font
-    ws[f'B{current_row}'].border = thin_border
+    _apply_range_border(ws, f'B{current_row}:F{current_row}', thin_border)
     current_row += 3
     
     # 8. 하단 - 위와 같이 청구합니다

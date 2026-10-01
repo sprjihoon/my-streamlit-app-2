@@ -261,36 +261,31 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
             for it in items
         ]
         
-        # DB에 인보이스 저장
-        invoice_id = None
-        if invoice_items:  # 항목이 있을 때만 저장
-            with get_connection() as con:
-                # vendor_id 조회 (vendors 테이블에서)
-                vendor_row = con.execute(
-                    "SELECT vendor_id FROM vendors WHERE vendor = ? OR name = ?",
-                    (req.vendor, req.vendor)
-                ).fetchone()
-                vendor_id = vendor_row[0] if vendor_row else req.vendor
-                
-                # invoices 테이블에 INSERT
-                cur = con.execute(
-                    """INSERT INTO invoices 
-                       (vendor_id, period_from, period_to, total_amount, status, created_at)
-                       VALUES (?, ?, ?, ?, '미확정', datetime('now'))""",
-                    (vendor_id, d_from, d_to, int(total_amount))
+        # DB에 인보이스 저장. 실적이 없어 합계가 0원이어도 헤더는 남긴다.
+        with get_connection() as con:
+            vendor_row = con.execute(
+                "SELECT vendor_id FROM vendors WHERE vendor = ? OR name = ?",
+                (req.vendor, req.vendor)
+            ).fetchone()
+            vendor_id = vendor_row[0] if vendor_row else req.vendor
+
+            cur = con.execute(
+                """INSERT INTO invoices 
+                   (vendor_id, period_from, period_to, total_amount, status, created_at)
+                   VALUES (?, ?, ?, ?, '미확정', datetime('now'))""",
+                (vendor_id, d_from, d_to, int(total_amount))
+            )
+            invoice_id = cur.lastrowid
+
+            for item in invoice_items:
+                con.execute(
+                    """INSERT INTO invoice_items 
+                       (invoice_id, item_name, qty, unit_price, amount, remark)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (invoice_id, item.항목, item.수량, item.단가, item.금액, item.비고)
                 )
-                invoice_id = cur.lastrowid
-                
-                # invoice_items 테이블에 INSERT
-                for item in invoice_items:
-                    con.execute(
-                        """INSERT INTO invoice_items 
-                           (invoice_id, item_name, qty, unit_price, amount, remark)
-                           VALUES (?, ?, ?, ?, ?, ?)""",
-                        (invoice_id, item.항목, item.수량, item.단가, item.금액, item.비고)
-                    )
-                
-                con.commit()
+
+            con.commit()
         
         # 로그 기록
         add_log(
