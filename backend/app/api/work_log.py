@@ -109,6 +109,38 @@ def ensure_work_log_columns():
         con.commit()
 
 
+def _work_log_where(
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
+    vendor: Optional[str] = None,
+    work_type: Optional[str] = None,
+    author: Optional[str] = None,
+    source: Optional[str] = None,
+) -> tuple[str, list]:
+    """목록 조회와 엑셀 내보내기가 같은 검색 조건을 쓰도록 한곳에서 만든다."""
+    clauses = ["1=1"]
+    params: list = []
+    if period_from:
+        clauses.append("날짜 >= ?")
+        params.append(period_from)
+    if period_to:
+        clauses.append("날짜 <= ?")
+        params.append(period_to)
+    if vendor:
+        clauses.append("업체명 LIKE ?")
+        params.append(f"%{vendor}%")
+    if work_type:
+        clauses.append("분류 LIKE ?")
+        params.append(f"%{work_type}%")
+    if author:
+        clauses.append("작성자 LIKE ?")
+        params.append(f"%{author}%")
+    if source:
+        clauses.append("출처 = ?")
+        params.append(source)
+    return "WHERE " + " AND ".join(clauses), params
+
+
 # ─────────────────────────────────────
 # API Endpoints
 # ─────────────────────────────────────
@@ -139,69 +171,19 @@ async def get_work_logs(
         offset: 오프셋
     """
     ensure_work_log_columns()
+    where, where_params = _work_log_where(
+        period_from, period_to, vendor, work_type, author, source
+    )
     
     with get_connection() as con:
-        # 기본 쿼리
-        query = "SELECT * FROM work_log WHERE 1=1"
-        params = []
-        
-        if period_from:
-            query += " AND 날짜 >= ?"
-            params.append(period_from)
-        
-        if period_to:
-            query += " AND 날짜 <= ?"
-            params.append(period_to)
-        
-        if vendor:
-            query += " AND 업체명 LIKE ?"
-            params.append(f"%{vendor}%")
-        
-        if work_type:
-            query += " AND 분류 LIKE ?"
-            params.append(f"%{work_type}%")
-        
-        if author:
-            query += " AND 작성자 LIKE ?"
-            params.append(f"%{author}%")
-        
-        if source:
-            query += " AND 출처 = ?"
-            params.append(source)
-        
-        # 정렬 및 페이지네이션
-        query += " ORDER BY COALESCE(저장시간, 날짜) DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        
-        df = pd.read_sql(query, con, params=params)
-        
-        # 전체 건수
-        count_query = "SELECT COUNT(*) FROM work_log WHERE 1=1"
-        count_params = params[:-2]  # limit, offset 제외
-        
-        # 필터 적용된 count 쿼리 재구성
-        count_query = "SELECT COUNT(*) FROM work_log WHERE 1=1"
-        count_params = []
-        if period_from:
-            count_query += " AND 날짜 >= ?"
-            count_params.append(period_from)
-        if period_to:
-            count_query += " AND 날짜 <= ?"
-            count_params.append(period_to)
-        if vendor:
-            count_query += " AND 업체명 LIKE ?"
-            count_params.append(f"%{vendor}%")
-        if work_type:
-            count_query += " AND 분류 LIKE ?"
-            count_params.append(f"%{work_type}%")
-        if author:
-            count_query += " AND 작성자 LIKE ?"
-            count_params.append(f"%{author}%")
-        if source:
-            count_query += " AND 출처 = ?"
-            count_params.append(source)
-        
-        total = con.execute(count_query, count_params).fetchone()[0]
+        query = (
+            f"SELECT * FROM work_log {where} "
+            "ORDER BY COALESCE(저장시간, 날짜) DESC LIMIT ? OFFSET ?"
+        )
+        df = pd.read_sql(query, con, params=[*where_params, limit, offset])
+        total = con.execute(
+            f"SELECT COUNT(*) FROM work_log {where}", where_params
+        ).fetchone()[0]
         
         # 필터 옵션들
         vendors = pd.read_sql(
@@ -545,89 +527,100 @@ async def check_duplicate(
         return {"is_duplicate": False, "existing": None}
 
 
+_SOURCE_LABELS = {"bot": "봇", "excel": "엑셀", "manual": "수동"}
+
+
 @router.get("/export")
 async def export_work_logs(
     start_date: str = Query(..., description="시작일 (YYYY-MM-DD)"),
     end_date: str = Query(..., description="종료일 (YYYY-MM-DD)"),
-    format: str = Query("excel", description="출력 형식 (excel, csv, json)")
+    vendor: Optional[str] = None,
+    work_type: Optional[str] = None,
+    author: Optional[str] = None,
+    source: Optional[str] = None,
+    format: str = Query("excel", description="출력 형식 (excel, csv, json)"),
 ):
     """
-    기간별 작업일지 내보내기
-    
-    Args:
-        start_date: 시작일 (YYYY-MM-DD)
-        end_date: 종료일 (YYYY-MM-DD)
-        format: 출력 형식 (excel, csv, json)
+    검색 조건에 맞는 작업일지 엑셀.
+
+    목록 조회와 같은 필터(기간, 업체명, 작업 종류, 작성자, 출처)를 쓰고
+    화면 페이지와 관계없이 조건에 맞는 전체를 담는다.
     """
     from fastapi.responses import StreamingResponse
     import io
-    
+
+    from logic.work_log_excel import EXCEL_LOG_LIMIT, create_work_log_xlsx
+
+    where, params = _work_log_where(
+        start_date, end_date, vendor, work_type, author, source
+    )
+
     ensure_work_log_columns()
     with get_connection() as con:
         rows = con.execute(
-            """SELECT 날짜, 업체명, 분류, 수량, 단가, 합계, 비고1, 작성자, 출처, 저장시간, 수정자, 수정시간
-               FROM work_log 
-               WHERE 날짜 >= ? AND 날짜 <= ?
-               ORDER BY 날짜 DESC, id DESC""",
-            (start_date, end_date)
+            f"""SELECT 날짜, 업체명, 분류, 수량, 단가, 합계, 비고1, 작성자, 출처, 저장시간, 수정자, 수정시간
+               FROM work_log
+               {where}
+               ORDER BY 업체명, 날짜, id""",
+            params,
         ).fetchall()
-    
+
     if not rows:
-        raise HTTPException(status_code=404, detail="해당 기간에 작업일지가 없습니다.")
-    
-    # DataFrame 생성
-    df = pd.DataFrame(rows, columns=[
-        "날짜", "업체명", "분류", "수량", "단가", "합계", "비고", "작성자", "출처", "저장시간", "수정자", "수정시간"
-    ])
-    
+        raise HTTPException(status_code=404, detail="해당 조건의 작업일지가 없습니다.")
+
+    if format not in ("csv", "json") and len(rows) > EXCEL_LOG_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"엑셀은 한 번에 {EXCEL_LOG_LIMIT}건까지입니다. 업체나 기간을 더 좁혀 주세요. (현재 {len(rows)}건)",
+        )
+
+    logs = []
+    for r in rows:
+        raw_source = r[8] if r[8] else None
+        logs.append({
+            "날짜": r[0],
+            "업체명": r[1],
+            "분류": r[2],
+            "수량": r[3],
+            "단가": r[4],
+            "합계": r[5],
+            "비고": r[6],
+            "작성자": r[7],
+            "출처": _SOURCE_LABELS.get(raw_source, raw_source or ""),
+            "저장시간": str(r[9]) if r[9] else None,
+            "수정자": r[10],
+            "수정시간": str(r[11]) if r[11] else None,
+        })
+
     if format == "json":
         return {
             "period": f"{start_date} ~ {end_date}",
-            "total_count": len(rows),
-            "total_amount": int(df["합계"].sum()),
-            "data": df.to_dict(orient="records")
+            "total_count": len(logs),
+            "total_amount": int(sum(int(item["합계"] or 0) for item in logs)),
+            "data": logs,
         }
-    
-    elif format == "csv":
+
+    if format == "csv":
+        df = pd.DataFrame(logs)
         output = io.StringIO()
         df.to_csv(output, index=False, encoding="utf-8-sig")
         output.seek(0)
-        
         return StreamingResponse(
             io.BytesIO(output.getvalue().encode("utf-8-sig")),
             media_type="text/csv",
             headers={
                 "Content-Disposition": f"attachment; filename=work_log_{start_date}_{end_date}.csv"
-            }
+            },
         )
-    
-    else:  # excel
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="작업일지")
-            
-            # 요약 시트 추가
-            summary_by_vendor = df.groupby("업체명").agg({
-                "합계": "sum",
-                "날짜": "count"
-            }).rename(columns={"날짜": "건수"}).reset_index()
-            summary_by_vendor.to_excel(writer, index=False, sheet_name="업체별 요약")
-            
-            summary_by_type = df.groupby("분류").agg({
-                "합계": "sum",
-                "날짜": "count"
-            }).rename(columns={"날짜": "건수"}).reset_index()
-            summary_by_type.to_excel(writer, index=False, sheet_name="작업별 요약")
-        
-        output.seek(0)
-        
-        return StreamingResponse(
-            output,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f"attachment; filename=work_log_{start_date}_{end_date}.xlsx"
-            }
-        )
+
+    output = io.BytesIO(create_work_log_xlsx(logs))
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=work_log_{start_date}_{end_date}.xlsx"
+        },
+    )
 
 
 # ─────────────────────────────────────

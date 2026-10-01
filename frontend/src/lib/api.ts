@@ -914,6 +914,22 @@ export async function deleteWorkLog(id: number) {
   });
 }
 
+export function getWorkLogExportUrl(
+  startDate: string,
+  endDate: string,
+  vendor?: string,
+  workType?: string,
+  author?: string,
+  source?: string,
+) {
+  const q = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  if (vendor) q.set('vendor', vendor);
+  if (workType) q.set('work_type', workType);
+  if (author) q.set('author', author);
+  if (source) q.set('source', source);
+  return `${API_BASE}/work-log/export?${q.toString()}`;
+}
+
 // ─────────────────────────────────────
 // 수선작업일지
 // ─────────────────────────────────────

@@ -14,6 +14,7 @@ import {
   WorkLogFilters, 
   WorkLogStats 
 } from '@/lib/api';
+import { downloadWorkLogExcel } from '@/lib/workLogExcel';
 
 export default function WorkLogPage() {
   const [logs, setLogs] = useState<WorkLog[]>([]);
@@ -75,6 +76,7 @@ export default function WorkLogPage() {
     비고1: '',
   });
   const [addLoading, setAddLoading] = useState(false);
+  const [excelExporting, setExcelExporting] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -424,6 +426,45 @@ export default function WorkLogPage() {
           >
             초기화
           </button>
+          <button
+            onClick={async () => {
+              if (!periodFrom || !periodTo) {
+                setMessage({ type: 'error', text: '엑셀 보고를 위해 시작일과 종료일을 선택하세요.' });
+                return;
+              }
+              setExcelExporting(true);
+              setMessage(null);
+              try {
+                await downloadWorkLogExcel({
+                  period_from: periodFrom,
+                  period_to: periodTo,
+                  vendor: vendor || undefined,
+                  work_type: workType || undefined,
+                  author: author || undefined,
+                  source: source || undefined,
+                });
+                setMessage({ type: 'success', text: '엑셀 보고서를 저장했습니다.' });
+              } catch (err) {
+                setMessage({
+                  type: 'error',
+                  text: err instanceof Error ? err.message : '엑셀 생성 실패',
+                });
+              } finally {
+                setExcelExporting(false);
+              }
+            }}
+            disabled={excelExporting}
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: excelExporting ? '#99f6e4' : '#0f766e',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: excelExporting ? 'wait' : 'pointer',
+            }}
+          >
+            {excelExporting ? '엑셀 만드는 중...' : '엑셀 다운로드'}
+          </button>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
             <select
@@ -438,6 +479,9 @@ export default function WorkLogPage() {
             </select>
           </div>
         </div>
+        <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0.6rem 0 0' }}>
+          엑셀은 현재 선택한 기간·업체·작업 종류·작성자·출처 필터의 작업일지를 담습니다. 화면에 보이는 페이지와 관계없이 조건에 맞는 모든 건이 들어갑니다.
+        </p>
       </Card>
 
       {/* 작업일지 목록 */}
