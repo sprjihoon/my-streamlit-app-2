@@ -497,6 +497,8 @@ def test_document_and_parcel_quotes_and_apply(isolated_runtime):
     assert hs_code_for_epost("490199") == "4901999000"
     assert hs_code_for_epost("4901999000") == "4901999000"
     assert hs_code_for_epost("610910", document=True) == "4901999000"
+    assert hs_code_for_epost("711719") == "7117199000"
+    assert hs_code_for_epost("7117199000") == "7117199000"
 
     created = create_overseas(_req(confirm=True, contents_type="document", totweight=400, receivetelno="+819011122233"), token)
     assert created["success"] is True

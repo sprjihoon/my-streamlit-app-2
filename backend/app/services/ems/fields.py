@@ -524,23 +524,20 @@ _SENDER_NAME_EN = {
 }
 
 
-# 우체국은 관세청 10자리 세번만 받는다. 0000으로 메운 코드는 없다고 거절된다.
-_HSK10 = {
-    "490199": "4901999000",
-}
-
-
 def hs_code_for_epost(code: str, *, document: bool = False) -> str:
-    """화면 HS를 우체국 세번으로 바꾼다. 서류는 49로 시작하는 10자리만 가능하다."""
+    """화면 HS를 우체국 목록에 있는 10자리 세번으로 바꾼다. 서류는 49로 시작하는 코드만 가능하다."""
+    from backend.app.services.ems.epost_hs import resolve_epost_hs
+
     parts = []
     for piece in str(code or "").split(";"):
         digits = re.sub(r"\D", "", piece)
-        if len(digits) == 6:
-            digits = _HSK10.get(digits, digits)
-        if document and (len(digits) != 10 or not digits.startswith("49")):
-            digits = "4901999000"
-        if digits:
-            parts.append(digits)
+        if not digits and not document:
+            continue
+        resolved = resolve_epost_hs(digits) if digits else ""
+        if document and (len(resolved) != 10 or not resolved.startswith("49")):
+            resolved = "4901999000"
+        if resolved:
+            parts.append(resolved)
     return ";".join(parts)
 
 
