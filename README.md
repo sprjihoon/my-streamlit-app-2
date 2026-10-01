@@ -284,6 +284,9 @@ get_res_info(order_no, req_ymd, req_type="2")
 - 발송인 전화·휴대전화는 4칸이다. 첫 칸은 국가번호 `82`, 나머지는 국내번호에서 앞 `0`을 뺀 값이다. 예: `010-1234-4567` → `82` / `10` / `1234` / `4567`.
 - 수취인 전화도 4칸(`receivetelno1`~`4`)과 전체번호(`receivetelno`)를 같이 보낸다. 첫 칸은 도착국 국가번호이고, 전체번호는 `+` 없이 `010-1234-1234`처럼 하이픈이 있는 국내번호다.
 - 서류(`em_ee=ee`)는 가로·세로·높이를 보내지 않는다. HS는 `49`로 시작하는 10자리다. 화면의 `490199`는 `4901999000`으로 보내고, 49가 아닌 서류 HS도 같은 세번으로 바꾼다.
+- 화물 HS도 우체국 상품 검색에 있는 10자리만 보낸다. 6자리는 `backend/app/services/ems/epost_hs10.json`의 세번으로 바꾸고, 그 목록에 있는 10자리는 그대로 둔다. 없는 6자리로 `ERR-223`이 나지 않게 하려는 변환이다.
+- 자주 쓰는 품목은 우체국 상품명과 같은 세번을 쓴다. 김치 `2005991000`, 이온음료·주스 `2202992000`, 샴푸 `3305100000`, 아우터(합성섬유 코트) `6201401010`, 스마트폰 `8517130000`, 스마트워치 `8517621010`, 아날로그 손목시계 `9102119010`, 장난감 `9503003919`, 공예 `9602009090`, 악기(기타) `9202901000`. 예전 6자리(`200980`, `711719` 등)도 같은 10자리로 바꾼다.
+- 상의는 티셔츠 `6109109000`, 속옷·양말은 브래지어 `6212109000`이다. 우체국 목록에 전혀 없는 코드는 앞자리가 가장 긴 세번으로, 그것도 없으면 `3926909000`으로 보낸다. 없는 코드 오류는 피하지만 품목과 다를 수 있다.
 
 ### 구글 주소 · 주소록 · HS코드
 
@@ -291,7 +294,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 - Address Validation: 지원 국가에서 검증하면 공식 주소와 영문 주소(`englishLatinAddress`)를 같이 받아 주소칸에는 영문을 넣는다. 중국·홍콩·대만·태국은 검증 목록에 없고, 검색으로 채워진 글자는 접수 직전에 영문으로 바꾼다
 - 주소록: 직원별 수취인 저장/기본주소/접수와 함께 저장 (`overseas_saved_addresses`), 화면 `/overseas-recipients`
 - 발송인: 이름·주소·전화 수정 후 목록 저장 (`overseas_saved_senders`), 화면 `/overseas-senders`
-- HS 검색: 접수 화면에서 한글·영문·HS 6자리 검색. 저장 품목 + 창고 카탈로그 + WCO HS 6자리 목록(`hs6.json`, 약 5,600건)을 API로 합쳐 보여 준다. 고른 품목은 저장해 재사용 (`overseas_saved_hs_codes`)
+- HS 검색: 접수 화면에서 한글·영문·HS 6자리 검색. 저장 품목 + 창고 카탈로그 + WCO HS 6자리 목록(`hs6.json`, 약 5,600건)을 API로 합쳐 보여 준다. 고른 품목은 저장해 재사용 (`overseas_saved_hs_codes`). 화면 값은 6자리일 수 있고, 우체국 접수 값은 위의 10자리다.
 
 프론트 키 `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` 는 Vercel에만 넣고 git에 커밋하지 않는다. Google Cloud 키 제한에 `tillion.io.kr` 과 로컬 개발 origin을 허용해야 화면 검색이 된다.
 
@@ -341,10 +344,10 @@ Vercel:
 ### 테스트
 
 ```bash
-python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow.py tests/test_overseas_order_excel.py tests/test_google_places.py -v
+python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow.py tests/test_overseas_order_excel.py tests/test_google_places.py tests/test_epost_hs_codes.py -v
 ```
 
-화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 영문 변환, 휴대전화 4칸, 서류 HS·박스 생략, 주소록, HS 완성, 출력서류 재출력, 구글 주소 파싱·Address Validation, 주문 엑셀 1건 변환과 빈 항목 유지를 검증한다.
+화면 접수 순서 전체 플로우, 확인 전 쓰기 거부, 발송인 영문 변환, 휴대전화 4칸, 서류 HS·박스 생략, 주소록, HS 완성, 우체국 10자리 HS 변환, 출력서류 재출력, 구글 주소 파싱·Address Validation, 주문 엑셀 1건 변환과 빈 항목 유지를 검증한다.
 
 ---
 
@@ -370,6 +373,13 @@ cd frontend && npm run dev
 ---
 
 ## 변경 이력
+
+### 2026-10-01
+- **fix(overseas-shipping): 우체국이 받는 10자리 HS만 접수한다**
+  - 6자리와 목록에 없는 코드는 `epost_hs10.json`의 10자리로 바꿔 `ERR-223`을 피한다
+  - 김치·샴푸·아우터·스마트폰·스마트워치·시계·장난감·공예·악기는 우체국 상품명과 같은 세번을 쓴다
+  - 작업일지 검색 조건과 같은 전체 건을 엑셀로 내려받는다
+  - 검증: `tests/test_epost_hs_codes.py`, `tests/test_work_log_export.py`
 
 ### 2026-09-23
 - **fix(overseas-shipping): DDP 버퍼 10% 통일, 최저 금액 제거**
