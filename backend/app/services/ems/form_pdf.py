@@ -418,6 +418,33 @@ def _ensure_cjk(page: fitz.Page) -> None:
     _CJK_PAGES.add(key)
 
 
+def _trim_white(pix: fitz.Pixmap) -> fitz.Pixmap:
+    width, height, n = pix.width, pix.height, pix.n
+    samples = pix.samples
+    min_x, min_y, max_x, max_y = width, height, -1, -1
+    for y in range(height):
+        row = y * width * n
+        for x in range(width):
+            i = row + x * n
+            if samples[i] < 250 or samples[i + 1] < 250 or samples[i + 2] < 250:
+                min_x = min(min_x, x)
+                min_y = min(min_y, y)
+                max_x = max(max_x, x)
+                max_y = max(max_y, y)
+    if max_x < 0:
+        return pix
+    clip_w = max_x - min_x + 1
+    clip_h = max_y - min_y + 1
+    out = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, clip_w, clip_h), False)
+    src = pix.samples
+    dst = out.samples_mv
+    for y in range(clip_h):
+        start = ((min_y + y) * width + min_x) * n
+        dest = y * clip_w * n
+        dst[dest:dest + clip_w * n] = src[start:start + clip_w * n]
+    return out
+
+
 def _barcode_pixmap(value: str) -> fitz.Pixmap:
     code = "".join(ch for ch in (value or "NO-TRACKING") if 32 <= ord(ch) < 127) or "NO-TRACKING"
     bar = code128.Code128(code, barHeight=32, barWidth=0.62, humanReadable=False)
@@ -525,6 +552,8 @@ def _premium_shown_weights(data: dict[str, Any]) -> tuple[int, int]:
 
 
 _KPACKET_BARCODE = (98.16, 149.04, 274.08, 172.68)
+# 답안지 바코드 막대. 칸 비율을 지키면 가운데만 그려져 좌우가 잘린 것처럼 보인다.
+_KPACKET_BARCODE_BARS = (111.25, 149.25, 260.50, 172.25)
 _KPACKET_COVERS = (
     (68.4, 337.7, 210.0, 347.4),
     (126.5, 347.5, 211.5, 360.2),
@@ -597,8 +626,6 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
         page.add_redact_annot(fitz.Rect(*box), fill=(1, 1, 1))
     page.apply_redactions(images=0, graphics=0, text=0)
     page.draw_rect(fitz.Rect(*_KPACKET_BARCODE), color=(1, 1, 1), fill=(1, 1, 1), width=0)
-    if barcode.width:
-        page.insert_image(fitz.Rect(*_KPACKET_BARCODE), pixmap=barcode, keep_proportion=True)
     _paint_uniform_rules(page, rules, _express_logo_holes(stamps))
 
     order_no = str(data.get("order_no") or "").strip()
@@ -659,6 +686,12 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
         _at(page, (40.0, 22.0), "취소된 접수", 11, color=(0.75, 0.05, 0.05))
     # POST Exprès(빨간 방패, 흰 글자)를 표 선과 데이터보다 나중에 그려 선 위에 올린다.
     _restamp_images(page, stamps)
+    if barcode.width:
+        page.insert_image(
+            fitz.Rect(*_KPACKET_BARCODE_BARS),
+            pixmap=_trim_white(barcode),
+            keep_proportion=False,
+        )
 
 
 def _kpacket_date(data: dict[str, Any]) -> str:

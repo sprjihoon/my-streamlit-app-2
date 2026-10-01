@@ -1220,6 +1220,18 @@ def test_kpacket_pdf_lands_on_epost_answer_sheet():
     assert dark == 0
     letter = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(100, 137.8, 102, 138.3), alpha=False)
     assert min(letter.samples[:3]) > 240
+    # 트랙킹 바코드 막대가 답안지처럼 좌우로 칸을 채운다.
+    band = doc[0].get_pixmap(matrix=fitz.Matrix(4, 4), clip=fitz.Rect(100, 156, 275, 166), alpha=False)
+    dark_x = [
+        x
+        for y in range(band.height)
+        for x in range(band.width)
+        if band.samples[(y * band.width + x) * 3] < 80
+    ]
+    assert dark_x
+    left = 100 + min(dark_x) / 4
+    right = 100 + max(dark_x) / 4
+    assert left < 114 and right > 258, (left, right)
 
     other = render_label_pdf(
         {
