@@ -1249,6 +1249,80 @@ def test_kpacket_pdf_lands_on_epost_answer_sheet():
     assert "CN 22" in other_text
 
 
+def _thin_rule_runs(page, clip):
+    """6배 확대에서 표 선 한 줄의 픽셀 두께. 겹친 두 줄이면 더 두껍다."""
+    import fitz
+
+    pix = page.get_pixmap(matrix=fitz.Matrix(6, 6), clip=fitz.Rect(*clip), alpha=False)
+    x = pix.width // 2
+    runs = []
+    run = 0
+    for y in range(pix.height):
+        index = (y * pix.width + x) * pix.n
+        if pix.samples[index] < 90:
+            run += 1
+        elif run:
+            runs.append(run)
+            run = 0
+    if run:
+        runs.append(run)
+    return [value for value in runs if value >= 2]
+
+
+def test_each_shipping_method_prints_its_own_form():
+    import fitz
+
+    from backend.app.services.ems.form_pdf import render_label_pdf
+
+    base = {
+        "order_no": "TIL-1",
+        "regino": "TEST000000KR",
+        "post_office": "SEOUL",
+        "ems_fee": 1000,
+        "totweight": 500,
+        "boxlength": 10,
+        "boxwidth": 10,
+        "boxheight": 10,
+        "posted_year": "2026",
+        "posted_month": "10",
+        "posted_day": "01",
+        "sender": {"name": "Spring", "tel": "+821012341234", "address": "Seoul", "zip": "04524"},
+        "recipient": {
+            "name": "Jane Doe",
+            "phone": "+819012341234",
+            "addr3": "1 Main",
+            "zip": "100-0001",
+            "country": "JP",
+            "country_name": "Japan",
+        },
+        "items": [{
+            "name_en": "Shoes",
+            "quantity": 1,
+            "unit_price_usd": 10,
+            "print_hs": "6403990000",
+            "net_weight_g": "500",
+            "origin_country": "KR",
+        }],
+    }
+    expected = {
+        "EMS": {"pages": 3, "has": ("CN23", "KOREA POST"), "lacks": ("www.empspremium.co.kr", "K- PACKET", "CN 22")},
+        "EMS_PREMIUM": {"pages": 2, "has": ("CN23", "www.empspremium.co.kr"), "lacks": ("K- PACKET", "CN 22")},
+        "KPACKET": {"pages": 1, "has": ("CN 22", "K- PACKET"), "lacks": ("CN23", "www.empspremium.co.kr")},
+    }
+    for method, check in expected.items():
+        pdf = render_label_pdf({**base, "shipping_method": method})
+        doc = fitz.open(stream=pdf, filetype="pdf")
+        text = "".join(page.get_text() for page in doc)
+        assert doc.page_count == check["pages"], method
+        for marker in check["has"]:
+            assert marker in text, (method, marker)
+        for marker in check["lacks"]:
+            assert marker not in text, (method, marker)
+        runs = _thin_rule_runs(doc[0], (80, 136, 200, 142))
+        assert runs, method
+        assert max(runs) <= 6, (method, runs)
+
+
 def test_label_html_escapes_and_prints_canceled(isolated_runtime):
     from fastapi.responses import HTMLResponse
 

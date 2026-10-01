@@ -232,14 +232,14 @@ get_res_info(order_no, req_ymd, req_type="2")
   → 체크한 행에는 칸마다 같은 값을 한 번에 넣고, 고른 행은 한 번에 지운다
   → POST /overseas-shipping/preview      확인 전 DB·우체국 미기록
   → 확인 후 POST /overseas-shipping      eship.epost.go.kr 즉시 접수
-  → GET /overseas-shipping/{id}/label    우체국 A4 출력서류 (JSON, format=pdf)
+  → GET /overseas-shipping/{id}/label    방식별 우체국 A4 출력서류 (JSON, format=pdf)
   → 화면 /overseas-print/{id} 에서 인쇄
   → 접수목록에서 같은 서류를 다시 연다 (취소 후에도 가능)
   → 목록의 관리 칸에서 접수 취소를 누른다. 실접수는 우체국 취소 후 상태를 취소로 바꾼다. 취소된 건도 출력서류는 남는다
 ```
 
 - 확인(`confirm=true`) 전에는 접수·취소를 쓰지 않는다.
-- 같은 직원 + 같은 전화번호 + 같은 국가 + 당일 접수는 중복 가드.
+- 같은 직원 + 같은 전화번호 + 같은 국가 + 같은 배송방법 + 당일 접수는 중복 가드.
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
 - 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다. 접수 `regData`는 SEED128, EUC-KR이다.
 - 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 화물·서류 예상요금을 나눠 보여 준다.
@@ -314,11 +314,11 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `GET` | `/overseas-shipping` | 접수 목록. 각 건에 요금, DDP, 합계(`spent_total`) |
 | `GET` | `/overseas-shipping/{id}` | 접수 1건 상세. 제품명·HS 품목·수취인·박스·지출을 입력값 그대로 돌려준다 |
 | `POST` | `/overseas-shipping` | 확인 후 접수 |
-| `GET` | `/overseas-shipping/{id}/label` | 출력서류. JSON, `format=pdf` 는 우체국 A4, `format=html` 은 미리보기 HTML |
+| `GET` | `/overseas-shipping/{id}/label` | 출력서류. JSON, `format=pdf` 는 방식별 우체국 A4, `format=html` 은 미리보기 HTML |
 | `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |
 | `DELETE` | `/overseas-shipping/{id}` | 관리자만 목록에서 삭제. 실접수는 우체국 취소 후 삭제 |
 
-우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, 우체국 A4 양식(주소기표지 1장, 세관신고서 2장)에 그 값만 올려 인쇄한다. 로고와 안내 문구는 양식 PDF를 그대로 쓰고, 표 선은 0.75pt 한 가지 굵기다. 화면은 `/overseas-print/{id}` 이다. 접수 직후의 **출력서류 인쇄**와 접수목록 각 행의 **출력서류**가 같은 페이지를 연다. 취소된 건도 출력서류 버튼은 남고, 서류 위에 취소된 접수라고 표시한다.
+우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, 배송방법마다 다른 우체국 A4 양식에 그 값만 올려 인쇄한다. EMS는 주소기표지 1장과 세관신고서 2장(CN23)이다. EMS 프리미엄은 프리미엄 양식 2장(CN23)이다. K-Packet은 주소와 CN22가 한 장이다. 로고와 안내 문구는 양식 PDF를 그대로 쓰고, 겹친 선과 회색 선은 EMS와 같이 0.75pt 한 가지 굵기로 다시 그린다. 화면은 `/overseas-print/{id}` 이다. 접수 직후의 **출력서류 인쇄**와 접수목록 각 행의 **출력서류**가 같은 페이지를 연다. 취소된 건도 출력서류 버튼은 남고, 서류 위에 취소된 접수라고 표시한다.
 
 ### 환경변수
 
@@ -375,6 +375,11 @@ cd frontend && npm run dev
 ## 변경 이력
 
 ### 2026-10-01
+- **feat(overseas-shipping): 케이패킷과 프리미엄은 각각의 우체국 양식으로 출력한다**
+  - EMS는 3장(CN23), EMS 프리미엄은 2장(CN23), K-Packet은 1장(CN22)
+  - 세 양식 모두 겹친 표 선을 0.75pt 한 가지로 맞춘다
+  - 같은 날 같은 수취인이라도 배송방법이 다르면 접수를 막지 않는다
+  - 검증: `tests/test_overseas_shipping.py`
 - **feat(overseas-shipping): 우체국 A4 양식 PDF로 출력한다**
   - 로고와 고정 문구는 양식 PDF를 쓰고, 등기번호·주소·품목은 같은 칸에 넣는다
   - 겹친 선과 회색 선을 걷어 표 선을 0.75pt 한 가지로 맞춘다
