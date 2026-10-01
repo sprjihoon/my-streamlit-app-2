@@ -1145,6 +1145,8 @@ def test_premium_pdf_lands_on_epost_answer_sheet():
 
 
 def test_kpacket_pdf_lands_on_epost_answer_sheet():
+    import fitz
+
     from backend.app.services.ems.form_pdf import render_label_pdf
 
     pdf = render_label_pdf(
@@ -1208,6 +1210,16 @@ def test_kpacket_pdf_lands_on_epost_answer_sheet():
     _assert_span(found, "20 * 20 * 20", (100.92, 374.28))
     _assert_span(found, "Heathrow Airport, Colnbrook By-Pass Harmondsworth", (69.60, 303.24))
     assert "원" in text
+    # POST Exprès 로고 안쪽을 표 가로선이 가로지르지 않는다.
+    shield = doc[0].get_pixmap(matrix=fitz.Matrix(4, 4), clip=fitz.Rect(80, 135.6, 120, 137.2), alpha=False)
+    dark = sum(
+        1
+        for i in range(0, len(shield.samples), 3)
+        if shield.samples[i] < 60 and shield.samples[i + 1] < 60 and shield.samples[i + 2] < 60
+    )
+    assert dark == 0
+    letter = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(100, 137.8, 102, 138.3), alpha=False)
+    assert min(letter.samples[:3]) > 240
 
     other = render_label_pdf(
         {
@@ -1321,6 +1333,10 @@ def test_each_shipping_method_prints_its_own_form():
         runs = _thin_rule_runs(doc[0], (80, 136, 200, 142))
         assert runs, method
         assert max(runs) <= 6, (method, runs)
+        if method == "KPACKET":
+            logo = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(100, 130, 100.5, 130.5), alpha=False)
+            red, green, blue = logo.samples[:3]
+            assert red > 180 and green < 80, (red, green, blue)
 
 
 def test_label_html_escapes_and_prints_canceled(isolated_runtime):

@@ -190,28 +190,54 @@ def _merge_spans(spans) -> list[tuple[float, float]]:
     return merged
 
 
-def _paint_uniform_rules(page: fitz.Page, rules: tuple[list, list]) -> None:
+def _subtract_spans(spans, cuts) -> list[tuple[float, float]]:
+    current = list(spans)
+    for cut_start, cut_end in cuts:
+        nxt: list[tuple[float, float]] = []
+        for start, end in current:
+            if end <= cut_start or start >= cut_end:
+                nxt.append((start, end))
+                continue
+            if start < cut_start:
+                nxt.append((start, cut_start))
+            if end > cut_end:
+                nxt.append((cut_end, end))
+        current = nxt
+    return [(start, end) for start, end in current if end - start > 0.4]
+
+
+def _paint_uniform_rules(page: fitz.Page, rules: tuple[list, list], holes: tuple[fitz.Rect, ...] = ()) -> None:
     horizontal, vertical = rules
     pad = 0.45
+
+    def _horizontal_cuts(rect: fitz.Rect):
+        return [(hole.x0, hole.x1) for hole in holes if not (rect.y1 < hole.y0 or rect.y0 > hole.y1)]
+
+    def _vertical_cuts(rect: fitz.Rect):
+        return [(hole.y0, hole.y1) for hole in holes if not (rect.x1 < hole.x0 or rect.x0 > hole.x1)]
+
     for _center, _spans, rects in horizontal:
         for rect in rects:
-            page.draw_rect(
-                fitz.Rect(rect.x0, rect.y0 - pad, rect.x1, rect.y1 + pad),
-                color=(1, 1, 1),
-                fill=(1, 1, 1),
-                width=0,
-            )
+            for start, end in _subtract_spans([(rect.x0, rect.x1)], _horizontal_cuts(rect)):
+                page.draw_rect(
+                    fitz.Rect(start, rect.y0 - pad, end, rect.y1 + pad),
+                    color=(1, 1, 1),
+                    fill=(1, 1, 1),
+                    width=0,
+                )
     for _center, _spans, rects in vertical:
         for rect in rects:
-            page.draw_rect(
-                fitz.Rect(rect.x0 - pad, rect.y0, rect.x1 + pad, rect.y1),
-                color=(1, 1, 1),
-                fill=(1, 1, 1),
-                width=0,
-            )
+            for start, end in _subtract_spans([(rect.y0, rect.y1)], _vertical_cuts(rect)):
+                page.draw_rect(
+                    fitz.Rect(rect.x0 - pad, start, rect.x1 + pad, end),
+                    color=(1, 1, 1),
+                    fill=(1, 1, 1),
+                    width=0,
+                )
     half = _RULE / 2
     for center, spans, _rects in horizontal:
-        for start, end in spans:
+        cuts = [(hole.x0, hole.x1) for hole in holes if hole.y0 - 0.6 <= center <= hole.y1 + 0.6]
+        for start, end in _subtract_spans(spans, cuts):
             page.draw_rect(
                 fitz.Rect(start, center - half, end, center + half),
                 color=(0, 0, 0),
@@ -219,7 +245,8 @@ def _paint_uniform_rules(page: fitz.Page, rules: tuple[list, list]) -> None:
                 width=0,
             )
     for center, spans, _rects in vertical:
-        for start, end in spans:
+        cuts = [(hole.y0, hole.y1) for hole in holes if hole.x0 - 0.6 <= center <= hole.x1 + 0.6]
+        for start, end in _subtract_spans(spans, cuts):
             page.draw_rect(
                 fitz.Rect(center - half, start, center + half, end),
                 color=(0, 0, 0),
@@ -528,10 +555,43 @@ _KPACKET_COVERS = (
 _KPACKET_PITCH = 19.8
 
 
+def _image_stamps(page: fitz.Page) -> list[tuple[int, fitz.Rect]]:
+    """양식에 박힌 로고와 표시. 표 선을 다시 그린 뒤에 그 위로 올린다."""
+    stamps = []
+    seen = set()
+    for info in page.get_image_info(xrefs=True):
+        xref = int(info.get("xref") or 0)
+        if xref <= 0 or info.get("colorspace") == 0:
+            continue
+        rect = fitz.Rect(info["bbox"])
+        key = (xref, round(rect.x0, 2), round(rect.y0, 2), round(rect.x1, 2), round(rect.y1, 2))
+        if key in seen or rect.is_empty:
+            continue
+        seen.add(key)
+        stamps.append((xref, rect))
+    return stamps
+
+
+def _express_logo_holes(stamps: list[tuple[int, fitz.Rect]]) -> tuple[fitz.Rect, ...]:
+    """빨간 POST Exprès 방패. 이 칸에는 표 선을 그리지 않는다."""
+    holes = []
+    for _xref, rect in stamps:
+        if rect.width >= 40 and rect.height >= 40 and rect.y0 < 180:
+            holes.append(rect)
+    return tuple(holes)
+
+
+def _restamp_images(page: fitz.Page, stamps: list[tuple[int, fitz.Rect]]) -> None:
+    ordered = sorted(stamps, key=lambda item: item[1].width >= 40 and item[1].height >= 40 and item[1].y0 < 180)
+    for xref, rect in ordered:
+        page.insert_image(rect, xref=xref, keep_proportion=False)
+
+
 def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> None:
     sender = data.get("sender") or {}
     recipient = data.get("recipient") or {}
     items = [item for item in list(data.get("items") or []) if item.get("name_en")][:5]
+    stamps = _image_stamps(page)
     rules = _table_rules(page)
     for box in _KPACKET_COVERS:
         page.add_redact_annot(fitz.Rect(*box), fill=(1, 1, 1))
@@ -539,7 +599,7 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
     page.draw_rect(fitz.Rect(*_KPACKET_BARCODE), color=(1, 1, 1), fill=(1, 1, 1), width=0)
     if barcode.width:
         page.insert_image(fitz.Rect(*_KPACKET_BARCODE), pixmap=barcode, keep_proportion=True)
-    _paint_uniform_rules(page, rules)
+    _paint_uniform_rules(page, rules, _express_logo_holes(stamps))
 
     order_no = str(data.get("order_no") or "").strip()
     if order_no:
@@ -597,6 +657,8 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
     _at(page, (74.64, 335.64), country_name, 8.04, "hebi")
     if data.get("status") == "canceled":
         _at(page, (40.0, 22.0), "취소된 접수", 11, color=(0.75, 0.05, 0.05))
+    # POST Exprès(빨간 방패, 흰 글자)를 표 선과 데이터보다 나중에 그려 선 위에 올린다.
+    _restamp_images(page, stamps)
 
 
 def _kpacket_date(data: dict[str, Any]) -> str:
