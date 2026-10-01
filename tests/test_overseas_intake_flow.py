@@ -267,7 +267,7 @@ def test_staff_intake_flow_matches_overseas_shipping_page(isolated_runtime):
     assert label["source"] == "internal"
     assert label["regino"] == created_body["tracking_no"]
     assert label["sender"]["name"] == "Spring Shop JP"
-    assert "CN22" in client.get(
+    assert "CN23" in client.get(
         f"/overseas-shipping/{row['id']}/label",
         params={"token": token, "format": "html"},
     ).text

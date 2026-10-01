@@ -10,7 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from backend.app.api.kpost_pickup import _get_user
@@ -50,6 +50,7 @@ from backend.app.services.ems.dimension_limits import (
 from backend.app.services.ems.duty_deposit import calculate_duty_deposit
 from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
+from backend.app.services.ems.form_pdf import render_label_pdf
 from backend.app.services.ems.label import build_shipment_label, render_label_html
 from backend.app.services.ems.order_excel import parse_order_workbook
 from logic.db import get_connection
@@ -1335,12 +1336,20 @@ def get_overseas(shipment_id: int, token: str):
 
 @router.get("/{shipment_id}/label")
 def overseas_label(shipment_id: int, token: str, format: str = "json"):
-    """접수 저장본으로 CN22 출력서류를 내려준다. 우체국 PDF API는 없다."""
+    """접수 저장본으로 A4 주소기표지와 세관신고서 2장을 내려준다. 우체국 PDF API는 없다."""
     _get_user(token)
     data, snapshot = _load_shipment(shipment_id)
     label = build_shipment_label(data, snapshot=snapshot)
-    if (format or "json").lower() == "html":
+    kind = (format or "json").lower()
+    if kind == "html":
         return HTMLResponse(render_label_html(label))
+    if kind == "pdf":
+        filename = f"ems-{(label.get('regino') or shipment_id)}.pdf"
+        return Response(
+            content=render_label_pdf(label),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
     return {"ok": True, "label": label}
 
 
@@ -1447,7 +1456,13 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
                 result.get("treatporegipoengnm") or "",
                 "requested",
                 0 if live else 1,
-                json.dumps({k: v for k, v in params.items() if k not in {"custno", "apprno"}}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        **{k: v for k, v in params.items() if k not in {"custno", "apprno"}},
+                        "treatporegipocd": result.get("treatporegipocd") or "",
+                    },
+                    ensure_ascii=False,
+                ),
                 validated.get("notes") or "",
                 user["nickname"],
                 created_at,

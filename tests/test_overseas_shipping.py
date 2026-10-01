@@ -896,9 +896,28 @@ def test_label_from_saved_shipment_not_epost_pdf(isolated_runtime):
     html = overseas_label(created["id"], token, format="html")
     assert isinstance(html, HTMLResponse)
     text = html.body.decode("utf-8")
-    assert "Customs Declaration (CN22)" in text
+    assert "CN23" in text
+    assert "1. CUSTOMS DECLARATION" in text
+    assert "2. CUSTOMS DECLARATION" in text
+    assert "6109109000" in text
     assert created["tracking_no"] in text
     assert "Clothing" in text
+
+    pdf = overseas_label(created["id"], token, format="pdf")
+    assert pdf.media_type == "application/pdf"
+    import fitz
+
+    form = fitz.open(stream=pdf.body, filetype="pdf")
+    assert form.page_count == 3
+    printed = "".join(page.get_text() for page in form)
+    assert created["tracking_no"] in printed
+    assert "Hong Gildong" in printed
+    assert "6109109000" in printed
+    assert "CN23" in printed
+    assert "KOREA POST" in printed
+    assert "Marie Renneberg" not in printed
+    assert "EG053055332KR" not in printed
+    assert "Stainless Steel Jewelry" not in printed
 
     built = build_shipment_label(
         {
@@ -928,6 +947,77 @@ def test_label_from_saved_shipment_not_epost_pdf(isolated_runtime):
         raise AssertionError("missing shipment should 404")
     except HTTPException as exc:
         assert exc.status_code == 404
+
+
+def test_label_pdf_lands_on_epost_answer_sheet():
+    import fitz
+
+    from backend.app.services.ems.form_pdf import render_label_pdf
+
+    pdf = render_label_pdf(
+        {
+            "regino": "EG053055332KR",
+            "posted_year": "2026",
+            "posted_month": "10",
+            "posted_day": "01",
+            "posted_hour": "16",
+            "posted_min": "11",
+            "post_office_code": "70020",
+            "post_office": "DONGDAEGU",
+            "ems_fee": 37500,
+            "totweight": 384,
+            "volume_weight": 384,
+            "boxlength": 18,
+            "boxwidth": 16,
+            "boxheight": 8,
+            "contents_type": "parcel",
+            "sender": {
+                "name": "reindeer",
+                "tel": "82-70-4191-8446",
+                "address": "Daegu, Dong- gu, 1 Dongchon- ro 2F Parcel Room",
+                "zip": "41142",
+            },
+            "recipient": {
+                "name": "Marie Renneberg",
+                "phone": "417-8480-9074",
+                "addr3": "Kurvenstrasse 1 Zuerich Zurich",
+                "zip": "8006",
+                "country": "CH",
+                "country_name": "Switzerland",
+                "email": "mchrrenneberg1@aol.com",
+            },
+            "items": [{
+                "name_en": "Stainless Steel Jewelry",
+                "quantity": 1,
+                "unit_price_usd": 20,
+                "print_hs": "7117900000",
+                "net_weight_g": "384",
+                "origin_country": "KR",
+            }],
+        }
+    )
+    page = fitz.open(stream=pdf, filetype="pdf")[0]
+    found = {}
+    for block in page.get_text("dict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block["lines"]:
+            for span in line["spans"]:
+                found.setdefault(span["text"].strip(), span["origin"])
+    expected = {
+        "EG053055332KR": (123.72, 82.08),
+        "Marie Renneberg": (350.88, 170.28),
+        "7117900000": (284.28, 351.24),
+        "DONGDAEGU": (491.76, 398.88),
+        "8006": (382.56, 303.84),
+        "SWITZERLAND": (459.18, 302.76),
+    }
+    for text, origin in expected.items():
+        assert text in found
+        assert abs(found[text][0] - origin[0]) < 1.0
+        assert abs(found[text][1] - origin[1]) < 1.0
+    assert "KOREA POST" in page.get_text()
+    assert "CN23" in page.get_text()
 
 
 def test_label_html_escapes_and_prints_canceled(isolated_runtime):

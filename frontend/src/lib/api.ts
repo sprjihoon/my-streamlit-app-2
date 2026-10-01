@@ -2100,6 +2100,10 @@ export function overseasLabelHtmlUrl(token: string, id: number) {
   return `${API_BASE}/overseas-shipping/${id}/label${overseasQuery(token, '&format=html')}`;
 }
 
+export function overseasLabelPdfUrl(token: string, id: number) {
+  return `${API_BASE}/overseas-shipping/${id}/label${overseasQuery(token, '&format=pdf')}`;
+}
+
 export async function getOverseasShippingLabel(token: string, id: number) {
   return fetchApi<{ ok: boolean; label: OverseasLabelData }>(
     `/overseas-shipping/${id}/label${overseasQuery(token)}`
