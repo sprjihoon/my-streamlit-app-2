@@ -1020,6 +1020,235 @@ def test_label_pdf_lands_on_epost_answer_sheet():
     assert "CN23" in page.get_text()
 
 
+def _pdf_spans(pdf: bytes):
+    import fitz
+
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    found = []
+    for page in doc:
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    found.append((span["text"], span["origin"], page.number))
+    return doc, found
+
+
+def _assert_span(found, text, origin, page=0):
+    hits = [item for item in found if item[2] == page and item[0] == text]
+    assert hits, text
+    assert any(
+        abs(hit[1][0] - origin[0]) < 1.0 and abs(hit[1][1] - origin[1]) < 1.0
+        for hit in hits
+    ), (text, [(hit[0], hit[1]) for hit in hits[:6]])
+
+
+def test_premium_pdf_lands_on_epost_answer_sheet():
+    from backend.app.services.ems.form_pdf import render_label_pdf
+
+    pdf = render_label_pdf(
+        {
+            "shipping_method": "EMS_PREMIUM",
+            "regino": "UP901002522KR",
+            "posted_year": "2026",
+            "posted_month": "10",
+            "posted_day": "01",
+            "posted_hour": "22",
+            "posted_min": "34",
+            "post_office_code": "70020",
+            "post_office": "DONGDAEGU",
+            "ems_fee": 109400,
+            "totweight": 2000,
+            "boxlength": 40,
+            "boxwidth": 30,
+            "boxheight": 20,
+            "contents_type": "parcel",
+            "sender": {
+                "name": "Tillion",
+                "tel": "+821027239490",
+                "address": "1 Dongchon-ro 2F Parcel Room, Dong-gu, Daegu",
+                "zip": "41142",
+            },
+            "recipient": {
+                "name": "Alex Morgan",
+                "phone": "+442087594321",
+                "addr1": "England",
+                "addr2": "Harmondsworth",
+                "addr3": "Heathrow Airport, Colnbrook By-Pass",
+                "zip": "UB7 0HJ",
+                "country": "GB",
+                "country_name": "United Kingdom",
+                "email": "alex.morgan@example.com",
+            },
+            "items": [{
+                "name_en": "Clothing",
+                "quantity": 1,
+                "unit_price_usd": 20,
+                "print_hs": "6109109000",
+                "net_weight_g": "2000",
+                "origin_country": "KR",
+            }],
+        }
+    )
+    doc, found = _pdf_spans(pdf)
+    assert doc.page_count == 2
+    text = "".join(page.get_text() for page in doc)
+    assert "CN23" in text
+    assert "www.empspremium.co.kr" in text
+    _assert_span(found, "UP901002522KR", (124.08, 82.08))
+    _assert_span(found, "Alex Morgan", (350.88, 170.28))
+    _assert_span(found, "6109109000", (284.28, 351.24))
+    _assert_span(found, "DONGDAEGU", (491.76, 393.72))
+    _assert_span(found, "UB7 0HJ", (373.56, 303.84))
+    _assert_span(found, " UNITED KINGDOM", (459.18, 302.76))
+    _assert_span(found, "4800 g", (420.36, 320.76))
+    _assert_span(found, "4000 g", (420.36, 337.80))
+    _assert_span(found, " 020- 8759- 4321", (343.27, 149.88))
+    _assert_span(found, "40 * 30 * 20", (500.16, 340.08))
+    assert "Marie Renneberg" not in text
+    assert "EG053055332KR" not in text
+
+    other = render_label_pdf(
+        {
+            "shipping_method": "EMS_PREMIUM",
+            "regino": "UP000000001KR",
+            "totweight": 500,
+            "boxlength": 10,
+            "boxwidth": 10,
+            "boxheight": 10,
+            "post_office": "SEOUL",
+            "ems_fee": 1000,
+            "sender": {"name": "Spring", "tel": "+821012341234", "address": "Seoul", "zip": "04524"},
+            "recipient": {
+                "name": "Jane Doe",
+                "phone": "+442071112233",
+                "addr3": "1 Main",
+                "zip": "SW1A 1AA",
+                "country": "GB",
+                "country_name": "United Kingdom",
+            },
+            "items": [{
+                "name_en": "Shoes",
+                "quantity": 1,
+                "unit_price_usd": 10,
+                "print_hs": "6403990000",
+                "net_weight_g": "500",
+                "origin_country": "KR",
+            }],
+        }
+    )
+    other_text = "".join(page.get_text() for page in _pdf_spans(other)[0])
+    assert "Alex Morgan" not in other_text
+    assert "UP901002522KR" not in other_text
+    assert "Jane Doe" in other_text
+
+
+def test_kpacket_pdf_lands_on_epost_answer_sheet():
+    from backend.app.services.ems.form_pdf import render_label_pdf
+
+    pdf = render_label_pdf(
+        {
+            "shipping_method": "KPACKET",
+            "order_no": "TIL-1790861691310",
+            "regino": "LI086651482KR",
+            "posted_year": "2026",
+            "posted_month": "10",
+            "posted_day": "01",
+            "ems_fee": 44790,
+            "totweight": 2000,
+            "boxlength": 20,
+            "boxwidth": 20,
+            "boxheight": 20,
+            "sender": {
+                "name": "Tillion",
+                "tel": "+821027239490",
+                "address": "1 Dongchon-ro 2F Parcel Room, Dong-gu, Daegu",
+                "zip": "41142",
+            },
+            "recipient": {
+                "name": "Alex Morgan",
+                "phone": "+442087594321",
+                "addr1": "England",
+                "addr2": "Harmondsworth",
+                "addr3": "Heathrow Airport, Colnbrook By-Pass",
+                "zip": "UB7 0HJ",
+                "country": "GB",
+                "country_name": "United Kingdom",
+            },
+            "items": [{
+                "name_en": "Clothing",
+                "quantity": 1,
+                "unit_price_usd": 20,
+                "print_hs": "6109109000",
+                "net_weight_g": "2000",
+                "origin_country": "KR",
+            }],
+        }
+    )
+    doc, found = _pdf_spans(pdf)
+    assert doc.page_count == 1
+    text = doc[0].get_text()
+    assert "CN 22" in text
+    assert "K- PACKET" in text
+    assert "동대구" in text
+    _assert_span(found, "LI086651482KR", (158.28, 182.40))
+    _assert_span(found, "Alex Morgan", (69.60, 289.32))
+    _assert_span(found, "Clothing", (316.20, 208.56))
+    _assert_span(found, "6109109000", (464.04, 207.60))
+    _assert_span(found, "UNITED KINGDOM", (74.64, 335.64))
+    _assert_span(found, "volume 1333g", (176.76, 370.92))
+    _assert_span(found, "2026.10.01.actual", (127.44, 357.12))
+    _assert_span(found, "Tel: 82- 10- 2723- 9490", (105.60, 202.08))
+    _assert_span(found, "Tel: 020- 8759- 4321", (97.20, 273.48))
+    _assert_span(found, "ZIP: UB7 0HJ", (210.96, 273.48))
+    _assert_span(found, "2000g", (212.52, 357.12))
+    _assert_span(found, "44790", (247.08, 357.12))
+    _assert_span(found, "GB", (287.28, 370.92))
+    _assert_span(found, "20 * 20 * 20", (100.92, 374.28))
+    _assert_span(found, "Heathrow Airport, Colnbrook By-Pass Harmondsworth", (69.60, 303.24))
+    assert "원" in text
+
+    other = render_label_pdf(
+        {
+            "shipping_method": "KPACKET",
+            "order_no": "TIL-1",
+            "regino": "LK000000001KR",
+            "posted_year": "2026",
+            "posted_month": "10",
+            "posted_day": "02",
+            "ems_fee": 1000,
+            "totweight": 500,
+            "boxlength": 10,
+            "boxwidth": 10,
+            "boxheight": 10,
+            "sender": {"name": "Spring", "tel": "+821012341234", "address": "Seoul", "zip": "04524"},
+            "recipient": {
+                "name": "Jane Doe",
+                "phone": "+442071112233",
+                "addr1": "London",
+                "addr3": "1 Main",
+                "zip": "SW1A 1AA",
+                "country": "GB",
+                "country_name": "United Kingdom",
+            },
+            "items": [{
+                "name_en": "Shoes",
+                "quantity": 1,
+                "unit_price_usd": 10,
+                "print_hs": "6403990000",
+                "net_weight_g": "500",
+                "origin_country": "KR",
+            }],
+        }
+    )
+    other_text = _pdf_spans(other)[0][0].get_text()
+    assert "Alex Morgan" not in other_text
+    assert "LI086651482KR" not in other_text
+    assert "Jane Doe" in other_text
+    assert "CN 22" in other_text
+
+
 def test_label_html_escapes_and_prints_canceled(isolated_runtime):
     from fastapi.responses import HTMLResponse
 

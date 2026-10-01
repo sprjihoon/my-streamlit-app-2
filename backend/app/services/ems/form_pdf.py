@@ -1,11 +1,13 @@
-"""우체국 A4 EMS 양식 PDF에 접수 데이터만 덮어 쓴다.
+"""우체국 A4 양식 PDF에 접수 데이터만 덮어 쓴다.
 
 로고, 표, 안내 문구는 템플릿 그대로 둔다.
 샘플로 박혀 있던 값만 지우고 같은 칸에 접수 값을 넣는다.
+EMS, EMS 프리미엄, K-Packet은 우체국 출력 파일이 서로 다르다.
 """
 
 from __future__ import annotations
 
+import math
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,43 @@ import fitz
 from reportlab.graphics.barcode import code128
 from reportlab.pdfgen.canvas import Canvas
 
+from backend.app.services.ems.fields import format_recipient_tel
+
 TEMPLATE = Path(__file__).with_name("ems_nml_a4_v1p.pdf")
+PREMIUM_TEMPLATE = Path(__file__).with_name("ems_nml_a4_v1p_p.pdf")
+KPACKET_TEMPLATE = Path(__file__).with_name("kpacket_a4_v2p.pdf")
+
+# 좌표는 각 답안지에서 잰 값이다. EMS는 EG053055332KR, 프리미엄은 UP901002522KR.
+_EMS_LAYOUT = {
+    "tracking": (123.72, 82.08),
+    "weight": (423.24, 320.76),
+    "volume": (423.24, 337.8),
+    "zip": (382.56, 303.84),
+    "dims": (501.84, 340.08),
+    "country_baseline": 355.44,
+    "office": (491.76, 398.88),
+    "signature": (293.28, 429.12),
+    "fee_right": 544.0,
+    "recipient_width": 230,
+    "recipient_next_x": None,
+    "premium_weights": False,
+    "national_phone": False,
+}
+_PREMIUM_LAYOUT = {
+    "tracking": (124.08, 82.08),
+    "weight": (420.36, 320.76),
+    "volume": (420.36, 337.80),
+    "zip": (373.56, 303.84),
+    "dims": (500.16, 340.08),
+    "country_baseline": 357.84,
+    "office": (491.76, 393.72),
+    "signature": (297.12, 429.12),
+    "fee_right": 547.39,
+    "recipient_width": 180,
+    "recipient_next_x": 311.28,
+    "premium_weights": True,
+    "national_phone": True,
+}
 
 # 정답 PDF(EG053055332KR)에서 잰 값. 덮는 칸은 표 선과 고정 글귀를 피한다.
 _BARCODE = (119.0, 93.0, 270.0, 130.0)
@@ -73,14 +111,23 @@ _CJK_PAGES: set[int] = set()
 
 
 def render_label_pdf(data: dict[str, Any]) -> bytes:
-    if not TEMPLATE.is_file():
-        raise FileNotFoundError(f"EMS 양식 PDF가 없습니다: {TEMPLATE}")
+    method = str(data.get("shipping_method") or "EMS")
+    if method == "KPACKET":
+        return _render(KPACKET_TEMPLATE, data, _fill_kpacket)
+    if method == "EMS_PREMIUM":
+        return _render(PREMIUM_TEMPLATE, data, lambda page, shipment, barcode: _fill_page(page, shipment, barcode, _PREMIUM_LAYOUT))
+    return _render(TEMPLATE, data, _fill_page)
+
+
+def _render(template: Path, data: dict[str, Any], fill) -> bytes:
+    if not template.is_file():
+        raise FileNotFoundError(f"우체국 양식 PDF가 없습니다: {template}")
     _CJK_PAGES.clear()
-    doc = fitz.open(TEMPLATE)
+    doc = fitz.open(template)
     try:
         barcode = _barcode_pixmap(str(data.get("regino") or ""))
         for page in doc:
-            _fill_page(page, data, barcode)
+            fill(page, data, barcode)
         return doc.tobytes(deflate=True, garbage=4)
     finally:
         doc.close()
@@ -181,10 +228,15 @@ def _paint_uniform_rules(page: fitz.Page, rules: tuple[list, list]) -> None:
             )
 
 
-def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> None:
+def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap, layout: dict[str, Any] | None = None) -> None:
+    layout = layout or _EMS_LAYOUT
     sender = data.get("sender") or {}
-    recipient = data.get("recipient") or {}
-    items = [item for item in list(data.get("items") or []) if item.get("name_en")][:3]
+    recipient = dict(data.get("recipient") or {})
+    if layout.get("national_phone"):
+        shown = format_recipient_tel(str(recipient.get("phone") or ""), str(recipient.get("country") or ""))
+        if shown:
+            recipient["phone"] = shown
+    items, actual_g, volume_g = _weights_for_layout(data, layout)
     is_doc = data.get("contents_type") == "document"
     rules = _table_rules(page)
     for box in _COVERS:
@@ -198,7 +250,7 @@ def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> N
         page.insert_image(fitz.Rect(*_BARCODE), pixmap=barcode, keep_proportion=True)
     _paint_uniform_rules(page, rules)
 
-    _at(page, (123.72, 82.08), data.get("regino"), 17.99, "hebi")
+    _at(page, layout["tracking"], data.get("regino"), 17.99, "hebi")
     _center(page, 308.6, 341.0, 132.84, data.get("posted_year"), 6.96)
     _center(page, 341.0, 373.4, 132.84, _two(data.get("posted_month")), 6.96)
     _center(page, 373.4, 400.4, 132.84, _two(data.get("posted_day")), 6.96)
@@ -212,23 +264,27 @@ def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> N
     _at(page, (93.0, 170.64), sender.get("name"), 9.96, "hebi")
     _at(page, (350.88, 170.28), recipient.get("name"), 9.96, "hebi")
     _lines(page, 61.68, 197.52, sender.get("address"), 9.96, 210, 12.96, "hebi", next_x=56.76)
-    _lines(page, 316.2, 202.92, _recipient_address(recipient), 9.96, 230, 12.96, "hebi")
+    _lines(
+        page, 316.2, 202.92, _recipient_address(recipient), 9.96,
+        layout["recipient_width"], 12.96, "hebi", next_x=layout["recipient_next_x"],
+    )
     _at(page, (350.88, 287.76), recipient.get("email"), 8.04, "hebi")
     _at(page, (119.4, 305.28), _spaced_digits(sender.get("zip")), 9.96, "hebi")
-    _at(page, (382.56, 303.84), recipient.get("zip"), 9.96, "hebi")
+    _at(page, layout["zip"], recipient.get("zip"), 9.96, "hebi")
     country = str(recipient.get("country_name") or "").strip().upper()
     _at(page, (459.18, 302.76), f" {country}" if country else "", 9.96, "hebi")
-    _at(page, (423.24, 320.76), _grams(data.get("totweight")), 9.96, "hebi")
-    _at(page, (423.24, 337.8), _grams(data.get("volume_weight")), 9.96, "hebi")
+    _at(page, layout["weight"], _grams(actual_g), 9.96, "hebi")
+    _at(page, layout["volume"], _grams(volume_g), 9.96, "hebi")
     fee = data.get("ems_fee")
     if fee is not None:
-        _right(page, 544.0, 319.68, f"{int(fee):,} ", 8.04)
-    _at(page, (501.84, 340.08), _dims(data), 6.0)
+        _right(page, layout["fee_right"], 319.68, f"{int(fee):,} ", 8.04)
+    _at(page, layout["dims"], _dims(data), 6.0)
     code = str(recipient.get("country") or "").upper()
-    _center(page, 517.3, 542.8, 355.44, code[:1], 12.96, "hebi")
-    _center(page, 542.8, 567.7, 355.44, code[1:2], 12.96, "hebi")
-    _at(page, (293.28, 429.12), sender.get("name"), 6.96)
-    _at(page, (491.76, 398.88), data.get("post_office"), 8.04)
+    baseline = layout["country_baseline"]
+    _center(page, 517.3, 542.8, baseline, code[:1], 12.96, "hebi")
+    _center(page, 542.8, 567.7, baseline, code[1:2], 12.96, "hebi")
+    _at(page, layout["signature"], sender.get("name"), 6.96)
+    _at(page, layout["office"], data.get("post_office"), 8.04)
 
     for index, item in enumerate(items):
         baseline = _ITEM_BASELINE + index * _ITEM_PITCH
@@ -408,3 +464,174 @@ def _money(value: float) -> str:
     if float(value).is_integer():
         return str(int(value))
     return f"{value:.2f}"
+
+
+def _weights_for_layout(data: dict[str, Any], layout: dict[str, Any]):
+    items = [dict(item) for item in list(data.get("items") or []) if item.get("name_en")][:3]
+    actual = data.get("totweight")
+    volume = data.get("volume_weight")
+    if not layout.get("premium_weights") or data.get("contents_type") == "document":
+        return items, actual, volume
+    shown_actual, shown_volume = _premium_shown_weights(data)
+    raw = str(int(data.get("totweight") or 0))
+    if len(items) == 1:
+        net = str(items[0].get("net_weight_g") or "").strip()
+        if not net or net == raw:
+            items[0]["net_weight_g"] = str(shown_actual)
+    return items, shown_actual, shown_volume
+
+
+def _premium_shown_weights(data: dict[str, Any]) -> tuple[int, int]:
+    """프리미엄 답안지는 실중량 칸에 운임중량, 부피중량 칸에 cm³/6000을 넣는다."""
+    length = int(data.get("boxlength") or 0)
+    width = int(data.get("boxwidth") or 0)
+    height = int(data.get("boxheight") or 0)
+    raw = int(data.get("totweight") or 0)
+    try:
+        premium_volume = int(data.get("volume_weight") or 0)
+    except (TypeError, ValueError):
+        premium_volume = 0
+    if length and width and height and premium_volume <= 0:
+        premium_volume = math.ceil((length * width * height) / 5)
+    shown_volume = int((length * width * height) / 6) if length and width and height else premium_volume
+    return max(raw, premium_volume), shown_volume
+
+
+_KPACKET_BARCODE = (98.16, 149.04, 274.08, 172.68)
+_KPACKET_COVERS = (
+    (68.4, 337.7, 210.0, 347.4),
+    (126.5, 347.5, 211.5, 360.2),
+    (211.8, 347.5, 246.0, 360.2),
+    (246.8, 347.5, 272.95, 360.2),
+    (176.4, 361.0, 246.0, 374.2),
+    (246.8, 361.0, 308.0, 374.2),
+    (100.5, 368.15, 170.0, 376.9),
+    (140.0, 173.6, 270.0, 185.5),
+    (316.0, 196.4, 391.8, 214.8),
+    (393.2, 196.4, 409.8, 214.8),
+    (411.0, 196.4, 428.8, 214.8),
+    (429.8, 196.4, 459.8, 214.8),
+    (461.0, 196.4, 494.5, 214.8),
+    (495.6, 196.4, 515.0, 214.8),
+    (405.0, 296.0, 430.0, 307.5),
+    (430.5, 296.0, 460.0, 308.2),
+    (426.0, 364.2, 520.0, 373.5),
+    (104.5, 193.2, 270.0, 205.2),
+    (69.2, 204.0, 280.0, 225.5),
+    (80.0, 250.3, 142.0, 262.2),
+    (96.0, 264.5, 190.0, 276.4),
+    (205.0, 264.5, 280.0, 276.4),
+    (69.2, 279.2, 280.0, 292.4),
+    (69.2, 293.3, 308.0, 316.6),
+    (70.0, 326.6, 250.0, 338.6),
+)
+_KPACKET_PITCH = 19.8
+
+
+def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> None:
+    sender = data.get("sender") or {}
+    recipient = data.get("recipient") or {}
+    items = [item for item in list(data.get("items") or []) if item.get("name_en")][:5]
+    rules = _table_rules(page)
+    for box in _KPACKET_COVERS:
+        page.add_redact_annot(fitz.Rect(*box), fill=(1, 1, 1))
+    page.apply_redactions(images=0, graphics=0, text=0)
+    page.draw_rect(fitz.Rect(*_KPACKET_BARCODE), color=(1, 1, 1), fill=(1, 1, 1), width=0)
+    if barcode.width:
+        page.insert_image(fitz.Rect(*_KPACKET_BARCODE), pixmap=barcode, keep_proportion=True)
+    _paint_uniform_rules(page, rules)
+
+    order_no = str(data.get("order_no") or "").strip()
+    if order_no:
+        _at(page, (68.64, 345.36), f"OrderNo. {order_no}", 6.96, "hebi")
+    posted = _kpacket_date(data)
+    if posted:
+        _at(page, (127.44, 357.12), posted, 9.0, "hebi")
+    weight = int(data.get("totweight") or 0)
+    if weight > 0:
+        _at(page, (212.52, 357.12), f"{weight}g", 9.0, "hebi")
+    fee = data.get("ems_fee")
+    if fee is not None and str(fee).strip() != "":
+        _at(page, (247.08, 357.12), str(int(fee)), 9.0, "hebi")
+    volume = _kpacket_volume_g(data)
+    if volume > 0:
+        _at(page, (176.76, 370.92), f"volume {volume}g", 9.0, "hebi")
+    _at(page, (247.08, 370.92), "Country :    ", 9.0, "hebi")
+    _at(page, (287.28, 370.92), str(recipient.get("country") or "").upper(), 9.0, "hebi")
+    _at(page, (100.92, 374.28), _dims(data), 6.96, "hebi")
+    _at(page, (158.28, 182.40), data.get("regino"), 8.04, "hebi")
+
+    total_value = 0.0
+    for index, item in enumerate(items):
+        shift = index * _KPACKET_PITCH
+        qty = int(item.get("quantity") or 1)
+        unit = float(item.get("unit_price_usd") or 0)
+        total_value += unit * qty
+        _at(page, (316.20, 208.56 + shift), item.get("name_en"), 8.04, "hebi")
+        _at(page, (399.84, 208.56 + shift), qty, 8.04, "hebi")
+        _at(page, (413.88, 208.08 + shift), item.get("net_weight_g"), 6.0, "hebi")
+        _at(page, (441.12, 208.56 + shift), _money(unit * qty), 8.04, "hebi")
+        _at(page, (464.04, 207.60 + shift), item.get("print_hs") or item.get("hs_code"), 5.04, "hebi")
+        _at(page, (500.40, 208.56 + shift), item.get("origin_country"), 8.04, "hebi")
+    if weight > 0:
+        _at(page, (413.64, 304.68), weight, 6.0, "hebi")
+    if items:
+        _at(page, (440.88, 305.16), _money(total_value), 8.04, "hebi")
+    _at(page, (432.36, 371.04), sender.get("name"), 6.0)
+
+    _at(page, (105.60, 202.08), _kpacket_sender_tel(sender.get("tel")), 8.04, "hebi")
+    _at(page, (69.60, 212.04), sender.get("name"), 8.04, "hebi")
+    _at(page, (69.60, 221.76), sender.get("address"), 8.04, "hebi")
+    _at(page, (86.76, 259.32), _spaced_digits(sender.get("zip")), 8.04, "hebi")
+    _at(page, (97.20, 273.48), _kpacket_recipient_tel(recipient.get("phone"), recipient.get("country")), 8.04, "hebi")
+    zipcode = str(recipient.get("zip") or "").strip()
+    if zipcode:
+        _at(page, (210.96, 273.48), f"ZIP: {zipcode}", 8.04, "hebi")
+    _at(page, (69.60, 289.32), recipient.get("name"), 9.0, "hebi")
+    street = " ".join(
+        part for part in (str(recipient.get("addr3") or "").strip(), str(recipient.get("addr2") or "").strip()) if part
+    )
+    _at(page, (69.60, 303.24), street, 9.0, "hebi")
+    _at(page, (69.60, 313.32), recipient.get("addr1"), 9.0, "hebi")
+    country_name = str(recipient.get("country_name") or "").strip().upper()
+    _at(page, (74.64, 335.64), country_name, 8.04, "hebi")
+    if data.get("status") == "canceled":
+        _at(page, (40.0, 22.0), "취소된 접수", 11, color=(0.75, 0.05, 0.05))
+
+
+def _kpacket_date(data: dict[str, Any]) -> str:
+    year = str(data.get("posted_year") or "").strip()
+    month = str(data.get("posted_month") or "").strip()
+    day = str(data.get("posted_day") or "").strip()
+    if not (year and month and day):
+        return ""
+    return f"{year}.{_two(month)}.{_two(day)}.actual"
+
+
+def _kpacket_volume_g(data: dict[str, Any]) -> int:
+    length = int(data.get("boxlength") or 0)
+    width = int(data.get("boxwidth") or 0)
+    height = int(data.get("boxheight") or 0)
+    if length and width and height:
+        return int((length * width * height) / 6)
+    try:
+        return int(data.get("volume_weight") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _kpacket_sender_tel(value: Any) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if digits.startswith("82") and len(digits) > 6:
+        rest = digits[2:]
+        if len(rest) > 4:
+            return f"Tel: 82- {rest[:2]}- {rest[2:-4]}- {rest[-4:]}"
+    text = str(value or "").strip()
+    return f"Tel: {text}" if text else ""
+
+
+def _kpacket_recipient_tel(phone: Any, country: Any) -> str:
+    shown = format_recipient_tel(str(phone or ""), str(country or ""))
+    if not shown:
+        return ""
+    return "Tel: " + shown.replace("-", "- ")

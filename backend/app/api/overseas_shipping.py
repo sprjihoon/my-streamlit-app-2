@@ -1336,7 +1336,7 @@ def get_overseas(shipment_id: int, token: str):
 
 @router.get("/{shipment_id}/label")
 def overseas_label(shipment_id: int, token: str, format: str = "json"):
-    """접수 저장본으로 A4 주소기표지와 세관신고서 2장을 내려준다. 우체국 PDF API는 없다."""
+    """접수 저장본으로 방식별 우체국 A4 출력서류를 내려준다. 우체국 PDF API는 없다."""
     _get_user(token)
     data, snapshot = _load_shipment(shipment_id)
     label = build_shipment_label(data, snapshot=snapshot)
@@ -1371,11 +1371,17 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         existing = con.execute(
             """
             SELECT id, tracking_no FROM overseas_shipping_requests
-            WHERE created_by=? AND recipient_phone=? AND countrycd=?
+            WHERE created_by=? AND recipient_phone=? AND countrycd=? AND shipping_method=?
               AND status='requested' AND created_at LIKE ?
             ORDER BY id DESC LIMIT 1
             """,
-            (user["nickname"], validated["receivetelno"], validated["countrycd"], f"{today}%"),
+            (
+                user["nickname"],
+                validated["receivetelno"],
+                validated["countrycd"],
+                validated["method"]["code"],
+                f"{today}%",
+            ),
         ).fetchone()
     if existing and validated["receivetelno"]:
         return {
