@@ -16,6 +16,7 @@ def test_catalog_codes_resolve_to_verified_ten_digits():
             continue
         sent = hs_code_for_epost(raw)
         assert len(sent) == 10 and sent.isdigit()
+        assert sent.startswith(raw)
         assert sent in table[raw]
         assert sent in known
         assert sent == resolve_epost_hs(raw)
@@ -37,6 +38,33 @@ def test_documents_keep_book_code_and_parcel_codes_stay_ten_digits():
     sent = hs_code_for_epost("711719;610910")
     assert sent == "7117199000;6109109000"
     assert all(len(part) == 10 for part in sent.split(";"))
+
+
+def test_mismatched_headings_use_the_product_code():
+    expect = {
+        "200599": "2005991000",
+        "200980": "2005991000",
+        "220299": "2202992000",
+        "220290": "2202992000",
+        "330510": "3305100000",
+        "330511": "3305100000",
+        "620140": "6201401010",
+        "620111": "6201401010",
+        "851713": "8517130000",
+        "851712": "8517130000",
+        "851762": "8517621010",
+        "910211": "9102119010",
+        "910210": "9102119010",
+        "950300": "9503003919",
+        "950399": "9503003919",
+        "960200": "9602009090",
+        "950340": "9602009090",
+        "920290": "9202901000",
+        "920599": "9202901000",
+    }
+    for raw, code in expect.items():
+        assert hs_code_for_epost(raw) == code
+        assert code in known_epost_hs_codes()
 
 
 def test_unknown_code_still_uses_a_listed_ten_digit():
