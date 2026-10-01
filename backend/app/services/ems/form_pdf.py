@@ -65,6 +65,8 @@ _COVERS = (
 _MERCHANDISE_MARK = (132.8, 400.2, 140.2, 409.2)
 _ITEM_BASELINE = 351.24
 _ITEM_PITCH = 14.4
+_RULE = 0.75
+_RULE_SNAP = 2.6
 
 _CJK_BUFFER: bytes | None = None
 _CJK_PAGES: set[int] = set()
@@ -84,11 +86,107 @@ def render_label_pdf(data: dict[str, Any]) -> bytes:
         doc.close()
 
 
+def _table_rules(page: fitz.Page) -> tuple[list, list]:
+    """검은 표 선만 모은다. 바코드 막대처럼 가는 선은 빼 둔다."""
+    horizontal: list[tuple[float, float, float, fitz.Rect]] = []
+    vertical: list[tuple[float, float, float, fitz.Rect]] = []
+    for drawing in page.get_drawings():
+        rect = drawing["rect"]
+        fill = drawing.get("fill")
+        # 흰 칸은 빼고, 검은 선과 회색 선은 같은 굵기로 다시 그린다.
+        if not fill or fill[0] > 0.92:
+            continue
+        width, height = rect.width, rect.height
+        if width > 6 and 0.4 < height < 1.8:
+            horizontal.append((rect.y0 + height / 2, rect.x0, rect.x1, rect))
+        elif height > 6 and 0.4 < width < 1.8:
+            vertical.append((rect.x0 + width / 2, rect.y0, rect.y1, rect))
+    return _snap_rules(horizontal), _snap_rules(vertical)
+
+
+def _snap_rules(items: list[tuple[float, float, float, fitz.Rect]]) -> list[tuple[float, list, list]]:
+    """겹치는 두 줄만 한 줄로 합친다. 좌우로 떨어진 선은 그대로 둔다."""
+    pending = sorted(items, key=lambda row: (row[0], row[1]))
+    used = [False] * len(pending)
+    snapped = []
+    for index, item in enumerate(pending):
+        if used[index]:
+            continue
+        group = [item]
+        used[index] = True
+        grew = True
+        while grew:
+            grew = False
+            for other_index, other in enumerate(pending):
+                if used[other_index]:
+                    continue
+                if any(
+                    abs(other[0] - row[0]) <= _RULE_SNAP and other[1] <= row[2] + 1.2 and row[1] <= other[2] + 1.2
+                    for row in group
+                ):
+                    group.append(other)
+                    used[other_index] = True
+                    grew = True
+        center = sum(row[0] for row in group) / len(group)
+        spans = _merge_spans((row[1], row[2]) for row in group)
+        snapped.append((center, spans, [row[3] for row in group]))
+    return snapped
+
+
+def _merge_spans(spans) -> list[tuple[float, float]]:
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1] + 1.2:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _paint_uniform_rules(page: fitz.Page, rules: tuple[list, list]) -> None:
+    horizontal, vertical = rules
+    pad = 0.45
+    for _center, _spans, rects in horizontal:
+        for rect in rects:
+            page.draw_rect(
+                fitz.Rect(rect.x0, rect.y0 - pad, rect.x1, rect.y1 + pad),
+                color=(1, 1, 1),
+                fill=(1, 1, 1),
+                width=0,
+            )
+    for _center, _spans, rects in vertical:
+        for rect in rects:
+            page.draw_rect(
+                fitz.Rect(rect.x0 - pad, rect.y0, rect.x1 + pad, rect.y1),
+                color=(1, 1, 1),
+                fill=(1, 1, 1),
+                width=0,
+            )
+    half = _RULE / 2
+    for center, spans, _rects in horizontal:
+        for start, end in spans:
+            page.draw_rect(
+                fitz.Rect(start, center - half, end, center + half),
+                color=(0, 0, 0),
+                fill=(0, 0, 0),
+                width=0,
+            )
+    for center, spans, _rects in vertical:
+        for start, end in spans:
+            page.draw_rect(
+                fitz.Rect(center - half, start, center + half, end),
+                color=(0, 0, 0),
+                fill=(0, 0, 0),
+                width=0,
+            )
+
+
 def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> None:
     sender = data.get("sender") or {}
     recipient = data.get("recipient") or {}
     items = [item for item in list(data.get("items") or []) if item.get("name_en")][:3]
     is_doc = data.get("contents_type") == "document"
+    rules = _table_rules(page)
     for box in _COVERS:
         page.add_redact_annot(fitz.Rect(*box), fill=(1, 1, 1))
     if is_doc:
@@ -98,6 +196,7 @@ def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -> N
     page.draw_rect(fitz.Rect(*_BARCODE), color=(1, 1, 1), fill=(1, 1, 1), width=0)
     if barcode.width:
         page.insert_image(fitz.Rect(*_BARCODE), pixmap=barcode, keep_proportion=True)
+    _paint_uniform_rules(page, rules)
 
     _at(page, (123.72, 82.08), data.get("regino"), 17.99, "hebi")
     _center(page, 308.6, 341.0, 132.84, data.get("posted_year"), 6.96)
