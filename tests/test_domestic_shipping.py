@@ -126,7 +126,7 @@ def test_create_sends_saved_sender_and_prints_input(isolated_runtime, monkeypatc
             "regiPoNm": "동대구",
             "resDate": "20261002",
             "price": "3500",
-            "vTelNo": "",
+            "vTelNo": "05056159873",
         }
 
     monkeypatch.setattr("backend.app.api.domestic_shipping.has_epost_credentials", lambda: True)
@@ -140,19 +140,24 @@ def test_create_sends_saved_sender_and_prints_input(isolated_runtime, monkeypatc
     assert "출력용상점" not in captured.values()
     with sqlite3.connect(isolated_runtime["db"]) as con:
         row = con.execute(
-            "SELECT api_sender_name, print_sender_name, tracking_no, is_test FROM domestic_shipments WHERE id=?",
+            "SELECT api_sender_name, print_sender_name, tracking_no, is_test, v_tel_no FROM domestic_shipments WHERE id=?",
             (created["id"],),
         ).fetchone()
-    assert row == ("스프링풀필먼트", "출력용상점", "1234567890123", 0)
+    assert row == ("스프링풀필먼트", "출력용상점", "1234567890123", 0, "05056159873")
     pdf = domestic_label(created["id"], token, format="pdf")
     text = fitz.open(stream=pdf.body, filetype="pdf")[0].get_text()
     assert "출력용상점" in text
     assert "홍길동" in text
     assert "12345-6789-0123" in text
+    assert "T: 0505-615-9873" in text
+    assert "010-1234-5678" not in text
+    assert "임시 가상번호" in text
+    assert "QA2Ene" not in text
     assert "A1" in text
     assert "135" in text
     assert "동서울" in text
     assert "서울강남" in text
+    assert "100" in text
     page = fitz.open(stream=pdf.body, filetype="pdf")[0]
     assert abs(page.rect.width - 484.72) < 0.2
     assert abs(page.rect.height - 314.65) < 0.2

@@ -22,6 +22,7 @@ PAGE_H = 314.65
 _ZIP_BAR = fitz.Rect(18.0, 120.1, 103.2, 154.2)
 _TRACK_BAR = fitz.Rect(172.1, 225.1, 319.6, 275.0)
 _SIDE_BAR = fitz.Rect(426.1, 41.5, 435.1, 130.0)
+_QR = fitz.Rect(133.3, 14.2, 156.0, 36.8)
 
 
 def _digits(value: object) -> str:
@@ -46,6 +47,8 @@ def _phone_m(value: object) -> str:
 
 def _phone_t(value: object) -> str:
     digits = _digits(value)
+    if len(digits) == 11 and digits.startswith("050"):
+        return f"T: {digits[:4]}-{digits[4:7]}-{digits[7:]}"
     if len(digits) == 11:
         return f"T: {digits[:3]}-{digits[3:7]}-{digits[7:]}"
     if len(digits) == 12:
@@ -55,11 +58,34 @@ def _phone_t(value: object) -> str:
     return ""
 
 
+def _phone_plain(value: object) -> str:
+    shown = _phone_t(value)
+    return shown[3:] if shown.startswith("T: ") else shown
+
+
 def _date(value: object) -> str:
     digits = _digits(value)
     if len(digits) >= 8:
         return f"{digits[:4]}/{digits[4:6]}/{digits[6:8]}"
     return ""
+
+
+def _qr_pixmap(value: str) -> fitz.Pixmap:
+    from reportlab.graphics import renderPDF
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+
+    widget = QrCodeWidget(value)
+    bounds = widget.getBounds()
+    width = bounds[2] - bounds[0]
+    height = bounds[3] - bounds[1]
+    drawing = Drawing(width, height, transform=[1, 0, 0, 1, -bounds[0], -bounds[1]])
+    drawing.add(widget)
+    src = fitz.open(stream=renderPDF.drawToString(drawing), filetype="pdf")
+    try:
+        return src[0].get_pixmap(matrix=fitz.Matrix(4, 4), alpha=False)
+    finally:
+        src.close()
 
 
 def _barcode_pixmap(value: str) -> fitz.Pixmap:
@@ -115,7 +141,8 @@ def build_domestic_label_pdf(item: dict) -> bytes:
     sender_addr1 = str(item.get("print_sender_addr1") or item.get("api_sender_addr1") or "")
     sender_addr2 = str(item.get("print_sender_addr2") or item.get("api_sender_addr2") or "")
     rec_name = str(item.get("recipient_name") or "")
-    rec_phone = str(item.get("recipient_phone") or "")
+    rec_phone = str(item.get("v_tel_no") or item.get("recipient_phone") or "")
+    virtual = bool(_digits(item.get("v_tel_no") or ""))
     rec_zip = _digits(item.get("recipient_zip") or "")
     rec_addr1 = str(item.get("recipient_addr1") or "")
     rec_addr2 = str(item.get("recipient_addr2") or "")
@@ -174,20 +201,22 @@ def build_domestic_label_pdf(item: dict) -> bytes:
         _h(page, 189.11, 135.52, rec_addr2, 11)
         _h(page, 186.23, 169.92, rec_name, 11)
         _h(page, 187.19, 187.61, _phone_t(rec_phone), 9, font="hebo")
-        _h(page, 187.07, 195.07, "※ 고객님의 개인정보 보호를 위하여 임시 가상번호를 사용합니다.", 6)
+        if virtual:
+            _h(page, 187.07, 195.07, "※ 고객님의 개인정보 보호를 위하여 임시 가상번호를 사용합니다.", 6)
         _h(page, 185.27, 210.32, "등기번호:", 9.96)
         _h(page, 231.23, 210.45, tracking, 14.04, font="hebo")
 
-        _v(page, 428.03, 294.84, f"{rec_addr1} {rec_addr2}".strip(), 6.96)
-        _v(page, 438.95, 294.12, rec_name, 6.96)
-        _v(page, 438.95, 238.20, _digits(rec_phone), 6.96, font="hebo")
-        _v(page, 443.02, 116.04, tracking, 7.93, font="hebo")
-        _v(page, 450.95, 265.20, f"{goods},, 수량:1,", 6.96)
-        _v(page, 452.03, 294.12, "내용품 :", 6.96)
+        _v(page, 433.83, 294.84, f"{rec_addr1} {rec_addr2}".strip(), 6.96)
+        _v(page, 444.75, 294.12, rec_name, 6.96)
+        _v(page, 443.95, 238.20, _phone_plain(rec_phone), 6.96, font="hebo")
+        _v(page, 448.42, 116.04, tracking, 7.93, font="hebo")
+        _v(page, 456.75, 250.0, f"{goods},,수량:1,{order_no}\u2660", 5.0)
+        _v(page, 457.83, 294.12, "내용품 :", 6.96)
 
         if rec_zip:
             page.insert_image(_ZIP_BAR, pixmap=_barcode_pixmap(rec_zip), keep_proportion=False)
         if tracking_digits:
+            page.insert_image(_QR, pixmap=_qr_pixmap(tracking_digits), keep_proportion=False)
             page.insert_image(_TRACK_BAR, pixmap=_barcode_pixmap(tracking_digits), keep_proportion=False)
             page.insert_image(_SIDE_BAR, pixmap=_barcode_pixmap(tracking_digits), keep_proportion=False, rotate=90)
         return doc.tobytes()

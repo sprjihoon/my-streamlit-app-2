@@ -140,6 +140,9 @@ def ensure_domestic_tables() -> None:
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_domestic_shipments_created ON domestic_shipments(created_at DESC)"
         )
+        columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
+        if "v_tel_no" not in columns:
+            con.execute("ALTER TABLE domestic_shipments ADD COLUMN v_tel_no TEXT NOT NULL DEFAULT ''")
         con.commit()
 
 
@@ -320,6 +323,7 @@ def _shipment_dict(row: tuple) -> dict[str, Any]:
         "goods_name", "box_size", "weight", "volume", "notes",
         "order_no", "tracking_no", "req_no", "res_no", "res_date", "price", "post_office",
         "status", "is_test", "created_by", "created_at", "canceled_at", "canceled_by",
+        "v_tel_no",
     )
     item = dict(zip(keys, row))
     item["is_test"] = bool(item["is_test"])
@@ -534,8 +538,8 @@ def create_domestic(req: DomesticSubmitRequest, token: str):
                 recipient_name, recipient_phone, recipient_zip, recipient_addr1, recipient_addr2,
                 goods_name, box_size, weight, volume, notes,
                 order_no, tracking_no, req_no, res_no, res_date, price, post_office,
-                status, is_test, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?)
+                status, is_test, created_by, created_at, v_tel_no
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?)
             """,
             (
                 data["vendor"]["id"], data["vendor"]["name"], data["vendor"]["office_ser"],
@@ -546,7 +550,7 @@ def create_domestic(req: DomesticSubmitRequest, token: str):
                 data["notes"],
                 order_no, result.get("regiNo") or "", result.get("reqNo") or "", result.get("resNo") or "",
                 result.get("resDate") or "", result.get("price") or "", result.get("regiPoNm") or "",
-                0 if live else 1, user["nickname"], now,
+                0 if live else 1, user["nickname"], now, result.get("vTelNo") or "",
             ),
         )
         con.commit()
