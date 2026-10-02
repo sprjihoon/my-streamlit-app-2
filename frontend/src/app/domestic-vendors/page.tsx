@@ -12,14 +12,6 @@ import {
   type DomesticVendor,
 } from '@/lib/api';
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: 8,
-  fontFamily: 'inherit',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     try {
@@ -107,34 +99,34 @@ export default function DomesticVendorsPage() {
   if (loading) return <Loading text="출고 업체를 불러오는 중..." />;
 
   return (
-    <div>
-      <PageHeader title="출고 업체" subtitle="공급지번호와 보내는 사람 기본값을 저장합니다. 계약번호는 공통입니다." />
+    <div className="domestic-form">
+      <PageHeader title="출고 업체" />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
-      <Card title={editId ? '업체 수정' : '업체 등록'}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <label>업체명<input style={inputStyle} value={form.name} onChange={(e) => setField('name', e.target.value)} /></label>
-          <label>공급지번호<input style={inputStyle} value={form.office_ser} onChange={(e) => setField('office_ser', e.target.value)} /></label>
-          <label>보내는 사람<input style={inputStyle} value={form.sender_name} onChange={(e) => setField('sender_name', e.target.value)} /></label>
-          <label>전화<input style={inputStyle} value={form.sender_phone} onChange={(e) => setField('sender_phone', e.target.value)} /></label>
-          <label>우편번호<input style={inputStyle} value={form.sender_zip} onChange={(e) => setField('sender_zip', e.target.value)} /></label>
-          <label>상세주소<input style={inputStyle} value={form.sender_addr2} onChange={(e) => setField('sender_addr2', e.target.value)} /></label>
+      <Card>
+        <div className="domestic-row">
+          <label className="domestic-field w-name">업체명<input value={form.name} onChange={(e) => setField('name', e.target.value)} /></label>
+          <label className="domestic-field w-office">공급지번호<input value={form.office_ser} onChange={(e) => setField('office_ser', e.target.value)} /></label>
         </div>
-        <label style={{ display: 'block', marginTop: 12 }}>주소
-          <input style={inputStyle} value={form.sender_addr1} onChange={(e) => setField('sender_addr1', e.target.value)} />
-        </label>
-        <div style={{ marginTop: 12 }}>
-          <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void handleSave()}>
-            {saving ? '저장 중...' : '저장'}
+        <div className="domestic-row">
+          <label className="domestic-field w-name">보내는 사람<input value={form.sender_name} onChange={(e) => setField('sender_name', e.target.value)} /></label>
+          <label className="domestic-field w-phone">전화<input value={form.sender_phone} onChange={(e) => setField('sender_phone', e.target.value)} /></label>
+          <label className="domestic-field w-zip">우편번호<input value={form.sender_zip} onChange={(e) => setField('sender_zip', e.target.value)} /></label>
+        </div>
+        <div className="domestic-row">
+          <label className="domestic-field w-addr">주소<input value={form.sender_addr1} onChange={(e) => setField('sender_addr1', e.target.value)} /></label>
+          <label className="domestic-field w-detail">상세<input value={form.sender_addr2} onChange={(e) => setField('sender_addr2', e.target.value)} /></label>
+        </div>
+        <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void handleSave()}>
+          {saving ? '저장 중...' : '저장'}
+        </button>
+        {editId && (
+          <button type="button" className="btn btn-secondary" style={{ marginLeft: 8 }} onClick={() => { setEditId(null); setForm(empty); }}>
+            취소
           </button>
-          {editId && (
-            <button type="button" className="btn btn-secondary" style={{ marginLeft: 8 }} onClick={() => { setEditId(null); setForm(empty); }}>
-              새로 등록
-            </button>
-          )}
-        </div>
+        )}
       </Card>
-      <Card title={`등록 업체 · ${items.length}곳`}>
+      <Card>
         {items.length === 0 ? <p className="text-muted">등록된 업체가 없습니다.</p> : (
           <table>
             <thead>

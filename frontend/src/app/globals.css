@@ -805,6 +805,84 @@ tbody tr:hover { background: #f7f8fd; }
   .layout { flex-direction: column; }
   .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: 1fr; }
   .metric-value { font-size: 1.25rem; }
+  .domestic-field.w-addr input,
+  .domestic-field.w-vendor select,
+  .domestic-field.w-box select,
+  .domestic-field.w-notes input {
+    width: 100%;
+  }
+}
+
+.domestic-form {
+  max-width: 42rem;
+}
+.domestic-form .card-header {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.95rem;
+}
+.domestic-section {
+  margin: 0.85rem 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.domestic-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.7rem;
+  align-items: flex-end;
+  margin-bottom: 0.55rem;
+}
+.domestic-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.domestic-field input,
+.domestic-field select {
+  padding: 0.38rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--text-primary);
+  background: #fff;
+}
+.domestic-field.w-vendor select { width: 16rem; }
+.domestic-field.w-name input { width: 10rem; }
+.domestic-field.w-phone input { width: 9rem; }
+.domestic-field.w-zip input { width: 5.6rem; }
+.domestic-field.w-office input { width: 9rem; }
+.domestic-field.w-goods input { width: 8rem; }
+.domestic-field.w-box select { width: 11rem; }
+.domestic-field.w-detail input { width: 10rem; }
+.domestic-field.w-addr input { width: 24rem; max-width: 100%; }
+.domestic-field.w-notes input { width: 24rem; max-width: 100%; }
+.domestic-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  margin: 0.35rem 0 0.7rem;
+}
+.domestic-facts {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.35rem 0.6rem;
+  margin: 0;
+  font-size: 0.92rem;
+}
+.domestic-facts dt {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.domestic-facts dd {
+  margin: 0;
 }
 
 /* ─────────────────────────────────────────

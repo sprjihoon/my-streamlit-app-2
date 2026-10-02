@@ -86,10 +86,10 @@ export default function DomesticShippingListPage() {
 
   return (
     <div>
-      <PageHeader title="국내 출고 접수목록" subtitle="행을 누르면 저장값과 송장 입력값을 봅니다." />
+      <PageHeader title="출고 목록" />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
-      <Card title={`출고 목록 · ${items.length}건`}>
+      <Card>
         <div style={{ marginBottom: 12 }}>
           <a href="/domestic-shipping" className="btn btn-primary">새 접수</a>
           <a href="/domestic-vendors" className="btn btn-secondary" style={{ marginLeft: 8 }}>업체 등록</a>

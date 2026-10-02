@@ -54,7 +54,7 @@ export default function DomesticPrintPage() {
       <div style={{ background: '#111827', color: '#d1d5db', padding: '8px 16px', fontSize: 13 }}>
         <a href="/domestic-shipping-list" style={{ color: '#d1d5db' }}>← 접수목록</a>
         <span style={{ marginLeft: 12 }}>
-          {item.tracking_no || item.order_no} · 송장 보내는 사람 {item.print_sender_name}. 우체국 답안지 반영 전입니다.
+          {item.tracking_no || item.order_no} · {item.print_sender_name}
         </span>
       </div>
       <iframe title="국내 출고 송장" src={pdfUrl} style={{ flex: 1, width: '100%', border: 'none', background: '#fff' }} />

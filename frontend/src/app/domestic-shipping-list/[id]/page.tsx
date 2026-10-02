@@ -26,10 +26,6 @@ function parseApiError(err: unknown): string {
   return String(err);
 }
 
-function Line({ label, value }: { label: string; value: string }) {
-  return <div style={{ marginBottom: 6 }}><strong>{label}</strong> {value || '-'}</div>;
-}
-
 export default function DomesticShippingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [token, setToken] = useState('');
@@ -88,40 +84,30 @@ export default function DomesticShippingDetailPage() {
   const status = item.status === 'canceled' ? '취소' : item.is_test ? '테스트' : '접수';
 
   return (
-    <div>
-      <PageHeader title="국내 출고 상세" subtitle={`${item.order_no} · ${(item.created_at || '').replace('T', ' ').slice(0, 16)}`} />
+    <div className="domestic-form">
+      <PageHeader title="출고 상세" subtitle={`${item.tracking_no || item.order_no} · ${status}`} />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
       <div style={{ marginBottom: 12 }}>
-        <a href="/domestic-shipping-list" className="btn btn-secondary">접수목록</a>
+        <a href="/domestic-shipping-list" className="btn btn-secondary">목록</a>
         <a href={`/domestic-print/${item.id}`} className="btn btn-primary" style={{ marginLeft: 8 }} target="_blank" rel="noreferrer">송장</a>
         {item.status !== 'canceled' && (
-          <button type="button" className="btn btn-primary" style={{ marginLeft: 8 }} onClick={() => void handleCancel()}>접수 취소</button>
+          <button type="button" className="btn btn-secondary" style={{ marginLeft: 8 }} onClick={() => void handleCancel()}>취소</button>
         )}
         {isAdmin && (
           <button type="button" className="btn btn-secondary" style={{ marginLeft: 8 }} onClick={() => void handleDelete()}>삭제</button>
         )}
       </div>
-      <Card title={`${item.vendor_name} · ${status}`}>
-        <Line label="송장번호" value={item.tracking_no} />
-        <Line label="공급지번호" value={item.office_ser} />
-        <Line label="요금" value={item.price} />
-        <Line label="상품" value={`${item.goods_name} · ${item.box_size}`} />
-      </Card>
-      <Card title="우체국에 보낸 보내는 사람">
-        <Line label="이름" value={item.api_sender_name} />
-        <Line label="전화" value={item.api_sender_phone} />
-        <Line label="주소" value={`${item.api_sender_zip} ${item.api_sender_addr1} ${item.api_sender_addr2 || ''}`} />
-      </Card>
-      <Card title="송장에 찍은 보내는 사람">
-        <Line label="이름" value={item.print_sender_name} />
-        <Line label="전화" value={item.print_sender_phone} />
-        <Line label="주소" value={`${item.print_sender_zip} ${item.print_sender_addr1} ${item.print_sender_addr2 || ''}`} />
-      </Card>
-      <Card title="받는 사람">
-        <Line label="이름" value={item.recipient_name} />
-        <Line label="전화" value={item.recipient_phone} />
-        <Line label="주소" value={`${item.recipient_zip} ${item.recipient_addr1} ${item.recipient_addr2 || ''}`} />
+      <Card>
+        <dl className="domestic-facts">
+          <dt>업체</dt><dd>{item.vendor_name}</dd>
+          <dt>송장번호</dt><dd>{item.tracking_no || '-'}</dd>
+          <dt>공급지</dt><dd>{item.office_ser}</dd>
+          <dt>상품</dt><dd>{item.goods_name} · {item.box_size}</dd>
+          <dt>우체국</dt><dd>{item.api_sender_name} · {item.api_sender_phone}<br />{item.api_sender_zip} {item.api_sender_addr1} {item.api_sender_addr2}</dd>
+          <dt>송장</dt><dd>{item.print_sender_name} · {item.print_sender_phone}<br />{item.print_sender_zip} {item.print_sender_addr1} {item.print_sender_addr2}</dd>
+          <dt>받는 사람</dt><dd>{item.recipient_name} · {item.recipient_phone}<br />{item.recipient_zip} {item.recipient_addr1} {item.recipient_addr2}</dd>
+        </dl>
       </Card>
     </div>
   );
