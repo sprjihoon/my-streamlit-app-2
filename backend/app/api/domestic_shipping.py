@@ -8,16 +8,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
-from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import fitz
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
-from reportlab.graphics.barcode import code128
-from reportlab.pdfgen.canvas import Canvas
 
 from backend.app.api.kpost_pickup import _get_user
 from backend.app.api.logs import add_log
@@ -28,6 +24,7 @@ from backend.app.services.epost.client import (
     insert_order,
     mock_insert_order,
 )
+from backend.app.services.epost.domestic_label import build_domestic_label_pdf
 from backend.app.services.epost.fields import (
     EPOST_CONTRACT_COMP_NM,
     PICKUP_BOX_SIZES,
@@ -572,48 +569,8 @@ def create_domestic(req: DomesticSubmitRequest, token: str):
     }
 
 
-def _barcode_png(value: str) -> bytes:
-    code = "".join(ch for ch in (value or "NO-TRACKING") if 32 <= ord(ch) < 127) or "NO-TRACKING"
-    bar = code128.Code128(code, barHeight=36, barWidth=0.8, humanReadable=False)
-    packet = BytesIO()
-    canvas = Canvas(packet, pagesize=(bar.width + 8, bar.height + 8))
-    bar.drawOn(canvas, 4, 4)
-    canvas.save()
-    src = fitz.open(stream=packet.getvalue(), filetype="pdf")
-    try:
-        return src[0].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False).tobytes("png")
-    finally:
-        src.close()
-
-
 def _label_pdf(item: dict[str, Any]) -> bytes:
-    doc = fitz.open()
-    try:
-        page = doc.new_page(width=595, height=842)
-        page.insert_font(fontname="korea", fontbuffer=fitz.Font("korea").buffer)
-        if item.get("status") == "canceled":
-            page.insert_text((40, 36), "취소된 접수", fontname="korea", fontsize=16, color=(0.75, 0.05, 0.05))
-        lines = [
-            f"송장번호  {item.get('tracking_no') or ''}",
-            f"주문번호  {item.get('order_no') or ''}",
-            f"업체  {item.get('vendor_name') or ''}   공급지  {item.get('office_ser') or ''}",
-            f"보내는 사람  {item.get('print_sender_name') or ''}",
-            f"전화  {item.get('print_sender_phone') or ''}   우편번호  {item.get('print_sender_zip') or ''}",
-            f"주소  {item.get('print_sender_addr1') or ''} {item.get('print_sender_addr2') or ''}".strip(),
-            f"받는 사람  {item.get('recipient_name') or ''}",
-            f"전화  {item.get('recipient_phone') or ''}   우편번호  {item.get('recipient_zip') or ''}",
-            f"주소  {item.get('recipient_addr1') or ''} {item.get('recipient_addr2') or ''}".strip(),
-            f"상품  {item.get('goods_name') or ''}   규격  {item.get('box_size') or ''}   요금  {item.get('price') or ''}",
-            "우체국 답안지 양식은 파일 반영 전입니다. 이 종이의 보내는 사람은 접수 입력값입니다.",
-        ]
-        y = 70
-        for line in lines:
-            page.insert_text((40, y), line, fontname="korea", fontsize=12)
-            y += 22
-        page.insert_image(fitz.Rect(40, y + 8, 360, y + 70), stream=_barcode_png(str(item.get("tracking_no") or "")))
-        return doc.tobytes()
-    finally:
-        doc.close()
+    return build_domestic_label_pdf(item)
 
 
 @router.get("/{shipment_id}/label")

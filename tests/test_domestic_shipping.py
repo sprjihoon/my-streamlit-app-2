@@ -148,7 +148,10 @@ def test_create_sends_saved_sender_and_prints_input(isolated_runtime, monkeypatc
     text = fitz.open(stream=pdf.body, filetype="pdf")[0].get_text()
     assert "출력용상점" in text
     assert "홍길동" in text
-    assert "1234567890123" in text
+    assert "12345-6789-0123" in text
+    page = fitz.open(stream=pdf.body, filetype="pdf")[0]
+    assert abs(page.rect.width - 484.72) < 0.2
+    assert abs(page.rect.height - 314.65) < 0.2
 
 
 def test_second_box_is_not_blocked_after_the_double_submit_window(isolated_runtime):
