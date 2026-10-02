@@ -245,6 +245,16 @@ const NAV_GROUPS = [
     ],
   },
   {
+    key: 'domestic-shipping',
+    label: '국내출고',
+    icon: <Truck {...IC} />,
+    items: [
+      { href: '/domestic-shipping', label: '출고 접수', icon: <Truck {...IC} /> },
+      { href: '/domestic-shipping-list', label: '접수목록', icon: <List {...IC} /> },
+      { href: '/domestic-vendors', label: '업체 등록', icon: <List {...IC} /> },
+    ],
+  },
+  {
     key: 'overseas-shipping',
     label: '해외배송',
     icon: <Globe {...IC} />,

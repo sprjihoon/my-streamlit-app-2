@@ -318,7 +318,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `POST` | `/overseas-shipping/{id}/cancel` | 확인 후 취소 |
 | `DELETE` | `/overseas-shipping/{id}` | 관리자만 목록에서 삭제. 실접수는 우체국 취소 후 삭제 |
 
-우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, 배송방법마다 다른 우체국 A4 양식에 그 값만 올려 인쇄한다. EMS는 주소기표지 1장과 세관신고서 2장(CN23)이다. EMS 프리미엄은 프리미엄 양식 2장(CN23)이다. K-Packet은 주소와 CN22가 한 장이다. 로고와 안내 문구는 양식 PDF를 그대로 쓰고, 겹친 선과 회색 선은 EMS와 같이 0.75pt 한 가지 굵기로 다시 그린다. K-Packet 로고와 표시는 표 선 위에 올린다. 화면은 `/overseas-print/{id}` 이다. 접수 직후의 **출력서류 인쇄**와 접수목록 각 행의 **출력서류**가 같은 페이지를 연다. 취소된 건도 출력서류 버튼은 남고, 서류 위에 취소된 접수라고 표시한다.
+우체국 `eship.epost.go.kr` 계약 OpenAPI에는 라벨 PDF를 내려주는 엔드포인트가 없다. 접수한 등기번호·발송인·수취인·인보이스를 저장해 두고, 배송방법마다 다른 우체국 A4 양식에 그 값만 올려 인쇄한다. EMS는 주소기표지 1장과 세관신고서 2장(CN23)이다. EMS 프리미엄은 프리미엄 양식 2장(CN23)이다. K-Packet은 주소와 CN22가 한 장이다. 로고와 안내 문구는 양식 PDF를 그대로 쓰고, 등기번호·주소·품목·중량·요금은 답안지에서 잰 칸에 넣는다. 겹친 선과 회색 선은 EMS와 같이 0.75pt 한 가지 굵기로 다시 그린다. K-Packet의 POST Exprès 로고는 표 선 위에 올린다. 트랙킹 바코드는 Scan과 No Signature 사이 답안지 폭을 채우고, 양식에 남아 있던 막대 한 줄이 등기번호와 겹치지 않게 지운다. 화면은 `/overseas-print/{id}` 이다. 접수 직후의 **출력서류 인쇄**와 접수목록 각 행의 **출력서류**가 같은 페이지를 연다. 취소된 건도 출력서류 버튼은 남고, 서류 위에 취소된 접수라고 표시한다.
 
 ### 환경변수
 
@@ -351,6 +351,35 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 
 ---
 
+## 국내 출고
+
+회수신청과 별도다. 계약은 하나이고, 박스 1개당 송장 1장이다. 우체국에는 `ship.epost.go.kr` 계약소포 `InsertOrder`를 일반·선불(`reqType` 1, `payType` 1)로 보낸다.
+
+- 업체 등록(`/domestic-vendors`)에 공급지번호와 보내는 사람 기본값을 넣는다. 공급지번호가 없으면 접수할 수 없다. 공급지번호는 접수 화면에서 고치지 않는다.
+- 출고 접수(`/domestic-shipping`)에서 업체를 고르면 저장된 보내는 사람이 채워지고, 그 칸은 고칠 수 있다. 고친 값은 송장에만 찍히고, 우체국에는 그 업체에 저장된 보내는 사람과 공급지번호가 간다. 나중에 업체 정보를 고쳐도 이미 접수한 송장은 바뀌지 않는다.
+- 같은 받는 사람에게 같은 날 박스를 더 보내는 것은 막지 않는다. 약 20초 안의 같은 클릭만 한 건으로 묶는다.
+- 확인 전 미리보기는 기록하지 않는다. 우체국 키가 없거나 테스트 접수면 우체국을 부르지 않고 테스트 등기번호로 저장한다.
+- 접수목록(`/domestic-shipping-list`)에서 송장, 접수 취소, 관리자 삭제를 한다. 실접수 취소는 계약소포 `GetResCancelCmd`다. 우체국이 거절하면 상태는 접수 그대로이고 사유를 보여 준다. 취소된 건도 송장은 남고, 종이 위에 취소된 접수라고 표시한다.
+- 우체국 API는 송장 PDF를 주지 않는다. 답안지 파일을 받기 전에는 보내는 사람·받는 사람·등기번호를 담은 임시 종이를 낸다. 화면은 `/domestic-print/{id}` 다.
+
+| 메서드 | 경로 | 동작 |
+|---|---|---|
+| `GET` | `/domestic-shipping/meta` | 실접수 가능 여부, 박스 규격 |
+| `GET/POST/PUT/DELETE` | `/domestic-shipping/vendors` | 업체와 공급지번호 |
+| `POST` | `/domestic-shipping/preview` | 확인용 미리보기 (미기록) |
+| `GET` | `/domestic-shipping` | 접수 목록 |
+| `GET` | `/domestic-shipping/{id}` | 상세. API로 보낸 보내는 사람과 송장에 찍을 보내는 사람을 같이 보여 준다 |
+| `POST` | `/domestic-shipping` | 확인 후 접수 |
+| `GET` | `/domestic-shipping/{id}/label` | 송장. `format=pdf` |
+| `POST` | `/domestic-shipping/{id}/cancel` | 확인 후 취소 |
+| `DELETE` | `/domestic-shipping/{id}` | 관리자만 삭제. 실접수는 우체국 취소 후 삭제 |
+
+```bash
+python -m pytest tests/test_domestic_shipping.py -q
+```
+
+---
+
 ## 개발 환경
 
 | 항목 | 값 |
@@ -373,6 +402,15 @@ cd frontend && npm run dev
 ---
 
 ## 변경 이력
+
+### 2026-10-02
+- **feat(domestic-shipping): 국내 출고를 업체 공급지번호로 접수한다**
+  - 송장에는 화면에서 고친 보내는 사람을 찍고, 우체국에는 업체에 저장한 보내는 사람과 공급지번호를 보낸다
+  - 답안지 파일이 오기 전에는 임시 송장을 낸다
+- **fix(overseas-shipping): 케이패킷 트랙킹 바코드를 답안지 폭으로 채운다**
+  - 막대가 칸 가운데만 그려져 좌우가 비던 것을 Scan과 No Signature 사이 답안지 폭에 맞춘다
+- **fix(overseas-shipping): 케이패킷 바코드 아래 남은 막대 줄을 지운다**
+  - 양식 바코드 끝이 한 줄 남아 등기번호와 겹치던 것을 지우고, 막대 높이를 답안지에 맞춘다
 
 ### 2026-10-01
 - **fix(overseas-shipping): 케이패킷 POST Exprès 로고를 표 선 위에 올린다**
