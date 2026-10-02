@@ -43,7 +43,9 @@ function emptyForm(): DomesticSubmitPayload {
     recipient_addr1: '',
     recipient_addr2: '',
     goods_name: '의류',
+    goods_qty: 1,
     box_size: 'SMALL',
+    label_count: 1,
     notes: '',
     test_mode: false,
   };
@@ -105,6 +107,12 @@ export default function DomesticShippingPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function setCount(key: 'goods_qty' | 'label_count', raw: string) {
+    const count = Math.max(1, Math.min(99, parseInt(raw, 10) || 1));
+    setPreview(null);
+    setForm((prev) => ({ ...prev, [key]: count }));
+  }
+
   async function handlePreview() {
     setSaving(true);
     setError(null);
@@ -120,15 +128,20 @@ export default function DomesticShippingPage() {
 
   async function handleSubmit() {
     if (!preview) return;
+    const sheets = preview.label_count || 1;
+    const qty = preview.goods_qty || 1;
     const ask = form.test_mode || !liveReady
-      ? '테스트로 1건 접수할까요? 우체국에는 보내지 않습니다.'
-      : `우체국에 ${preview.api_sender.name} / 공급지 ${preview.office_ser} 로 접수할까요?\n송장에는 ${preview.print_sender.name} 이 찍힙니다.`;
+      ? `테스트로 ${sheets}장 접수할까요? 우체국에는 보내지 않습니다.`
+      : `우체국에 ${preview.api_sender.name} / 공급지 ${preview.office_ser} 로 ${sheets}장 접수할까요?\n상품 ${preview.goods_name} ${qty}개가 각 접수에 전달됩니다. 송장에는 ${preview.print_sender.name} 이 찍힙니다.`;
     if (!window.confirm(ask)) return;
     setSaving(true);
     setError(null);
     try {
       const created = await createDomesticShipping(token, form);
-      window.location.href = `/domestic-print/${created.id}`;
+      const ids = created.ids?.length ? created.ids : [created.id];
+      window.location.href = ids.length > 1
+        ? `/domestic-print/batch?ids=${ids.join(',')}`
+        : `/domestic-print/${ids[0]}`;
     } catch (err) {
       setError(parseApiError(err));
       setSaving(false);
@@ -176,12 +189,14 @@ export default function DomesticShippingPage() {
         </div>
         <div className="domestic-row">
           <label className="domestic-field w-goods">상품<input value={form.goods_name} onChange={(e) => setField('goods_name', e.target.value)} /></label>
+          <label className="domestic-field w-qty">상품수량<input type="number" min={1} max={99} value={form.goods_qty || 1} onChange={(e) => setCount('goods_qty', e.target.value)} /></label>
           <label className="domestic-field w-box">
             박스
             <select value={form.box_size} onChange={(e) => setField('box_size', e.target.value)}>
               {boxSizes.map((size) => <option key={size.code} value={size.code}>{size.label}</option>)}
             </select>
           </label>
+          <label className="domestic-field w-qty">송장 갯수<input type="number" min={1} max={99} value={form.label_count || 1} onChange={(e) => setCount('label_count', e.target.value)} /></label>
         </div>
         <label className="domestic-check">
           <input type="checkbox" checked={form.test_mode} onChange={(e) => setForm((prev) => ({ ...prev, test_mode: e.target.checked }))} />
@@ -193,7 +208,7 @@ export default function DomesticShippingPage() {
         </button>
         {preview && (
           <p className="text-muted" style={{ marginTop: 12, marginBottom: 0 }}>
-            우체국 {preview.api_sender.name} · 공급지 {preview.office_ser} · 송장 {preview.print_sender.name} · {preview.box_label}
+            우체국 {preview.api_sender.name} · 공급지 {preview.office_ser} · 송장 {preview.print_sender.name} · {preview.goods_name} {preview.goods_qty}개 · {preview.label_count}장 · {preview.box_label}
           </p>
         )}
       </Card>

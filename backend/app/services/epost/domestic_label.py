@@ -147,13 +147,18 @@ def build_domestic_label_pdf(item: dict) -> bytes:
     rec_addr1 = str(item.get("recipient_addr1") or "")
     rec_addr2 = str(item.get("recipient_addr2") or "")
     goods = str(item.get("goods_name") or "")
+    try:
+        goods_qty = int(item.get("goods_qty") or 1)
+    except (TypeError, ValueError):
+        goods_qty = 1
+    if goods_qty < 1:
+        goods_qty = 1
     order_no = str(item.get("order_no") or "")
     tracking = _tracking(item.get("tracking_no"))
     tracking_digits = _digits(item.get("tracking_no"))
     office = str(item.get("post_office") or "")
     applied = _date(item.get("res_date") or item.get("created_at"))
     notes = str(item.get("notes") or "")
-    goods_line = f"{goods},, 수량:1, {order_no}♠".strip(" ,")
 
     doc = fitz.open()
     try:
@@ -187,7 +192,7 @@ def build_domestic_label_pdf(item: dict) -> bytes:
         _h(page, 117.11, 118.18, applied, 6.96, font="hebo")
         _h(page, 138.71, 142.36, "(1/1)", 8.04, font="hebo")
         _h(page, 37.19, 168.95, rec_zip, 12, font="hebo")
-        goods_end = _h(page, 3.11, 187.36, f"{goods},, 수량:1, ", 8.04)
+        goods_end = _h(page, 3.11, 187.36, f"{goods},, 수량:{goods_qty}, ", 8.04)
         goods_end = _h(page, goods_end, 187.36, order_no, 8.04, font="hebo")
         _h(page, goods_end, 187.36, "♠", 8.04)
         _h(page, 5.15, 293.26, notes, 6.96)
@@ -210,7 +215,7 @@ def build_domestic_label_pdf(item: dict) -> bytes:
         _v(page, 444.75, 294.12, rec_name, 6.96)
         _v(page, 443.95, 238.20, _phone_plain(rec_phone), 6.96, font="hebo")
         _v(page, 448.42, 116.04, tracking, 7.93, font="hebo")
-        _v(page, 456.75, 250.0, f"{goods},,수량:1,{order_no}\u2660", 5.0)
+        _v(page, 456.75, 250.0, f"{goods},,수량:{goods_qty},{order_no}\u2660", 5.0)
         _v(page, 457.83, 294.12, "내용품 :", 6.96)
 
         if rec_zip:
@@ -222,3 +227,20 @@ def build_domestic_label_pdf(item: dict) -> bytes:
         return doc.tobytes()
     finally:
         doc.close()
+
+
+def build_domestic_labels_pdf(items: list[dict]) -> bytes:
+    """송장 여러 장을 한 PDF로 잇는다. 한 장이면 그대로 반환한다."""
+    if len(items) == 1:
+        return build_domestic_label_pdf(items[0])
+    merged = fitz.open()
+    try:
+        for item in items:
+            part = fitz.open(stream=build_domestic_label_pdf(item), filetype="pdf")
+            try:
+                merged.insert_pdf(part)
+            finally:
+                part.close()
+        return merged.tobytes()
+    finally:
+        merged.close()

@@ -14,6 +14,7 @@ from backend.app.api.domestic_shipping import (
     create_vendor,
     delete_domestic,
     domestic_label,
+    domestic_labels,
     preview_domestic,
 )
 
@@ -161,6 +162,43 @@ def test_create_sends_saved_sender_and_prints_input(isolated_runtime, monkeypatc
     page = fitz.open(stream=pdf.body, filetype="pdf")[0]
     assert abs(page.rect.width - 484.72) < 0.2
     assert abs(page.rect.height - 314.65) < 0.2
+
+
+def test_goods_qty_is_sent_and_several_labels_print(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    vendor_id = create_vendor(_vendor(), token)["id"]
+    captured = []
+
+    def fake_insert(params):
+        captured.append(dict(params))
+        n = len(captured)
+        return {
+            "reqNo": f"REQ{n}",
+            "resNo": f"RES{n}",
+            "regiNo": f"12345678901{n:02d}",
+            "regiPoNm": "동대구우체국",
+            "resDate": "20261003",
+            "price": "2600",
+            "vTelNo": "",
+        }
+
+    monkeypatch.setattr("backend.app.api.domestic_shipping.has_epost_credentials", lambda: True)
+    monkeypatch.setattr("backend.app.api.domestic_shipping.insert_order", fake_insert)
+    created = create_domestic(_submit(vendor_id, test_mode=False, goods_qty=3, label_count=2), token)
+    assert created["partial"] is False
+    assert len(created["ids"]) == 2
+    assert len(captured) == 2
+    assert {row["qty"] for row in captured} == {3}
+    assert {row["goodsNm"] for row in captured} == {"의류"}
+    assert captured[0]["orderNo"] != captured[1]["orderNo"]
+    pdf = domestic_labels(token, ids=",".join(str(item) for item in created["ids"]))
+    doc = fitz.open(stream=pdf.body, filetype="pdf")
+    assert doc.page_count == 2
+    assert "수량:3" in doc[0].get_text()
+    assert "수량:3" in doc[1].get_text()
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        qty = con.execute("SELECT goods_qty FROM domestic_shipments WHERE id=?", (created["ids"][0],)).fetchone()[0]
+    assert qty == 3
 
 
 def test_second_box_is_not_blocked_after_the_double_submit_window(isolated_runtime):

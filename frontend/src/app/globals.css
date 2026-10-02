@@ -859,6 +859,7 @@ tbody tr:hover { background: #f7f8fd; }
 .domestic-field.w-zip input { width: 5.6rem; }
 .domestic-field.w-office input { width: 9rem; }
 .domestic-field.w-goods input { width: 8rem; }
+.domestic-field.w-qty input { width: 4.2rem; }
 .domestic-field.w-box select { width: 11rem; }
 .domestic-field.w-detail input { width: 10rem; }
 .domestic-field.w-addr input { width: 24rem; max-width: 100%; }

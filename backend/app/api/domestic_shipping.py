@@ -24,7 +24,10 @@ from backend.app.services.epost.client import (
     insert_order,
     mock_insert_order,
 )
-from backend.app.services.epost.domestic_label import build_domestic_label_pdf
+from backend.app.services.epost.domestic_label import (
+    build_domestic_label_pdf,
+    build_domestic_labels_pdf,
+)
 from backend.app.services.epost.fields import (
     EPOST_CONTRACT_COMP_NM,
     PICKUP_BOX_SIZES,
@@ -70,7 +73,9 @@ class DomesticSubmitRequest(BaseModel):
     recipient_addr1: str
     recipient_addr2: str = ""
     goods_name: str
+    goods_qty: int = 1
     box_size: str = "DEFAULT"
+    label_count: int = 1
     notes: str = ""
     confirm: bool = False
     test_mode: bool = False
@@ -143,6 +148,9 @@ def ensure_domestic_tables() -> None:
         columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
         if "v_tel_no" not in columns:
             con.execute("ALTER TABLE domestic_shipments ADD COLUMN v_tel_no TEXT NOT NULL DEFAULT ''")
+        columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
+        if "goods_qty" not in columns:
+            con.execute("ALTER TABLE domestic_shipments ADD COLUMN goods_qty INTEGER NOT NULL DEFAULT 1")
         con.commit()
 
 
@@ -257,9 +265,21 @@ def _validate(req: DomesticSubmitRequest) -> dict[str, Any]:
         "printed": printed,
         "recipient": recipient,
         "goods": goods,
+        "goods_qty": _bounded_count(req.goods_qty, "상품수량"),
+        "label_count": _bounded_count(req.label_count, "송장 갯수"),
         "spec": spec,
         "notes": _clean(req.notes, max_bytes=50),
     }
+
+
+def _bounded_count(value: int, name: str) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}는 1에서 99 사이여야 합니다.") from None
+    if count < 1 or count > 99:
+        raise ValueError(f"{name}는 1에서 99 사이여야 합니다.")
+    return count
 
 
 def _api_params(data: dict[str, Any], order_no: str, *, test_yn: str) -> dict[str, str]:
@@ -289,7 +309,7 @@ def _api_params(data: dict[str, Any], order_no: str, *, test_yn: str) -> dict[st
         "goodsNm": data["goods"],
         "weight": int(spec["weight"]),
         "volume": int(spec["volume"]),
-        "qty": 1,
+        "qty": data["goods_qty"],
         "microYn": "Y" if spec.get("micro") else "N",
         "printYn": "Y",
         "testYn": test_yn,
@@ -307,6 +327,8 @@ def _preview(data: dict[str, Any]) -> dict[str, Any]:
         "print_sender": data["printed"],
         "recipient": data["recipient"],
         "goods_name": data["goods"],
+        "goods_qty": data["goods_qty"],
+        "label_count": data["label_count"],
         "box_size": data["spec"]["code"],
         "box_label": data["spec"]["label"],
         "weight": data["spec"]["weight"],
@@ -323,7 +345,7 @@ def _shipment_dict(row: tuple) -> dict[str, Any]:
         "goods_name", "box_size", "weight", "volume", "notes",
         "order_no", "tracking_no", "req_no", "res_no", "res_date", "price", "post_office",
         "status", "is_test", "created_by", "created_at", "canceled_at", "canceled_by",
-        "v_tel_no",
+        "v_tel_no", "goods_qty",
     )
     item = dict(zip(keys, row))
     item["is_test"] = bool(item["is_test"])
@@ -473,6 +495,34 @@ def list_domestic(token: str):
     return {"items": [_shipment_dict(row) for row in rows]}
 
 
+def _parse_label_ids(raw: str) -> list[int]:
+    parts = [part.strip() for part in (raw or "").split(",") if part.strip()]
+    if not parts or len(parts) > 99:
+        raise HTTPException(status_code=400, detail="송장은 1장에서 99장까지 지정해주세요.")
+    ids: list[int] = []
+    for part in parts:
+        if not part.isdigit():
+            raise HTTPException(status_code=400, detail="송장 번호가 올바르지 않습니다.")
+        ids.append(int(part))
+    return ids
+
+
+@router.get("/labels")
+def domestic_labels(token: str, ids: str = "", format: str = "pdf"):
+    _get_user(token)
+    ensure_domestic_tables()
+    wanted = _parse_label_ids(ids)
+    items = [_load_shipment(shipment_id) for shipment_id in wanted]
+    if format != "pdf":
+        return {"ok": True, "items": items}
+    pdf = build_domestic_labels_pdf(items)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="domestic-labels.pdf"'},
+    )
+
+
 @router.get("/{shipment_id}")
 def get_domestic(shipment_id: int, token: str):
     _get_user(token)
@@ -480,51 +530,15 @@ def get_domestic(shipment_id: int, token: str):
     return _load_shipment(shipment_id)
 
 
-@router.post("")
-def create_domestic(req: DomesticSubmitRequest, token: str):
-    user = _get_user(token)
-    ensure_domestic_tables()
-    if not req.confirm:
-        raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
-    try:
-        data = _validate(req)
-    except ValueError as exc:
-        raise _http_error(exc) from exc
-
-    recent = (datetime.now(KST) - _DUP_WINDOW).isoformat(timespec="seconds")
-    with get_connection() as con:
-        existing = con.execute(
-            """
-            SELECT id, tracking_no FROM domestic_shipments
-            WHERE created_by=? AND vendor_id=? AND recipient_phone=? AND status='requested'
-              AND created_at>=?
-            ORDER BY id DESC LIMIT 1
-            """,
-            (user["nickname"], data["vendor"]["id"], data["recipient"]["phone"], recent),
-        ).fetchone()
-    if existing:
-        return {
-            "duplicate_guard": True,
-            "success": True,
-            "id": existing[0],
-            "tracking_no": existing[1],
-        }
-
-    live = has_epost_credentials() and not req.test_mode
-    order_no = truncate_utf8_bytes(
-        re.sub(r"[^A-Za-z0-9]", "", f"DOM{int(datetime.now(KST).timestamp() * 1000)}").upper(),
-        30,
-    )
-    params = _api_params(data, order_no, test_yn="N" if live else "Y")
-    if not live:
-        result = mock_insert_order()
-    else:
-        try:
-            result = insert_order(params)
-        except EpostError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    now = datetime.now(KST).isoformat(timespec="seconds")
+def _store_shipment(
+    data: dict[str, Any],
+    order_no: str,
+    result: dict[str, Any],
+    *,
+    live: bool,
+    user_name: str,
+    created_at: str,
+) -> int:
     saved = data["saved"]
     printed = data["printed"]
     recipient = data["recipient"]
@@ -538,8 +552,8 @@ def create_domestic(req: DomesticSubmitRequest, token: str):
                 recipient_name, recipient_phone, recipient_zip, recipient_addr1, recipient_addr2,
                 goods_name, box_size, weight, volume, notes,
                 order_no, tracking_no, req_no, res_no, res_date, price, post_office,
-                status, is_test, created_by, created_at, v_tel_no
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?)
+                status, is_test, created_by, created_at, v_tel_no, goods_qty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?)
             """,
             (
                 data["vendor"]["id"], data["vendor"]["name"], data["vendor"]["office_ser"],
@@ -550,27 +564,91 @@ def create_domestic(req: DomesticSubmitRequest, token: str):
                 data["notes"],
                 order_no, result.get("regiNo") or "", result.get("reqNo") or "", result.get("resNo") or "",
                 result.get("resDate") or "", result.get("price") or "", result.get("regiPoNm") or "",
-                0 if live else 1, user["nickname"], now, result.get("vTelNo") or "",
+                0 if live else 1, user_name, created_at, result.get("vTelNo") or "", data["goods_qty"],
             ),
         )
         con.commit()
-        shipment_id = int(cur.lastrowid)
-    add_log(
-        action_type="국내출고접수",
-        target_type="domestic_shipment",
-        target_id=str(shipment_id),
-        target_name=result.get("regiNo") or order_no,
-        user_nickname=user["nickname"],
-    )
+        return int(cur.lastrowid)
+
+
+def _created_payload(rows: list[tuple], *, requested: int, live: bool, data: dict[str, Any], duplicate: bool) -> dict[str, Any]:
+    ids = [int(row[0]) for row in rows]
+    trackings = [row[1] or "" for row in rows]
     return {
+        "duplicate_guard": duplicate,
         "success": True,
-        "id": shipment_id,
-        "order_no": order_no,
-        "tracking_no": result.get("regiNo") or "",
-        "price": result.get("price") or "",
+        "id": ids[0],
+        "ids": ids,
+        "order_no": rows[0][2] or "",
+        "tracking_no": trackings[0],
+        "tracking_nos": trackings,
+        "price": rows[0][3] or "",
+        "partial": len(ids) < requested,
         "is_test": not live,
         "preview": _preview(data),
     }
+
+
+@router.post("")
+def create_domestic(req: DomesticSubmitRequest, token: str):
+    user = _get_user(token)
+    ensure_domestic_tables()
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
+    try:
+        data = _validate(req)
+    except ValueError as exc:
+        raise _http_error(exc) from exc
+
+    requested = data["label_count"]
+    recent = (datetime.now(KST) - _DUP_WINDOW).isoformat(timespec="seconds")
+    with get_connection() as con:
+        existing = con.execute(
+            """
+            SELECT id, tracking_no, order_no, price FROM domestic_shipments
+            WHERE created_by=? AND vendor_id=? AND recipient_phone=? AND status='requested'
+              AND created_at>=?
+            ORDER BY id ASC
+            """,
+            (user["nickname"], data["vendor"]["id"], data["recipient"]["phone"], recent),
+        ).fetchall()
+    if len(existing) >= requested:
+        return _created_payload(existing[-requested:], requested=requested, live=not req.test_mode and has_epost_credentials(), data=data, duplicate=True)
+    remaining = requested - len(existing)
+
+    live = has_epost_credentials() and not req.test_mode
+    now = datetime.now(KST).isoformat(timespec="seconds")
+    created: list[tuple] = []
+    for offset in range(remaining):
+        index = len(existing) + offset + 1
+        order_no = truncate_utf8_bytes(
+            re.sub(r"[^A-Za-z0-9]", "", f"DOM{int(datetime.now(KST).timestamp() * 1000)}{index:02d}").upper(),
+            30,
+        )
+        params = _api_params(data, order_no, test_yn="N" if live else "Y")
+        if not live:
+            result = mock_insert_order()
+        else:
+            try:
+                result = insert_order(params)
+            except EpostError as exc:
+                if created or existing:
+                    break
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        shipment_id = _store_shipment(data, order_no, result, live=live, user_name=user["nickname"], created_at=now)
+        created.append((shipment_id, result.get("regiNo") or "", order_no, result.get("price") or ""))
+        add_log(
+            action_type="국내출고접수",
+            target_type="domestic_shipment",
+            target_id=str(shipment_id),
+            target_name=result.get("regiNo") or order_no,
+            user_nickname=user["nickname"],
+        )
+
+    rows = list(existing) + created
+    if not rows:
+        raise HTTPException(status_code=502, detail="접수에 실패했습니다.")
+    return _created_payload(rows, requested=requested, live=live, data=data, duplicate=False)
 
 
 def _label_pdf(item: dict[str, Any]) -> bytes:

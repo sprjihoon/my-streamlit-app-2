@@ -103,7 +103,7 @@ export default function DomesticShippingDetailPage() {
           <dt>업체</dt><dd>{item.vendor_name}</dd>
           <dt>송장번호</dt><dd>{item.tracking_no || '-'}</dd>
           <dt>공급지</dt><dd>{item.office_ser}</dd>
-          <dt>상품</dt><dd>{item.goods_name} · {item.box_size}</dd>
+          <dt>상품</dt><dd>{item.goods_name} {item.goods_qty || 1}개 · {item.box_size}</dd>
           <dt>우체국</dt><dd>{item.api_sender_name} · {item.api_sender_phone}<br />{item.api_sender_zip} {item.api_sender_addr1} {item.api_sender_addr2}</dd>
           <dt>송장</dt><dd>{item.print_sender_name} · {item.print_sender_phone}<br />{item.print_sender_zip} {item.print_sender_addr1} {item.print_sender_addr2}</dd>
           <dt>받는 사람</dt><dd>{item.recipient_name} · {item.recipient_phone}<br />{item.recipient_zip} {item.recipient_addr1} {item.recipient_addr2}</dd>

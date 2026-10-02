@@ -358,9 +358,11 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 - 업체 등록(`/domestic-vendors`)에 공급지번호와 보내는 사람 기본값을 넣는다. 공급지번호가 없으면 접수할 수 없다. 공급지번호는 접수 화면에서 고치지 않는다.
 - 출고 접수(`/domestic-shipping`)에서 업체를 고르면 저장된 보내는 사람이 채워지고, 그 칸은 고칠 수 있다. 고친 값은 송장에만 찍히고, 우체국에는 그 업체에 저장된 보내는 사람과 공급지번호가 간다. 나중에 업체 정보를 고쳐도 이미 접수한 송장은 바뀌지 않는다.
 - 같은 받는 사람에게 같은 날 박스를 더 보내는 것은 막지 않는다. 약 20초 안의 같은 클릭만 한 건으로 묶는다.
+- 상품명은 우체국 `goodsNm`으로 가고, 상품수량은 각 접수의 `qty`와 송장 `수량`에 들어간다. 송장 갯수만큼 접수를 따로 하며, 장마다 등기번호가 하나씩 나온다. 여러 장이면 `/domestic-print/batch`에서 한 PDF로 뽑는다.
 - 확인 전 미리보기는 기록하지 않는다. 우체국 키가 없거나 테스트 접수면 우체국을 부르지 않고 테스트 등기번호로 저장한다.
 - 접수목록(`/domestic-shipping-list`)에서 송장, 접수 취소, 관리자 삭제를 한다. 실접수 취소는 계약소포 `GetResCancelCmd`다. 우체국이 거절하면 상태는 접수 그대로이고 사유를 보여 준다. 취소된 건도 송장은 남고, 종이 위에 취소된 접수라고 표시한다.
 - 우체국 API는 송장 PDF를 주지 않는다. 송장은 신형 C형(111×171mm)을 가로로 둔 171×111mm 종이에, 답안지에서 잰 칸에 받는 사람·등기번호·바코드를 찍는다. 보내는 사람 칸에는 접수 화면에서 고친 값이 들어간다. 집배코드는 modo 와 같이 받는 사람 우편번호로 찾아 A1, 135, 동서울, 서울강남, 10 30 자리에 찍고, 바코드 옆 숫자는 그 우편번호의 구분코스다. 우체국이 돌려준 가상번호가 있으면 받는 사람 전화 칸과 오른쪽 번호에 찍고, 등기번호 QR을 답안지 자리에 넣는다. 가상번호가 없으면 입력한 전화를 찍는다. 화면은 `/domestic-print/{id}` 다.
+- 구분코스 메모. `06236` 테헤란로 152는 집배코드 파일과 우체국 계약 API(`biz.epost.go.kr`, `target=delivArea`)가 둘 다 `courseNo` 100이다. 우체국 전산 답안지의 102는 `courseNo`, `delivAreaCd`, `prclPathSeq`에 없어서 출처를 확정하지 못했다. 배송에 문제를 주는 차이로 보지 않고 여기까지 둔다.
 
 | 메서드 | 경로 | 동작 |
 |---|---|---|
@@ -370,7 +372,8 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 | `GET` | `/domestic-shipping` | 접수 목록 |
 | `GET` | `/domestic-shipping/{id}` | 상세. API로 보낸 보내는 사람과 송장에 찍을 보내는 사람을 같이 보여 준다 |
 | `POST` | `/domestic-shipping` | 확인 후 접수 |
-| `GET` | `/domestic-shipping/{id}/label` | 송장. `format=pdf` |
+| `GET` | `/domestic-shipping/{id}/label` | 송장 1장. `format=pdf` |
+| `GET` | `/domestic-shipping/labels` | 여러 장 송장. `ids=1,2`, `format=pdf` |
 | `POST` | `/domestic-shipping/{id}/cancel` | 확인 후 취소 |
 | `DELETE` | `/domestic-shipping/{id}` | 관리자만 삭제. 실접수는 우체국 취소 후 삭제 |
 
@@ -402,6 +405,12 @@ cd frontend && npm run dev
 ---
 
 ## 변경 이력
+
+### 2026-10-03
+- **feat(domestic-shipping): 상품수량과 송장 장수를 접수한다**
+  - 상품명은 `goodsNm`으로, 상품수량은 각 접수의 `qty`와 송장 수량에 들어간다
+  - 송장 갯수만큼 등기번호를 따로 받고, 여러 장은 한 PDF로 뽑는다
+- 구분코스 메모. `06236`은 집배코드 파일과 계약 API가 둘 다 100이다. 답안지 102의 출처는 확정하지 못했고, 배송 문제로 보지 않는다
 
 ### 2026-10-02
 - **feat(domestic-shipping): 가상번호와 등기번호 QR을 송장에 찍는다**
