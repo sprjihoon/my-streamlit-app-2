@@ -1,7 +1,7 @@
 """우체국 신형 C형 송장. 용지는 111×171mm 이고, 이 출력은 글자가 가로가 되도록 171×111mm 로 둔다.
 
 칸 위치는 2026-10-02 실접수 답안지(exc2016C)에서 쟀다.
-집배코드(A1, 135, 102 등)는 우체국 출력에만 있고 접수 API 응답에는 없어서 비워 둔다.
+집배코드는 modo 와 같이 받는 사람 우편번호로 찾는다.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from io import BytesIO
 import fitz
 from reportlab.graphics.barcode import code128
 from reportlab.pdfgen.canvas import Canvas
+
+from backend.app.services.epost.delivery_codes import lookup_delivery_code
 
 # 답안지 페이지. 171mm × 111mm.
 PAGE_W = 484.72
@@ -132,6 +134,18 @@ def build_domestic_label_pdf(item: dict) -> bytes:
         page.insert_font(fontname="korea", fontbuffer=fitz.Font("korea").buffer)
         if item.get("status") == "canceled":
             page.insert_text((2, 28), "취소된 접수", fontname="korea", fontsize=8, color=(0.75, 0.05, 0.05))
+
+        code = lookup_delivery_code(rec_zip)
+        if code:
+            _h(page, 173.51, 45.41, code.sort_code_1, 28, font="hebo")
+            _h(page, 220.91, 33.21, "★", 20)
+            _h(page, 214.07, 41.88, code.arr_cnpo_nm, 11)
+            _h(page, 252.11, 45.41, code.sort_code_2, 28, font="hebo")
+            _h(page, 307.07, 41.88, code.deliv_po_nm, 11)
+            _h(page, 355.07, 36.17, f"{code.sort_code_3} {code.sort_code_4}".strip(), 20, font="hebo")
+            if code.course_no:
+                _h(page, 325.55, 275.18, code.course_no, 23, font="hebo")
+                _h(page, 375.83, 272.18, code.course_no, 12, font="hebo")
 
         _h(page, 2.15, 47.26, f"접수국 : {office}".strip(), 6.96)
         _h(page, 2.15, 62.26, "주문인:", 6.96)
