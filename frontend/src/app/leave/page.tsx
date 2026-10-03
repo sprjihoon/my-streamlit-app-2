@@ -2,6 +2,13 @@
 import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Alert } from '@/components/Alert';
+import { Card } from '@/components/Card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const HOURS_PER_DAY = 7;
@@ -133,22 +140,15 @@ interface AdminRequest {
 // ─────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; bg: string; color: string }> = {
-    pending:          { label: '결재중',    bg: '#fff3cd', color: '#856404' },
-    approved:         { label: '승인',      bg: '#d1e7dd', color: '#0a3622' },
-    rejected:         { label: '반려',      bg: '#f8d7da', color: '#842029' },
-    cancelled:        { label: '취소',      bg: '#e2e3e5', color: '#41464b' },
-    cancel_requested: { label: '취소결재중', bg: '#fff0e6', color: '#c45000' },
+  const map: Record<string, { label: string; variant: 'warning' | 'success' | 'danger' | 'neutral' | 'repairing' }> = {
+    pending: { label: '결재중', variant: 'warning' },
+    approved: { label: '승인', variant: 'success' },
+    rejected: { label: '반려', variant: 'danger' },
+    cancelled: { label: '취소', variant: 'neutral' },
+    cancel_requested: { label: '취소결재중', variant: 'repairing' },
   };
-  const s = map[status] || { label: status, bg: '#e9ecef', color: '#495057' };
-  return (
-    <span style={{
-      padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem',
-      backgroundColor: s.bg, color: s.color, fontWeight: 600,
-    }}>
-      {s.label}
-    </span>
-  );
+  const s = map[status] || { label: status, variant: 'neutral' as const };
+  return <Badge variant={s.variant}>{s.label}</Badge>;
 }
 
 // ─────────────────────────────────────
@@ -174,10 +174,10 @@ function LeaveDonut({ summary }: { summary: LeaveSummary }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' }}>
       <svg width="140" height="140" viewBox="0 0 140 140">
-        <circle cx="70" cy="70" r={r} fill="none" stroke="#e9ecef" strokeWidth="16" />
+        <circle cx="70" cy="70" r={r} fill="none"             stroke="var(--border)" strokeWidth="16" />
         {remainingDash > 0 && (
           <circle cx="70" cy="70" r={r} fill="none"
-            stroke={isNegative ? '#dc3545' : '#198754'}
+            stroke={isNegative ? 'var(--color-danger)' : 'var(--color-success)'}
             strokeWidth="16"
             strokeDasharray={`${remainingDash} ${circ - remainingDash}`}
             strokeDashoffset={circ * 0.25}
@@ -186,7 +186,7 @@ function LeaveDonut({ summary }: { summary: LeaveSummary }) {
         )}
         {pendingDash > 0 && (
           <circle cx="70" cy="70" r={r} fill="none"
-            stroke="#ffc107" strokeWidth="16"
+            stroke="var(--color-warning)" strokeWidth="16"
             strokeDasharray={`${pendingDash} ${circ - pendingDash}`}
             strokeDashoffset={circ * 0.25}
             style={{ transform: `rotate(${usedPct * 3.6}deg)`, transformOrigin: '70px 70px' }}
@@ -194,7 +194,7 @@ function LeaveDonut({ summary }: { summary: LeaveSummary }) {
         )}
         {usedDash > 0 && (
           <circle cx="70" cy="70" r={r} fill="none"
-            stroke="#0d6efd" strokeWidth="16"
+            stroke="var(--color-brand)" strokeWidth="16"
             strokeDasharray={`${usedDash} ${circ - usedDash}`}
             strokeDashoffset={circ * 0.25}
           />
@@ -482,48 +482,35 @@ export default function LeavePage() {
 
   return (
     <div>
-      <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        <PageHeader title="연월차 관리" />
-        <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-          근로기준법 기준 | 1일 = 7시간 (10:00~18:00)
-        </p>
-      </div>
+      <PageHeader title="연월차 관리" subtitle="근로기준법 기준. 1일 = 7시간 (10:00~18:00)" />
 
-      {/* 알림 */}
-      {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
-      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
+      {error && <Alert type="error" message={error} />}
+      {success && <Alert type="success" message={success} />}
 
-      {/* 연도 선택 + 탭 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+      <div className="tw-mb-3 tw-flex tw-flex-wrap tw-items-end tw-gap-3">
+        <div className="data-tabs tw-mb-0">
           {[
             { key: 'my', label: '내 연차' },
             { key: 'approvals', label: `결재함${pendingApprovals.length > 0 ? ` (${pendingApprovals.length})` : ''}` },
             ...(isAdmin ? [{ key: 'admin', label: '전체 현황' }] : []),
           ].map(({ key, label }) => (
-            <button key={key} onClick={() => setTab(key as any)}
-              style={{
-                padding: '0.5rem 1rem', border: 'none', borderRadius: '4px', cursor: 'pointer',
-                backgroundColor: tab === key ? '#0d6efd' : '#e9ecef',
-                color: tab === key ? 'white' : '#495057', fontWeight: tab === key ? 600 : 400,
-              }}>
+            <Button key={key} type="button" variant={tab === key ? 'primary' : 'secondary'} onClick={() => setTab(key as typeof tab)}>
               {label}
-            </button>
+            </Button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <select value={year} onChange={e => setYear(Number(e.target.value))}
-            style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }}>
+        <Field label="연도" className="tw-mb-0">
+          <Select value={year} onChange={e => setYear(Number(e.target.value))}>
             {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
-          </select>
-        </div>
+          </Select>
+        </Field>
       </div>
 
       {/* ── 내 연차 탭 ── */}
       {tab === 'my' && (
         <>
           {/* 연차 현황 카드 */}
-          <div style={card}>
+          <Card>
             {summary && !summary.exempt && !summary.no_join_date ? (
               <LeaveDonut summary={summary} />
             ) : summary?.exempt && !isAdmin ? (
@@ -537,12 +524,12 @@ export default function LeavePage() {
             ) : (
               <p style={{ color: '#6c757d' }}>연차 정보를 불러오는 중...</p>
             )}
-          </div>
+          </Card>
 
           {/* 신청 버튼 — 관리자는 항상 표시 */}
           {(isAdmin || (summary && !summary.exempt && !summary.no_join_date)) && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <button onClick={async () => {
+            <div className="tw-mb-3">
+              <Button type="button" onClick={async () => {
                 if (showForm) {
                   setShowForm(false);
                   return;
@@ -558,13 +545,9 @@ export default function LeavePage() {
                   if (chainRes.ok) setFormApprovers(await chainRes.json());
                   if (candRes.ok) setCandidates(await candRes.json());
                 } catch {}
-              }}
-                style={{
-                  padding: '0.6rem 1.25rem', backgroundColor: '#0d6efd', color: 'white',
-                  border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600,
-                }}>
+              }}>
                 {showForm ? '닫기' : '연차 신청'}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -715,22 +698,15 @@ export default function LeavePage() {
                 </div>
 
                 {/* 사유 */}
-                <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.35rem' }}>사유 <span style={{ fontWeight: 400, color: '#adb5bd' }}>(선택)</span></label>
-                  <input type="text" value={formReason} onChange={e => setFormReason(e.target.value)}
-                    placeholder="예: 개인 사정, 여행 등"
-                    style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '6px', fontSize: '0.9rem', boxSizing: 'border-box' }} />
-                </div>
+                <Field label="사유" hint="선택">
+                  <Input type="text" value={formReason} onChange={e => setFormReason(e.target.value)} placeholder="예: 개인 사정, 여행 등" />
+                </Field>
 
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button type="submit" disabled={submitting || !canSubmit}
-                    style={{ padding: '0.55rem 1.5rem', backgroundColor: (submitting || !canSubmit) ? '#adb5bd' : '#0d6efd', color: 'white', border: 'none', borderRadius: '6px', cursor: (submitting || !canSubmit) ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                <div className="tw-flex tw-gap-2">
+                  <Button type="submit" disabled={submitting || !canSubmit}>
                     {submitting ? '신청 중...' : '신청'}
-                  </button>
-                  <button type="button" onClick={() => setShowForm(false)}
-                    style={{ padding: '0.55rem 1rem', backgroundColor: 'white', color: '#6c757d', border: '1px solid #dee2e6', borderRadius: '6px', cursor: 'pointer' }}>
-                    닫기
-                  </button>
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>닫기</Button>
                 </div>
               </form>
             </div>

@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { Button } from '@/components/ui/button';
+import { Metric } from '@/components/ui/metric';
+import PageHeader from '@/components/ui/page-header';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const IMG_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -407,7 +410,7 @@ function DetailPageInner() {
   const totalNormalQty = Math.max(0, (data?.summary.total_actual_qty ?? 0) - totalDefectQty);
 
   return (
-    <div style={{ background: C.bg, minHeight: '100vh' }}>
+    <div>
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
       {subModal && (
         <SubLogModal type={subModal} allItems={allItems} onClose={() => setSubModal(null)} />
@@ -416,26 +419,16 @@ function DetailPageInner() {
         <InboundWorkModal batchId={workModal} onClose={() => { setWorkModal(null); loadDetail(); }} />
       )}
 
-      {/* 헤더 */}
-      <div style={{ background: C.primaryLight, borderBottom: `1px solid ${C.border}`, padding: '0.85rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'sticky', top: 0, zIndex: 100 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button
-            onClick={() => router.back()}
-            style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.85rem', color: C.muted, display: 'flex', alignItems: 'center', gap: 4 }}
-          >
-            ← 뒤로
-          </button>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '1.05rem', color: C.primary }}>{vendor}</div>
-            <div style={{ fontSize: '0.82rem', color: C.textSub, marginTop: 2 }}>
-              {date} · {data ? `도매처 ${data.summary.batches_count}곳 · 품목 ${data.summary.items_count}종` : '로딩 중...'}
-            </div>
-          </div>
-        </div>
-        <button onClick={loadDetail} style={{ background: 'none', border: `1px solid ${C.border}`, borderRadius: 6, padding: '0.3rem 0.7rem', cursor: 'pointer', fontSize: '0.8rem', color: C.muted }}>
-          🔄 새로고침
-        </button>
-      </div>
+      <PageHeader
+        title={vendor || '입고 상세'}
+        subtitle={data ? `${date} · 도매처 ${data.summary.batches_count}곳 · 품목 ${data.summary.items_count}종` : (date || '불러오는 중')}
+        actions={
+          <>
+            <Button type="button" variant="ghost" onClick={() => router.back()}>뒤로</Button>
+            <Button type="button" variant="secondary" onClick={loadDetail}>새로고침</Button>
+          </>
+        }
+      />
 
       <div>
         {loading && <div style={{ textAlign: 'center', padding: '3rem', color: C.muted }}>불러오는 중...</div>}
@@ -444,28 +437,27 @@ function DetailPageInner() {
         {data && (
           <>
             {/* 요약 카드 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', background: C.card, borderRadius: 10, border: `1px solid ${C.border}`, marginBottom: '1.25rem', overflow: 'hidden' }}>
+            <div className="data-kpis">
               {([
                 { label: '장끼수량', v: data.summary.total_janggi_qty, color: C.text, clickType: null },
-                { label: '실수량',   v: data.summary.total_actual_qty,  color: C.success, clickType: null },
+                { label: '실수량', v: data.summary.total_actual_qty, color: C.success, clickType: null },
                 { label: '정상수량', v: totalNormalQty, color: totalNormalQty < data.summary.total_actual_qty ? C.text : C.success, clickType: null },
                 { label: '불량수량', v: totalDefectQty, color: totalDefectQty > 0 ? C.danger : C.muted, clickType: totalDefectQty > 0 ? 'defect' : null },
-                { label: '누락',     v: data.summary.total_missing_qty, color: data.summary.total_missing_qty > 0 ? C.danger : C.muted, clickType: null },
-                { label: '입고율',   v: data.summary.total_janggi_qty > 0 ? `${Math.round(data.summary.total_actual_qty / data.summary.total_janggi_qty * 100)}%` : '-', color: C.success, clickType: null },
+                { label: '누락', v: data.summary.total_missing_qty, color: data.summary.total_missing_qty > 0 ? C.danger : C.muted, clickType: null },
+                { label: '입고율', v: data.summary.total_janggi_qty > 0 ? `${Math.round(data.summary.total_actual_qty / data.summary.total_janggi_qty * 100)}%` : '-', color: C.success, clickType: null },
                 { label: '매칭필요', v: data.summary.needs_matching_count, color: data.summary.needs_matching_count > 0 ? C.warn : C.muted, clickType: null },
                 { label: '수선건수', v: data.summary.repair_total, color: data.summary.repair_total > 0 ? C.purple : C.muted, clickType: data.summary.repair_total > 0 ? 'repair' : null },
               ] as { label: string; v: number | string; color: string; clickType: 'defect' | 'repair' | null }[]).map(s => (
-                <div
+                <button
                   key={s.label}
+                  type="button"
+                  className="tw-border-0 tw-bg-transparent tw-p-0 tw-text-left"
                   onClick={() => s.clickType && setSubModal(s.clickType)}
-                  style={{ padding: '0.65rem 0.5rem', textAlign: 'center', borderRight: `1px solid ${C.border}`, cursor: s.clickType ? 'pointer' : 'default', background: s.clickType ? 'rgba(0,0,0,0.02)' : undefined }}
-                  title={s.clickType ? `${s.label} 클릭하여 상세 보기` : undefined}
+                  disabled={!s.clickType}
+                  title={s.clickType ? `${s.label} 상세` : undefined}
                 >
-                  <div style={{ fontSize: '0.68rem', color: C.muted, marginBottom: 2 }}>
-                    {s.label}{s.clickType && <span style={{ marginLeft: 2, fontSize: '0.6rem' }}>▶</span>}
-                  </div>
-                  <div style={{ fontWeight: 700, fontSize: '1rem', color: s.color }}>{typeof s.v === 'number' ? s.v.toLocaleString() : s.v}</div>
-                </div>
+                  <Metric label={s.clickType ? `${s.label} ›` : s.label} value={<span style={{ color: s.color }}>{typeof s.v === 'number' ? s.v.toLocaleString() : s.v}</span>} />
+                </button>
               ))}
             </div>
 

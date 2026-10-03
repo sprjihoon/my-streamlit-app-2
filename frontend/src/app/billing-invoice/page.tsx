@@ -1,9 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { KpiStrip } from '@/components/data';
+import { FilterBar, KpiStrip } from '@/components/data';
+import { Alert } from '@/components/Alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import PageHeader from '@/components/ui/page-header';
+import { Select } from '@/components/ui/select';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -48,17 +52,8 @@ const fmtDt = (s: string | null) => {
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { bg: string; color: string }> = {
-    '미납': { bg: '#fef2f2', color: '#dc2626' },
-    '부분납': { bg: '#fff7ed', color: '#ea580c' },
-    '완납': { bg: '#f0fdf4', color: '#16a34a' },
-  };
-  const s = map[status] || { bg: '#f3f4f6', color: '#6b7280' };
-  return (
-    <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: '0.72rem', fontWeight: 700, background: s.bg, color: s.color }}>
-      {status}
-    </span>
-  );
+  const variant = status === '완납' ? 'success' : status === '부분납' ? 'warning' : status === '미납' ? 'danger' : 'neutral';
+  return <Badge variant={variant}>{status}</Badge>;
 }
 
 // ─── 납부 처리 모달 ──────────────────────────────────────────────────
@@ -107,8 +102,8 @@ function PayModal({ inv, token, onClose, onSaved }: {
             style={{ width: '100%', padding: '0.45rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.875rem', boxSizing: 'border-box' }} />
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={btnGray}>취소</button>
-          <button onClick={save} disabled={saving} style={btnBlue}>{saving ? '저장 중...' : '저장'}</button>
+          <button type="button" onClick={onClose} className="btn btn-ghost">취소</button>
+          <button type="button" onClick={save} disabled={saving} className="btn btn-primary">{saving ? '저장 중...' : '저장'}</button>
         </div>
       </div>
     </div>
@@ -492,8 +487,8 @@ export default function BillingInvoicePage() {
         }
       </div>
 
-      {uploadMsg && <div style={{ padding: '0.75rem 1rem', background: '#f0fdf4', color: '#16a34a', borderRadius: 8, marginBottom: '0.75rem', fontSize: '0.875rem' }}>{uploadMsg}</div>}
-      {uploadError && <div style={{ padding: '0.75rem 1rem', background: '#fef2f2', color: '#dc2626', borderRadius: 8, marginBottom: '0.75rem', fontSize: '0.875rem' }}>{uploadError}</div>}
+      {uploadMsg && <Alert type="success" message={uploadMsg} onClose={() => setUploadMsg('')} />}
+      {uploadError && <Alert type="error" message={uploadError} onClose={() => setUploadError('')} />}
 
       {uploadResults.length > 0 && (
         <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: '1rem', overflow: 'hidden' }}>
@@ -511,65 +506,34 @@ export default function BillingInvoicePage() {
         </div>
       )}
 
-      {/* 필터 */}
-      <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
-        {/* 연도 */}
-        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28 }}>연도</span>
+      <FilterBar
+        trailing={
+          <>
+            <Button type="button" variant="ghost" onClick={handleDeleteAll}>빈 항목 정리</Button>
+            <Button type="button" variant="warning" onClick={handleDedup}>중복 진단/제거</Button>
+            <Button type="button" variant="success" onClick={handleBulkComplete}>전체 완납 설정</Button>
+            <Button type="button" variant="danger" onClick={handleDeleteAllInvoices}>전체삭제</Button>
+          </>
+        }
+      >
+        <div className="data-tabs tw-mb-0">
           {[2024, 2025, 2026, 2027].map(y => (
-            <button key={y} onClick={() => { setFilterYear(y); setFilterMonth(0); }}
-              style={{ padding: '0.25rem 0.65rem', border: '1px solid', borderColor: filterYear === y ? '#1a3c6e' : '#e5e7eb', background: filterYear === y ? '#1a3c6e' : 'white', color: filterYear === y ? 'white' : '#374151', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem', fontWeight: filterYear === y ? 700 : 400 }}>
-              {y}
-            </button>
+            <Button key={y} type="button" variant={filterYear === y ? 'primary' : 'secondary'} onClick={() => { setFilterYear(y); setFilterMonth(0); }}>{y}</Button>
           ))}
         </div>
-        {/* 서비스월 */}
-        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28 }}>월</span>
-          <button onClick={() => setFilterMonth(0)}
-            style={{ padding: '0.25rem 0.65rem', border: '1px solid', borderColor: filterMonth === 0 ? '#6b7280' : '#e5e7eb', background: filterMonth === 0 ? '#6b7280' : 'white', color: filterMonth === 0 ? 'white' : '#374151', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem' }}>
-            전체
-          </button>
+        <div className="data-tabs tw-mb-0">
+          <Button type="button" variant={filterMonth === 0 ? 'primary' : 'secondary'} onClick={() => setFilterMonth(0)}>전체</Button>
           {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-            <button key={m} onClick={() => setFilterMonth(m)}
-              style={{ padding: '0.25rem 0.6rem', border: '1px solid', borderColor: filterMonth === m ? '#1d4ed8' : '#e5e7eb', background: filterMonth === m ? '#1d4ed8' : 'white', color: filterMonth === m ? 'white' : '#374151', borderRadius: 20, cursor: 'pointer', fontSize: '0.78rem', fontWeight: filterMonth === m ? 700 : 400 }}>
-              {m}월
-            </button>
+            <Button key={m} type="button" variant={filterMonth === m ? 'primary' : 'secondary'} onClick={() => setFilterMonth(m)}>{m}월</Button>
           ))}
         </div>
-        {/* 거래처 + 상태 + 빈항목 */}
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28 }}>검색</span>
-          <input type="text" placeholder="거래처명" value={filterClient}
-            onChange={e => setFilterClient(e.target.value)}
-            style={{ padding: '0.28rem 0.6rem', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: '0.78rem', width: 110 }} />
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-            style={{ padding: '0.28rem 0.6rem', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: '0.78rem' }}>
-            <option value="">전체 상태</option>
-            {['미납', '부분납', '완납'].map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <button onClick={() => setFilterStatus(filterStatus === '미납' ? '' : '미납')}
-            style={{ padding: '0.28rem 0.65rem', background: filterStatus === '미납' ? '#fef2f2' : 'white', color: '#dc2626', border: `1px solid ${filterStatus === '미납' ? '#dc2626' : '#e5e7eb'}`, borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: filterStatus === '미납' ? 700 : 400 }}>
-            미납만
-          </button>
-          <button onClick={handleDeleteAll}
-            style={{ marginLeft: 'auto', padding: '0.28rem 0.65rem', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
-            🗑 빈 항목 정리
-          </button>
-          <button onClick={handleDedup}
-            style={{ padding: '0.28rem 0.65rem', background: '#fff7ed', color: '#ea580c', border: '1px solid #fed7aa', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
-            🔍 중복 진단/제거
-          </button>
-          <button onClick={handleBulkComplete}
-            style={{ padding: '0.28rem 0.65rem', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}>
-            ✅ 전체 완납 설정
-          </button>
-          <button onClick={handleDeleteAllInvoices}
-            style={{ padding: '0.28rem 0.65rem', background: '#7f1d1d', color: 'white', border: '1px solid #991b1b', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}>
-            ☠ 전체삭제
-          </button>
-        </div>
-      </div>
+        <Input placeholder="거래처명" value={filterClient} onChange={e => setFilterClient(e.target.value)} className="tw-max-w-[160px]" />
+        <Select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="tw-max-w-[140px]">
+          <option value="">전체 상태</option>
+          {['미납', '부분납', '완납'].map(s => <option key={s} value={s}>{s}</option>)}
+        </Select>
+        <Button type="button" variant={filterStatus === '미납' ? 'danger' : 'ghost'} onClick={() => setFilterStatus(filterStatus === '미납' ? '' : '미납')}>미납만</Button>
+      </FilterBar>
 
       {/* 목록 테이블 */}
       <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
@@ -583,7 +547,7 @@ export default function BillingInvoicePage() {
               <thead>
                 <tr>
                   {['청구일', '거래처', '서비스월', '청구합계', '입금액', '미수금', '상태', '업로더', ''].map(h => (
-                    <th key={h}>{h}</th>
+                    <th key={h} className={['청구합계', '입금액', '미수금'].includes(h) ? 'cell-num' : undefined}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -596,9 +560,9 @@ export default function BillingInvoicePage() {
                       <td>{fmtDt(inv.invoice_date)}{overdue && <span style={{ marginLeft: 4, color: '#dc2626', fontSize: '0.68rem' }}>연체</span>}</td>
                       <td>{inv.client_name}</td>
                       <td>{inv.service_month || '-'}</td>
-                      <td>{(inv.total_amount || 0).toLocaleString()}</td>
-                      <td>{(inv.paid_amount || 0).toLocaleString()}</td>
-                      <td>{unpaid.toLocaleString()}</td>
+                      <td className="cell-num">{(inv.total_amount || 0).toLocaleString()}</td>
+                      <td className="cell-num">{(inv.paid_amount || 0).toLocaleString()}</td>
+                      <td className={unpaid > 0 ? 'cell-num tw-text-tillion-danger' : 'cell-num'}>{unpaid.toLocaleString()}</td>
                       <td>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleToggleStatus(inv); }}
@@ -610,9 +574,9 @@ export default function BillingInvoicePage() {
                       <td>{inv.created_by || '-'}</td>
                       <td>
                         <div style={{ display: 'flex', gap: '0.35rem' }}>
-                          <button onClick={(e) => { e.stopPropagation(); setDetailId(inv.id); }} style={{ ...btnSm, background: '#eff6ff', color: '#1d4ed8' }}>상세</button>
-                          <button onClick={(e) => { e.stopPropagation(); setPayingInv(inv); }} style={{ ...btnSm, background: '#f0fdf4', color: '#16a34a' }}>납부</button>
-                          <button onClick={(e) => { e.stopPropagation(); handleDelete(inv.id); }} style={{ ...btnSm, background: '#fef2f2', color: '#dc2626' }}>삭제</button>
+                          <button onClick={(e) => { e.stopPropagation(); setDetailId(inv.id); }} className="btn btn-secondary">상세</button>
+                          <button onClick={(e) => { e.stopPropagation(); setPayingInv(inv); }} className="btn btn-success">납부</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(inv.id); }} className="btn btn-danger">삭제</button>
                         </div>
                       </td>
                     </tr>
@@ -800,7 +764,3 @@ export default function BillingInvoicePage() {
     </div>
   );
 }
-
-const btnBlue: React.CSSProperties = { padding: '0.45rem 1rem', background: '#1a3c6e', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' };
-const btnGray: React.CSSProperties = { padding: '0.45rem 1rem', background: '#6b7280', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: '0.875rem' };
-const btnSm: React.CSSProperties = { padding: '0.25rem 0.6rem', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap' };

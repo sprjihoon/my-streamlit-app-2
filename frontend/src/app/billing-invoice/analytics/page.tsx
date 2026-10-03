@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { KpiStrip } from '@/components/data';
+import { Button } from '@/components/ui/button';
+import PageHeader from '@/components/ui/page-header';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -29,11 +32,18 @@ interface Analytics {
 const fmt = (n: number) => n.toLocaleString('ko-KR') + '원';
 const K = (n: number) => (n / 10000).toFixed(0) + '만';
 
-const COLORS = ['#1a3c6e', '#2563eb', '#0891b2', '#16a34a', '#7c3aed', '#d97706', '#dc2626', '#84cc16', '#f97316', '#6b7280'];
+const COLORS = [
+  'var(--color-brand)',
+  'var(--color-brand-dark)',
+  'var(--color-success)',
+  'var(--color-warning)',
+  'var(--color-danger)',
+  'var(--text-secondary)',
+];
 
 // ─── SVG 바차트 ──────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function BarChart({ data, keyY = 'total', color = '#1a3c6e', h = 140 }: {
+function BarChart({ data, keyY = 'total', color = 'var(--color-brand)', h = 140 }: {
   data: any[];
   keyY?: string; color?: string; h?: number;
 }) {
@@ -138,20 +148,17 @@ export default function BillingAnalyticsPage() {
   return (
     <div>
       {/* 헤더 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>청구금액 분석</h2>
-          <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>실 청구서 기준 매출·미수금 분석</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          {[2024, 2025, 2026, 2027].map(y => (
-            <button key={y} onClick={() => setYear(y)}
-              style={{ padding: '0.35rem 0.75rem', border: '1px solid', borderColor: year === y ? '#1a3c6e' : '#d1d5db', background: year === y ? '#1a3c6e' : 'white', color: year === y ? 'white' : '#374151', borderRadius: 6, cursor: 'pointer', fontSize: '0.8rem' }}>
-              {y}년
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="청구금액 분석"
+        subtitle="실 청구서 기준 매출과 미수금입니다."
+        actions={
+          <div className="data-tabs tw-mb-0">
+            {[2024, 2025, 2026, 2027].map(y => (
+              <Button key={y} type="button" variant={year === y ? 'primary' : 'secondary'} onClick={() => setYear(y)}>{y}년</Button>
+            ))}
+          </div>
+        }
+      />
 
       {loading ? (
         <p style={{ textAlign: 'center', color: '#9ca3af', padding: '3rem' }}>로딩 중...</p>
@@ -161,26 +168,21 @@ export default function BillingAnalyticsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
           {/* KPI */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
-            {[
-              { label: '총 청구 건수', value: `${data.summary.invoice_count}건`, color: '#1a3c6e' },
-              { label: '총 청구액', value: fmt(data.summary.total_billed), color: '#1d4ed8' },
-              { label: '총 입금액', value: fmt(data.summary.total_paid), color: '#16a34a' },
-              { label: '총 미수금', value: fmt(data.summary.total_unpaid), color: data.summary.total_unpaid > 0 ? '#dc2626' : '#16a34a' },
-            ].map(k => (
-              <div key={k.label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginBottom: '0.25rem' }}>{k.label}</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: k.color }}>{k.value}</div>
-              </div>
-            ))}
-          </div>
+          <KpiStrip
+            items={[
+              { label: '총 청구 건수', value: `${data.summary.invoice_count}건` },
+              { label: '총 청구액', value: fmt(data.summary.total_billed) },
+              { label: '총 입금액', value: <span className="tw-text-tillion-success">{fmt(data.summary.total_paid)}</span> },
+              { label: '총 미수금', value: <span className={data.summary.total_unpaid > 0 ? 'tw-text-tillion-danger' : 'tw-text-tillion-success'}>{fmt(data.summary.total_unpaid)}</span> },
+            ]}
+          />
 
           {/* 월별 추이 */}
           {card('📈 월별 청구 추이',
             data.monthly.length === 0
               ? <p style={{ color: '#9ca3af', fontSize: '0.8rem' }}>데이터 없음</p>
               : <>
-                <BarChart data={data.monthly} keyY="total" color="#1a3c6e" />
+                <BarChart data={data.monthly} keyY="total" color="var(--color-brand)" />
                 <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', fontSize: '0.72rem', color: '#9ca3af' }}>
                   {data.monthly.map(m => (
                     <div key={m.month} style={{ flex: 1, textAlign: 'center' }}>
@@ -261,7 +263,7 @@ export default function BillingAnalyticsPage() {
               </div>
               {clientTrend.length > 0
                 ? <>
-                  <BarChart data={clientTrend} keyY="total" color="#0891b2" />
+                  <BarChart data={clientTrend} keyY="total" color="var(--color-brand-dark)" />
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '0.4rem', marginTop: '0.5rem', fontSize: '0.72rem' }}>
                     {clientTrend.map(m => (
                       <div key={m.month} style={{ background: '#f9fafb', borderRadius: 6, padding: '0.4rem', textAlign: 'center' }}>

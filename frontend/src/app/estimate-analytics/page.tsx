@@ -3,7 +3,7 @@ import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import { Loading } from '@/components/Loading';
-import { DateRangeControl, FilterBar } from '@/components/data';
+import { DateRangeControl, FilterBar, KpiStrip } from '@/components/data';
 import { Button } from '@/components/ui/button';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -206,12 +206,6 @@ export default function EstimateAnalyticsPage() {
     boxShadow: '0 1px 3px rgba(0,0,0,.08)',
   };
 
-  const statCardStyle: React.CSSProperties = {
-    ...cardStyle,
-    textAlign: 'center',
-    padding: '1.25rem 1rem',
-  };
-
   const visitorTotalPages = Math.max(1, Math.ceil(visitorTotal / pageSize));
   const calcTotalPages = Math.max(1, Math.ceil(calcTotal / pageSize));
 
@@ -250,34 +244,16 @@ export default function EstimateAnalyticsPage() {
           {activeTab === 'overview' && stats && (
             <>
               {/* 요약 카드 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>총 방문수</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#3b82f6' }}>{fmt(stats.summary.total_visits)}</div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>고유 방문자</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981' }}>{fmt(stats.summary.unique_visitors)}</div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>총 계산 횟수</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#8b5cf6' }}>{fmt(stats.summary.total_calculations)}</div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>전환율</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f59e0b' }}>{stats.summary.conversion_rate}%</div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>모바일 접속</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ec4899' }}>{fmt(stats.summary.mobile_count)}</div>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>{stats.summary.mobile_rate}%</div>
-                </div>
-                <div style={statCardStyle}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: 4 }}>평균 체류시간</div>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#06b6d4' }}>{fmtDuration(stats.summary.avg_duration_seconds)}</div>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>최대 {fmtDuration(stats.summary.max_duration_seconds)}</div>
-                </div>
-              </div>
+              <KpiStrip
+                items={[
+                  { label: '총 방문수', value: fmt(stats.summary.total_visits) },
+                  { label: '고유 방문자', value: <span className="tw-text-tillion-success">{fmt(stats.summary.unique_visitors)}</span> },
+                  { label: '총 계산 횟수', value: fmt(stats.summary.total_calculations) },
+                  { label: '전환율', value: <span className="tw-text-tillion-warning">{stats.summary.conversion_rate}%</span> },
+                  { label: '모바일 접속', value: fmt(stats.summary.mobile_count), hint: `${stats.summary.mobile_rate}%` },
+                  { label: '평균 체류시간', value: fmtDuration(stats.summary.avg_duration_seconds), hint: `최대 ${fmtDuration(stats.summary.max_duration_seconds)}` },
+                ]}
+              />
 
               {/* 통계 그리드 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>

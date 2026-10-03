@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
+import { DateRangeControl, FilterBar, KpiStrip } from '@/components/data';
+import { Select } from '@/components/ui/select';
 import {
   getDefectLogs,
   getDefectLogStats,
@@ -193,72 +195,56 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
     <>
       {/* 통계 카드 */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-          <Card title="조회 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total.toLocaleString()}</p></Card>
-          <Card title="오늘 건수"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{stats.today.toLocaleString()}</p></Card>
-          <Card title="미처리"><p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626' }}>{stats.unresolved.toLocaleString()}</p></Card>
-          <Card title="처리결과">
-            <div style={{ fontSize: '0.8rem', lineHeight: 1.8 }}>
-              {stats.by_result.map((r) => (
-                <div key={r.처리결과} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{r.처리결과}</span>
-                  <strong>{r.count}</strong>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
+        <KpiStrip
+          items={[
+            { label: '조회 건수', value: stats.total.toLocaleString() },
+            { label: '오늘 건수', value: stats.today.toLocaleString() },
+            { label: '미처리', value: <span className="tw-text-tillion-danger">{stats.unresolved.toLocaleString()}</span> },
+          ]}
+        />
+      )}
+      {stats && stats.by_result.length > 0 && (
+        <p className="caption tw-mb-3">
+          {stats.by_result.map((r) => `${r.처리결과} ${r.count.toLocaleString()}`).join(' · ')}
+        </p>
       )}
 
-      {/* 검색 필터 */}
-      <Card title="검색 필터">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>시작일</label>
-            <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className="ui-control" />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>종료일</label>
-            <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className="ui-control" />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>업체명</label>
-            <select value={vendor} onChange={(e) => setVendor(e.target.value)} className="ui-control">
-              <option value="">전체</option>
-              {filters?.vendors.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>불량명</label>
-            <select value={defect} onChange={(e) => setDefect(e.target.value)} className="ui-control">
-              <option value="">전체</option>
-              {filters?.defects.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>처리결과</label>
-            <select value={resultFilter} onChange={(e) => setResultFilter(e.target.value)} className="ui-control">
-              <option value="">전체</option>
-              <option value="미처리">미처리</option>
-              {RESULT_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>작성자</label>
-            <select value={author} onChange={(e) => setAuthor(e.target.value)} className="ui-control">
-              <option value="">전체</option>
-              {filters?.authors.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button onClick={() => { setCurrentPage(1); load(); }} style={btn('#2563eb')}>검색</button>
+      <FilterBar>
+        <DateRangeControl from={periodFrom} to={periodTo} onFrom={setPeriodFrom} onTo={setPeriodTo} />
+        <Field label="업체명">
+          <Select value={vendor} onChange={(e) => setVendor(e.target.value)}>
+            <option value="">전체</option>
+            {filters?.vendors.map((v) => <option key={v} value={v}>{v}</option>)}
+          </Select>
+        </Field>
+        <Field label="불량명">
+          <Select value={defect} onChange={(e) => setDefect(e.target.value)}>
+            <option value="">전체</option>
+            {filters?.defects.map((d) => <option key={d} value={d}>{d}</option>)}
+          </Select>
+        </Field>
+        <Field label="처리결과">
+          <Select value={resultFilter} onChange={(e) => setResultFilter(e.target.value)}>
+            <option value="">전체</option>
+            <option value="미처리">미처리</option>
+            {RESULT_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </Select>
+        </Field>
+        <Field label="작성자">
+          <Select value={author} onChange={(e) => setAuthor(e.target.value)}>
+            <option value="">전체</option>
+            {filters?.authors.map((a) => <option key={a} value={a}>{a}</option>)}
+          </Select>
+        </Field>
+      </FilterBar>
+      <div className="tw-mb-3 tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+          <button onClick={() => { setCurrentPage(1); load(); }} className="btn btn-primary">검색</button>
           <button onClick={() => {
             const r = monthRange();
             setPeriodFrom(r.from); setPeriodTo(r.to);
             setVendor(''); setDefect(''); setAuthor(''); setResultFilter(''); setUnresolvedOnly(false);
             setCurrentPage(1);
-          }} style={btn('#6b7280')}>초기화</button>
+          }} className="btn btn-ghost">초기화</button>
           <button
             onClick={async () => {
               if (!periodFrom || !periodTo) {
@@ -283,7 +269,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
               }
             }}
             disabled={excelExporting}
-            style={btn('#0f766e')}
+            className="btn btn-secondary"
           >
             {excelExporting ? '엑셀 만드는 중...' : '엑셀 다운로드 (사진 포함)'}
           </button>
@@ -295,20 +281,19 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             />
             미처리만 보기
           </label>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
-            <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: 4 }}>
+          <div className="tw-ml-auto">
+            <label className="ops-label">페이지당</label>
+            <Select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}>
               <option value={50}>50개</option>
               <option value={100}>100개</option>
               <option value={200}>200개</option>
               <option value={0}>전체</option>
-            </select>
+            </Select>
           </div>
         </div>
-        <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0.6rem 0 0' }}>
+        <p className="caption tw-mb-3">
           엑셀은 현재 선택한 업체·기간·불량명·처리결과 필터의 불량일지와 사진을 담습니다.
         </p>
-      </Card>
 
       {/* 목록 */}
       <div style={{ marginTop: '1rem' }}>
@@ -333,7 +318,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
             >
               {fillBusy ? '갱신 중…' : '🔍 바코드로 정보 갱신'}
             </button>
-            <button onClick={() => setShowAdd(true)} style={btn('#22c55e')}>➕ 수동 추가</button>
+            <button onClick={() => setShowAdd(true)} className="btn btn-success">➕ 수동 추가</button>
           </div>
         </div>
 
@@ -639,8 +624,8 @@ function DefectFormModal({
           </div>
         )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-          <button onClick={onClose} style={btn('#6b7280')}>취소</button>
-          <button onClick={save} disabled={saving} style={btn('#2563eb')}>{saving ? '저장 중...' : '저장'}</button>
+          <button onClick={onClose} className="btn btn-ghost">취소</button>
+          <button onClick={save} disabled={saving} className="btn btn-primary">{saving ? '저장 중...' : '저장'}</button>
         </div>
       </div>
     </Modal>
@@ -649,8 +634,8 @@ function DefectFormModal({
 
 function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div>
-      <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>{label}</label>
+    <div className="form-group">
+      <label>{label}</label>
       {children}
     </div>
   );
@@ -663,17 +648,13 @@ function Modal({ title, onClose, children, maxWidth = 560 }: {
   maxWidth?: number;
 }) {
   return (
-    <div style={{
-      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-    }}>
-      <div style={{
-        backgroundColor: 'white', padding: '1.5rem', borderRadius: 8,
-        maxWidth, width: '92%', maxHeight: '90vh', overflowY: 'auto',
-        boxSizing: 'border-box',
-      }}>
-        <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '1rem' }}>{title}</h2>
-        {children}
+    <div className="data-modal-backdrop">
+      <div className="data-modal" style={{ maxWidth }}>
+        <div className="data-modal-head">
+          <h2>{title}</h2>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>닫기</button>
+        </div>
+        <div className="data-modal-body">{children}</div>
       </div>
     </div>
   );
@@ -684,8 +665,8 @@ function ConfirmModal({ text, onCancel, onConfirm }: { text: string; onCancel: (
     <Modal title="확인" onClose={onCancel}>
       <p style={{ marginBottom: 16 }}>{text}</p>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button onClick={onCancel} style={btn('#6b7280')}>취소</button>
-        <button onClick={onConfirm} style={btn('#ef4444')}>삭제</button>
+        <button onClick={onCancel} className="btn btn-ghost">취소</button>
+        <button onClick={onConfirm} className="btn btn-danger">삭제</button>
       </div>
     </Modal>
   );
