@@ -5,6 +5,11 @@ import { useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
+import { DateRangeControl, FilterBar, KpiStrip, TableSummary } from '@/components/data';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Select } from '@/components/ui/select';
 import { 
   getWorkLogs, 
   getWorkLogStats, 
@@ -256,38 +261,13 @@ export default function WorkLogPage() {
   };
 
   const getSourceBadge = (source: string | null) => {
-    const colors: Record<string, string> = {
-      bot: '#22c55e',
-      excel: '#3b82f6',
-      manual: '#8b5cf6',
-    };
-    const labels: Record<string, string> = {
-      bot: '🤖 봇',
-      excel: '📊 엑셀',
-      manual: '✏️ 수동',
-    };
-    const color = colors[source || ''] || '#6b7280';
-    const label = labels[source || ''] || source || '-';
-    
-    return (
-      <span style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.25rem',
-        padding: '0.125rem 0.5rem',
-        borderRadius: '4px',
-        fontSize: '0.75rem',
-        backgroundColor: color,
-        color: 'white',
-        fontWeight: source === 'bot' ? '600' : '400',
-      }}>
-        {label}
-      </span>
-    );
+    const variant = source === 'bot' ? 'success' : source === 'excel' ? 'info' : source === 'manual' ? 'neutral' : 'neutral';
+    const labels: Record<string, string> = { bot: '봇', excel: '엑셀', manual: '수동' };
+    return <Badge variant={variant}>{labels[source || ''] || source || '-'}</Badge>;
   };
 
   return (
-    <div style={{ padding: '1rem' }}>
+    <div>
       <PageHeader title="작업일지" />
 
       {message && (
@@ -304,128 +284,60 @@ export default function WorkLogPage() {
 
       {/* 통계 카드 */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-          <Card title="전체 건수">
-            <p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total.toLocaleString()}</p>
-          </Card>
-          <Card title="전체 금액">
-            <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a' }}>
-              {stats.total_amount.toLocaleString()}원
-            </p>
-          </Card>
-          <Card title="오늘 건수">
-            <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb' }}>{stats.today.toLocaleString()}</p>
-          </Card>
-          {stats.by_source.slice(0, 2).map((item, idx) => (
-            <Card key={idx} title={`출처: ${item.출처 || '미지정'}`}>
-              <p style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{item.count.toLocaleString()}건</p>
-            </Card>
-          ))}
-        </div>
+        <KpiStrip
+          items={[
+            { label: '전체 건수', value: stats.total.toLocaleString() },
+            { label: '전체 금액', value: <span className="tw-text-tillion-success">{stats.total_amount.toLocaleString()}원</span> },
+            { label: '오늘 건수', value: stats.today.toLocaleString() },
+            ...stats.by_source.slice(0, 2).map((item) => ({
+              label: `출처: ${item.출처 || '미지정'}`,
+              value: `${item.count.toLocaleString()}건`,
+            })),
+          ]}
+        />
       )}
 
-      {/* 필터 */}
-      <Card title="검색 필터">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>시작일</label>
-            <input
-              type="date"
-              value={periodFrom}
-              onChange={(e) => setPeriodFrom(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>종료일</label>
-            <input
-              type="date"
-              value={periodTo}
-              onChange={(e) => setPeriodTo(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>업체명</label>
-            <select
-              value={vendor}
-              onChange={(e) => setVendor(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            >
-              <option value="">전체</option>
-              {filters?.vendors.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>작업 종류</label>
-            <select
-              value={workType}
-              onChange={(e) => setWorkType(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            >
-              <option value="">전체</option>
-              {filters?.work_types.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>작성자</label>
-            <select
-              value={author}
-              onChange={(e) => setAuthor(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            >
-              <option value="">전체</option>
-              {filters?.authors.map((a) => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>출처</label>
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            >
-              <option value="">전체</option>
-              <option value="bot">봇</option>
-              <option value="excel">엑셀</option>
-              <option value="manual">수동</option>
-            </select>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            onClick={handleSearch}
-            style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: '#2563eb',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            검색
-          </button>
-          <button
-            onClick={handleReset}
-            style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: '#6b7280',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
-            초기화
-          </button>
-          <button
+      <FilterBar>
+        <DateRangeControl from={periodFrom} to={periodTo} onFrom={setPeriodFrom} onTo={setPeriodTo} />
+        <Field label="업체명">
+          <Select value={vendor} onChange={(e) => setVendor(e.target.value)}>
+            <option value="">전체</option>
+            {filters?.vendors.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="작업 종류">
+          <Select value={workType} onChange={(e) => setWorkType(e.target.value)}>
+            <option value="">전체</option>
+            {filters?.work_types.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="작성자">
+          <Select value={author} onChange={(e) => setAuthor(e.target.value)}>
+            <option value="">전체</option>
+            {filters?.authors.map((a) => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="출처">
+          <Select value={source} onChange={(e) => setSource(e.target.value)}>
+            <option value="">전체</option>
+            <option value="bot">봇</option>
+            <option value="excel">엑셀</option>
+            <option value="manual">수동</option>
+          </Select>
+        </Field>
+      </FilterBar>
+      <div className="tw-mb-3 tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+          <Button type="button" onClick={handleSearch}>검색</Button>
+          <Button type="button" variant="ghost" onClick={handleReset}>초기화</Button>
+          <Button
+            type="button"
+            variant="secondary"
             onClick={async () => {
               if (!periodFrom || !periodTo) {
                 setMessage({ type: 'error', text: '엑셀 보고를 위해 시작일과 종료일을 선택하세요.' });
@@ -453,74 +365,35 @@ export default function WorkLogPage() {
               }
             }}
             disabled={excelExporting}
-            style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: excelExporting ? '#99f6e4' : '#0f766e',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: excelExporting ? 'wait' : 'pointer',
-            }}
           >
             {excelExporting ? '엑셀 만드는 중...' : '엑셀 다운로드'}
-          </button>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.875rem', color: '#666' }}>페이지당:</span>
-            <select
-              value={pageSize}
-              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-              style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
-            >
+          </Button>
+          <Field label="페이지당" className="tw-mb-0 tw-ml-auto">
+            <Select value={pageSize} onChange={(e) => handlePageSizeChange(Number(e.target.value))}>
               <option value={50}>50개</option>
               <option value={100}>100개</option>
               <option value={200}>200개</option>
               <option value={0}>전체</option>
-            </select>
-          </div>
+            </Select>
+          </Field>
         </div>
-        <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0.6rem 0 0' }}>
+        <p className="caption tw-mb-3">
           엑셀은 현재 선택한 기간·업체·작업 종류·작성자·출처 필터의 작업일지를 담습니다. 화면에 보이는 페이지와 관계없이 조건에 맞는 모든 건이 들어갑니다.
         </p>
-      </Card>
 
       {/* 작업일지 목록 */}
-      <div style={{ marginTop: '1rem' }}>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '0.5rem'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: '600' }}>
-            작업일지 목록 
-            <span style={{ color: '#666', fontWeight: '400', marginLeft: '0.5rem' }}>
-              ({pageSize === 0 ? totalCount : `${logs.length}/${totalCount}`}건)
-              {totalPages > 1 && ` - ${currentPage}/${totalPages}페이지`}
-            </span>
-          </h3>
-          <button
-            onClick={() => setShowAddModal(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.5rem 1rem',
-              backgroundColor: '#22c55e',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: '500',
-            }}
-          >
-            ➕ 수동 추가
-          </button>
-        </div>
+      <div className="tw-mb-2 tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2">
+        <TableSummary>
+          작업일지 {pageSize === 0 ? totalCount : `${logs.length}/${totalCount}`}건
+          {totalPages > 1 ? ` · ${currentPage}/${totalPages}페이지` : ''}
+        </TableSummary>
+        <Button type="button" variant="success" onClick={() => setShowAddModal(true)}>수동 추가</Button>
+      </div>
       <Card title="" style={{ marginTop: '0' }}>
         {loading ? (
           <Loading />
         ) : logs.length === 0 ? (
-          <p style={{ color: '#666' }}>작업일지가 없습니다.</p>
+          <p className="caption">작업일지가 없습니다.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table>
@@ -702,7 +575,6 @@ export default function WorkLogPage() {
           </div>
         )}
       </Card>
-      </div>
 
       {/* 새 작업일지 추가 모달 */}
       {showAddModal && (

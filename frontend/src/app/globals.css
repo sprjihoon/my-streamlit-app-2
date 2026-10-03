@@ -701,9 +701,6 @@ tbody tr:hover { background: #f6f7fb; }
    그리드
 ───────────────────────────────────────── */
 .grid   { display: grid; gap: 1rem; }
-.grid-2 { grid-template-columns: repeat(2, 1fr); }
-.grid-3 { grid-template-columns: repeat(3, 1fr); }
-.grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-5 { grid-template-columns: repeat(5, 1fr); }
 
 /* ─────────────────────────────────────────
@@ -839,18 +836,13 @@ tbody tr:hover { background: #f6f7fb; }
 .text-right   { text-align: right; }
 .text-center  { text-align: center; }
 .text-muted   { color: var(--text-secondary); }
-.text-small   { font-size: 0.8125rem; }
 .mb-1  { margin-bottom: 1rem; }
 .mt-1  { margin-top: 1rem; }
-.mb-05 { margin-bottom: 0.5rem; }
-.mt-05 { margin-top: 0.5rem; }
 
 .flex         { display: flex; align-items: center; }
-.flex-between { display: flex; justify-content: space-between; align-items: center; }
 .flex-wrap    { flex-wrap: wrap; }
 .gap-05 { gap: 0.5rem; }
 .gap-1  { gap: 1rem; }
-.gap-15 { gap: 1.5rem; }
 
 .badge {
   display: inline-flex;
@@ -862,11 +854,6 @@ tbody tr:hover { background: #f6f7fb; }
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
-.badge-blue    { background: #dbeafe; color: #1d4ed8; }
-.badge-green   { background: #dcfce7; color: #15803d; }
-.badge-red     { background: #fee2e2; color: #b91c1c; }
-.badge-yellow  { background: #fef9c3; color: #854d0e; }
-.badge-gray    { background: #f3f4f6; color: #4b5563; }
 
 /* ─────────────────────────────────────────
    해외배송 (PC 작업 화면)
@@ -1085,7 +1072,7 @@ tbody tr:hover { background: #f6f7fb; }
     padding: 1rem;
   }
   .layout { flex-direction: column; }
-  .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: 1fr; }
+  .grid-5 { grid-template-columns: 1fr; }
   .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric-value { font-size: 1.15rem; }
   .domestic-field.w-addr input,

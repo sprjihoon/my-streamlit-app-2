@@ -7,6 +7,10 @@ import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
 import { KpiStrip } from '@/components/data';
 import { calculateInvoice, getVendors, Vendor } from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -363,107 +367,80 @@ export default function InvoicePage() {
       {/* 계산 조건 */}
       <Card title="📅 계산 조건" style={{ marginBottom: '1rem' }}>
         {/* 월 빠른 선택 */}
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>📆 월 빠른 선택</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <select
+        <div className="tw-mb-4">
+          <label className="ops-label">월 빠른 선택</label>
+          <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+            <Select
               value={selectedYear}
               onChange={(e) => {
                 const year = parseInt(e.target.value);
                 setSelectedYear(year);
               }}
-              style={{ 
-                padding: '0.5rem', 
-                border: '1px solid #ddd', 
-                borderRadius: '4px',
-                fontWeight: 500,
-                minWidth: '90px'
-              }}
+              className="tw-max-w-[110px]"
             >
               {[...Array(5)].map((_, i) => {
                 const year = new Date().getFullYear() - 2 + i;
                 return <option key={year} value={year}>{year}년</option>;
               })}
-            </select>
-            <div style={{ 
-              display: 'flex', 
-              gap: '0.25rem', 
-              flexWrap: 'wrap',
-              flex: 1
-            }}>
+            </Select>
+            <div className="data-tabs tw-mb-0">
               {[...Array(12)].map((_, i) => {
                 const month = i;
-                // dateFrom에서 월과 일을 직접 파싱 (시간대 문제 방지)
                 const [fromYear, fromMonth] = dateFrom.split('-').map(Number);
                 const [, toMonth] = dateTo.split('-').map(Number);
-                const isSelected = selectedYear === fromYear && 
-                  (fromMonth - 1) === month && 
+                const isSelected = selectedYear === fromYear &&
+                  (fromMonth - 1) === month &&
                   (toMonth - 1) === month;
                 return (
-                  <button
+                  <Button
                     key={month}
+                    type="button"
+                    variant={isSelected ? 'primary' : 'secondary'}
                     onClick={() => {
                       const firstDay = new Date(selectedYear, month, 1);
                       const lastDay = new Date(selectedYear, month + 1, 0);
                       setDateFrom(formatLocalDate(firstDay));
                       setDateTo(formatLocalDate(lastDay));
                     }}
-                    style={{
-                      padding: '0.4rem 0.6rem',
-                      border: isSelected ? '2px solid #4CAF50' : '1px solid #ddd',
-                      borderRadius: '4px',
-                      background: isSelected ? '#e8f5e9' : '#f9f9f9',
-                      cursor: 'pointer',
-                      fontWeight: isSelected ? 600 : 400,
-                      color: isSelected ? '#2e7d32' : '#333',
-                      transition: 'all 0.15s ease',
-                      minWidth: '45px'
-                    }}
                   >
                     {month + 1}월
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: mode === 'single' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+        <div className="data-form-grid">
           {mode === 'single' && (
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>공급처명</label>
-              <select
+            <Field label="공급처명">
+              <Select
                 value={singleVendor}
                 onChange={(e) => setSingleVendor(e.target.value)}
-                style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
               >
                 <option value="">선택하세요</option>
                 {vendors.map(v => (
                   <option key={v.vendor} value={v.vendor}>
-                    {v.vendor} {v.active === 'YES' ? '🟢' : '⚪'}
+                    {v.vendor} {v.active === 'YES' ? '활성' : '비활성'}
                   </option>
                 ))}
-              </select>
-            </div>
+              </Select>
+            </Field>
           )}
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>시작일</label>
-            <input
+          <Field label="시작일">
+            <Input
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
             />
-          </div>
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>종료일</label>
-            <input
+          </Field>
+          <Field label="종료일">
+            <Input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
             />
-          </div>
+          </Field>
         </div>
 
         {/* 옵션 */}
@@ -496,38 +473,22 @@ export default function InvoicePage() {
 
         {/* 작업일지 소스 선택 */}
         {includeWorklog && (
-          <div style={{ 
-            display: 'flex', 
-            gap: '0.5rem', 
-            alignItems: 'center', 
-            marginBottom: '1rem',
-            padding: '0.75rem',
-            backgroundColor: '#f8f9fa',
-            borderRadius: '8px',
-            border: '1px solid #e9ecef'
-          }}>
-            <span style={{ fontWeight: 500, color: '#495057' }}>📋 작업일지 소스:</span>
-            <select
-              value={worklogSource}
-              onChange={(e) => setWorklogSource(e.target.value as 'all' | 'bot' | 'upload')}
-              style={{
-                padding: '0.5rem 1rem',
-                border: '1px solid #ced4da',
-                borderRadius: '4px',
-                backgroundColor: 'white',
-                cursor: 'pointer',
-                fontSize: '0.9rem'
-              }}
-            >
-              <option value="all">전체 (봇 + 업로드)</option>
-              <option value="bot">봇 작업일지만</option>
-              <option value="upload">업로드 파일만</option>
-            </select>
-            <span style={{ fontSize: '0.85rem', color: '#6c757d' }}>
+          <div className="tw-mb-4 tw-flex tw-flex-wrap tw-items-end tw-gap-3 tw-rounded-lg tw-border tw-border-tillion-border tw-bg-tillion-page tw-p-3">
+            <Field label="작업일지 소스" className="tw-mb-0">
+              <Select
+                value={worklogSource}
+                onChange={(e) => setWorklogSource(e.target.value as 'all' | 'bot' | 'upload')}
+              >
+                <option value="all">전체 (봇 + 업로드)</option>
+                <option value="bot">봇 작업일지만</option>
+                <option value="upload">업로드 파일만</option>
+              </Select>
+            </Field>
+            <p className="caption">
               {worklogSource === 'all' && '모든 작업일지 데이터를 사용합니다'}
               {worklogSource === 'bot' && '봇으로 입력된 작업일지만 사용합니다'}
               {worklogSource === 'upload' && '엑셀로 업로드된 작업일지만 사용합니다'}
-            </span>
+            </p>
           </div>
         )}
       </Card>
@@ -537,29 +498,20 @@ export default function InvoicePage() {
         <>
           {/* 필터 및 거래처 선택 */}
           <Card title="✅ 계산할 거래처 선택" style={{ marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
-              <select
+            <div className="tw-mb-4 tw-flex tw-flex-wrap tw-items-center tw-gap-3">
+              <Select
                 value={showMode}
                 onChange={(e) => setShowMode(e.target.value as 'active' | 'inactive' | 'all')}
-                style={{ padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+                className="tw-max-w-[140px]"
               >
                 <option value="active">활성만</option>
                 <option value="inactive">비활성만</option>
                 <option value="all">전체</option>
-              </select>
-              <button
-                onClick={handleSelectAll}
-                style={{
-                  padding: '0.5rem 1rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  background: '#f5f5f5',
-                  cursor: 'pointer',
-                }}
-              >
+              </Select>
+              <Button type="button" variant="secondary" onClick={handleSelectAll}>
                 {selectedVendors.length === filteredVendors.length ? '전체 해제' : '전체 선택'}
-              </button>
-              <span style={{ color: '#666' }}>
+              </Button>
+              <span className="caption">
                 {selectedVendors.length} / {filteredVendors.length} 선택됨
               </span>
             </div>
@@ -592,63 +544,30 @@ export default function InvoicePage() {
           </Card>
 
           {/* 일괄 계산 버튼 */}
-          <div style={{ marginBottom: '1rem' }}>
+          <div className="tw-mb-4">
             {!isBatchRunning ? (
-              <button
+              <Button
+                type="button"
+                variant="success"
                 onClick={handleBatchCalculate}
                 disabled={selectedVendors.length === 0}
-                style={{
-                  padding: '0.75rem 2rem',
-                  backgroundColor: selectedVendors.length === 0 ? '#ccc' : '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: selectedVendors.length === 0 ? 'not-allowed' : 'pointer',
-                  fontSize: '1rem',
-                }}
               >
-                🚀 인보이스 일괄 생성 시작 ({selectedVendors.length}개)
-              </button>
+                인보이스 일괄 생성 시작 ({selectedVendors.length}개)
+              </Button>
             ) : (
-              <button
-                onClick={handleStopBatch}
-                style={{
-                  padding: '0.75rem 2rem',
-                  backgroundColor: '#f44336',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '1rem',
-                }}
-              >
-                ⏹️ 계산 중지
-              </button>
+              <Button type="button" variant="danger" onClick={handleStopBatch}>
+                계산 중지
+              </Button>
             )}
           </div>
 
           {/* 진행 상황 */}
           {(isBatchRunning || batchLogs.length > 0) && (
             <Card title="📊 진행 상황">
-              <div style={{ marginBottom: '1rem' }}>
-                <div style={{
-                  width: '100%',
-                  height: '20px',
-                  backgroundColor: '#e0e0e0',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                }}>
-                  <div style={{
-                    width: `${batchProgress}%`,
-                    height: '100%',
-                    backgroundColor: '#4CAF50',
-                    transition: 'width 0.3s',
-                  }} />
-                </div>
-                <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
-                  {batchProgress.toFixed(0)}% 완료
-                </div>
+              <div className="tw-mb-4 tw-h-5 tw-w-full tw-overflow-hidden tw-rounded-full tw-bg-tillion-border">
+                <div className="tw-h-full tw-bg-tillion-success" style={{ width: `${batchProgress}%` }} />
               </div>
+              <p className="caption tw-mb-3 tw-text-center">{batchProgress.toFixed(0)}% 완료</p>
 
               <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                 <table>
@@ -680,22 +599,15 @@ export default function InvoicePage() {
       {/* 단일 계산 모드 */}
       {mode === 'single' && (
         <>
-          <button
+          <Button
+            type="button"
+            variant="success"
+            className="tw-mb-4"
             onClick={handleSingleCalculate}
             disabled={loading || !singleVendor}
-            style={{
-              padding: '0.75rem 2rem',
-              backgroundColor: !singleVendor ? '#ccc' : '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: !singleVendor ? 'not-allowed' : 'pointer',
-              fontSize: '1rem',
-              marginBottom: '1rem',
-            }}
           >
-            {loading ? '계산 중...' : '🚀 인보이스 계산'}
-          </button>
+            {loading ? '계산 중...' : '인보이스 계산'}
+          </Button>
 
           {loading && <Loading text="인보이스 계산 중..." />}
 
@@ -709,27 +621,15 @@ export default function InvoicePage() {
                 </Alert>
               )}
 
-              <Card title={`📋 ${result.vendor} 인보이스`} style={{ marginBottom: '1rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{result.vendor}</div>
-                    <div style={{ color: '#666', fontSize: '0.875rem' }}>공급처</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{result.date_from}</div>
-                    <div style={{ color: '#666', fontSize: '0.875rem' }}>시작일</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{result.date_to}</div>
-                    <div style={{ color: '#666', fontSize: '0.875rem' }}>종료일</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'green' }}>
-                      ₩{formatNumber(result.total_amount)}
-                    </div>
-                    <div style={{ color: '#666', fontSize: '0.875rem' }}>총 금액</div>
-                  </div>
-                </div>
+              <Card title={`${result.vendor} 인보이스`} className="tw-mb-4">
+                <KpiStrip
+                  items={[
+                    { label: '공급처', value: result.vendor },
+                    { label: '시작일', value: result.date_from },
+                    { label: '종료일', value: result.date_to },
+                    { label: '총 금액', value: <span className="tw-text-tillion-success">₩{formatNumber(result.total_amount)}</span> },
+                  ]}
+                />
               </Card>
 
               <Card title="📝 상세 항목">

@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import PageHeader from '@/components/ui/page-header';
+import { Select } from '@/components/ui/select';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -236,41 +239,24 @@ export default function LeaveCalendarPage() {
 
   return (
     <div>
-      <h2 style={{ marginBottom: '0.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)' }}>연차 달력</h2>
-      <p style={{ color: '#6c757d', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
-        승인된 연차를 달력으로 확인합니다.
-      </p>
+      <PageHeader title="연차 달력" subtitle="승인된 연차를 달력으로 확인합니다." />
 
       <div style={card}>
         {/* 헤더: 월 이동 */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <h4 style={{ margin: 0 }}>{year}년 {month}월</h4>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <select value={year} onChange={e => setYear(Number(e.target.value))}
-              style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }}>
+        <div className="tw-mb-5 tw-flex tw-flex-wrap tw-items-end tw-justify-between tw-gap-3">
+          <h4 className="tw-m-0">{year}년 {month}월</h4>
+          <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+            <Select value={year} onChange={e => setYear(Number(e.target.value))} className="tw-max-w-[110px]">
               {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
-            </select>
-            <select value={month} onChange={e => setMonth(Number(e.target.value))}
-              style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }}>
+            </Select>
+            <Select value={month} onChange={e => setMonth(Number(e.target.value))} className="tw-max-w-[90px]">
               {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                 <option key={m} value={m}>{m}월</option>
               ))}
-            </select>
-            <button
-              onClick={() => { const d = new Date(year, month - 2); setYear(d.getFullYear()); setMonth(d.getMonth() + 1); }}
-              style={{ padding: '0.4rem 0.9rem', border: '1px solid #dee2e6', borderRadius: '4px', backgroundColor: 'white', cursor: 'pointer' }}>
-              ◀
-            </button>
-            <button
-              onClick={() => { setYear(new Date().getFullYear()); setMonth(new Date().getMonth() + 1); }}
-              style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', backgroundColor: 'white', cursor: 'pointer', fontSize: '0.875rem' }}>
-              오늘
-            </button>
-            <button
-              onClick={() => { const d = new Date(year, month); setYear(d.getFullYear()); setMonth(d.getMonth() + 1); }}
-              style={{ padding: '0.4rem 0.9rem', border: '1px solid #dee2e6', borderRadius: '4px', backgroundColor: 'white', cursor: 'pointer' }}>
-              ▶
-            </button>
+            </Select>
+            <Button type="button" variant="secondary" onClick={() => { const d = new Date(year, month - 2); setYear(d.getFullYear()); setMonth(d.getMonth() + 1); }}>이전</Button>
+            <Button type="button" variant="secondary" onClick={() => { setYear(new Date().getFullYear()); setMonth(new Date().getMonth() + 1); }}>오늘</Button>
+            <Button type="button" variant="secondary" onClick={() => { const d = new Date(year, month); setYear(d.getFullYear()); setMonth(d.getMonth() + 1); }}>다음</Button>
           </div>
         </div>
 

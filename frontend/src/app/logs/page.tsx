@@ -41,15 +41,11 @@ interface LogsResult {
 
 // ─── helpers ─────────────────────────────────────────────────────────
 function actionColor(action: string): string {
-  if (action.includes('삭제')) return '#dc2626';
-  if (action.includes('반려')) return '#f97316';
-  if (action.includes('승인') || action.includes('확정')) return '#16a34a';
-  if (action.includes('수정') || action.includes('업데이트')) return '#2563eb';
-  if (action.includes('생성') || action.includes('등록')) return '#7c3aed';
-  if (action.includes('업로드')) return '#0891b2';
-  if (action.includes('로그인')) return '#4f46e5';
-  if (action.includes('신청')) return '#d97706';
-  return '#6b7280';
+  if (action.includes('삭제') || action.includes('반려')) return 'var(--color-danger)';
+  if (action.includes('승인') || action.includes('확정') || action.includes('생성') || action.includes('등록')) return 'var(--color-success)';
+  if (action.includes('수정') || action.includes('업데이트') || action.includes('업로드') || action.includes('신청')) return 'var(--color-warning)';
+  if (action.includes('로그인')) return 'var(--color-brand)';
+  return 'var(--text-secondary)';
 }
 
 function fmtDt(s: string | null) {
@@ -64,7 +60,7 @@ function Arrow({ pct }: { pct: number }) {
 }
 
 // ─── SVG 차트 컴포넌트 ─────────────────────────────────────────────
-function BarChart({ data, keyX, keyY, color = '#2563eb', height = 120, maxBars = 30 }: {
+function BarChart({ data, keyX, keyY, color = 'var(--color-brand)', height = 120, maxBars = 30 }: {
   data: Record<string, number | string>[];
   keyX: string; keyY: string;
   color?: string; height?: number; maxBars?: number;
@@ -115,7 +111,7 @@ function HeatBar({ data }: { data: { hour: number; count: number }[] }) {
             style={{
               flex: 1,
               height: h,
-              backgroundColor: `rgba(37,99,235,${alpha.toFixed(2)})`,
+              backgroundColor: `rgba(67,97,238,${alpha.toFixed(2)})`,
               borderRadius: '2px 2px 0 0',
               cursor: 'default',
             }}
@@ -232,7 +228,7 @@ export default function LogsPage() {
     if (t === 'dashboard') loadAnalytics(token);
   };
 
-  const FEATURE_COLORS = ['#2563eb', '#16a34a', '#7c3aed', '#d97706', '#0891b2', '#dc2626', '#f97316', '#84cc16'];
+  const FEATURE_COLORS = ['var(--color-brand)', 'var(--color-success)', 'var(--color-warning)', 'var(--color-danger)', 'var(--text-secondary)'];
 
   // ── 사용자별 집계 ────────────────────────────────────
   const userSummary = analytics

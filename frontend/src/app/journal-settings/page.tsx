@@ -3,6 +3,8 @@ import PageHeader from '@/components/ui/page-header';
 
 import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/Card';
+import { Alert } from '@/components/Alert';
+import { Button } from '@/components/ui/button';
 import { Loading } from '@/components/Loading';
 import {
   getRepairBarcodes,
@@ -41,8 +43,8 @@ const btn = (bg: string): React.CSSProperties => ({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>{label}</label>
+    <div className="form-group">
+      <label>{label}</label>
       {children}
     </div>
   );
@@ -52,10 +54,13 @@ function Modal({ title, onClose, children, maxWidth = 400 }: {
   title: string; onClose: () => void; children: React.ReactNode; maxWidth?: number;
 }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div style={{ backgroundColor: 'white', padding: '1.5rem', borderRadius: 8, maxWidth, width: '92%' }}>
-        <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '1rem' }}>{title}</h2>
-        {children}
+    <div className="data-modal-backdrop">
+      <div className="data-modal" style={{ maxWidth }}>
+        <div className="data-modal-head">
+          <h2>{title}</h2>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>닫기</button>
+        </div>
+        <div className="data-modal-body">{children}</div>
       </div>
     </div>
   );
@@ -66,8 +71,8 @@ function ConfirmModal({ text, onCancel, onConfirm }: { text: string; onCancel: (
     <Modal title="확인" onClose={onCancel}>
       <p style={{ marginBottom: 16 }}>{text}</p>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button onClick={onCancel} style={btn('#6b7280')}>취소</button>
-        <button onClick={onConfirm} style={btn('#ef4444')}>삭제</button>
+        <button onClick={onCancel} className="btn btn-ghost">취소</button>
+        <button onClick={onConfirm} className="btn btn-danger">삭제</button>
       </div>
     </Modal>
   );
@@ -321,9 +326,9 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
           <input value={form.상품명} onChange={(e) => setForm({ ...form, 상품명: e.target.value })} className="ui-control" />
         </Field>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <button onClick={saveManual} style={btn('#2563eb')}>{editing ? '수정 저장' : '등록'}</button>
+          <button onClick={saveManual} className="btn btn-primary">{editing ? '수정 저장' : '등록'}</button>
           {editing && (
-            <button onClick={() => { setEditing(null); setForm(emptyForm); }} style={btn('#6b7280')}>취소</button>
+            <button onClick={() => { setEditing(null); setForm(emptyForm); }} className="btn btn-ghost">취소</button>
           )}
         </div>
       </Card>
@@ -361,7 +366,7 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
               <option value="">전체 업체</option>
               {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
-            <button onClick={load} style={btn('#2563eb')}>검색</button>
+            <button onClick={load} className="btn btn-primary">검색</button>
           </div>
           {loading ? <Loading /> : items.length === 0 ? (
             <p style={{ color: '#666' }}>등록된 바코드가 없습니다.</p>
@@ -736,8 +741,8 @@ function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error';
           <Field label="별칭">
             <input value={workForm.별칭} onChange={(e) => setWorkForm({ ...workForm, 별칭: e.target.value })} placeholder="스팀" className="ui-control" />
           </Field>
-          <button onClick={saveWork} style={btn('#2563eb')}>{editingWork ? '수정 저장' : '추가'}</button>
-          {editingWork && <button onClick={() => { setEditingWork(null); setWorkForm(emptyWork); }} style={btn('#6b7280')}>취소</button>}
+          <button onClick={saveWork} className="btn btn-primary">{editingWork ? '수정 저장' : '추가'}</button>
+          {editingWork && <button onClick={() => { setEditingWork(null); setWorkForm(emptyWork); }} className="btn btn-ghost">취소</button>}
         </div>
         {loading ? <Loading /> : (
           <div style={{ overflowX: 'auto' }}>
@@ -777,8 +782,8 @@ function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error';
             <Field label="별칭">
               <input value={defectForm.별칭} onChange={(e) => setDefectForm({ ...defectForm, 별칭: e.target.value })} placeholder="구멍수선" className="ui-control" />
             </Field>
-            <button onClick={saveDefect} style={btn('#2563eb')}>{editingDefect ? '수정 저장' : '추가'}</button>
-            {editingDefect && <button onClick={() => { setEditingDefect(null); setDefectForm(emptyDefect); }} style={btn('#6b7280')}>취소</button>}
+            <button onClick={saveDefect} className="btn btn-primary">{editingDefect ? '수정 저장' : '추가'}</button>
+            {editingDefect && <button onClick={() => { setEditingDefect(null); setDefectForm(emptyDefect); }} className="btn btn-ghost">취소</button>}
           </div>
           {loading ? <Loading /> : (
             <div style={{ overflowX: 'auto' }}>
@@ -1027,37 +1032,13 @@ export default function JournalSettingsPage() {
     <div>
       <PageHeader title="일지 설정" />
 
-      {message && (
-        <div style={{
-          marginBottom: 12, padding: '0.75rem 1rem', borderRadius: 6,
-          backgroundColor: message.type === 'success' ? '#dcfce7' : '#fee2e2',
-          color: message.type === 'success' ? '#166534' : '#991b1b',
-          fontSize: '0.9rem',
-        }}>
-          {message.text}
-          <button onClick={() => setMessage(null)} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>×</button>
-        </div>
-      )}
+      {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
-      {/* 탭 헤더 */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', marginBottom: '1rem' }}>
+      <div className="data-tabs">
         {tabs.map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key as typeof tab)}
-            style={{
-              padding: '0.6rem 1.2rem',
-              background: 'none',
-              border: 'none',
-              borderBottom: tab === key ? '2px solid #2563eb' : '2px solid transparent',
-              cursor: 'pointer',
-              color: tab === key ? '#2563eb' : '#6b7280',
-              fontWeight: tab === key ? 700 : 500,
-              fontSize: '0.95rem',
-            }}
-          >
-            {label}
-          </button>
+          <Button key={key} type="button" variant={tab === key ? 'primary' : 'secondary'} onClick={() => setTab(key as typeof tab)}>
+            {label.replace('🤖 ', '')}
+          </Button>
         ))}
       </div>
 
