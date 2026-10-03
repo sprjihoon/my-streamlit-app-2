@@ -102,18 +102,18 @@ function SectionToggle({ open, label, badge, onToggle }: {
 function BarcodeItem({ b }: { b: RepairBarcode }) {
   return (
     <>
-      <div className="ops-g-b62b6f44">
+      <div className="tw-text-tillion-text tw-text-[13px] tw-font-semibold">
         {b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}
       </div>
       {b.상품명 && b.상품명 !== b.제품명 && (
-        <div className="ops-g-a07faae5">
+        <div className="tw-text-tillion-muted tw-text-[11px] tw-mt-[1px]">
           {b.상품명}
         </div>
       )}
-      <div className="ops-g-3c90cb6b">
+      <div className="tw-text-[#9ca3af] tw-flex tw-font-mono tw-text-[11px] tw-gap-[8px] tw-mt-[2px]">
         <span>{b.바코드}</span>
-        {b.도매처 && <span className="ops-g-aea55d24">{b.도매처}</span>}
-        {b.업체명 && <span className="ops-g-e31e45c4">[{b.업체명}]</span>}
+        {b.도매처 && <span className="tw-text-[#6d28d9] tw-font-[inherit]">{b.도매처}</span>}
+        {b.업체명 && <span className="tw-text-[#9ca3af] tw-font-[inherit]">[{b.업체명}]</span>}
       </div>
     </>
   );
@@ -440,29 +440,29 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
     <div style={{ ...cardStyle, border: `1px solid ${borderColor}`, borderLeftWidth: hasIssue ? 4 : 1 }}>
 
       {/* ── 카드 헤더 ── */}
-      <div className="ops-g-205e294c">
-        <div className="ops-g-d4aaee81">
+      <div className="tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-pt-[13px] tw-px-[16px] tw-pb-[11px]">
+        <div className="tw-items-start tw-flex tw-gap-[10px] tw-justify-between">
 
           {/* 왼쪽: 품명 */}
-          <div className="ops-g-50933f05">
-            <div className="ops-g-f65feaa0">
-              <span className="ops-g-5ebfc4c0">#{item.line_no}</span>
-              {saved && <span className="ops-g-97720fff">✓ 저장됨</span>}
-              {needsQtyConfirm && <span className="ops-g-83f80299">수량미확인</span>}
+          <div className="tw-flex-1 tw-min-w-0">
+            <div className="tw-items-center tw-flex tw-gap-[5px] tw-mb-[4px]">
+              <span className="tw-text-[#9ca3af] tw-text-[11px] tw-font-semibold">#{item.line_no}</span>
+              {saved && <span className="tw-text-[#157347] tw-text-[11px] tw-font-bold">✓ 저장됨</span>}
+              {needsQtyConfirm && <span className="tw-bg-[#fff7ed] tw-border tw-border-solid tw-border-[#fb923c] tw-rounded-[5px] tw-text-[#ea580c] tw-text-[10px] tw-font-bold tw-py-[1px] tw-px-[5px]">수량미확인</span>}
             </div>
-            <div className="ops-g-9e754cf6">
+            <div className="tw-text-tillion-text tw-text-[16px] tw-font-bold tw-leading-[1.3] tw-break-keep">
               {item.item_name || '(품명 없음)'}
             </div>
             {item.option_text && (
-              <div className="ops-g-6e1aa17f">{item.option_text}</div>
+              <div className="tw-text-tillion-muted tw-text-[13px] tw-mt-[2px]">{item.option_text}</div>
             )}
             {(item.confirmed_by || item.updated_at) && (
-              <div className="ops-g-e5d8011a">
+              <div className="tw-flex tw-flex-wrap tw-gap-[8px] tw-mt-[5px]">
                 {item.confirmed_by && (
-                  <span className="ops-g-3c5606c2">입력: {item.confirmed_by}</span>
+                  <span className="tw-text-tillion-muted tw-text-[10px]">입력: {item.confirmed_by}</span>
                 )}
                 {item.updated_at && (
-                  <span className="ops-g-ccbeb784">
+                  <span className="tw-text-[#9ca3af] tw-text-[10px]">
                     {item.updated_at.replace('T', ' ').slice(0, 16)}
                   </span>
                 )}
@@ -471,9 +471,9 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           </div>
 
           {/* 오른쪽: 관리자 버튼 */}
-          <div className="ops-g-9d931539">
+          <div className="tw-items-end tw-flex tw-flex-col tw-shrink-0 tw-gap-[5px]">
             {isAdmin && (
-              <div className="ops-g-8f404211">
+              <div className="tw-flex tw-gap-[4px]">
                 <button onClick={() => editMode ? setEditMode(false) : openEditMode()} style={{
                   fontSize: 11, padding: '3px 9px', borderRadius: 6, fontWeight: 600,
                   background: C.borderLight, color: editMode ? C.brand : C.textMuted,
@@ -484,7 +484,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                 {onDelete && (
                   <button
                     onClick={() => { if (confirm(`"${item.item_name || '#' + item.line_no}" 삭제?`)) onDelete?.(); }}
-                    className="ops-g-d6e27b2b"
+                    className="tw-bg-[#f3f4f8] tw-border tw-border-solid tw-border-tillion-border tw-rounded-[6px] tw-text-tillion-muted tw-cursor-pointer tw-text-[11px] tw-font-semibold tw-py-[3px] tw-px-[9px]"
                   >삭제</button>
                 )}
               </div>
@@ -496,17 +496,17 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
       {/* ── 매칭 정보 한 줄 ── */}
       {!editMode && (
         isMatched ? (
-          <div className="ops-g-ccd3b6ad">
-            <span className="ops-g-a2b316f9">공급처</span>
-            <span className="ops-g-b24479d6">{item.matched_vendor}</span>
-            {item.matched_product && <><span className="ops-g-54df7224">·</span><span>{item.matched_product}</span></>}
-            {item.matched_option && <span className="ops-g-a2b316f9">/ {item.matched_option}</span>}
+          <div className="tw-items-center tw-bg-[#f3f4f8] tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-text-tillion-muted tw-flex tw-flex-wrap tw-text-[12px] tw-gap-y-[2px] tw-gap-x-[8px] tw-py-[6px] tw-px-[16px]">
+            <span className="tw-text-[#9ca3af]">공급처</span>
+            <span className="tw-text-[#374151] tw-font-semibold">{item.matched_vendor}</span>
+            {item.matched_product && <><span className="tw-text-tillion-border">·</span><span>{item.matched_product}</span></>}
+            {item.matched_option && <span className="tw-text-[#9ca3af]">/ {item.matched_option}</span>}
             {item.matched_barcode && (
-              <span className="ops-g-f3ea8865">{item.matched_barcode}</span>
+              <span className="tw-text-[#9ca3af] tw-font-mono tw-text-[10px] tw-ml-[4px]">{item.matched_barcode}</span>
             )}
           </div>
         ) : (
-          <div className="ops-g-23669c35">
+          <div className="tw-bg-[#fffdf5] tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-text-[#92400e] tw-text-[12px] tw-py-[6px] tw-px-[16px]">
             ⚠ 미매칭
           </div>
         )
@@ -514,22 +514,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
       {/* ── 관리자 수정 폼 ── */}
       {editMode && (
-        <div className="ops-g-e7a16aa8">
-          <div className="ops-g-6b4bd5b3">
+        <div className="tw-bg-[#f9fafb] tw-border-b tw-border-solid tw-border-tillion-border tw-pt-[12px] tw-px-[16px] tw-pb-[14px]">
+          <div className="tw-text-tillion-muted tw-text-[12px] tw-font-bold tw-mb-[10px]">
             품목 수정
           </div>
 
           {/* 바코드 검색 */}
-          <div className="ops-g-8e545338">
-            <div className="ops-g-f097867b">바코드 검색 (선택 시 품명·옵션 자동입력)</div>
-            <div ref={editBarcodeRef} className="ops-g-1d5e5023">
+          <div className="tw-mb-[10px]">
+            <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">바코드 검색 (선택 시 품명·옵션 자동입력)</div>
+            <div ref={editBarcodeRef} className="tw-relative">
               {editSelectedBarcode ? (
-                <div className="ops-g-013fe721">
-                  <div className="ops-g-c3bb394c">
+                <div className="tw-items-center tw-flex tw-gap-[6px]">
+                  <div className="tw-bg-[#ede9fe] tw-rounded-[8px] tw-text-[#6d28d9] tw-flex-1 tw-text-[12px] tw-font-semibold tw-py-[8px] tw-px-[10px]">
                     ✅ {editSelectedBarcode.바코드} — {editSelectedBarcode.제품명}{editSelectedBarcode.옵션 ? ' / ' + editSelectedBarcode.옵션 : ''}
                   </div>
                   <button onClick={() => { setEditSelectedBarcode(null); setEditBarcodeQuery(''); setEditBarcodeResults([]); }}
-                    className="ops-g-9b2b9a8c">
+                    className="tw-bg-[#f3f4f8] tw-border-0 tw-rounded-[6px] tw-text-tillion-muted tw-cursor-pointer tw-text-[11px] tw-py-[6px] tw-px-[10px]">
                     변경
                   </button>
                 </div>
@@ -540,14 +540,14 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                     onChange={e => handleEditBarcodeInput(e.target.value)}
                     onFocus={() => setEditBarcodeOpen(true)}
                     placeholder="바코드번호 또는 제품명 검색"
-                    className="ui-control ops-g-635938c7"
+                    className="ui-control tw-bg-white"
                   />
-                  {editBarcodeLoading && <div className="ops-g-ed84ac13">검색 중…</div>}
+                  {editBarcodeLoading && <div className="tw-text-[#9ca3af] tw-text-[11px] tw-py-[3px] tw-px-[2px]">검색 중…</div>}
                   {editBarcodeOpen && editBarcodeResults.length > 0 && (
-                    <div className="ops-g-f771c9ea">
+                    <div className="ops-pop">
                       {editBarcodeResults.map(b => (
                         <div key={b.바코드} onMouseDown={() => selectEditBarcode(b)}
-                          className="ops-g-04296f59">
+                          className="tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-cursor-pointer tw-py-[8px] tw-px-[12px]">
                           <BarcodeItem b={b} />
                         </div>
                       ))}
@@ -559,93 +559,93 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           </div>
 
           {/* 품명 + 옵션 */}
-          <div className="ops-g-ec5d3aef">
+          <div className="tw-grid tw-gap-[8px] tw-grid-cols-2 tw-mb-[8px]">
             <div>
-              <div className="ops-g-f097867b">품명</div>
+              <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">품명</div>
               <input
                 value={editForm.item_name}
                 onChange={e => setEditForm(p => ({ ...p, item_name: e.target.value }))}
                 placeholder="품명"
-                className="ui-control ops-g-635938c7"
+                className="ui-control tw-bg-white"
               />
             </div>
             <div>
-              <div className="ops-g-f097867b">옵션</div>
+              <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">옵션</div>
               <input
                 value={editForm.option_text}
                 onChange={e => setEditForm(p => ({ ...p, option_text: e.target.value }))}
                 placeholder="색상·사이즈 등"
-                className="ui-control ops-g-635938c7"
+                className="ui-control tw-bg-white"
               />
             </div>
           </div>
 
           {/* 공급처 위치 + 연락처 */}
-          <div className="ops-g-ec5d3aef">
+          <div className="tw-grid tw-gap-[8px] tw-grid-cols-2 tw-mb-[8px]">
             <div>
-              <div className="ops-g-f097867b">공급처 위치</div>
+              <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">공급처 위치</div>
               <input
                 value={editForm.supplier_location}
                 onChange={e => setEditForm(p => ({ ...p, supplier_location: e.target.value }))}
                 placeholder="예) 동대문 A동 3층"
-                className="ui-control ops-g-635938c7"
+                className="ui-control tw-bg-white"
               />
             </div>
             <div>
-              <div className="ops-g-f097867b">공급처 연락처</div>
+              <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">공급처 연락처</div>
               <input
                 value={editForm.supplier_contact}
                 onChange={e => setEditForm(p => ({ ...p, supplier_contact: e.target.value }))}
                 placeholder="010-0000-0000"
-                className="ui-control ops-g-635938c7"
+                className="ui-control tw-bg-white"
               />
             </div>
           </div>
 
           {/* 메모 */}
-          <div className="ops-g-8e545338">
-            <div className="ops-g-f097867b">메모</div>
+          <div className="tw-mb-[10px]">
+            <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">메모</div>
             <input
               value={editForm.memo}
               onChange={e => setEditForm(p => ({ ...p, memo: e.target.value }))}
               placeholder="메모"
-              className="ui-control ops-g-635938c7"
+              className="ui-control tw-bg-white"
             />
           </div>
 
-          <div className="ops-g-ac734d21">
+          <div className="tw-flex tw-gap-[8px]">
             <button onClick={handleEditSave} disabled={editSaving} style={{
               flex: 2, height: 40, background: editSaving ? '#d1d5db' : C.brand,
               color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
             }}>{editSaving ? '저장 중…' : '저장'}</button>
-            <button onClick={() => setEditMode(false)} className="ops-g-02409999">취소</button>
+            <button onClick={() => setEditMode(false)} className="tw-bg-white tw-border tw-border-solid tw-border-tillion-border tw-rounded-[8px] tw-text-tillion-muted tw-cursor-pointer tw-flex-1 tw-text-[14px] tw-h-[40px]">취소</button>
           </div>
         </div>
       )}
 
       {/* ── 수량 + 상태 + 저장 ── */}
-      <div className="ops-g-0f9ea867">
+      <div className="tw-pt-[14px] tw-px-[16px] tw-pb-[10px]">
 
         {/* 수량 3칸 — 무채색 레이아웃 */}
-        <div className="ops-g-f2c57763">
+        <div className="tw-grid tw-gap-[8px] tw-grid-cols-3 tw-mb-[14px]">
           {/* 장끼 (표시 전용) */}
-          <div className="ops-g-e2e1e078">
-            <div className="ops-g-9aa3081d">장끼</div>
-            <div className="ops-g-e7e2d16f">{item.janggi_qty}</div>
+          <div className="tw-text-center">
+            <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-tracking-[0.3px] tw-mb-[5px]">장끼</div>
+            <div className="tw-bg-[#f3f4f8] tw-rounded-[10px] tw-text-[#374151] tw-text-[26px] tw-font-black tw-leading-[1] tw-py-[10px] tw-px-[6px]">{item.janggi_qty}</div>
           </div>
           {/* 실입고 */}
           <div>
-            <div className="ops-g-1d0006b7">실입고</div>
+            <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-tracking-[0.3px] tw-mb-[5px] tw-text-center">실입고</div>
             <input
               type="number" inputMode="numeric" min={0}
               value={actualQty}
               onChange={e => setActualQty(Number(e.target.value))}
-              className="ops-g-505665c2"
+              className="tw-bg-white tw-border-[1.5px] tw-border-solid tw-border-tillion-border tw-rounded-[10px] tw-box-border tw-text-tillion-text tw-text-[26px] tw-font-black tw-outline-none tw-py-[9px] tw-px-[4px] tw-text-center tw-w-full"
             />
           </div>
           {/* 미입고 */}
           <div>
-            <div className="ops-g-1d0006b7">미입고</div>
+            <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-tracking-[0.3px] tw-mb-[5px] tw-text-center">미입고</div>
             <input
               type="number" inputMode="numeric" min={0}
               value={missingQty}
@@ -662,7 +662,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
         {/* 이름 미입력 */}
         {!isAdmin && !workerName && (
-          <div className="ops-g-8e7ddfa8">
+          <div className="tw-bg-[#fffdf5] tw-border tw-border-solid tw-border-[#fde68a] tw-rounded-[8px] tw-text-[#92400e] tw-text-[12px] tw-mb-[8px] tw-py-[7px] tw-px-[12px]">
             ↑ 상단에서 이름을 먼저 입력해주세요
           </div>
         )}
@@ -683,14 +683,14 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
         </button>
 
         {/* ── 바코드 매칭 섹션 ── */}
-        <div className="ops-g-e50f284b">
+        <div className="tw-mb-[8px]">
           <SectionToggle
             open={showMatch}
             label="🔍 상품명 · 도매처 수정 / 바코드 매칭"
             badge={
               item.matched_barcode
-                ? <span className="ops-g-7f9e75e2">✓ {item.matched_barcode}</span>
-                : <span className="ops-g-a2b316f9">미매칭</span>
+                ? <span className="tw-text-[#6d28d9] tw-font-bold">✓ {item.matched_barcode}</span>
+                : <span className="tw-text-[#9ca3af]">미매칭</span>
             }
             onToggle={() => {
               setShowMatch(s => !s);
@@ -703,22 +703,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           />
 
           {showMatch && (
-            <div className="ops-g-b164960e">
+            <div className="tw-bg-[#fafafa] tw-border tw-border-solid tw-border-tillion-border tw-rounded-[12px] tw-mt-[4px] tw-p-[14px]">
               {/* 상품명·도매처 입력 */}
-              <div className="ops-g-ec5d3aef">
+              <div className="tw-grid tw-gap-[8px] tw-grid-cols-2 tw-mb-[8px]">
                 <div>
-                  <div className="ops-g-f097867b">상품명</div>
+                  <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">상품명</div>
                   <input value={editItemName} onChange={e => setEditItemName(e.target.value)}
-                    placeholder="장끼 상품명" className="ui-control ops-g-635938c7" />
+                    placeholder="장끼 상품명" className="ui-control tw-bg-white" />
                 </div>
                 <div>
-                  <div className="ops-g-f097867b">도매처</div>
+                  <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[3px]">도매처</div>
                   <input value={editWholesale} onChange={e => setEditWholesale(e.target.value)}
-                    placeholder="도매처 (예: NODI)" className="ui-control ops-g-635938c7" />
+                    placeholder="도매처 (예: NODI)" className="ui-control tw-bg-white" />
                 </div>
               </div>
 
-              <div className="ops-g-5b6d9f7a">
+              <div className="tw-flex tw-gap-[6px] tw-mb-[10px]">
                 <button onClick={saveItemFields} disabled={nameSaving} style={{
                   flex: 1, height: 36, background: nameSaving ? '#d1d5db' : C.brand,
                   color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -737,12 +737,12 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
               {/* 자동매칭 1건 */}
               {autoMatched && (
-                <div className="ops-g-1a9b4751">
-                  <div className="ops-g-1de91d46">✓ 자동매칭 후보</div>
-                  <div className="ops-g-62dfb0bc">
+                <div className="tw-bg-white tw-border tw-border-solid tw-border-[#b7ebc9] tw-rounded-[10px] tw-mb-[10px] tw-p-[12px]">
+                  <div className="tw-text-[#157347] tw-text-[11px] tw-font-semibold tw-mb-[4px]">✓ 자동매칭 후보</div>
+                  <div className="tw-text-tillion-text tw-text-[14px] tw-font-bold">
                     {autoMatched.제품명}{autoMatched.옵션 ? ` / ${autoMatched.옵션}` : ''}
                   </div>
-                  <div className="ops-g-b3ab8026">
+                  <div className="tw-text-[#9ca3af] tw-font-mono tw-text-[11px] tw-mt-[2px] tw-mx-0 tw-mb-[8px]">
                     {autoMatched.바코드}{autoMatched.도매처 && ` · ${autoMatched.도매처}`}
                   </div>
                   <button onClick={() => handleSelectBarcode(autoMatched)} disabled={matchSaving} style={{
@@ -756,8 +756,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
               {/* 후보 다수 */}
               {!autoMatched && barcodeResults.length > 0 && (
-                <div className="ops-g-8e545338">
-                  <div className="ops-g-4d83c690">
+                <div className="tw-mb-[10px]">
+                  <div className="tw-text-tillion-muted tw-text-[11px] tw-font-semibold tw-mb-[6px]">
                     후보 {barcodeResults.length}건 — 선택하세요
                   </div>
                   {barcodeResults.map(b => (
@@ -773,22 +773,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
               )}
 
               {/* 수동 검색 */}
-              <div className="ops-g-f439effd">
-                <div className="ops-g-c9a0bb12">직접 검색</div>
+              <div className="tw-border-t tw-border-solid tw-border-[#f3f4f8] tw-pt-[10px]">
+                <div className="tw-text-[#9ca3af] tw-text-[10px] tw-font-semibold tw-mb-[5px]">직접 검색</div>
                 <input
                   value={barcodeQuery} onChange={e => handleBarcodeInput(e.target.value)}
                   placeholder="바코드 · 제품명 · 도매처 검색"
-                  className="ui-control ops-g-3bedbc5d"
+                  className="ui-control tw-bg-white tw-mb-[4px]"
                 />
                 {!barcodeLoading && barcodeQuery && barcodeResults.length === 0 && !autoMatched && (
-                  <div className="ops-g-c266c2e3">검색 결과 없음</div>
+                  <div className="tw-text-tillion-muted tw-text-[12px]">검색 결과 없음</div>
                 )}
                 {barcodeQuery && barcodeResults.map(b => (
-                  <button key={b.바코드} onClick={() => handleSelectBarcode(b)} disabled={matchSaving} className="ops-g-fce267e1">
+                  <button key={b.바코드} onClick={() => handleSelectBarcode(b)} disabled={matchSaving} className="tw-bg-white tw-border tw-border-solid tw-border-tillion-border tw-rounded-[8px] tw-cursor-pointer tw-block tw-mb-[4px] tw-py-[9px] tw-px-[12px] tw-text-left tw-w-full">
                     <BarcodeItem b={b} />
                   </button>
                 ))}
-                {matchSaved && <div className="ops-g-35ba4f7e">✓ 매칭 저장됨</div>}
+                {matchSaved && <div className="tw-text-[#157347] tw-text-[12px] tw-mt-[4px]">✓ 매칭 저장됨</div>}
               </div>
             </div>
           )}
@@ -800,26 +800,26 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           label="📷 제품 사진"
           badge={
             photos.length > 0
-              ? <span className="ops-g-185c4a45">{photos.length}장</span>
-              : <span className="ops-g-a2b316f9">없음</span>
+              ? <span className="tw-text-tillion-brand tw-font-bold">{photos.length}장</span>
+              : <span className="tw-text-[#9ca3af]">없음</span>
           }
           onToggle={() => setShowPhoto(s => !s)}
         />
         {showPhoto && (
-          <div className="ops-g-24cff590">
-            <div className="ops-g-2af48433">
+          <div className="tw-bg-[#f9fafb] tw-border tw-border-solid tw-border-tillion-border tw-rounded-[12px] tw-mt-[4px] tw-p-[12px]">
+            <div className="tw-flex tw-flex-wrap tw-gap-[8px]">
               {photos.map(photo => (
-                <div key={photo.id} className="ops-g-1d5e5023">
+                <div key={photo.id} className="tw-relative">
                   <img
                     src={`${API_BASE}${photo.url}`}
                     alt="제품사진"
-                    className="ops-g-c174ec39"
+                    className="tw-border tw-border-solid tw-border-tillion-border tw-rounded-[10px] tw-cursor-pointer tw-h-[80px] tw-object-cover tw-w-[80px]"
                     onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
                   />
                   {isAdmin && (
                     <button
                       onClick={() => handlePhotoDelete(photo.id)}
-                      className="ops-g-a9a19bff"
+                      className="ops-photo-x"
                     >×</button>
                   )}
                 </div>
@@ -830,10 +830,10 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 cursor: uploading ? 'wait' : 'pointer', color: C.textFaint, fontSize: 10,
               }}>
-                <span className="ops-g-e17804f5">{uploading ? '⏳' : '📷'}</span>
-                <span className="ops-g-93146bdd">{uploading ? '업로드 중' : '추가'}</span>
+                <span className="tw-text-[24px]">{uploading ? '⏳' : '📷'}</span>
+                <span className="tw-mt-[2px]">{uploading ? '업로드 중' : '추가'}</span>
                 <input type="file" accept="image/*" capture="environment"
-                  className="ops-g-8251cb3b"
+                  className="tw-hidden"
                   onChange={handlePhotoUpload} disabled={uploading}
                 />
               </label>
@@ -843,7 +843,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
         {/* ── Inbox 사진 선택 연결 (배치 inbox 사진 전체 표시) ── */}
         {inboxPhotos.length > 0 && (
-          <div className="ops-g-15d9cd55">
+          <div className="tw-mt-[8px]">
             <button
               onClick={() => setShowInboxPicker(v => !v)}
               style={{
@@ -857,11 +857,11 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
               {showInboxPicker ? ' ▲' : ' ▼'}
             </button>
             {showInboxPicker && (
-              <div className="ops-g-1a63a599">
-                <div className="ops-g-d87d1f57">
+              <div className="tw-bg-[#f0f9ff] tw-border tw-border-solid tw-border-[#bae6fd] tw-rounded-[10px] tw-mt-[4px] tw-p-[10px]">
+                <div className="tw-text-[#64748b] tw-text-[11px] tw-mb-[8px]">
                   ✅ 이 품목에 연결됨 · 🔗 다른 품목에 연결됨 · 미연결은 클릭하여 연결
                 </div>
-                <div className="ops-g-95807799">
+                <div className="tw-grid tw-gap-[6px] tw-grid-cols-3">
                   {inboxPhotos.map(photo => {
                     // 이 품목에 연결됐는지 (item.photos 와 stored_filename 비교)
                     const linkedToThis = photos.some(p => photo.stored_filename && p.filename === photo.stored_filename);
@@ -883,10 +883,10 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                             <img
                               src={`${API_BASE}${photo.url}`}
                               alt={photo.filename || ''}
-                              className="ops-g-28611783"
+                              className="tw-aspect-square tw-block tw-object-cover tw-w-full"
                             />
                           ) : (
-                            <div className="ops-g-49f87b5a">📷</div>
+                            <div className="tw-items-center tw-aspect-square tw-bg-[#e0f2fe] tw-flex tw-text-[28px] tw-justify-center tw-w-full">📷</div>
                           )}
                           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: linkedToThis ? 'rgba(34,197,94,0.8)' : linkedToOther ? 'rgba(245,158,11,0.8)' : 'rgba(0,0,0,0.5)', padding: '2px 4px', fontSize: 9, color: '#fff', textAlign: 'center' }}>
                             {inboxLinking === photo.id ? '연결 중…' : linkedToThis ? '✅ 연결됨' : linkedToOther ? '🔗 다른품목' : '선택'}
@@ -897,7 +897,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                           <button
                             onClick={() => handleUnlinkInboxPhoto(photo.id)}
                             disabled={!!inboxLinking}
-                            className="ops-g-1455a639"
+                            className="tw-items-center tw-bg-tillion-danger tw-border-0 tw-rounded-full tw-text-white tw-cursor-pointer tw-flex tw-text-[11px] tw-h-[18px] tw-justify-center tw-leading-[1] tw-absolute tw-right-[2px] tw-top-[2px] tw-w-[18px]"
                             title="연결 해제"
                           >×</button>
                         )}
@@ -920,11 +920,11 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: needsPhotoDecision ? '#ea580c' : C.textMuted, marginBottom: 6 }}>
               {needsPhotoDecision ? '⚠️ 사진 처리결정 필요' : '📸 사진 처리결정'}
-              {photoDecision && <span className="ops-g-3b91985a">
+              {photoDecision && <span className="tw-font-normal tw-ml-[6px]">
                 ({photoDecision === 'photo' ? '업로드사진' : photoDecision === 'existing' ? '기존상품' : photoDecision === 'new' ? '신상품' : '사진없음'})
               </span>}
             </div>
-            <div className="ops-g-07988eb3">
+            <div className="tw-flex tw-flex-wrap tw-gap-[6px]">
               {(['photo', 'existing', 'new', 'none'] as const).map(v => {
                 const labels: Record<string, string> = { photo: '📷 업로드사진', existing: '🔗 기존상품', new: '🆕 신상품', none: '🚫 사진없음' };
                 const isActive = photoDecision === v;
@@ -1085,18 +1085,18 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
   };
 
   return (
-    <div className="ops-g-86593efd" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ops-g-5c79db59">
+    <div className="tw-items-end tw-bg-black/50 tw-flex tw-inset-0 tw-justify-center tw-fixed tw-z-[200]" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ops-sheet">
         {/* handle bar */}
-        <div className="ops-g-48df0bf0" />
-        <div className="ops-g-073d7268">
-          <span className="ops-g-4791020e">품목 직접 추가</span>
-          <button onClick={onClose} className="ops-g-df5cea67">×</button>
+        <div className="tw-bg-tillion-border tw-rounded-[2px] tw-h-[4px] tw-mt-0 tw-mx-auto tw-mb-[16px] tw-w-[40px]" />
+        <div className="tw-items-center tw-flex tw-justify-between tw-mb-[18px]">
+          <span className="tw-text-[17px] tw-font-extrabold">품목 직접 추가</span>
+          <button onClick={onClose} className="tw-items-center tw-bg-[#f3f4f8] tw-border-0 tw-rounded-full tw-text-tillion-muted tw-cursor-pointer tw-flex tw-text-[18px] tw-h-[32px] tw-justify-center tw-w-[32px]">×</button>
         </div>
 
         {/* 업체 */}
         <label className="ops-label">업체</label>
-        <div ref={vendorRef} className="ops-g-afacf144">
+        <div ref={vendorRef} className="tw-mb-[14px] tw-relative">
           <input value={vendorQuery}
             onChange={e => { setVendorQuery(e.target.value); setVendorOpen(true); if (!e.target.value) { setSelectedVendors([]); setVendorDisplay(''); } }}
             onFocus={() => setVendorOpen(true)}
@@ -1105,22 +1105,22 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
           {vendorOpen && (fVendors.length > 0 || fAliases.length > 0) && (
             <div style={dropS}>
               {fVendors.length > 0 && <>
-                <div className="ops-g-541cf7c6">📦 등록 업체</div>
+                <div className="tw-bg-[#fafafa] tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-text-[#9ca3af] tw-text-[10px] tw-font-bold tw-py-[5px] tw-px-[12px]">📦 등록 업체</div>
                 {fVendors.map(v => (
                   <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
                     style={{ padding: '9px 14px', fontSize: 14, cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: vendorDisplay === v.name ? C.brandLight : undefined }}>
                     <strong>{v.name}</strong>
-                    {v.aliases.length > 0 && <span className="ops-g-d587ed76">({v.aliases.join(', ')})</span>}
+                    {v.aliases.length > 0 && <span className="tw-text-[#9ca3af] tw-text-[11px] tw-ml-[6px]">({v.aliases.join(', ')})</span>}
                   </div>
                 ))}
               </>}
               {fAliases.length > 0 && <>
-                <div className="ops-g-541cf7c6">🏷️ 화주사 별칭</div>
+                <div className="tw-bg-[#fafafa] tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-text-[#9ca3af] tw-text-[10px] tw-font-bold tw-py-[5px] tw-px-[12px]">🏷️ 화주사 별칭</div>
                 {fAliases.map(a => (
                   <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
-                    className="ops-g-114ea3f1">
-                    <span className="ops-g-185c4a45">{a.canonical}</span>
-                    {a.aliases.length > 0 && <span className="ops-g-d587ed76">→ {a.aliases.join(', ')}</span>}
+                    className="tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-cursor-pointer tw-text-[14px] tw-py-[9px] tw-px-[14px]">
+                    <span className="tw-text-tillion-brand tw-font-bold">{a.canonical}</span>
+                    {a.aliases.length > 0 && <span className="tw-text-[#9ca3af] tw-text-[11px] tw-ml-[6px]">→ {a.aliases.join(', ')}</span>}
                   </div>
                 ))}
               </>}
@@ -1133,22 +1133,22 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
           바코드{' '}
           {barcodeLoading ? '(로딩 중…)' : selectedVendors.length > 0 && barcodeResults.length > 0 ? `(${barcodeResults.length}개)` : '(바코드 · 제품명 검색)'}
         </label>
-        <div ref={barcodeRef} className="ops-g-afacf144">
+        <div ref={barcodeRef} className="tw-mb-[14px] tw-relative">
           {selectedBarcode ? (
-            <div className="ops-g-a580969f">
-              <div className="ops-g-62fa9953">
+            <div className="tw-items-center tw-flex tw-gap-[8px]">
+              <div className="tw-bg-[#ede9fe] tw-rounded-[10px] tw-text-[#6d28d9] tw-flex-1 tw-text-[13px] tw-font-semibold tw-py-[9px] tw-px-[12px]">
                 ✅ {selectedBarcode.바코드} — {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
               </div>
               <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); setApiSearchResults([]); }}
-                className="ops-g-d89f60a0">변경</button>
+                className="tw-bg-[#f3f4f8] tw-border-0 tw-rounded-[8px] tw-text-tillion-muted tw-cursor-pointer tw-text-[12px] tw-py-[7px] tw-px-[12px]">변경</button>
             </div>
           ) : (
             <>
               {!barcodeLoading && selectedVendors.length > 0 && barcodeResults.length === 0 && (
-                <div className="ops-g-90105026">
-                  <span className="ops-g-67b91ed6">"{vendorDisplay}" 등록 바코드 없음</span>
+                <div className="tw-bg-[#fdecec] tw-border tw-border-solid tw-border-[#f6c4c4] tw-rounded-[8px] tw-text-[12px] tw-mb-[8px] tw-py-[8px] tw-px-[12px]">
+                  <span className="tw-text-[#b42318]">"{vendorDisplay}" 등록 바코드 없음</span>
                   <a href="/journal-settings" target="_blank" rel="noreferrer"
-                    className="ops-g-7f8f4ca4">+ 신규 등록</a>
+                    className="tw-text-tillion-brand tw-font-bold tw-ml-[8px] tw-underline">+ 신규 등록</a>
                 </div>
               )}
               <input
@@ -1158,15 +1158,15 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
                 placeholder={selectedVendors.length > 0 && barcodeResults.length > 0 ? `바코드·제품명 검색 (${barcodeResults.length}개)` : '바코드번호 또는 제품명'}
                 className="ui-control"
               />
-              {(barcodeLoading || apiSearchLoading) && <div className="ops-g-ed84ac13">검색 중…</div>}
+              {(barcodeLoading || apiSearchLoading) && <div className="tw-text-[#9ca3af] tw-text-[11px] tw-py-[3px] tw-px-[2px]">검색 중…</div>}
               {!apiSearchLoading && selectedVendors.length === 0 && barcodeQuery.trim() && apiSearchResults.length === 0 && (
-                <div className="ops-g-291b392b">검색 결과 없음</div>
+                <div className="tw-text-[#b42318] tw-text-[12px] tw-py-[3px] tw-px-[2px]">검색 결과 없음</div>
               )}
               {barcodeOpen && displayBarcodes.length > 0 && (
                 <div style={dropS}>
                   {displayBarcodes.map(b => (
                     <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
-                      className="ops-g-3ade0c87">
+                      className="tw-border-b tw-border-solid tw-border-[#f3f4f8] tw-cursor-pointer tw-py-[9px] tw-px-[14px]">
                       <BarcodeItem b={b} />
                     </div>
                   ))}
@@ -1187,7 +1187,7 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
           placeholder="예) 블랙, L" style={{ ...inp, marginBottom: 14 }} />
 
         {/* 수량 + 단가 */}
-        <div className="ops-g-13bc3815">
+        <div className="tw-grid tw-gap-[12px] tw-grid-cols-2 tw-mb-[22px]">
           <div>
             <label className="ops-label">장끼 수량 *</label>
             <input type="number" inputMode="numeric" min={1} value={form.janggi_qty}
@@ -1202,9 +1202,9 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
           </div>
         </div>
 
-        <div className="ops-g-bccf3703">
+        <div className="tw-flex tw-gap-[10px]">
           <button onClick={onClose}
-            className="ops-g-0df9e4a9">
+            className="tw-bg-white tw-border tw-border-solid tw-border-tillion-border tw-rounded-[12px] tw-text-tillion-muted tw-cursor-pointer tw-flex-1 tw-text-[15px] tw-font-bold tw-h-[50px]">
             취소
           </button>
           <button onClick={handleAdd} disabled={adding || !form.item_name.trim()}

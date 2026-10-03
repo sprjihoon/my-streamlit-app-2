@@ -252,73 +252,73 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
 
   return (
     <>
-      <tr className="ops-g-635938c7">
+      <tr className="tw-bg-white">
         {/* No */}
-        <td className="ops-g-aa59be66">{item.line_no}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[#9ca3af] tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-text-center tw-align-middle">{item.line_no}</td>
         {/* 날짜 */}
-        <td className="ops-g-4d8da5fe">{batchDate || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-tillion-muted tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{batchDate || '-'}</td>
         {/* 업체명 */}
-        <td className="ops-g-87f0f30f">{batchVendor || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[0.85rem] tw-font-medium tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{batchVendor || '-'}</td>
         {/* 도매처 */}
-        <td className="ops-g-4d8da5fe">{batchWholesale || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-tillion-muted tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{batchWholesale || '-'}</td>
         {/* 제품명 */}
         <td style={tdWrap}>
-          <div className="ops-g-0728c5c8">{item.item_name || '-'}</div>
+          <div className="tw-font-medium">{item.item_name || '-'}</div>
         </td>
         {/* 옵션 */}
         <td style={tdWrap}>
-          <div className="ops-g-ddcf39d9">{item.option_text || '-'}</div>
+          <div className="tw-text-tillion-muted tw-text-[0.78rem]">{item.option_text || '-'}</div>
         </td>
         {/* 바코드 */}
-        <td className="ops-g-efc72f05">
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-tillion-muted tw-font-mono tw-text-[0.75rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">
           {item.matched_barcode || '-'}
         </td>
         {/* 장끼수량 */}
-        <td className="ops-g-82a3554e">{item.janggi_qty}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[#1d4ed8] tw-text-[0.85rem] tw-font-semibold tw-py-[0.7rem] tw-px-[1rem] tw-text-center tw-align-middle">{item.janggi_qty}</td>
         {/* 실입고 */}
-        <td className="ops-g-75b838b4">
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-text-center tw-align-middle">
           <input
             type="number" min={0} value={actualQty}
             onChange={e => setActualQty(Number(e.target.value))}
-            className="ui-control ops-g-cd278a91"
+            className="ui-control tw-py-[0.2rem] tw-px-[0.25rem] tw-text-center tw-w-[52px]"
           />
         </td>
         {/* 미입고 */}
-        <td className="ops-g-75b838b4">
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-text-center tw-align-middle">
           <input
             type="number" min={0} value={missingQty}
             onChange={e => setMissingQty(Number(e.target.value))}
-            className="ui-control ops-g-cd278a91"
+            className="ui-control tw-py-[0.2rem] tw-px-[0.25rem] tw-text-center tw-w-[52px]"
           />
         </td>
         {/* 공급처상품명 */}
         <td style={tdWrap}>
-          <div className="ops-g-badd327d">{item.matched_vendor || '-'}</div>
-          <div className="ops-g-ef18f090">{item.matched_product || '-'}</div>
+          <div className="tw-text-[#7c3aed] tw-text-[0.78rem] tw-font-semibold">{item.matched_vendor || '-'}</div>
+          <div className="tw-text-[0.78rem]">{item.matched_product || '-'}</div>
         </td>
         {/* 공급처옵션 */}
-        <td className="ops-g-37c1bf25">{item.matched_option || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-tillion-muted tw-text-[0.78rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{item.matched_option || '-'}</td>
         {/* 공급처위치 */}
-        <td className="ops-g-16c90e3b">{item.supplier_location || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[#374151] tw-text-[0.78rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{item.supplier_location || '-'}</td>
         {/* 공급처연락처 */}
-        <td className="ops-g-16c90e3b">{item.supplier_contact || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[#374151] tw-text-[0.78rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{item.supplier_contact || '-'}</td>
         {/* 작성자 */}
-        <td className="ops-g-c724402f">{batchCreatedBy || '-'}</td>
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-tillion-muted tw-text-[0.75rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">{batchCreatedBy || '-'}</td>
         {/* 수정시간 */}
-        <td className="ops-g-f38ca7bf">
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[#9ca3af] tw-text-[0.73rem] tw-py-[0.7rem] tw-px-[1rem] tw-align-middle">
           {item.updated_at ? item.updated_at.slice(0, 16).replace('T', ' ') : '-'}
         </td>
         {/* 사진 */}
-        <td className="ops-g-75b838b4">
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-text-center tw-align-middle">
           {photoCount > 0
-            ? <span className="ops-g-8f07b944">📷 {photoCount}</span>
-            : <span className="ops-g-e8d04424">-</span>
+            ? <span className="tw-bg-[#f0fdfa] tw-border tw-border-solid tw-border-[#99f6e4] tw-rounded-[4px] tw-text-[#0f766e] tw-text-[0.78rem] tw-py-[2px] tw-px-[6px]">📷 {photoCount}</span>
+            : <span className="tw-text-[#d1d5db] tw-text-[0.75rem]">-</span>
           }
         </td>
         {/* 액션 */}
-        <td className="ops-g-75b838b4">
-          <div className="ops-g-d98363cf">
-            <button onClick={save} disabled={saving} className="ops-g-04fc72e5">
+        <td className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-text-[0.85rem] tw-py-[0.7rem] tw-px-[1rem] tw-text-center tw-align-middle">
+          <div className="tw-flex tw-gap-[3px] tw-justify-center">
+            <button onClick={save} disabled={saving} className="tw-bg-tillion-brand tw-border-0 tw-rounded-[6px] tw-text-white tw-cursor-pointer tw-text-[0.75rem] tw-font-medium tw-py-[0.2rem] tw-px-[0.6rem]">
               {saving ? '…' : '저장'}
             </button>
             <button
@@ -330,7 +330,7 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
             {onDelete && (
               <button
                 onClick={() => { if (confirm(`품목 "${item.item_name || item.line_no + '번'}"을 삭제하시겠습니까?`)) onDelete(); }}
-                className="ops-g-7e722f8e"
+                className="tw-bg-tillion-danger tw-border-0 tw-rounded-[6px] tw-text-white tw-cursor-pointer tw-text-[0.73rem] tw-font-medium tw-py-[0.2rem] tw-px-[0.5rem]"
               >
                 🗑
               </button>
@@ -340,15 +340,15 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
       </tr>
       {/* 수정 폼 인라인 */}
       {editMode && (
-        <tr className="ops-g-dbf3858d">
-          <td colSpan={19} className="ops-g-ec3a38c5">
-            <div className="ops-g-6cdb8a4b">✏️ 품목 정보 수정</div>
-            <div className="ops-g-065d8d2b">
+        <tr className="tw-bg-[#f0f4ff]">
+          <td colSpan={19} className="tw-border-b tw-border-solid tw-border-[#e0e7ff] tw-py-[0.75rem] tw-px-[1rem]">
+            <div className="tw-text-tillion-brand tw-text-[0.82rem] tw-font-bold tw-mb-[8px]">✏️ 품목 정보 수정</div>
+            <div className="ops-auto-grid">
               {/* 바코드 검색 */}
-              <div ref={bcRef} className="ops-g-0a31cd57">
-                <div className="ops-g-85c6f07c">
+              <div ref={bcRef} className="tw-col-span-2 tw-relative">
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">
                   바코드 검색
-                  {bcLoading && <span className="ops-g-983ea6e7">검색 중…</span>}
+                  {bcLoading && <span className="tw-text-[#a5b4fc] tw-text-[0.65rem] tw-ml-[6px]">검색 중…</span>}
                 </div>
                 <input
                   value={bcQuery}
@@ -363,45 +363,45 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
                       <div
                         key={b.바코드}
                         onMouseDown={() => selectBcItem(b)}
-                        className="ops-g-73f89ff9"
+                        className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-cursor-pointer tw-text-[0.78rem] tw-py-[6px] tw-px-[10px]"
                         onMouseEnter={e => (e.currentTarget.style.background = '#eef2ff')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}
                       >
-                        <span className="ops-g-2ad4d06d">{b.바코드}</span>
-                        <span className="ops-g-c238c143">{b.제품명}</span>
-                        {b.옵션 && <span className="ops-g-e43d399c">/ {b.옵션}</span>}
-                        {b.도매처 && <span className="ops-g-6b4570fe">[{b.도매처}]</span>}
+                        <span className="tw-text-tillion-brand tw-font-semibold">{b.바코드}</span>
+                        <span className="tw-text-[#374151] tw-ml-[6px]">{b.제품명}</span>
+                        {b.옵션 && <span className="tw-text-tillion-muted tw-ml-[4px]">/ {b.옵션}</span>}
+                        {b.도매처 && <span className="tw-text-[#9ca3af] tw-text-[0.72rem] tw-ml-[6px]">[{b.도매처}]</span>}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
               <div>
-                <div className="ops-g-85c6f07c">공급처(업체명)</div>
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">공급처(업체명)</div>
                 <input value={editForm.matched_vendor} onChange={e => setEditForm(f => ({ ...f, matched_vendor: e.target.value }))} style={editInput} placeholder="공급처" />
               </div>
               <div>
-                <div className="ops-g-85c6f07c">공급처 상품명</div>
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">공급처 상품명</div>
                 <input value={editForm.matched_product} onChange={e => setEditForm(f => ({ ...f, matched_product: e.target.value }))} style={editInput} placeholder="공급처 상품명" />
               </div>
               <div>
-                <div className="ops-g-85c6f07c">공급처 옵션</div>
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">공급처 옵션</div>
                 <input value={editForm.matched_option} onChange={e => setEditForm(f => ({ ...f, matched_option: e.target.value }))} style={editInput} placeholder="공급처 옵션" />
               </div>
               <div>
-                <div className="ops-g-85c6f07c">공급처 위치</div>
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">공급처 위치</div>
                 <input value={editForm.supplier_location} onChange={e => setEditForm(f => ({ ...f, supplier_location: e.target.value }))} style={editInput} placeholder="예) A동 3층" />
               </div>
               <div>
-                <div className="ops-g-85c6f07c">공급처 연락처</div>
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">공급처 연락처</div>
                 <input value={editForm.supplier_contact} onChange={e => setEditForm(f => ({ ...f, supplier_contact: e.target.value }))} style={editInput} placeholder="010-0000-0000" />
               </div>
               <div>
-                <div className="ops-g-85c6f07c">메모</div>
+                <div className="tw-text-[#9ca3af] tw-text-[0.73rem] tw-mb-[3px]">메모</div>
                 <input value={editForm.memo} onChange={e => setEditForm(f => ({ ...f, memo: e.target.value }))} style={editInput} placeholder="메모" />
               </div>
             </div>
-            <div className="ops-g-ac734d21">
+            <div className="tw-flex tw-gap-[8px]">
               <button onClick={saveEdit} disabled={editSaving} style={{ ...btn('#4361ee'), opacity: editSaving ? 0.5 : 1 }}>
                 {editSaving ? '저장 중…' : '수정 저장'}
               </button>
@@ -561,7 +561,7 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="ops-g-3857b8f7"
+        className="ops-inline-add"
       >
         ➕ 품목 직접 추가
       </button>
@@ -569,15 +569,15 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
   }
 
   return (
-    <div className="ops-g-4f08436e">
-      <div className="ops-g-81b30176">
-        <span className="ops-g-e976d825">➕ 품목 직접 추가</span>
-        <button onClick={() => { setOpen(false); resetForm(); }} className="ops-g-eacc64a8">×</button>
+    <div className="tw-bg-[#f8faff] tw-border tw-border-solid tw-border-[#c7d2fe] tw-rounded-[8px] tw-mb-[1rem] tw-p-[1rem]">
+      <div className="tw-items-center tw-flex tw-justify-between tw-mb-[0.75rem]">
+        <span className="tw-text-tillion-brand tw-text-[0.9rem] tw-font-bold">➕ 품목 직접 추가</span>
+        <button onClick={() => { setOpen(false); resetForm(); }} className="tw-bg-transparent tw-border-0 tw-text-tillion-muted tw-cursor-pointer tw-text-[1.1rem]">×</button>
       </div>
 
-      <div className="ops-g-7af22f65">
+      <div className="tw-grid tw-gap-[0.6rem] tw-grid-cols-2 tw-mb-[0.6rem]">
         {/* 업체 선택 */}
-        <div ref={vendorRef} className="ops-g-9b7d1e42">
+        <div ref={vendorRef} className="tw-col-span-full tw-relative">
           <label className="ops-label">업체 (등록업체·별칭 검색)</label>
           <input
             value={vendorQuery}
@@ -595,7 +595,7 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
                     <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
                       style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13, background: vendorDisplay === v.name ? '#eef2ff' : undefined }}>
                       <strong>{v.name}</strong>
-                      {v.aliases.length > 0 && <span className="ops-g-d587ed76">({v.aliases.join(', ')})</span>}
+                      {v.aliases.length > 0 && <span className="tw-text-[#9ca3af] tw-text-[11px] tw-ml-[6px]">({v.aliases.join(', ')})</span>}
                     </div>
                   ))}
                 </>
@@ -605,9 +605,9 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
                   <div style={grpLbl}>🏷️ 화주사 별칭</div>
                   {fAliases.map(a => (
                     <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
-                      className="ops-g-14dafe32">
-                      <span className="ops-g-0db62ead">{a.canonical}</span>
-                      {a.aliases.length > 0 && <span className="ops-g-d587ed76">→ {a.aliases.join(', ')}</span>}
+                      className="tw-cursor-pointer tw-text-[13px] tw-py-[7px] tw-px-[12px]">
+                      <span className="tw-text-[#1d4ed8] tw-font-semibold">{a.canonical}</span>
+                      {a.aliases.length > 0 && <span className="tw-text-[#9ca3af] tw-text-[11px] tw-ml-[6px]">→ {a.aliases.join(', ')}</span>}
                     </div>
                   ))}
                 </>
@@ -617,26 +617,26 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
         </div>
 
         {/* 바코드 검색 */}
-        <div ref={barcodeRef} className="ops-g-9b7d1e42">
+        <div ref={barcodeRef} className="tw-col-span-full tw-relative">
           <label className="ops-label">바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
           {selectedVendors.length === 0 ? (
-            <div className="ops-g-021306a7">↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
+            <div className="tw-text-[#9ca3af] tw-text-[0.8rem] tw-py-[0.4rem] tw-px-0">↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
           ) : barcodeLoading ? (
-            <div className="ops-g-9e6d18fb">바코드 목록 불러오는 중…</div>
+            <div className="tw-text-[#9ca3af] tw-text-[0.8rem]">바코드 목록 불러오는 중…</div>
           ) : barcodeResults.length === 0 ? (
-            <div className="ops-g-e0418eaa">
-              <span className="ops-g-67b91ed6">"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
-              <a href="/journal-settings" target="_blank" className="ops-g-2ad4d06d">신규 바코드 등록 →</a>
-              <div className="ops-g-f0797788">아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
+            <div className="tw-bg-[#fef2f2] tw-border tw-border-solid tw-border-[#fecaca] tw-rounded-[6px] tw-text-[0.82rem] tw-py-[0.6rem] tw-px-[0.8rem]">
+              <span className="tw-text-[#b42318]">"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
+              <a href="/journal-settings" target="_blank" className="tw-text-tillion-brand tw-font-semibold">신규 바코드 등록 →</a>
+              <div className="tw-text-[#9ca3af] tw-text-[0.75rem] tw-mt-[3px]">아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
             </div>
           ) : (
             <>
               {selectedBarcode ? (
-                <div className="ops-g-013fe721">
-                  <div className="ops-g-402cd9b0">
+                <div className="tw-items-center tw-flex tw-gap-[6px]">
+                  <div className="tw-bg-[#ede9fe] tw-rounded-[6px] tw-text-[#7c3aed] tw-flex-1 tw-text-[0.82rem] tw-font-medium tw-py-[0.4rem] tw-px-[0.65rem]">
                     ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
                   </div>
-                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} className="btn btn-secondary ops-g-023b6b39">변경</button>
+                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} className="btn btn-secondary tw-text-[0.75rem] tw-py-[0.3rem] tw-px-[0.6rem]">변경</button>
                 </div>
               ) : (
                 <>
@@ -651,14 +651,14 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
                     <div style={dropBase}>
                       {fBarcodes.slice(0, 50).map(b => (
                         <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
-                          className="ops-g-74eb0c84">
-                          <div className="ops-g-5a263f2b">
+                          className="tw-border-b tw-border-solid tw-border-[#f3f4f6] tw-cursor-pointer tw-py-[7px] tw-px-[12px]">
+                          <div className="tw-items-start tw-flex tw-justify-between">
                             <div>
-                              <span className="ops-g-d5c56bff">{b.제품명}</span>
-                              {b.옵션 && <span className="ops-g-c266c2e3"> / {b.옵션}</span>}
-                              <div className="ops-g-19dbafec">{b.바코드}</div>
+                              <span className="tw-text-[13px] tw-font-medium">{b.제품명}</span>
+                              {b.옵션 && <span className="tw-text-tillion-muted tw-text-[12px]"> / {b.옵션}</span>}
+                              <div className="tw-text-[#9ca3af] tw-font-mono tw-text-[11px]">{b.바코드}</div>
                             </div>
-                            <span className="ops-g-6f885f65">{b.업체명}</span>
+                            <span className="tw-text-[#7c3aed] tw-shrink-0 tw-text-[11px] tw-ml-[8px]">{b.업체명}</span>
                           </div>
                         </div>
                       ))}
@@ -671,7 +671,7 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
         </div>
 
         {/* 품명 */}
-        <div className="ops-g-97e59dc7">
+        <div className="tw-col-span-full">
           <label className="ops-label">품명 *</label>
           <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))} placeholder="예) 타원 백팩" className="ui-control" />
         </div>
@@ -690,14 +690,14 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
         </div>
 
         {/* 단가 */}
-        <div className="ops-g-97e59dc7">
+        <div className="tw-col-span-full">
           <label className="ops-label">단가 (선택)</label>
           <input type="number" min={0} value={form.unit_price} onChange={e => setForm(f => ({ ...f, unit_price: e.target.value }))}
             placeholder="0" style={{ ...inp, maxWidth: 160 }} />
         </div>
       </div>
 
-      <div className="ops-g-ac734d21">
+      <div className="tw-flex tw-gap-[8px]">
         <button onClick={() => { setOpen(false); resetForm(); }} className="btn btn-secondary">취소</button>
         <button
           onClick={handleAdd}
@@ -791,33 +791,33 @@ function VendorCombobox({ token, value, canonical, onChange }: VendorComboboxPro
   };
 
   return (
-    <div ref={wrapRef} className="ops-g-1e81b652">
-      <div className="ops-g-8f404211">
+    <div ref={wrapRef} className="tw-relative tw-w-full">
+      <div className="tw-flex tw-gap-[4px]">
         <input
           value={query}
           onChange={e => handleInput(e.target.value)}
           onFocus={() => setOpen(true)}
           placeholder="업체명 검색 또는 직접 입력"
-          className="ui-control ops-g-52dcacf6"
+          className="ui-control tw-flex-1"
           autoComplete="off"
         />
         <button
           type="button"
           onClick={() => setOpen(o => !o)}
-          className="btn btn-secondary ops-g-fa9eef55"
+          className="btn btn-secondary tw-text-[12px] tw-min-w-[32px] tw-py-0 tw-px-[10px]"
           title="목록 열기"
         >▾</button>
       </div>
 
       {/* 선택된 등록업체 뱃지 */}
       {canonical && (
-        <div className="ops-g-72b8d63f">
-          <span className="ops-g-7fe82697">
+        <div className="tw-items-center tw-flex tw-gap-[6px] tw-mt-[4px]">
+          <span className="tw-bg-[#ede9fe] tw-rounded-[4px] tw-text-tillion-brand tw-text-[11px] tw-py-[2px] tw-px-[7px]">
             📦 등록업체: {canonical}
           </span>
           <button
             type="button"
-            className="ops-g-c2ec2f6c"
+            className="tw-bg-transparent tw-border-0 tw-text-tillion-muted tw-cursor-pointer tw-text-[11px] tw-p-0"
             onClick={() => setAliasModal(registered.find(r => r.name === canonical) ?? { name: canonical, aliases: [] })}
             title="별칭 관리"
           >✎ 별칭</button>
@@ -837,14 +837,14 @@ function VendorCombobox({ token, value, canonical, onChange }: VendorComboboxPro
                   onMouseDown={() => selectRegistered(v)}
                 >
                   <div>
-                    <span className="ops-g-0728c5c8">{v.name}</span>
+                    <span className="tw-font-medium">{v.name}</span>
                     {v.aliases.length > 0 && (
-                      <span className="ops-g-d587ed76">
+                      <span className="tw-text-[#9ca3af] tw-text-[11px] tw-ml-[6px]">
                         ({v.aliases.join(', ')})
                       </span>
                     )}
                   </div>
-                  {v.name === canonical && <span className="ops-g-0cf82291">✓</span>}
+                  {v.name === canonical && <span className="tw-text-tillion-brand tw-text-[12px]">✓</span>}
                 </div>
               ))}
             </>
@@ -923,10 +923,10 @@ function AliasEditor({ token, vendor, onClose, onSaved }: {
   return (
     <div style={overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={box} onMouseDown={e => e.stopPropagation()}>
-        <div className="ops-g-6981b207">
+        <div className="tw-text-[14px] tw-font-bold tw-mb-[0.75rem]">
           ✎ &quot;{vendor.name}&quot; 별칭 관리
         </div>
-        <div className="ops-g-eeda8aab">
+        <div className="tw-text-tillion-muted tw-text-[12px] tw-mb-[8px]">
           쉼표로 구분. OCR이 별칭으로 읽어도 이 업체 바코드 목록에서 매칭합니다.
         </div>
         <textarea
@@ -934,9 +934,9 @@ function AliasEditor({ token, vendor, onClose, onSaved }: {
           onChange={e => setAliases(e.target.value)}
           placeholder="예: ABC코리아, 에이비씨, ABC"
           rows={3}
-          className="ui-control ops-g-1cf39c73"
+          className="ui-control tw-resize-y tw-w-full"
         />
-        <div className="ops-g-44b4db5c">
+        <div className="tw-flex tw-gap-[8px] tw-justify-end tw-mt-[12px]">
           <button onClick={onClose} className="btn btn-secondary">취소</button>
           <button onClick={save} disabled={saving} style={{ ...btn('var(--color-brand)'), opacity: saving ? 0.6 : 1 }}>
             {saving ? '저장 중…' : '저장'}
@@ -1002,10 +1002,10 @@ function CreateBatchModal({ token, onClose, onCreated }: {
           <input
             value={memo} onChange={e => setMemo(e.target.value)}
             placeholder="메모"
-            className="ui-control ops-g-64c1cf9b"
+            className="ui-control tw-w-full"
           />
         </div>
-        <div className="ops-g-b82f4ad5">
+        <div className="tw-flex tw-gap-[0.5rem] tw-justify-end tw-pt-[0.5rem]">
           <button onClick={onClose} className="btn btn-secondary">취소</button>
           <button onClick={handleCreate} disabled={saving} style={{ ...btn('var(--color-brand)'), opacity: saving ? 0.5 : 1 }}>
             {saving ? '생성 중…' : '입고 시작'}
@@ -1055,7 +1055,7 @@ function EditBatchModal({ batch, token, onClose, onUpdated }: {
           <label className="ops-label">화주사</label>
           <input
             value={vendor} onChange={e => setVendor(e.target.value)}
-            className="ui-control ops-g-64c1cf9b"
+            className="ui-control tw-w-full"
           />
         </div>
         <div style={fRow}>
@@ -1067,7 +1067,7 @@ function EditBatchModal({ batch, token, onClose, onUpdated }: {
           <input
             value={wholesale} onChange={e => setWholesale(e.target.value)}
             placeholder="도매처 이름"
-            className="ui-control ops-g-64c1cf9b"
+            className="ui-control tw-w-full"
           />
         </div>
         <div style={fRow}>
@@ -1075,10 +1075,10 @@ function EditBatchModal({ batch, token, onClose, onUpdated }: {
           <input
             value={memo} onChange={e => setMemo(e.target.value)}
             placeholder="메모"
-            className="ui-control ops-g-64c1cf9b"
+            className="ui-control tw-w-full"
           />
         </div>
-        <div className="ops-g-b82f4ad5">
+        <div className="tw-flex tw-gap-[0.5rem] tw-justify-end tw-pt-[0.5rem]">
           <button onClick={onClose} className="btn btn-secondary">취소</button>
           <button onClick={handleSave} disabled={saving} style={{ ...btn('#f59e0b'), opacity: saving ? 0.5 : 1 }}>
             {saving ? '저장 중…' : '수정 저장'}

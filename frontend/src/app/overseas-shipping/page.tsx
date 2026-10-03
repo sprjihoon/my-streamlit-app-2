@@ -582,10 +582,10 @@ export default function OverseasShippingPage() {
       const text = field === 'receivemail'
         ? '영문 이메일로 입력해주세요.'
         : `우체국에 넣을 수 없는 문자: ${fieldErrors[field]}`;
-      return <span className="ops-g-b4a3af30">{text}</span>;
+      return <span className="tw-text-[#b91c1c] tw-text-[0.78rem] tw-font-semibold">{text}</span>;
     }
     if (fieldNotes[field]) {
-      return <span className="ops-g-89c48f24">{fieldNotes[field]}</span>;
+      return <span className="tw-text-[#1d4ed8] tw-text-[0.78rem]">{fieldNotes[field]}</span>;
     }
     return null;
   }
@@ -1047,7 +1047,7 @@ export default function OverseasShippingPage() {
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
       {printId && (
-        <p className="ops-g-82d8a36e">
+        <p className="tw-mt-0 tw-mx-0 tw-mb-[1rem]">
           <a href={`/overseas-print/${printId}`} className="btn btn-primary" target="_blank" rel="noreferrer">
             출력서류 인쇄
           </a>
@@ -1095,21 +1095,21 @@ export default function OverseasShippingPage() {
       <div className="overseas-intake">
       <div>
       <Card title="접수 정보">
-        <p className="text-muted ops-g-27a03c04">
+        <p className="text-muted tw-mb-[1rem]">
           {liveReady ? `실접수 가능 · 기본 발송지 ${senderAddr}` : `EMS 키가 없어 테스트 접수로 저장됩니다. 기본 발송지 ${senderAddr}`}
           {GMAPS_KEY ? ' · 구글 주소검색 가능' : ' · 구글 주소키 없음(직접 입력)'}
         </p>
 
         <FormSection title="주문 엑셀" first>
-          <p className="text-muted ops-g-8bc3634a">
+          <p className="text-muted tw-mt-0">
             합포 1건의 주문 엑셀을 올리면 수취인, 주소, 제품명, 수량을 채웁니다. 품목란은 HS 품목이라 비워 둡니다.
           </p>
-          <div className="ops-g-4c7ce78c">
+          <div className="tw-items-center tw-flex tw-flex-wrap tw-gap-[0.5rem]">
             <input
               ref={excelInputRef}
               type="file"
               accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="ops-g-8251cb3b"
+              className="tw-hidden"
               onChange={(e) => void handleExcelFile(e.target.files?.[0] || null)}
             />
             <button
@@ -1123,7 +1123,7 @@ export default function OverseasShippingPage() {
             {excelName && <span className="text-muted">{excelName}</span>}
           </div>
           {excelGroups.length > 1 && (
-            <div className="ops-g-ec65ec12">
+            <div className="tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mt-[0.75rem]">
               {excelGroups.map((group, index) => (
                 <button
                   key={`${group.bundle_no}-${index}`}
@@ -1139,8 +1139,8 @@ export default function OverseasShippingPage() {
         </FormSection>
 
         <FormSection title="발송인" tone="sender">
-        <div className="ops-g-50c2747a">
-          <label className="ops-g-7b614378">
+        <div className="tw-items-end tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mb-[1rem]">
+          <label className="tw-flex-[1_1_240px]">
             저장된 발송인
             <select
               className="ui-control"
@@ -1226,7 +1226,7 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, save_sender_label: e.target.value }))}
             />
           </label>
-          <label className="ops-g-02504591">
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mt-[1.4rem]">
             <input
               type="checkbox"
               checked={!!form.save_sender}
@@ -1234,7 +1234,7 @@ export default function OverseasShippingPage() {
             />
             접수와 함께 발송인 저장
           </label>
-          <label className="ops-g-47c922d8">
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem]">
             <input
               type="checkbox"
               checked={!!form.save_sender_default}
@@ -1246,8 +1246,8 @@ export default function OverseasShippingPage() {
         </FormSection>
 
         <FormSection title="수취인" tone="recipient">
-        <div className="ops-g-50c2747a">
-          <label className="ops-g-2b216c3c">
+        <div className="tw-items-end tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mb-[1rem]">
+          <label className="tw-flex-[1_1_260px]">
             저장된 수취인
             <button
               type="button"
@@ -1292,7 +1292,7 @@ export default function OverseasShippingPage() {
           <label>
             국가
             <input
-              className="ui-control ops-g-a0663851"
+              className="ui-control tw-mb-[0.35rem]"
               value={nationQuery}
               placeholder="국가명·코드 검색 (예: 일본, JP)"
               onChange={(e) => setNationQuery(e.target.value)}
@@ -1312,13 +1312,13 @@ export default function OverseasShippingPage() {
                 ))
               )}
             </select>
-            <span className="text-muted ops-g-ef18f090">
+            <span className="text-muted tw-text-[0.78rem]">
               {nationsFallback ? '우체국 국가목록을 받지 못해 임시 목록입니다.' : '우체국 API 발송가능국'} · {nations.length}개
             </span>
           </label>
-          <div className="ops-g-97e59dc7">
-            <div className="ops-g-023f7c2a">우편물 종류</div>
-            <div className="ops-g-ac734d21">
+          <div className="tw-col-span-full">
+            <div className="tw-text-[0.85rem] tw-font-semibold tw-mb-[6px]">우편물 종류</div>
+            <div className="tw-flex tw-gap-[8px]">
               <button
                 type="button"
                 className="btn"
@@ -1350,7 +1350,7 @@ export default function OverseasShippingPage() {
                 서류
               </button>
             </div>
-            <span className="text-muted ops-g-ef18f090">
+            <span className="text-muted tw-text-[0.78rem]">
               {canDocument
                 ? '화물·서류 요금이 다릅니다. 선택한 유형으로 접수됩니다.'
                 : 'K-Packet은 화물만 가능합니다.'}
@@ -1413,7 +1413,7 @@ export default function OverseasShippingPage() {
             />
             <FieldMark field="receiveaddr2" />
           </label>
-          <div className="ops-g-97e59dc7">
+          <div className="tw-col-span-full">
             <label>
               상세주소 (영문){GMAPS_KEY ? ' · 구글 검색' : ''}{validating ? ' · 검증 중...' : ''}
               <input
@@ -1427,10 +1427,10 @@ export default function OverseasShippingPage() {
               />
               <FieldMark field="receiveaddr3" />
             </label>
-            <div className="ops-g-a43e282e">
+            <div className="tw-items-center tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mt-[0.55rem]">
               <button
                 type="button"
-                className="btn btn-primary ops-g-ba9812f3"
+                className="btn btn-primary tw-min-w-[140px]"
                 onClick={() => void triggerAddressValidation()}
                 disabled={validating || !GMAPS_KEY}
                
@@ -1450,7 +1450,7 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, save_address_label: e.target.value }))}
             />
           </label>
-          <label className="ops-g-02504591">
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mt-[1.4rem]">
             <input
               type="checkbox"
               checked={!!form.save_address}
@@ -1458,7 +1458,7 @@ export default function OverseasShippingPage() {
             />
             접수와 함께 수취인 저장
           </label>
-          <label className="ops-g-47c922d8">
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem]">
             <input
               type="checkbox"
               checked={!!form.save_address_default}
@@ -1486,14 +1486,14 @@ export default function OverseasShippingPage() {
               onChange={(e) => setForm((p) => ({ ...p, totweight: parseInt(e.target.value, 10) || 0 }))}
             />
             {isDocument && (
-              <span className="text-muted ops-g-ef18f090">
+              <span className="text-muted tw-text-[0.78rem]">
                 서류 요금은 300g~2kg 구간으로 계산됩니다
                 {form.shipping_method === 'EMS_PREMIUM' ? ' · 프리미엄 서류 최대 500g' : ' · EMS 서류 최대 2kg'}
               </span>
             )}
           </label>
           {isDocument ? (
-            <div className="text-muted ops-g-666fc28d">
+            <div className="text-muted tw-self-center tw-text-[0.85rem]">
               서류는 박스 크기·부피중량을 적용하지 않습니다.
             </div>
           ) : (
@@ -1533,7 +1533,7 @@ export default function OverseasShippingPage() {
           </label>
             </>
           )}
-          <label className="ops-g-97e59dc7">
+          <label className="tw-col-span-full">
             메모
             <input
               style={styleFor('notes')}
@@ -1566,7 +1566,7 @@ export default function OverseasShippingPage() {
             {quoteLoading && !quoteParcel ? (
               <span className="text-muted">조회 중</span>
             ) : quoteParcel && !quoteParcel.ok ? (
-              <span className="ops-g-5da41c61">{quoteParcel.error}</span>
+              <span className="tw-text-[#b91c1c] tw-text-[0.8rem] tw-font-semibold">{quoteParcel.error}</span>
             ) : quoteParcel?.totalFee != null ? (
               <span className="fee-choice-price">{quoteParcel.totalFee.toLocaleString()}원</span>
             ) : (
@@ -1588,7 +1588,7 @@ export default function OverseasShippingPage() {
               {quoteLoading && !quoteDocument ? (
                 <span className="text-muted">조회 중</span>
               ) : quoteDocument && !quoteDocument.ok ? (
-                <span className="ops-g-5da41c61">{quoteDocument.error}</span>
+                <span className="tw-text-[#b91c1c] tw-text-[0.8rem] tw-font-semibold">{quoteDocument.error}</span>
               ) : quoteDocument?.totalFee != null ? (
                 <span className="fee-choice-price">{quoteDocument.totalFee.toLocaleString()}원</span>
               ) : (
@@ -1598,9 +1598,9 @@ export default function OverseasShippingPage() {
           )}
         </div>
         {quoteLoading && quoteFee == null ? (
-          <div className="ops-g-52e7ae76">요금 조회 중...</div>
+          <div className="tw-text-[0.9rem] tw-mt-[8px]">요금 조회 중...</div>
         ) : quoteError && quoteFee == null ? (
-          <div className="ops-g-8da3a4bc">{quoteError}</div>
+          <div className="tw-text-[#b91c1c] tw-font-semibold tw-mt-[8px]">{quoteError}</div>
         ) : quoteFee != null ? (
           <div className="fee-lines">
             <div className="fee-line">
@@ -1628,12 +1628,12 @@ export default function OverseasShippingPage() {
               </>
             )}
             {quoteDuty?.ineligibleReason && (
-              <div className="ops-g-6a36136f">
+              <div className="tw-text-[#b45309] tw-text-[0.8rem] tw-font-semibold">
                 {quoteDuty.ineligibleReason}
               </div>
             )}
             {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
-              <div className="text-muted ops-g-c0024dfb">
+              <div className="text-muted tw-text-[0.8rem]">
                 신고가액을 입력하면 관세 선납이 나옵니다.
               </div>
             )}
@@ -1654,13 +1654,13 @@ export default function OverseasShippingPage() {
             </div>
           </div>
         ) : (
-          <div className="text-muted ops-g-15d9cd55">중량을 입력하면 우체국 요금이 표시됩니다.</div>
+          <div className="text-muted tw-mt-[8px]">중량을 입력하면 우체국 요금이 표시됩니다.</div>
         )}
       </Card>
 
       <Card title="접수">
         {liveReady && (
-          <label className="ops-g-c897e9b2">
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mb-[0.75rem]">
             <input
               type="checkbox"
               checked={!!form.test_mode}
@@ -1669,8 +1669,8 @@ export default function OverseasShippingPage() {
             테스트 접수 (우체국에 실제 신청하지 않음)
           </label>
         )}
-        <div className="ops-g-ba0deef2">
-          <button type="button" className="btn btn-primary ops-g-64c1cf9b" onClick={handleSubmit} disabled={saving}>
+        <div className="tw-flex tw-flex-col tw-gap-[0.55rem]">
+          <button type="button" className="btn btn-primary tw-w-full" onClick={handleSubmit} disabled={saving}>
             {saving ? '접수 중...' : liveReady && !form.test_mode ? '해외배송 접수' : '테스트 접수'}
           </button>
           <div className="fee-links">
@@ -1685,7 +1685,7 @@ export default function OverseasShippingPage() {
       </div>
 
       <Card title="세관 인보이스">
-        <p className="text-muted ops-g-37282f14">
+        <p className="text-muted tw-mb-[0.75rem]">
           {isDocument
             ? '서류도 내용품명(영문)을 입력하세요. 예: Documents. '
             : '제품명은 주문 상품이고, 품목은 HS 품목입니다. 한글·영문·HS 6자리로 검색합니다. '}
@@ -1856,7 +1856,7 @@ export default function OverseasShippingPage() {
             </tbody>
           </table>
         </div>
-        <button type="button" className="btn btn-secondary ops-g-663f9daa" onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
+        <button type="button" className="btn btn-secondary tw-mt-[0.75rem]" onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
           품목 추가
         </button>
       </Card>

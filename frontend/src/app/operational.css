@@ -477,6 +477,58 @@
   max-width: 520px;
   max-height: 90vh;
   overflow-y: auto;
+  box-shadow: 0 -4px 30px rgba(0,0,0,0.15);
+}
+.ops-auto-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ops-inline-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--color-brand-light);
+  color: var(--color-brand);
+  border: 2px dashed #c7d2fe;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ops-photo-x {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #b42318;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.ops-pop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  margin-top: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
 }
 .ops-sheet-handle {
   width: 40px;
