@@ -3,6 +3,15 @@
 import { useState, useEffect } from 'react';
 import { Alert } from '@/components/Alert';
 import { Loading } from '@/components/Loading';
+import { DateRangeControl, FilterBar, TableSummary } from '@/components/data';
+import { EmptyState } from '@/components/operational';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import PageHeader from '@/components/ui/page-header';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const BRAND_LABEL: Record<string, string> = { fashion: '패션', beauty: '뷰티', etc: '기타' };
@@ -32,6 +41,12 @@ interface EstimateDetail extends EstimateRow {
 
 function fmt(n: number) {
   return n.toLocaleString('ko-KR');
+}
+
+function brandVariant(brandType: string): 'info' | 'warning' | 'neutral' {
+  if (brandType === 'fashion') return 'info';
+  if (brandType === 'beauty') return 'warning';
+  return 'neutral';
 }
 
 export default function EstimateListPage() {
@@ -459,160 +474,90 @@ export default function EstimateListPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const inputStyle: React.CSSProperties = {
-    padding: '0.5rem 0.65rem', border: '1px solid #d1d5db', borderRadius: 8,
-    fontSize: '0.85rem', outline: 'none', background: '#fff',
-  };
-  const btnStyle: React.CSSProperties = {
-    padding: '0.5rem 1rem', border: 'none', borderRadius: 8,
-    fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', transition: 'all .15s',
-  };
-  const smallInputStyle: React.CSSProperties = {
-    padding: '0.35rem 0.5rem', border: '1px solid #d1d5db', borderRadius: 6,
-    fontSize: '0.8rem', outline: 'none', background: '#fff',
-  };
-
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto', padding: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-          견적서 목록
-        </h1>
-        <button
-          onClick={openCreateModal}
-          style={{
-            padding: '0.55rem 1.2rem', border: 'none', borderRadius: 8,
-            background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff',
-            fontSize: '0.875rem', fontWeight: 700, cursor: 'pointer',
-            boxShadow: '0 2px 6px rgba(16,185,129,.35)',
-          }}
-        >
-          + 새 견적서 만들기
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="견적서 목록"
+        subtitle="날짜와 업체로 저장된 견적을 찾습니다."
+        actions={<Button variant="success" onClick={openCreateModal}>+ 새 견적서 만들기</Button>}
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      {/* 필터 바 */}
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end',
-        background: '#fff', padding: '1rem', borderRadius: 12,
-        boxShadow: '0 1px 3px rgba(0,0,0,.08)', marginBottom: '1rem',
-      }}>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>시작일</label>
-          <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>종료일</label>
-          <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>표시 개수</label>
-          <select style={{ ...inputStyle, appearance: 'auto' as const }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+      <FilterBar
+        trailing={
+          <>
+            <Button type="button" onClick={handleSearch}>검색</Button>
+            {(dateFrom || dateTo) && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => { setDateFrom(''); setDateTo(''); setTimeout(() => { setPage(1); loadEstimates(); }, 0); }}
+              >
+                초기화
+              </Button>
+            )}
+          </>
+        }
+      >
+        <DateRangeControl from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
+        <Field label="표시 개수" className="tw-mb-0">
+          <Select
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+          >
             {PAGE_SIZES.map((s) => (
               <option key={s} value={s}>{s}개</option>
             ))}
-          </select>
-        </div>
-        <button onClick={handleSearch} style={{ ...btnStyle, background: '#3b82f6', color: '#fff' }}>
-          검색
-        </button>
-        {(dateFrom || dateTo) && (
-          <button onClick={() => { setDateFrom(''); setDateTo(''); setTimeout(() => { setPage(1); loadEstimates(); }, 0); }} style={{ ...btnStyle, background: '#e5e7eb', color: '#374151' }}>
-            초기화
-          </button>
-        )}
-      </div>
+          </Select>
+        </Field>
+      </FilterBar>
 
-      {/* 테이블 */}
       {loading ? (
-        <div style={{ padding: '3rem', textAlign: 'center' }}><Loading /></div>
+        <div className="tw-py-12 tw-text-center"><Loading /></div>
       ) : items.length === 0 ? (
-        <div style={{
-          textAlign: 'center', padding: '3rem', background: '#fff',
-          borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,.08)', color: '#9ca3af',
-        }}>
-          저장된 견적서가 없습니다.
-        </div>
+        <EmptyState title="저장된 견적서가 없습니다." />
       ) : (
-        <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,.08)', overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as const }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc' }}>
-                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>날짜</th>
-                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>업체명</th>
-                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>연락처</th>
-                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>유형</th>
-                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>총액</th>
-                  <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row) => (
-                  <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', color: '#6b7280' }}>{row.created_at}</td>
-                    <td style={{ padding: '0.6rem', fontWeight: 500 }}>{row.company_name || '-'}</td>
-                    <td style={{ padding: '0.6rem', color: '#6b7280' }}>{row.contact || '-'}</td>
-                    <td style={{ padding: '0.6rem', textAlign: 'center' }}>
-                      <span style={{
-                        display: 'inline-block', padding: '2px 10px', borderRadius: 12,
-                        fontSize: '0.75rem', fontWeight: 600,
-                        background: row.brand_type === 'fashion' ? '#dbeafe' : row.brand_type === 'beauty' ? '#fce7f3' : '#f3f4f6',
-                        color: row.brand_type === 'fashion' ? '#1d4ed8' : row.brand_type === 'beauty' ? '#be185d' : '#374151',
-                      }}>
-                        {BRAND_LABEL[row.brand_type] || row.brand_type}
-                      </span>
-                    </td>
-                    <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 600 }}>₩{fmt(row.total_amount)}</td>
-                    <td style={{ padding: '0.6rem', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                        <button
-                          onClick={() => loadDetail(row.id)}
-                          style={{
-                            padding: '4px 10px', fontSize: '0.75rem', fontWeight: 500,
-                            background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
-                          }}
-                        >
-                          상세
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirmId(row.id)}
-                          style={{
-                            padding: '4px 10px', fontSize: '0.75rem', fontWeight: 500,
-                            background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer',
-                          }}
-                        >
-                          삭제
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* 페이지네이션 */}
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '0.75rem 1rem', borderTop: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#6b7280',
-          }}>
-            <span>총 {total}건 / {totalPages} 페이지</span>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                style={{
-                  ...btnStyle, padding: '0.35rem 0.75rem', fontSize: '0.8rem',
-                  background: page <= 1 ? '#f3f4f6' : '#e5e7eb', color: page <= 1 ? '#d1d5db' : '#374151',
-                  cursor: page <= 1 ? 'default' : 'pointer',
-                }}
-              >
-                이전
-              </button>
+        <>
+          <TableSummary>총 {total}건 · {page} / {totalPages} 페이지</TableSummary>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>날짜</TableHead>
+                <TableHead>업체명</TableHead>
+                <TableHead>연락처</TableHead>
+                <TableHead>유형</TableHead>
+                <TableHead numeric>총액</TableHead>
+                <TableHead>관리</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="tw-whitespace-nowrap tw-text-tillion-muted">{row.created_at}</TableCell>
+                  <TableCell className="tw-font-medium">{row.company_name || '-'}</TableCell>
+                  <TableCell className="tw-text-tillion-muted">{row.contact || '-'}</TableCell>
+                  <TableCell>
+                    <Badge variant={brandVariant(row.brand_type)}>
+                      {BRAND_LABEL[row.brand_type] || row.brand_type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell numeric className="tw-font-semibold">₩{fmt(row.total_amount)}</TableCell>
+                  <TableCell>
+                    <div className="tw-flex tw-justify-end tw-gap-1">
+                      <Button type="button" className="tw-px-2 tw-py-1 tw-text-[12px]" onClick={() => loadDetail(row.id)}>상세</Button>
+                      <Button type="button" variant="ghost" className="tw-px-2 tw-py-1 tw-text-[12px] tw-text-tillion-danger" onClick={() => setDeleteConfirmId(row.id)}>삭제</Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="data-pager">
+            <span>{total}건</span>
+            <div className="data-pager-actions">
+              <Button type="button" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>이전</Button>
               {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
                 let p: number;
                 if (totalPages <= 5) {
@@ -625,112 +570,71 @@ export default function EstimateListPage() {
                   p = page - 2 + i;
                 }
                 return (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p)}
-                    style={{
-                      ...btnStyle, padding: '0.35rem 0.65rem', fontSize: '0.8rem', minWidth: 32,
-                      background: p === page ? '#3b82f6' : '#f3f4f6',
-                      color: p === page ? '#fff' : '#374151',
-                    }}
-                  >
+                  <Button key={p} type="button" variant={p === page ? 'primary' : 'secondary'} className="tw-min-w-[32px] tw-px-2" onClick={() => setPage(p)}>
                     {p}
-                  </button>
+                  </Button>
                 );
               })}
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                style={{
-                  ...btnStyle, padding: '0.35rem 0.75rem', fontSize: '0.8rem',
-                  background: page >= totalPages ? '#f3f4f6' : '#e5e7eb', color: page >= totalPages ? '#d1d5db' : '#374151',
-                  cursor: page >= totalPages ? 'default' : 'pointer',
-                }}
-              >
-                다음
-              </button>
+              <Button type="button" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>다음</Button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* 새 견적서 생성 모달 */}
       {isCreating && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
-        }}>
-          <div style={{
-            background: '#fff', borderRadius: 16, maxWidth: 820, width: '100%', maxHeight: '92vh',
-            overflow: 'hidden', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 20px 50px rgba(0,0,0,.25)',
-          }}>
+        <div className="data-modal-backdrop">
+          <div className="data-modal">
             {/* 헤더 */}
-            <div style={{
-              padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              background: 'linear-gradient(135deg, #10b981, #059669)',
-            }}>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
-                새 견적서 만들기
-              </h2>
-              <button
-                onClick={closeCreateModal}
-                style={{
-                  background: 'rgba(255,255,255,.2)', border: 'none', borderRadius: 8,
-                  padding: '6px 12px', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                닫기
-              </button>
+            <div className="data-modal-head">
+              <h2>새 견적서 만들기</h2>
+              <Button type="button" variant="ghost" onClick={closeCreateModal}>닫기</Button>
             </div>
 
             {/* 본문 */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem' }}>
+            <div className="data-modal-body">
               {/* 기본 정보 */}
-              <div style={{ background: '#f0fdf4', borderRadius: 12, padding: '1rem', marginBottom: '1.25rem', border: '1px solid #bbf7d0' }}>
-                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#065f46', marginBottom: '0.75rem', margin: '0 0 0.75rem' }}>
-                  기본 정보
-                </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+              <div className="surface">
+                <h3 className="section-title">기본 정보</h3>
+                <div className="data-form-grid">
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>
-                      업체명 <span style={{ color: '#ef4444' }}>*</span>
+                    <label className="ops-label">
+                      업체명 <span className="field-required">*</span>
                     </label>
                     <input
                       type="text"
                       value={createCompanyName}
                       onChange={(e) => setCreateCompanyName(e.target.value)}
                       placeholder="업체명 입력"
-                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                      className="ui-control"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>연락처</label>
+                    <label className="ops-label">연락처</label>
                     <input
                       type="text"
                       value={createContact}
                       onChange={(e) => setCreateContact(e.target.value)}
                       placeholder="010-0000-0000"
-                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                      className="ui-control"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>이메일</label>
+                    <label className="ops-label">이메일</label>
                     <input
                       type="email"
                       value={createEmail}
                       onChange={(e) => setCreateEmail(e.target.value)}
                       placeholder="example@email.com"
-                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                      className="ui-control"
                     />
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>브랜드 유형</label>
+                    <label className="ops-label">브랜드 유형</label>
                     <select
                       value={createBrandType}
                       onChange={(e) => setCreateBrandType(e.target.value)}
-                      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', appearance: 'auto' as const }}
+                      className="ui-control"
                     >
                       <option value="fashion">패션</option>
                       <option value="beauty">뷰티</option>
@@ -758,7 +662,7 @@ export default function EstimateListPage() {
                 {showAutoCalc && (
                   <div style={{ padding: '1rem', background: '#f8faff' }}>
                     {/* 기본 수치 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.65rem', marginBottom: '0.75rem' }}>
+                    <div className="data-form-grid tw-mb-3">
                       {[
                         { label: '월 출고건수', value: createMonthlyOutbound, set: (v: number) => setCreateMonthlyOutbound(v) },
                         { label: '반품 비율 (%)', value: createReturnPct, set: (v: number) => setCreateReturnPct(Math.min(100, v)) },
@@ -769,12 +673,12 @@ export default function EstimateListPage() {
                         { label: 'SKU 수', value: createSkuCount, set: (v: number) => setCreateSkuCount(v) },
                       ].map(({ label, value, set }) => (
                         <div key={label}>
-                          <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#6b7280', marginBottom: 3 }}>{label}</label>
+                          <label className="ops-label">{label}</label>
                           <input
                             type="number" min={0} step={1}
                             value={value || ''}
                             onChange={(e) => set(Math.ceil(Number(e.target.value)) || 0)}
-                            style={{ ...smallInputStyle, width: '100%' }}
+                            className="ui-control"
                             placeholder="0"
                           />
                         </div>
@@ -821,7 +725,7 @@ export default function EstimateListPage() {
                               <select
                                 value={createPpBagProvider}
                                 onChange={(e) => setCreatePpBagProvider(e.target.value as 'brand' | 'ours')}
-                                style={{ ...smallInputStyle, minWidth: 130 }}
+                                className="ui-control tw-min-w-[130px]"
                               >
                                 <option value="brand">브랜드 제공</option>
                                 <option value="ours">풀필먼트 공용</option>
@@ -832,7 +736,7 @@ export default function EstimateListPage() {
                               <select
                                 value={createMailerProvider}
                                 onChange={(e) => setCreateMailerProvider(e.target.value as 'brand' | 'ours')}
-                                style={{ ...smallInputStyle, minWidth: 130 }}
+                                className="ui-control tw-min-w-[130px]"
                               >
                                 <option value="brand">브랜드 제공</option>
                                 <option value="ours">풀필먼트 공용</option>
@@ -845,7 +749,7 @@ export default function EstimateListPage() {
                           <select
                             value={createCourierBoxProvider}
                             onChange={(e) => setCreateCourierBoxProvider(e.target.value as 'brand' | 'ours')}
-                            style={{ ...smallInputStyle, minWidth: 130 }}
+                            className="ui-control tw-min-w-[130px]"
                           >
                             <option value="brand">브랜드 제공</option>
                             <option value="ours">풀필먼트 공용</option>
@@ -920,60 +824,60 @@ export default function EstimateListPage() {
                   </button>
                 </div>
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <table>
                     <thead>
-                      <tr style={{ background: '#f1f5f9' }}>
-                        <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 140 }}>항목명</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 80 }}>수량</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>단가 (₩)</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 110 }}>금액</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>비고</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #e2e8f0', width: 50 }}></th>
+                      <tr>
+                        <th className="tw-font-semibold">항목명</th>
+                        <th className="cell-num tw-font-semibold">수량</th>
+                        <th className="cell-num tw-font-semibold">단가 (₩)</th>
+                        <th className="cell-num tw-font-semibold">금액</th>
+                        <th className="tw-font-semibold">비고</th>
+                        <th className="tw-font-semibold"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {createItems.map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '0.4rem' }}>
+                        <tr key={idx}>
+                          <td>
                             <input
                               type="text"
                               value={item.항목}
                               onChange={(e) => updateCreateItem(idx, '항목', e.target.value)}
-                              style={{ ...smallInputStyle, width: '100%' }}
+                              className="ui-control"
                               placeholder="예: 출고비"
                             />
                           </td>
-                          <td style={{ padding: '0.4rem' }}>
+                          <td>
                             <input
                               type="number"
                               value={item.수량}
                               onChange={(e) => updateCreateItem(idx, '수량', e.target.value)}
-                              style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                              className="ui-control tw-text-right"
                               min={0}
                             />
                           </td>
-                          <td style={{ padding: '0.4rem' }}>
+                          <td>
                             <input
                               type="number"
                               value={item.단가}
                               onChange={(e) => updateCreateItem(idx, '단가', e.target.value)}
-                              style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                              className="ui-control tw-text-right"
                               min={0}
                             />
                           </td>
-                          <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 600, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
+                          <td className="cell-num tw-text-tillion-brand tw-font-semibold">
                             ₩{fmt(item.금액)}
                           </td>
-                          <td style={{ padding: '0.4rem' }}>
+                          <td>
                             <input
                               type="text"
                               value={item.비고 || ''}
                               onChange={(e) => updateCreateItem(idx, '비고', e.target.value)}
-                              style={{ ...smallInputStyle, width: '100%' }}
+                              className="ui-control"
                               placeholder="비고"
                             />
                           </td>
-                          <td style={{ padding: '0.4rem', textAlign: 'center' }}>
+                          <td>
                             <button
                               onClick={() => removeCreateItem(idx)}
                               disabled={createItems.length === 1}
@@ -992,11 +896,11 @@ export default function EstimateListPage() {
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr style={{ background: '#f8fafc' }}>
-                        <td colSpan={3} style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 700, fontSize: '0.85rem' }}>
+                      <tr>
+                        <td colSpan={3} className="cell-num tw-font-semibold">
                           합계
                         </td>
-                        <td style={{ padding: '0.65rem 0.5rem', textAlign: 'right', fontWeight: 700, color: '#1d4ed8', fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
+                        <td className="cell-num tw-text-tillion-brand tw-font-semibold">
                           ₩{fmt(getCreateTotalAmount())}
                         </td>
                         <td colSpan={2}></td>
@@ -1042,40 +946,16 @@ export default function EstimateListPage() {
 
       {/* 삭제 확인 모달 */}
       {deleteConfirmId !== null && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
-        }}>
-          <div style={{
-            background: '#fff', borderRadius: 16, padding: '1.5rem', maxWidth: 360, width: '100%',
-            boxShadow: '0 20px 40px rgba(0,0,0,.2)',
-          }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1rem', color: '#1f2937' }}>
-              삭제 확인
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '1.5rem' }}>
+        <div className="data-modal-backdrop">
+          <div className="data-modal is-confirm">
+            <h3 className="section-title">삭제 확인</h3>
+            <p className="caption tw-mb-3">
               견적서 #{deleteConfirmId}를 삭제하시겠습니까?<br />
               이 작업은 되돌릴 수 없습니다.
             </p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => setDeleteConfirmId(null)}
-                style={{
-                  flex: 1, padding: '0.65rem', border: '1px solid #d1d5db', borderRadius: 8,
-                  background: '#fff', color: '#374151', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                취소
-              </button>
-              <button
-                onClick={() => handleDelete(deleteConfirmId)}
-                style={{
-                  flex: 1, padding: '0.65rem', border: 'none', borderRadius: 8,
-                  background: '#ef4444', color: '#fff', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                삭제
-              </button>
+            <div className="tw-flex tw-gap-2">
+              <Button type="button" variant="secondary" className="tw-flex-1" onClick={() => setDeleteConfirmId(null)}>취소</Button>
+              <Button type="button" variant="destructive" className="tw-flex-1" onClick={() => handleDelete(deleteConfirmId)}>삭제</Button>
             </div>
           </div>
         </div>
@@ -1083,37 +963,16 @@ export default function EstimateListPage() {
 
       {/* 상세/수정 모달 */}
       {selectedId !== null && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem',
-        }}>
-          <div style={{
-            background: '#fff', borderRadius: 16, maxWidth: 800, width: '100%', maxHeight: '90vh',
-            overflow: 'hidden', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 20px 40px rgba(0,0,0,.2)',
-          }}>
+        <div className="data-modal-backdrop">
+          <div className="data-modal">
             {/* 헤더 */}
-            <div style={{
-              padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-            }}>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
-                견적서 #{selectedId} {isEditing ? '수정' : '상세'}
-              </h2>
-              <button
-                onClick={closeModal}
-                style={{
-                  background: 'rgba(255,255,255,.2)', border: 'none', borderRadius: 8,
-                  padding: '6px 12px', color: '#fff', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                닫기
-              </button>
+            <div className="data-modal-head">
+              <h2>견적서 #{selectedId} {isEditing ? '수정' : '상세'}</h2>
+              <Button type="button" variant="ghost" onClick={closeModal}>닫기</Button>
             </div>
 
             {/* 본문 */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem' }}>
+            <div className="data-modal-body">
               {detailLoading ? (
                 <div style={{ padding: '3rem', textAlign: 'center' }}><Loading /></div>
               ) : detail ? (
@@ -1126,40 +985,40 @@ export default function EstimateListPage() {
                       기본 정보
                     </h3>
                     {isEditing ? (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                      <div className="data-form-grid">
                         <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>업체명</label>
+                          <label className="ops-label">업체명</label>
                           <input
                             type="text"
                             value={editCompanyName}
                             onChange={(e) => setEditCompanyName(e.target.value)}
-                            style={{ ...inputStyle, width: '100%' }}
+                            className="ui-control"
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>연락처</label>
+                          <label className="ops-label">연락처</label>
                           <input
                             type="text"
                             value={editContact}
                             onChange={(e) => setEditContact(e.target.value)}
-                            style={{ ...inputStyle, width: '100%' }}
+                            className="ui-control"
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>이메일</label>
+                          <label className="ops-label">이메일</label>
                           <input
                             type="email"
                             value={editEmail}
                             onChange={(e) => setEditEmail(e.target.value)}
-                            style={{ ...inputStyle, width: '100%' }}
+                            className="ui-control"
                           />
                         </div>
                         <div>
-                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>브랜드 유형</label>
+                          <label className="ops-label">브랜드 유형</label>
                           <select
                             value={editBrandType}
                             onChange={(e) => setEditBrandType(e.target.value)}
-                            style={{ ...inputStyle, width: '100%', appearance: 'auto' as const }}
+                            className="ui-control"
                           >
                             <option value="fashion">패션</option>
                             <option value="beauty">뷰티</option>
@@ -1207,59 +1066,59 @@ export default function EstimateListPage() {
                       )}
                     </div>
                     <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                      <table>
                         <thead>
-                          <tr style={{ background: '#f1f5f9' }}>
-                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 120 }}>항목</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 80 }}>수량</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 80 }}>단가</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>금액</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, borderBottom: '1px solid #e2e8f0', minWidth: 100 }}>비고</th>
-                            {isEditing && <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600, borderBottom: '1px solid #e2e8f0', width: 50 }}></th>}
+                          <tr>
+                            <th className="tw-font-semibold">항목</th>
+                            <th className="cell-num tw-font-semibold">수량</th>
+                            <th className="cell-num tw-font-semibold">단가</th>
+                            <th className="cell-num tw-font-semibold">금액</th>
+                            <th className="tw-font-semibold">비고</th>
+                            {isEditing && <th className="tw-font-semibold"></th>}
                           </tr>
                         </thead>
                         <tbody>
                           {isEditing ? (
                             editItems.map((item, idx) => (
-                              <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '0.4rem' }}>
+                              <tr key={idx}>
+                                <td>
                                   <input
                                     type="text"
                                     value={item.항목}
                                     onChange={(e) => updateEditItem(idx, '항목', e.target.value)}
-                                    style={{ ...smallInputStyle, width: '100%' }}
+                                    className="ui-control"
                                     placeholder="항목명"
                                   />
                                 </td>
-                                <td style={{ padding: '0.4rem' }}>
+                                <td>
                                   <input
                                     type="number"
                                     value={item.수량}
                                     onChange={(e) => updateEditItem(idx, '수량', e.target.value)}
-                                    style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                                    className="ui-control tw-text-right"
                                   />
                                 </td>
-                                <td style={{ padding: '0.4rem' }}>
+                                <td>
                                   <input
                                     type="number"
                                     value={item.단가}
                                     onChange={(e) => updateEditItem(idx, '단가', e.target.value)}
-                                    style={{ ...smallInputStyle, width: '100%', textAlign: 'right' }}
+                                    className="ui-control tw-text-right"
                                   />
                                 </td>
-                                <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 600, color: '#1d4ed8' }}>
+                                <td className="cell-num tw-text-tillion-brand tw-font-semibold">
                                   ₩{fmt(item.금액)}
                                 </td>
-                                <td style={{ padding: '0.4rem' }}>
+                                <td>
                                   <input
                                     type="text"
                                     value={item.비고 || ''}
                                     onChange={(e) => updateEditItem(idx, '비고', e.target.value)}
-                                    style={{ ...smallInputStyle, width: '100%' }}
+                                    className="ui-control"
                                     placeholder="비고"
                                   />
                                 </td>
-                                <td style={{ padding: '0.4rem', textAlign: 'center' }}>
+                                <td>
                                   <button
                                     onClick={() => removeEditItem(idx)}
                                     style={{
@@ -1274,20 +1133,20 @@ export default function EstimateListPage() {
                             ))
                           ) : (
                             detail.items.map((item, idx) => (
-                              <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                <td style={{ padding: '0.5rem' }}>{item.항목}</td>
-                                <td style={{ padding: '0.5rem', textAlign: 'right' }}>{fmt(item.수량)}</td>
-                                <td style={{ padding: '0.5rem', textAlign: 'right' }}>₩{fmt(item.단가)}</td>
-                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>₩{fmt(item.금액)}</td>
-                                <td style={{ padding: '0.5rem', color: '#6b7280', fontSize: '0.78rem' }}>{item.비고 || ''}</td>
+                              <tr key={idx}>
+                                <td>{item.항목}</td>
+                                <td className="cell-num">{fmt(item.수량)}</td>
+                                <td className="cell-num">₩{fmt(item.단가)}</td>
+                                <td className="cell-num tw-font-semibold">₩{fmt(item.금액)}</td>
+                                <td>{item.비고 || ''}</td>
                               </tr>
                             ))
                           )}
                         </tbody>
                         <tfoot>
-                          <tr style={{ background: '#f8fafc' }}>
-                            <td colSpan={3} style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700 }}>합계</td>
-                            <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 700, color: '#1d4ed8' }}>
+                          <tr>
+                            <td colSpan={3} className="cell-num tw-font-semibold">합계</td>
+                            <td className="cell-num tw-text-tillion-brand tw-font-semibold">
                               ₩{fmt(isEditing ? getEditTotalAmount() : detail.total_amount)}
                             </td>
                             <td colSpan={isEditing ? 2 : 1}></td>

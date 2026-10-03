@@ -2,6 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loading } from '@/components/Loading';
+import { ChartSection, DateRangeControl, FilterBar, KpiStrip, TableSummary } from '@/components/data';
+import { EmptyState } from '@/components/operational';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import PageHeader from '@/components/ui/page-header';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -128,54 +135,26 @@ function calcPreset(p: Preset): { from: string; to: string } {
   }
 }
 
-// 유입경로 색상
-const SRC_COLOR: Record<string, { bg: string; text: string }> = {
-  'Instagram':       { bg: '#e4405f', text: '#fff' },
-  'Instagram 광고':  { bg: '#c13584', text: '#fff' },
-  'YouTube':         { bg: '#ff0000', text: '#fff' },
-  'YouTube 광고':    { bg: '#cc0000', text: '#fff' },
-  'Naver':           { bg: '#03c75a', text: '#fff' },
-  '네이버 광고':     { bg: '#019040', text: '#fff' },
-  'Google':          { bg: '#4285f4', text: '#fff' },
-  'Google 광고':     { bg: '#1a73e8', text: '#fff' },
-  'Facebook':        { bg: '#1877f2', text: '#fff' },
-  'Facebook 광고':   { bg: '#0a5dc2', text: '#fff' },
-  'KakaoTalk':       { bg: '#fee500', text: '#3c1e1e' },
-  '카카오 광고':     { bg: '#f5c200', text: '#3c1e1e' },
-  'TikTok':          { bg: '#111', text: '#fff' },
-  'X(Twitter)':      { bg: '#000', text: '#fff' },
-  '직접 접속':       { bg: '#e5e7eb', text: '#374151' },
-  '사이트 내 이동':  { bg: '#dbeafe', text: '#1d4ed8' },
-  'Daum':            { bg: '#4a90d9', text: '#fff' },
-  '이메일':          { bg: '#7c3aed', text: '#fff' },
-  '기타':            { bg: '#f3f4f6', text: '#6b7280' },
-};
-
 function SourceBadge({ source }: { source: string }) {
-  const c = SRC_COLOR[source] || { bg: '#a855f7', text: '#fff' };
-  return (
-    <span style={{
-      display: 'inline-block', padding: '2px 8px', borderRadius: 10,
-      fontSize: '0.7rem', fontWeight: 600, background: c.bg, color: c.text, whiteSpace: 'nowrap',
-    }}>{source}</span>
-  );
+  const variant = source.includes('광고') ? 'warning' : source === '직접 접속' ? 'neutral' : 'info';
+  return <Badge variant={variant}>{source}</Badge>;
 }
 
-function BarRow({ label, count, total, color, sub }: { label: string; count: number; total: number; color: string; sub?: string }) {
+function BarRow({ label, count, total, sub }: { label: string; count: number; total: number; color?: string; sub?: string }) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <span style={{ fontSize: '0.82rem', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-          {sub && <span style={{ fontSize: '0.7rem', color: '#9ca3af', flexShrink: 0 }}>{sub}</span>}
+    <div className="tw-mb-2">
+      <div className="tw-mb-1 tw-flex tw-items-center tw-justify-between tw-gap-2">
+        <div className="tw-flex tw-min-w-0 tw-items-center tw-gap-1.5">
+          <span className="tw-truncate tw-text-[13px]">{label}</span>
+          {sub ? <span className="caption tw-shrink-0">{sub}</span> : null}
         </div>
-        <span style={{ fontSize: '0.82rem', fontWeight: 600, color, flexShrink: 0 }}>
-          {fmt(count)} <span style={{ color: '#9ca3af', fontWeight: 400 }}>({pct}%)</span>
+        <span className="tw-shrink-0 tw-text-[13px] tw-font-semibold tw-tabular-nums">
+          {fmt(count)} <span className="tw-font-normal tw-text-tillion-muted">({pct}%)</span>
         </span>
       </div>
-      <div style={{ height: 6, background: '#f1f5f9', borderRadius: 4 }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 4, transition: 'width .4s' }} />
+      <div className="data-bar">
+        <i style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -383,29 +362,6 @@ export default function WpAnalyticsPage() {
   }
 
   // ── 스타일 ──
-  const card: React.CSSProperties = { background: '#fff', borderRadius: 12, padding: '1.1rem', boxShadow: '0 1px 4px rgba(0,0,0,.07)' };
-  const statCard = (color: string): React.CSSProperties => ({ ...card, textAlign: 'center', padding: '1.1rem 0.6rem', borderTop: `3px solid ${color}` });
-  const tabBtn = (active: boolean): React.CSSProperties => ({
-    padding: '0.5rem 1rem', border: 'none', borderRadius: 8, cursor: 'pointer',
-    fontWeight: 600, fontSize: '0.83rem',
-    background: active ? '#6366f1' : '#f3f4f6',
-    color: active ? '#fff' : '#6b7280', transition: 'all .15s',
-  });
-  const presetBtn = (active: boolean): React.CSSProperties => ({
-    padding: '0.35rem 0.75rem', border: '1px solid', borderRadius: 6,
-    fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
-    borderColor: active ? '#6366f1' : '#e5e7eb',
-    background: active ? '#eef2ff' : '#fff',
-    color: active ? '#6366f1' : '#6b7280',
-  });
-  const inputStyle: React.CSSProperties = {
-    padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6,
-    fontSize: '0.82rem', outline: 'none', background: '#fff',
-  };
-  const btnStyle: React.CSSProperties = {
-    padding: '0.4rem 0.8rem', border: 'none', borderRadius: 6,
-    fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
-  };
   const th: React.CSSProperties = { padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap', background: '#f8fafc', fontSize: '0.82rem' };
   const td: React.CSSProperties = { padding: '0.55rem 0.75rem', borderBottom: '1px solid #f1f5f9', fontSize: '0.82rem' };
 
@@ -414,149 +370,104 @@ export default function WpAnalyticsPage() {
   const visTotal = Math.max(1, Math.ceil(visitorTotal / 20));
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', padding: '1rem' }}>
+    <div>
+      <PageHeader
+        title="WordPress 사이트 분석"
+        subtitle="spring3pl.co.kr 전체 페이지 방문자 데이터"
+      />
 
-      {/* ── 헤더 ── */}
-      <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>WordPress 사이트 분석</h1>
-        <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>spring3pl.co.kr 전체 페이지 방문자 데이터</p>
-      </div>
-
-      {/* ── 날짜 필터 + 프리셋 ── */}
-      <div style={{ ...card, marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-          {PRESETS.map(p => (
-            <button key={p} style={presetBtn(preset === p)} onClick={() => applyPreset(p)}>{p}</button>
+      <FilterBar
+        trailing={(dateFrom || dateTo) && preset !== '전체' ? (
+          <span className="caption">{dateFrom || '전체'} ~ {dateTo || '전체'}</span>
+        ) : null}
+      >
+        <div className="data-tabs tw-mb-0">
+          {PRESETS.map((p) => (
+            <Button key={p} type="button" variant={preset === p ? 'primary' : 'secondary'} onClick={() => applyPreset(p)}>
+              {p}
+            </Button>
           ))}
         </div>
         {preset === '직접입력' && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', marginBottom: 2 }}>시작일</label>
-              <input type="date" style={inputStyle} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', marginBottom: 2 }}>종료일</label>
-              <input type="date" style={inputStyle} value={dateTo} onChange={e => setDateTo(e.target.value)} />
-            </div>
-          </div>
+          <DateRangeControl from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
         )}
-        {(dateFrom || dateTo) && preset !== '전체' && (
-          <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#6b7280' }}>
-            📅 {dateFrom || '전체'} ~ {dateTo || '전체'}
-          </div>
-        )}
-      </div>
+      </FilterBar>
 
-      {/* ── 관리자 IP 필터 패널 ── */}
-      <div style={{ ...card, marginBottom: '1rem', border: '1px solid #e5e7eb' }}>
-        <button
-          onClick={() => setIpPanelOpen(v => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0, width: '100%', textAlign: 'left' }}
-        >
-          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#374151' }}>🚫 분석 제외 IP 관리</span>
-          <span style={{ fontSize: '0.72rem', color: '#9ca3af', marginLeft: 4 }}>({excludedIps.length}개)</span>
-          <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: '#9ca3af' }}>{ipPanelOpen ? '▲ 접기' : '▼ 펼치기'}</span>
+      <div className="card">
+        <button type="button" className="tw-flex tw-w-full tw-items-center tw-gap-2 tw-border-0 tw-bg-transparent tw-p-0 tw-text-left" onClick={() => setIpPanelOpen((v) => !v)}>
+          <span className="section-title tw-mb-0">분석 제외 IP</span>
+          <span className="caption">({excludedIps.length}개)</span>
+          <span className="caption tw-ml-auto">{ipPanelOpen ? '접기' : '펼치기'}</span>
         </button>
-
         {ipPanelOpen && (
-          <div style={{ marginTop: '0.9rem' }}>
-            {/* 현재 목록 */}
+          <div className="tw-mt-3">
             {excludedIps.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: '0.9rem' }}>
-                {excludedIps.map(item => (
-                  <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', borderRadius: 8, padding: '0.45rem 0.75rem' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#374151', fontWeight: 600 }}>{item.ip_address}</span>
-                    {item.memo && <span style={{ fontSize: '0.73rem', color: '#9ca3af' }}>{item.memo}</span>}
-                    <button
-                      onClick={() => deleteExcludedIp(item.id)}
-                      style={{ marginLeft: 'auto', background: '#fee2e2', color: '#b91c1c', border: 'none', borderRadius: 6, padding: '2px 10px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
-                    >삭제</button>
+              <div className="tw-mb-3 tw-flex tw-flex-col tw-gap-1.5">
+                {excludedIps.map((item) => (
+                  <div key={item.id} className="tw-flex tw-items-center tw-gap-2 tw-rounded-md tw-bg-[var(--bg-muted)] tw-px-2 tw-py-1.5">
+                    <span className="tw-font-mono tw-text-[13px] tw-font-semibold">{item.ip_address}</span>
+                    {item.memo ? <span className="caption">{item.memo}</span> : null}
+                    <Button type="button" variant="ghost" className="tw-ml-auto tw-px-2 tw-py-0.5 tw-text-[12px] tw-text-tillion-danger" onClick={() => deleteExcludedIp(item.id)}>삭제</Button>
                   </div>
                 ))}
               </div>
             ) : (
-              <p style={{ fontSize: '0.8rem', color: '#9ca3af', margin: '0 0 0.9rem' }}>등록된 제외 IP 없음</p>
+              <p className="caption tw-mb-3">등록된 제외 IP 없음</p>
             )}
-
-            {/* 추가 입력 */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', marginBottom: 2 }}>IP 주소</label>
-                <input
-                  type="text" placeholder="예) 123.456.78.90"
-                  value={ipInput} onChange={e => setIpInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addExcludedIp()}
-                  style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', outline: 'none', width: 180 }}
+            <div className="tw-flex tw-flex-wrap tw-items-end tw-gap-2">
+              <Field label="IP 주소" className="tw-mb-0">
+                <Input
+                  type="text"
+                  placeholder="예) 123.456.78.90"
+                  value={ipInput}
+                  onChange={(e) => setIpInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addExcludedIp()}
                 />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#6b7280', marginBottom: 2 }}>메모 (선택)</label>
-                <input
-                  type="text" placeholder="예) 관리자 IP"
-                  value={memoInput} onChange={e => setMemoInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addExcludedIp()}
-                  style={{ padding: '0.4rem 0.6rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', outline: 'none', width: 140 }}
+              </Field>
+              <Field label="메모 (선택)" className="tw-mb-0">
+                <Input
+                  type="text"
+                  placeholder="예) 관리자 IP"
+                  value={memoInput}
+                  onChange={(e) => setMemoInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addExcludedIp()}
                 />
-              </div>
-              <button
-                onClick={addExcludedIp}
-                style={{ padding: '0.4rem 0.9rem', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
-              >+ 추가</button>
+              </Field>
+              <Button type="button" onClick={addExcludedIp}>추가</Button>
             </div>
           </div>
         )}
       </div>
 
-      {/* ── 탭 ── */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: '1rem', flexWrap: 'wrap' }}>
-        {([['overview', '📊 개요'], ['flow', '🔀 페이지 흐름'], ['pages', '📄 페이지별'], ['sessions', '👤 방문자별'], ['visitors', '📋 방문 로그']] as [Tab, string][]).map(([t, label]) => (
-          <button key={t} style={tabBtn(activeTab === t)} onClick={() => setActiveTab(t)}>{label}</button>
+      <div className="data-tabs">
+        {([['overview', '개요'], ['flow', '페이지 흐름'], ['pages', '페이지별'], ['sessions', '방문자별'], ['visitors', '방문 로그']] as [Tab, string][]).map(([t, label]) => (
+          <Button key={t} type="button" variant={activeTab === t ? 'primary' : 'secondary'} onClick={() => setActiveTab(t)}>{label}</Button>
         ))}
       </div>
 
       {loading && activeTab === 'overview' ? (
-        <div style={{ padding: '4rem', textAlign: 'center' }}><Loading /></div>
+        <div className="tw-py-16 tw-text-center"><Loading /></div>
       ) : (
         <>
-          {/* ════════════════════════════════════════════════
-              개요 탭
-          ════════════════════════════════════════════════ */}
           {activeTab === 'overview' && stats && (
             <>
-              {/* 요약 카드 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                <div style={statCard('#6366f1')}>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>총 방문수</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#6366f1' }}>{fmt(stats.summary.total_visits)}</div>
-                </div>
-                <div style={statCard('#10b981')}>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>고유 방문자</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#10b981' }}>{fmt(stats.summary.unique_visitors)}</div>
-                </div>
-                <div style={statCard('#ec4899')}>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>모바일</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ec4899' }}>{fmt(stats.summary.mobile_count)}</div>
-                  <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>{stats.summary.mobile_rate}%</div>
-                </div>
-                <div style={statCard('#06b6d4')}>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>평균 체류시간</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#06b6d4' }}>{fmtDuration(stats.summary.avg_duration_seconds)}</div>
-                  <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>최대 {fmtDuration(stats.summary.max_duration_seconds)}</div>
-                </div>
-                <div style={statCard('#f59e0b')}>
-                  <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>페이지 수</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#f59e0b' }}>{stats.page_stats.length}</div>
-                </div>
-              </div>
+              <KpiStrip
+                items={[
+                  { label: '총 방문수', value: fmt(stats.summary.total_visits) },
+                  { label: '고유 방문자', value: fmt(stats.summary.unique_visitors) },
+                  { label: '모바일', value: fmt(stats.summary.mobile_count), hint: `${stats.summary.mobile_rate}%` },
+                  { label: '평균 체류시간', value: fmtDuration(stats.summary.avg_duration_seconds), hint: `최대 ${fmtDuration(stats.summary.max_duration_seconds)}` },
+                ]}
+              />
+              <TableSummary>페이지 {stats.page_stats.length}개</TableSummary>
 
               {/* 인게이지먼트 + 반복유입 카드 */}
               {stats.engagement && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                <div className="data-split">
                   {/* 인게이지먼트 지표 */}
-                  <div style={card}>
-                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>📊 방문 깊이 분석</h3>
-                    <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>한 페이지만 보고 나간 방문자도 "얼마나 관심이 있었는지"를 측정합니다</p>
+                  <div className="card">
+                    <h3 className="section-title">📊 방문 깊이 분석</h3>
+                    <p className="caption">한 페이지만 보고 나간 방문자도 "얼마나 관심이 있었는지"를 측정합니다</p>
 
                     {/* 체류시간 구간 */}
                     <div style={{ marginBottom: '0.8rem' }}>
@@ -569,9 +480,9 @@ export default function WpAnalyticsPage() {
                       ].map((item, i) => {
                         const pct = stats.summary.total_visits > 0 ? Math.round(item.val / stats.summary.total_visits * 100) : 0;
                         return (
-                          <div key={i} style={{ marginBottom: 6 }}>
+                          <div key={i} className="tw-mb-1.5">
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, fontSize: '0.75rem' }}>
-                              <span style={{ color: '#374151' }}>{item.label}</span>
+                              <span>{item.label}</span>
                               <span style={{ fontWeight: 700, color: item.textColor }}>{fmt(item.val)}명 ({pct}%)</span>
                             </div>
                             <div style={{ height: 5, background: '#f1f5f9', borderRadius: 3 }}>
@@ -583,57 +494,56 @@ export default function WpAnalyticsPage() {
                     </div>
 
                     {/* 마일스톤 */}
-                    <div style={{ display: 'flex', gap: 8, marginBottom: '0.8rem' }}>
-                      <div style={{ flex: 1, background: '#eff6ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
-                        <div style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 700 }}>10초 이상 체류</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1d4ed8' }}>{stats.engagement.milestone_10s_rate}%</div>
-                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.milestone_10s_count)}명</div>
+                    <div className="tw-mb-3 tw-grid tw-grid-cols-2 tw-gap-3">
+                      <div>
+                        <div className="caption">10초 이상 체류</div>
+                        <div className="tw-text-[18px] tw-font-semibold tw-tabular-nums">{stats.engagement.milestone_10s_rate}%</div>
+                        <div className="caption">{fmt(stats.engagement.milestone_10s_count)}명</div>
                       </div>
-                      <div style={{ flex: 1, background: '#f0fdf4', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
-                        <div style={{ fontSize: '0.65rem', color: '#16a34a', fontWeight: 700 }}>30초 이상 체류</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#15803d' }}>{stats.engagement.milestone_30s_rate}%</div>
-                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.milestone_30s_count)}명</div>
+                      <div>
+                        <div className="caption">30초 이상 체류</div>
+                        <div className="tw-text-[18px] tw-font-semibold tw-tabular-nums">{stats.engagement.milestone_30s_rate}%</div>
+                        <div className="caption">{fmt(stats.engagement.milestone_30s_count)}명</div>
                       </div>
                     </div>
 
-                    {/* 스크롤 깊이 */}
-                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6b7280', marginBottom: 6 }}>📜 스크롤 깊이</div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <div style={{ flex: 1, background: '#faf5ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
-                        <div style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 700 }}>평균 스크롤</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6d28d9' }}>{stats.engagement.avg_scroll_depth}%</div>
+                    <div className="caption tw-mb-1.5">스크롤 깊이</div>
+                    <div className="tw-grid tw-grid-cols-3 tw-gap-3">
+                      <div>
+                        <div className="caption">평균 스크롤</div>
+                        <div className="tw-text-[18px] tw-font-semibold tw-tabular-nums">{stats.engagement.avg_scroll_depth}%</div>
                       </div>
-                      <div style={{ flex: 1, background: '#faf5ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
-                        <div style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 700 }}>50% 이상 스크롤</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6d28d9' }}>{stats.engagement.scroll_50_rate}%</div>
-                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.scroll_50_count)}명</div>
+                      <div>
+                        <div className="caption">50% 이상</div>
+                        <div className="tw-text-[18px] tw-font-semibold tw-tabular-nums">{stats.engagement.scroll_50_rate}%</div>
+                        <div className="caption">{fmt(stats.engagement.scroll_50_count)}명</div>
                       </div>
-                      <div style={{ flex: 1, background: '#faf5ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
-                        <div style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 700 }}>75% 이상 스크롤</div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6d28d9' }}>{stats.engagement.scroll_75_rate}%</div>
-                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{fmt(stats.engagement.scroll_75_count)}명</div>
+                      <div>
+                        <div className="caption">75% 이상</div>
+                        <div className="tw-text-[18px] tw-font-semibold tw-tabular-nums">{stats.engagement.scroll_75_rate}%</div>
+                        <div className="caption">{fmt(stats.engagement.scroll_75_count)}명</div>
                       </div>
                     </div>
                   </div>
 
                   {/* 반복유입 분석 */}
                   {stats.repeat_stats && (
-                    <div style={card}>
-                      <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.4rem' }}>🔄 반복유입 분석</h3>
-                      <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>같은 IP가 탭을 닫고 재접속한 횟수 기준 (당일 재방문 포함, 페이지 이동은 제외)</p>
+                    <div className="card">
+                      <h3 className="section-title">🔄 반복유입 분석</h3>
+                      <p className="caption">같은 IP가 탭을 닫고 재접속한 횟수 기준 (당일 재방문 포함, 페이지 이동은 제외)</p>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: '0.8rem' }}>
                         <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '0.7rem', textAlign: 'center' }}>
                           <div style={{ fontSize: '0.68rem', color: '#16a34a', fontWeight: 700 }}>재방문자</div>
                           <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#15803d' }}>{fmt(stats.repeat_stats.repeat_ips)}</div>
-                          <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>
+                          <div className="caption">
                             {stats.repeat_stats.total_ips > 0 ? Math.round(stats.repeat_stats.repeat_ips / stats.repeat_stats.total_ips * 100) : 0}%
                           </div>
                         </div>
                         <div style={{ background: '#f8fafc', borderRadius: 8, padding: '0.7rem', textAlign: 'center' }}>
                           <div style={{ fontSize: '0.68rem', color: '#6b7280', fontWeight: 700 }}>신규방문자</div>
                           <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#374151' }}>{fmt(stats.repeat_stats.once_ips)}</div>
-                          <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>
+                          <div className="caption">
                             {stats.repeat_stats.total_ips > 0 ? Math.round(stats.repeat_stats.once_ips / stats.repeat_stats.total_ips * 100) : 0}%
                           </div>
                         </div>
@@ -642,20 +552,20 @@ export default function WpAnalyticsPage() {
                       <div style={{ background: '#eff6ff', borderRadius: 8, padding: '0.6rem', textAlign: 'center' }}>
                         <div style={{ fontSize: '0.68rem', color: '#3b82f6', fontWeight: 700 }}>방문자 평균 세션 수</div>
                         <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1d4ed8' }}>{stats.repeat_stats.avg_sessions.toFixed(1)}회</div>
-                        <div style={{ fontSize: '0.65rem', color: '#9ca3af' }}>세션 기준 (당일 재방문 포함)</div>
+                        <div className="caption">세션 기준 (당일 재방문 포함)</div>
                       </div>
 
                       {/* 재방문율 바 */}
                       <div style={{ marginTop: '0.8rem' }}>
                         {[
                           { label: '신규 (1회 방문)', count: stats.repeat_stats.once_ips, color: '#e5e7eb' },
-                          { label: '재방문 (2회+)', count: stats.repeat_stats.repeat_ips, color: '#6366f1' },
+                          { label: '재방문 (2회+)', count: stats.repeat_stats.repeat_ips, color: 'var(--color-brand)' },
                         ].map((item, i) => {
                           const pct = stats.repeat_stats.total_ips > 0 ? Math.round(item.count / stats.repeat_stats.total_ips * 100) : 0;
                           return (
-                            <div key={i} style={{ marginBottom: 6 }}>
+                            <div key={i} className="tw-mb-1.5">
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 2 }}>
-                                <span style={{ color: '#374151' }}>{item.label}</span>
+                                <span>{item.label}</span>
                                 <span style={{ fontWeight: 700, color: '#6b7280' }}>{pct}%</span>
                               </div>
                               <div style={{ height: 6, background: '#f1f5f9', borderRadius: 3 }}>
@@ -670,28 +580,28 @@ export default function WpAnalyticsPage() {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+              <div className="data-split">
 
                 {/* 유입 경로 */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>유입 경로</h3>
+                <div className="card">
+                  <h3 className="section-title">유입 경로</h3>
                   {stats.referrer_stats.map((r, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                       <SourceBadge source={r.source} />
-                      <div style={{ flex: 1, margin: '0 10px', height: 6, background: '#f1f5f9', borderRadius: 4 }}>
-                        <div style={{ height: '100%', width: `${Math.round(r.count / totalVisits * 100)}%`, background: SRC_COLOR[r.source]?.bg || '#6366f1', borderRadius: 4 }} />
+                      <div className="data-bar tw-mx-2 tw-flex-1">
+                        <i style={{ width: `${Math.round(r.count / totalVisits * 100)}%` }} />
                       </div>
                       <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', minWidth: 50, textAlign: 'right' }}>
                         {fmt(r.count)} <span style={{ color: '#9ca3af', fontWeight: 400, fontSize: '0.72rem' }}>({Math.round(r.count / totalVisits * 100)}%)</span>
                       </span>
                     </div>
                   ))}
-                  {stats.referrer_stats.length === 0 && <p style={{ color: '#9ca3af', fontSize: '0.82rem', margin: 0 }}>데이터 없음</p>}
+                  {stats.referrer_stats.length === 0 && <p className="caption">데이터 없음</p>}
                 </div>
 
                 {/* 체류시간 분포 */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>체류시간 분포</h3>
+                <div className="card">
+                  <h3 className="section-title">체류시간 분포</h3>
                   {Object.entries(stats.dwell_distribution).map(([label, count], i) => {
                     const colors = ['#e5e7eb', '#fca5a5', '#fdba74', '#fde68a', '#6ee7b7', '#6366f1', '#8b5cf6'];
                     return (
@@ -701,31 +611,31 @@ export default function WpAnalyticsPage() {
                 </div>
 
                 {/* 디바이스 + OS */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>디바이스</h3>
+                <div className="card">
+                  <h3 className="section-title">디바이스</h3>
                   {stats.device_stats.map((r, i) => <BarRow key={i} label={r.device} count={r.count} total={totalVisits} color="#ec4899" />)}
                   <div style={{ borderTop: '1px solid #f1f5f9', marginTop: 12, paddingTop: 12 }}>
-                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>OS</h3>
+                    <h3 className="section-title">OS</h3>
                     {stats.os_stats.map((r, i) => <BarRow key={i} label={r.os} count={r.count} total={totalVisits} color="#8b5cf6" />)}
                   </div>
                 </div>
 
                 {/* 브라우저 */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>브라우저</h3>
+                <div className="card">
+                  <h3 className="section-title">브라우저</h3>
                   {stats.browser_stats.map((r, i) => <BarRow key={i} label={r.browser} count={r.count} total={totalVisits} color="#10b981" />)}
                 </div>
 
                 {/* 지역 */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>접속 지역</h3>
+                <div className="card">
+                  <h3 className="section-title">접속 지역</h3>
                   {stats.location_stats.map((r, i) => <BarRow key={i} label={r.location} count={r.count} total={totalVisits} color="#06b6d4" />)}
-                  {stats.location_stats.length === 0 && <p style={{ color: '#9ca3af', fontSize: '0.82rem', margin: 0 }}>데이터 없음</p>}
+                  {stats.location_stats.length === 0 && <p className="caption">데이터 없음</p>}
                 </div>
 
                 {/* 시간대 / 요일 히트맵 */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>시간대별 방문 히트맵</h3>
+                <div className="card">
+                  <h3 className="section-title">시간대별 방문 히트맵</h3>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                     {Array.from({ length: 24 }, (_, h) => {
                       const hs = String(h).padStart(2, '0');
@@ -737,7 +647,7 @@ export default function WpAnalyticsPage() {
                         <div key={h} title={`${h}시: ${cnt}회`}
                           style={{
                             width: 30, height: 30, borderRadius: 5,
-                            background: `rgba(99,102,241,${0.07 + in_ * 0.93})`,
+                            background: `rgba(67, 97, 238,${0.07 + in_ * 0.93})`,
                             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                             fontSize: '0.6rem', fontWeight: 700,
                             color: in_ > 0.45 ? '#fff' : '#9ca3af',
@@ -748,7 +658,7 @@ export default function WpAnalyticsPage() {
                     })}
                   </div>
                   <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '1rem 0 0.6rem' }}>요일별</h3>
-                  <div style={{ display: 'flex', gap: 4 }}>
+                  <div className="tw-flex tw-gap-1">
                     {stats.weekday_stats.map((r, i) => {
                       const maxC = Math.max(...stats.weekday_stats.map(x => x.count), 1);
                       const in_ = r.count / maxC;
@@ -756,7 +666,7 @@ export default function WpAnalyticsPage() {
                         <div key={i} title={`${r.weekday}요일: ${r.count}회`}
                           style={{
                             flex: 1, height: 42, borderRadius: 7,
-                            background: `rgba(99,102,241,${0.07 + in_ * 0.93})`,
+                            background: `rgba(67, 97, 238,${0.07 + in_ * 0.93})`,
                             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                             fontSize: '0.68rem', fontWeight: 700,
                             color: in_ > 0.5 ? '#fff' : '#6b7280',
@@ -771,8 +681,8 @@ export default function WpAnalyticsPage() {
 
                 {/* UTM 캠페인 */}
                 {stats.utm_stats.length > 0 && (
-                  <div style={card}>
-                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>UTM 캠페인 유입</h3>
+                  <div className="card">
+                    <h3 className="section-title">UTM 캠페인 유입</h3>
                     {stats.utm_stats.map((r, i) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0.4rem 0', borderBottom: '1px solid #f1f5f9' }}>
                         <div>
@@ -780,7 +690,7 @@ export default function WpAnalyticsPage() {
                           {r.medium && <span style={{ fontSize: '0.7rem', color: '#6b7280', marginLeft: 4 }}>{r.medium}</span>}
                           {r.campaign && <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: 1 }}>{r.campaign}</div>}
                         </div>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6366f1' }}>{fmt(r.count)}</span>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-brand)' }}>{fmt(r.count)}</span>
                       </div>
                     ))}
                   </div>
@@ -788,31 +698,37 @@ export default function WpAnalyticsPage() {
               </div>
 
               {/* 일별 추이 */}
-              <div style={card}>
-                <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>일별 방문 추이</h3>
+              <ChartSection
+                title="일별 방문 추이"
+                description="막대와 아래 목록은 같은 일별 방문 수입니다."
+              >
                 {stats.daily_visits.length > 0 ? (
                   <>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 70, marginBottom: 6 }}>
+                    <div className="tw-mb-2 tw-flex tw-h-[70px] tw-items-end tw-gap-0.5">
                       {[...stats.daily_visits].reverse().map((d, i) => {
                         const maxC = Math.max(...stats.daily_visits.map(x => x.count), 1);
                         const h = Math.max(3, (d.count / maxC) * 65);
                         return (
-                          <div key={i} title={`${d.date}: ${d.count}회`}
-                            style={{ flex: 1, height: h, background: '#6366f1', borderRadius: '3px 3px 0 0', opacity: 0.75, minWidth: 3 }} />
+                          <div
+                            key={i}
+                            title={`${d.date}: ${d.count}회`}
+                            className="tw-min-w-[3px] tw-flex-1 tw-rounded-t-[3px] tw-bg-tillion-brand tw-opacity-80"
+                            style={{ height: h }}
+                          />
                         );
                       })}
                     </div>
-                    <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                    <div className="tw-max-h-[150px] tw-overflow-y-auto">
                       {[...stats.daily_visits].reverse().map((d, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid #f8fafc' }}>
-                          <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>{d.date}</span>
-                          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#6366f1' }}>{fmt(d.count)}회</span>
+                        <div key={i} className="tw-flex tw-justify-between tw-border-b tw-border-[var(--border)] tw-py-0.5">
+                          <span className="caption">{d.date}</span>
+                          <span className="tw-text-[12px] tw-font-semibold tw-tabular-nums tw-text-tillion-brand">{fmt(d.count)}회</span>
                         </div>
                       ))}
                     </div>
                   </>
-                ) : <p style={{ color: '#9ca3af', fontSize: '0.82rem', margin: 0 }}>데이터 없음</p>}
-              </div>
+                ) : <p className="caption">데이터 없음</p>}
+              </ChartSection>
             </>
           )}
 
@@ -824,61 +740,58 @@ export default function WpAnalyticsPage() {
             flow ? (
               <>
                 {/* 세션 요약 */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <div style={statCard('#6366f1')}>
-                    <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>총 세션</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#6366f1' }}>{fmt(flow.summary.total_sessions)}</div>
-                  </div>
-                  <div style={statCard('#f59e0b')}>
-                    <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>이탈 세션</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f59e0b' }}>{fmt(flow.summary.bounce_sessions)}</div>
-                    <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>바운스율</div>
-                  </div>
-                  <div style={statCard(flow.summary.bounce_rate > 70 ? '#ef4444' : flow.summary.bounce_rate > 50 ? '#f59e0b' : '#10b981')}>
-                    <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginBottom: 3 }}>바운스율</div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: flow.summary.bounce_rate > 70 ? '#ef4444' : flow.summary.bounce_rate > 50 ? '#f59e0b' : '#10b981' }}>
-                      {flow.summary.bounce_rate}%
-                    </div>
-                    <div style={{ fontSize: '0.68rem', color: '#9ca3af' }}>1페이지만 보고 이탈</div>
-                  </div>
-                </div>
+                <KpiStrip
+                  items={[
+                    { label: '총 세션', value: fmt(flow.summary.total_sessions) },
+                    { label: '이탈 세션', value: fmt(flow.summary.bounce_sessions) },
+                    {
+                      label: '바운스율',
+                      value: (
+                        <span className={flow.summary.bounce_rate > 70 ? 'tw-text-tillion-danger' : flow.summary.bounce_rate > 50 ? 'tw-text-tillion-warning' : 'tw-text-tillion-success'}>
+                          {flow.summary.bounce_rate}%
+                        </span>
+                      ),
+                      hint: '1페이지만 보고 이탈',
+                    },
+                  ]}
+                />
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                <div className="data-split">
 
                   {/* 세션 깊이 */}
-                  <div style={card}>
-                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>세션 깊이 (1회 방문당 페이지 수)</h3>
+                  <div className="card">
+                    <h3 className="section-title">세션 깊이 (1회 방문당 페이지 수)</h3>
                     {flow.session_depth.map((d, i) => (
                       <BarRow key={i} label={d.label} count={d.count} total={flow.summary.total_sessions} color={['#e5e7eb', '#fca5a5', '#fdba74', '#6ee7b7', '#6366f1'][i] || '#6366f1'} />
                     ))}
                   </div>
 
                   {/* 입장 페이지 */}
-                  <div style={card}>
-                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>🚪 입장 페이지 (Landing)</h3>
-                    <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.6rem' }}>방문자가 가장 먼저 들어온 페이지</p>
+                  <div className="card">
+                    <h3 className="section-title">🚪 입장 페이지 (Landing)</h3>
+                    <p className="caption">방문자가 가장 먼저 들어온 페이지</p>
                     {flow.entry_pages.map((r, i) => (
                       <BarRow key={i} label={shortenUrl(r.page_url)} count={r.count} total={flow.summary.total_sessions} color="#10b981" sub={i === 0 ? '(메인 유입)' : ''} />
                     ))}
-                    {flow.entry_pages.length === 0 && <p style={{ color: '#9ca3af', fontSize: '0.82rem', margin: 0 }}>세션 데이터 없음</p>}
+                    {flow.entry_pages.length === 0 && <p className="caption">세션 데이터 없음</p>}
                   </div>
 
                   {/* 이탈 페이지 */}
-                  <div style={card}>
-                    <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>🚪 이탈 페이지 (Exit)</h3>
-                    <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.6rem' }}>방문자가 마지막으로 떠난 페이지</p>
+                  <div className="card">
+                    <h3 className="section-title">🚪 이탈 페이지 (Exit)</h3>
+                    <p className="caption">방문자가 마지막으로 떠난 페이지</p>
                     {flow.exit_pages.map((r, i) => (
                       <BarRow key={i} label={shortenUrl(r.page_url)} count={r.count} total={flow.summary.total_sessions} color="#ef4444" />
                     ))}
-                    {flow.exit_pages.length === 0 && <p style={{ color: '#9ca3af', fontSize: '0.82rem', margin: 0 }}>세션 데이터 없음</p>}
+                    {flow.exit_pages.length === 0 && <p className="caption">세션 데이터 없음</p>}
                   </div>
                 </div>
 
                 {/* 페이지별 이탈률 */}
-                <div style={{ ...card, marginBottom: '1rem' }}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.8rem' }}>페이지별 이탈률</h3>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div className="card">
+                  <h3 className="section-title">페이지별 이탈률</h3>
+                  <div className="tw-overflow-x-auto">
+                    <table>
                       <thead>
                         <tr>
                           {['페이지', '총 조회', '이탈 수', '이탈률', ''].map((h, i) => (
@@ -889,13 +802,13 @@ export default function WpAnalyticsPage() {
                       <tbody>
                         {flow.exit_rate_by_page.map((r, i) => (
                           <tr key={i}>
-                            <td style={td}>
+                            <td>
                               <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{shortenUrl(r.page_url)}</div>
                               <div style={{ fontSize: '0.7rem', color: '#9ca3af' }}>{r.page_url}</div>
                             </td>
-                            <td style={{ ...td, textAlign: 'right' }}>{fmt(r.total_views)}</td>
+                            <td className="cell-num">{fmt(r.total_views)}</td>
                             <td style={{ ...td, textAlign: 'right', color: '#ef4444', fontWeight: 600 }}>{fmt(r.exit_count)}</td>
-                            <td style={{ ...td, textAlign: 'right' }}>
+                            <td className="cell-num">
                               <span style={{
                                 padding: '2px 8px', borderRadius: 8, fontSize: '0.78rem', fontWeight: 700,
                                 background: r.exit_rate > 70 ? '#fee2e2' : r.exit_rate > 40 ? '#fef3c7' : '#dcfce7',
@@ -915,11 +828,11 @@ export default function WpAnalyticsPage() {
                 </div>
 
                 {/* 페이지 전환 흐름 */}
-                <div style={card}>
-                  <h3 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#374151', margin: '0 0 0.4rem' }}>페이지 전환 흐름 (A → B)</h3>
-                  <p style={{ fontSize: '0.72rem', color: '#9ca3af', margin: '0 0 0.8rem' }}>동일 세션 내에서 연속으로 이동한 페이지 쌍</p>
+                <div className="card">
+                  <h3 className="section-title">페이지 전환 흐름 (A → B)</h3>
+                  <p className="caption">동일 세션 내에서 연속으로 이동한 페이지 쌍</p>
                   {flow.page_flow.length === 0 ? (
-                    <p style={{ color: '#9ca3af', fontSize: '0.82rem', margin: 0 }}>다중 페이지 세션 데이터 없음</p>
+                    <p className="caption">다중 페이지 세션 데이터 없음</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {flow.page_flow.map((r, i) => (
@@ -930,11 +843,11 @@ export default function WpAnalyticsPage() {
                           <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#374151', background: '#e0e7ff', padding: '2px 8px', borderRadius: 6 }}>
                             {shortenUrl(r.from_page)}
                           </span>
-                          <span style={{ color: '#6366f1', fontWeight: 700 }}>→</span>
+                          <span style={{ color: 'var(--color-brand)', fontWeight: 700 }}>→</span>
                           <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#374151', background: '#d1fae5', padding: '2px 8px', borderRadius: 6 }}>
                             {shortenUrl(r.to_page)}
                           </span>
-                          <span style={{ marginLeft: 'auto', fontSize: '0.8rem', fontWeight: 700, color: '#6366f1' }}>{fmt(r.count)}회</span>
+                          <span style={{ marginLeft: 'auto', fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-brand)' }}>{fmt(r.count)}회</span>
                         </div>
                       ))}
                     </div>
@@ -948,16 +861,16 @@ export default function WpAnalyticsPage() {
               페이지별 분석 탭
           ════════════════════════════════════════════════ */}
           {activeTab === 'pages' && stats && (
-            <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.07)', overflow: 'hidden' }}>
-              <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', margin: 0 }}>페이지별 방문 현황</h3>
-                <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>{stats.page_stats.length}개 페이지</span>
+            <div className="card tw-overflow-hidden tw-p-0">
+              <div className="surface-header tw-px-3 tw-pt-3">
+                <h3 className="section-title tw-mb-0">페이지별 방문 현황</h3>
+                <span className="caption">{stats.page_stats.length}개 페이지</span>
               </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="tw-overflow-x-auto">
+                <table>
                   <thead>
                     <tr>
-                      <th style={th}>#</th>
+                      <th>#</th>
                       {([
                         ['페이지', 'page_url'],
                         ['방문수', 'count'],
@@ -974,7 +887,7 @@ export default function WpAnalyticsPage() {
                             style={{ ...th, textAlign: i >= 1 ? 'right' : 'left', cursor: 'pointer', userSelect: 'none' }}
                             onClick={() => togglePageSort(sortKey)}
                           >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <span className="tw-inline-flex tw-items-center tw-gap-1">
                               {label}
                               <span style={{ fontSize: '0.65rem', color: active ? '#6366f1' : '#cbd5e1' }}>
                                 {active ? (pageSort.dir === 'asc' ? '▲' : '▼') : '⇅'}
@@ -991,17 +904,17 @@ export default function WpAnalyticsPage() {
                       return (
                         <tr key={p.page_url}>
                           <td style={{ ...td, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</td>
-                          <td style={td}>
+                          <td>
                             <div style={{ fontWeight: 600, color: '#374151', fontSize: '0.83rem' }}>{shortenUrl(p.page_url)}</div>
                             <div style={{ fontSize: '0.7rem', color: '#9ca3af', wordBreak: 'break-all' }}>{p.page_url}</div>
                           </td>
-                          <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: '#6366f1' }}>{fmt(p.count)}</td>
+                          <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: 'var(--color-brand)' }}>{fmt(p.count)}</td>
                           <td style={{ ...td, textAlign: 'right', color: '#10b981', fontWeight: 600 }}>{fmt(p.unique_count)}</td>
                           <td style={{ ...td, textAlign: 'right', color: '#06b6d4', fontWeight: 600 }}>{fmtDuration(p.avg_duration)}</td>
                           <td style={{ ...td, minWidth: 120 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                               <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 4 }}>
-                                <div style={{ height: '100%', width: `${pct}%`, background: '#6366f1', borderRadius: 4 }} />
+                                <div style={{ height: '100%', width: `${pct}%`, background: 'var(--color-brand)', borderRadius: 4 }} />
                               </div>
                               <span style={{ fontSize: '0.72rem', color: '#9ca3af', width: 28, textAlign: 'right' }}>{pct}%</span>
                             </div>
@@ -1013,7 +926,7 @@ export default function WpAnalyticsPage() {
                 </table>
               </div>
               {stats.page_stats.length === 0 && (
-                <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>WordPress 방문 데이터 없음</div>
+                <div className="caption tw-py-12 tw-text-center">WordPress 방문 데이터 없음</div>
               )}
             </div>
           )}
@@ -1022,13 +935,13 @@ export default function WpAnalyticsPage() {
               방문자별 탭 (IP별)
           ════════════════════════════════════════════════ */}
           {activeTab === 'sessions' && (
-            <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.07)', overflow: 'hidden' }}>
-              <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', margin: 0 }}>방문자별 분석 (IP 기준)</h3>
-                <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>총 {fmt(sessionTotal)}명</span>
+            <div className="card tw-overflow-hidden tw-p-0">
+              <div className="surface-header tw-px-3 tw-pt-3">
+                <h3 className="section-title tw-mb-0">방문자별 분석 (IP 기준)</h3>
+                <span className="caption">총 {fmt(sessionTotal)}명</span>
               </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="tw-overflow-x-auto">
+                <table>
                   <thead>
                     <tr>
                       {([
@@ -1048,12 +961,12 @@ export default function WpAnalyticsPage() {
                         return (
                           <th
                             key={key}
-                            style={{ ...th, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                            className="tw-cursor-pointer tw-select-none"
                             onClick={() => toggleSessionSort(key)}
                           >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <span className="tw-inline-flex tw-items-center tw-gap-1">
                               {label}
-                              <span style={{ fontSize: '0.65rem', color: isActive ? '#6366f1' : '#cbd5e1' }}>
+                              <span className={isActive ? "tw-text-tillion-brand" : "tw-text-[#cbd5e1]"}>
                                 {isActive ? (sessionSort.dir === 'asc' ? '▲' : '▼') : '⇅'}
                               </span>
                             </span>
@@ -1065,18 +978,18 @@ export default function WpAnalyticsPage() {
                   <tbody>
                     {sortedSessions.map((s, i) => (
                       <tr key={i} style={{ background: s.is_repeat ? '#fefce8' : undefined }}>
-                        <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                        <td className="tw-font-mono tw-text-[12px]">
                           {s.ip_address}
                         </td>
-                        <td style={{ ...td, fontSize: '0.78rem' }}>
+                        <td>
                           {s.city || s.region || s.country ? (
                             <span title={[s.country, s.region, s.city].filter(Boolean).join(', ')}>
                               {s.city || s.region || s.country}
                             </span>
-                          ) : <span style={{ color: '#d1d5db' }}>-</span>}
+                          ) : <span className="tw-text-[#d1d5db]">-</span>}
                         </td>
-                        <td style={td}><SourceBadge source={s.source} /></td>
-                        <td style={{ ...td, textAlign: 'center' }}>
+                        <td><SourceBadge source={s.source} /></td>
+                        <td className="tw-text-center">
                           {s.is_repeat ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                               <span style={{ background: '#fef08a', color: '#854d0e', padding: '2px 7px', borderRadius: 8, fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -1090,24 +1003,24 @@ export default function WpAnalyticsPage() {
                             <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>신규</span>
                           )}
                         </td>
-                        <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: '#6366f1' }}>{s.sessions}</td>
+                        <td style={{ ...td, textAlign: 'center', fontWeight: 600, color: 'var(--color-brand)' }}>{s.sessions}</td>
                         <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{s.page_views}</td>
-                        <td style={td}>
+                        <td>
                           {s.max_duration > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <div className="tw-flex tw-flex-col tw-gap-0.5">
                               <span style={{
                                 padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
                                 background: s.max_duration >= 180 ? '#dcfce7' : s.max_duration >= 60 ? '#dbeafe' : '#f3f4f6',
                                 color: s.max_duration >= 180 ? '#166534' : s.max_duration >= 60 ? '#1d4ed8' : '#6b7280',
                               }}>{fmtDuration(s.max_duration)}</span>
-                              <div style={{ display: 'flex', gap: 2 }}>
+                              <div className="tw-flex tw-gap-0.5">
                                 {s.has_10s && <span style={{ fontSize: '0.6rem', background: '#dbeafe', color: '#1d4ed8', padding: '1px 4px', borderRadius: 4 }}>10초✓</span>}
                                 {s.has_30s && <span style={{ fontSize: '0.6rem', background: '#dcfce7', color: '#166534', padding: '1px 4px', borderRadius: 4 }}>30초✓</span>}
                               </div>
                             </div>
-                          ) : <span style={{ color: '#d1d5db' }}>-</span>}
+                          ) : <span className="tw-text-[#d1d5db]">-</span>}
                         </td>
-                        <td style={{ ...td, textAlign: 'center' }}>
+                        <td className="tw-text-center">
                           {s.max_scroll_depth > 0 ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                               <span style={{
@@ -1118,9 +1031,9 @@ export default function WpAnalyticsPage() {
                                 <div style={{ height: '100%', width: `${s.max_scroll_depth}%`, background: '#8b5cf6', borderRadius: 2 }} />
                               </div>
                             </div>
-                          ) : <span style={{ color: '#d1d5db', fontSize: '0.72rem' }}>-</span>}
+                          ) : <span className="caption">-</span>}
                         </td>
-                        <td style={td}>
+                        <td>
                           {s.is_mobile ? (
                             <span style={{ background: '#fce7f3', color: '#be185d', padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600 }}>모바일</span>
                           ) : (
@@ -1132,16 +1045,16 @@ export default function WpAnalyticsPage() {
                       </tr>
                     ))}
                     {sessions.length === 0 && (
-                      <tr><td colSpan={11} style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</td></tr>
+                      <tr><td colSpan={11} className="caption tw-py-12 tw-text-center">데이터 없음</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderTop: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#6b7280' }}>
                 <span>{sessionTotal}명 / {sessTotal}페이지</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button disabled={sessionPage <= 1} onClick={() => setSessionPage(p => Math.max(1, p - 1))} style={{ ...btnStyle, background: sessionPage <= 1 ? '#f3f4f6' : '#e5e7eb', color: sessionPage <= 1 ? '#d1d5db' : '#374151', cursor: sessionPage <= 1 ? 'default' : 'pointer' }}>이전</button>
-                  <button disabled={sessionPage >= sessTotal} onClick={() => setSessionPage(p => Math.min(sessTotal, p + 1))} style={{ ...btnStyle, background: sessionPage >= sessTotal ? '#f3f4f6' : '#e5e7eb', color: sessionPage >= sessTotal ? '#d1d5db' : '#374151', cursor: sessionPage >= sessTotal ? 'default' : 'pointer' }}>다음</button>
+                <div className="tw-flex tw-gap-1">
+                  <Button type="button" variant="secondary" disabled={sessionPage <= 1} onClick={() => setSessionPage(p => Math.max(1, p - 1))}>이전</Button>
+                  <Button type="button" variant="secondary" disabled={sessionPage >= sessTotal} onClick={() => setSessionPage(p => Math.min(sessTotal, p + 1))}>다음</Button>
                 </div>
               </div>
             </div>
@@ -1151,13 +1064,13 @@ export default function WpAnalyticsPage() {
               방문 로그 탭
           ════════════════════════════════════════════════ */}
           {activeTab === 'visitors' && (
-            <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 1px 4px rgba(0,0,0,.07)', overflow: 'hidden' }}>
-              <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#374151', margin: 0 }}>방문 로그</h3>
-                <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>총 {fmt(visitorTotal)}건</span>
+            <div className="card tw-overflow-hidden tw-p-0">
+              <div className="surface-header tw-px-3 tw-pt-3">
+                <h3 className="section-title tw-mb-0">방문 로그</h3>
+                <span className="caption">총 {fmt(visitorTotal)}건</span>
               </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="tw-overflow-x-auto">
+                <table>
                   <thead>
                     <tr>
                       {([
@@ -1176,12 +1089,12 @@ export default function WpAnalyticsPage() {
                         return (
                           <th
                             key={key}
-                            style={{ ...th, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                            className="tw-cursor-pointer tw-select-none"
                             onClick={() => toggleVisitorSort(key)}
                           >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <span className="tw-inline-flex tw-items-center tw-gap-1">
                               {label}
-                              <span style={{ fontSize: '0.65rem', color: isActive ? '#6366f1' : '#cbd5e1' }}>
+                              <span className={isActive ? "tw-text-tillion-brand" : "tw-text-[#cbd5e1]"}>
                                 {isActive ? (visitorSort.dir === 'asc' ? '▲' : '▼') : '⇅'}
                               </span>
                             </span>
@@ -1194,60 +1107,60 @@ export default function WpAnalyticsPage() {
                     {sortedVisitors.map(v => (
                       <tr key={v.id}>
                         <td style={{ ...td, whiteSpace: 'nowrap', color: '#6b7280', fontSize: '0.75rem' }}>{v.created_at}</td>
-                        <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.75rem' }}>{v.ip_address}</td>
-                        <td style={{ ...td, fontSize: '0.75rem' }}>{v.city || v.region || v.country || <span style={{ color: '#d1d5db' }}>-</span>}</td>
+                        <td className="tw-font-mono tw-text-[12px]">{v.ip_address}</td>
+                        <td style={{ ...td, fontSize: '0.75rem' }}>{v.city || v.region || v.country || <span className="tw-text-[#d1d5db]">-</span>}</td>
                         <td style={{ ...td, maxWidth: 180 }}>
                           <div style={{ fontWeight: 600, fontSize: '0.78rem', color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.page_url}>
                             {shortenUrl(v.page_url)}
                           </div>
                         </td>
-                        <td style={{ ...td, fontSize: '0.78rem' }}>{v.os}</td>
-                        <td style={{ ...td, fontSize: '0.78rem' }}>{v.browser}</td>
-                        <td style={td}>
+                        <td>{v.os}</td>
+                        <td>{v.browser}</td>
+                        <td>
                           {v.is_mobile ? (
                             <span style={{ background: '#fce7f3', color: '#be185d', padding: '2px 6px', borderRadius: 8, fontSize: '0.7rem', fontWeight: 600 }}>모바일</span>
                           ) : <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>{v.device_type}</span>}
                         </td>
-                        <td style={td}>
+                        <td>
                           {v.duration_seconds > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <div className="tw-flex tw-flex-col tw-gap-0.5">
                               <span style={{
                                 padding: '2px 7px', borderRadius: 8, fontSize: '0.72rem', fontWeight: 600,
                                 background: v.duration_seconds >= 180 ? '#dcfce7' : v.duration_seconds >= 60 ? '#dbeafe' : '#f3f4f6',
                                 color: v.duration_seconds >= 180 ? '#166534' : v.duration_seconds >= 60 ? '#1d4ed8' : '#6b7280',
                               }}>{fmtDuration(v.duration_seconds)}</span>
-                              <div style={{ display: 'flex', gap: 2 }}>
+                              <div className="tw-flex tw-gap-0.5">
                                 {v.milestone_10s && <span style={{ fontSize: '0.58rem', background: '#dbeafe', color: '#1d4ed8', padding: '1px 3px', borderRadius: 3 }}>10s✓</span>}
                                 {v.milestone_30s && <span style={{ fontSize: '0.58rem', background: '#dcfce7', color: '#166534', padding: '1px 3px', borderRadius: 3 }}>30s✓</span>}
                               </div>
                             </div>
-                          ) : <span style={{ color: '#d1d5db' }}>-</span>}
+                          ) : <span className="tw-text-[#d1d5db]">-</span>}
                         </td>
-                        <td style={{ ...td, textAlign: 'center' }}>
+                        <td className="tw-text-center">
                           {v.scroll_depth > 0 ? (
                             <span style={{
                               fontSize: '0.75rem', fontWeight: 700,
                               color: v.scroll_depth >= 75 ? '#6d28d9' : v.scroll_depth >= 50 ? '#7c3aed' : '#a78bfa',
                             }}>{v.scroll_depth}%</span>
-                          ) : <span style={{ color: '#d1d5db', fontSize: '0.72rem' }}>-</span>}
+                          ) : <span className="caption">-</span>}
                         </td>
-                        <td style={td}>
+                        <td>
                           <SourceBadge source={v.source} />
                           {v.utm_campaign && <div style={{ fontSize: '0.68rem', color: '#9ca3af', marginTop: 1 }}>{v.utm_campaign}</div>}
                         </td>
                       </tr>
                     ))}
                     {visitors.length === 0 && (
-                      <tr><td colSpan={10} style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>데이터 없음</td></tr>
+                      <tr><td colSpan={10} className="caption tw-py-12 tw-text-center">데이터 없음</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderTop: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#6b7280' }}>
                 <span>{visitorTotal}건 / {visTotal}페이지</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button disabled={visitorPage <= 1} onClick={() => setVisitorPage(p => Math.max(1, p - 1))} style={{ ...btnStyle, background: visitorPage <= 1 ? '#f3f4f6' : '#e5e7eb', color: visitorPage <= 1 ? '#d1d5db' : '#374151', cursor: visitorPage <= 1 ? 'default' : 'pointer' }}>이전</button>
-                  <button disabled={visitorPage >= visTotal} onClick={() => setVisitorPage(p => Math.min(visTotal, p + 1))} style={{ ...btnStyle, background: visitorPage >= visTotal ? '#f3f4f6' : '#e5e7eb', color: visitorPage >= visTotal ? '#d1d5db' : '#374151', cursor: visitorPage >= visTotal ? 'default' : 'pointer' }}>다음</button>
+                <div className="tw-flex tw-gap-1">
+                  <Button type="button" variant="secondary" disabled={visitorPage <= 1} onClick={() => setVisitorPage(p => Math.max(1, p - 1))}>이전</Button>
+                  <Button type="button" variant="secondary" disabled={visitorPage >= visTotal} onClick={() => setVisitorPage(p => Math.min(visTotal, p + 1))}>다음</Button>
                 </div>
               </div>
             </div>
