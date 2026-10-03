@@ -24,6 +24,8 @@ import {
   VendorAlias,
   RepairBarcode,
 } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState, StatusBadge } from '@/components/operational';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -64,17 +66,6 @@ const C = {
 };
 
 // ─── 배치 상태 ────────────────────────
-const BATCH_STATUS_COLOR: Record<string, { bg: string; color: string }> = {
-  ocr_pending:  { bg: '#f3f4f6', color: '#374151' },
-  confirming:   { bg: '#fef9c3', color: '#92400e' },
-  inbound_done: { bg: '#dbeafe', color: '#1d4ed8' },
-  grading:      { bg: C.purpleLight, color: C.purple },
-  repairing:    { bg: '#ffedd5', color: '#c2410c' },
-  done:         { bg: C.successLight, color: C.success },
-  cancelled:    { bg: C.dangerLight,  color: C.danger },
-};
-
-
 // ─── 공통 스타일 오브젝트 ──────────────
 const cardStyle: React.CSSProperties = {
   background: C.card,
@@ -95,22 +86,11 @@ function SectionToggle({ open, label, badge, onToggle }: {
   open: boolean; label: string; badge?: React.ReactNode; onToggle: () => void;
 }) {
   return (
-    <button
-      onClick={onToggle}
-      style={{
-        width: '100%', padding: '9px 14px',
-        background: '#fff',
-        color: C.textMuted,
-        border: `1px solid ${C.border}`,
-        borderRadius: 10, fontSize: 13, fontWeight: 500,
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        transition: 'border-color 0.15s',
-      }}
-    >
-      <span style={{ color: open ? C.textSub : C.textMuted }}>{label}</span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+    <button onClick={onToggle} className="ops-toggle">
+      <span className={open ? 'ops-toggle-label is-open' : 'ops-toggle-label'}>{label}</span>
+      <span className="ops-toggle-side">
         {badge}
-        <span style={{ color: C.textFaint }}>{open ? '▲' : '▼'}</span>
+        <span className="ops-toggle-chevron">{open ? '▲' : '▼'}</span>
       </span>
     </button>
   );
@@ -122,18 +102,18 @@ function SectionToggle({ open, label, badge, onToggle }: {
 function BarcodeItem({ b }: { b: RepairBarcode }) {
   return (
     <>
-      <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+      <div className="ops-g-b62b6f44">
         {b.제품명}{b.옵션 ? ` / ${b.옵션}` : ''}
       </div>
       {b.상품명 && b.상품명 !== b.제품명 && (
-        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+        <div className="ops-g-a07faae5">
           {b.상품명}
         </div>
       )}
-      <div style={{ fontSize: 11, color: C.textFaint, display: 'flex', gap: 8, marginTop: 2, fontFamily: 'monospace' }}>
+      <div className="ops-g-3c90cb6b">
         <span>{b.바코드}</span>
-        {b.도매처 && <span style={{ color: C.purple, fontFamily: 'inherit' }}>{b.도매처}</span>}
-        {b.업체명 && <span style={{ color: C.textFaint, fontFamily: 'inherit' }}>[{b.업체명}]</span>}
+        {b.도매처 && <span className="ops-g-aea55d24">{b.도매처}</span>}
+        {b.업체명 && <span className="ops-g-e31e45c4">[{b.업체명}]</span>}
       </div>
     </>
   );
@@ -460,29 +440,29 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
     <div style={{ ...cardStyle, border: `1px solid ${borderColor}`, borderLeftWidth: hasIssue ? 4 : 1 }}>
 
       {/* ── 카드 헤더 ── */}
-      <div style={{ padding: '13px 16px 11px', borderBottom: `1px solid ${C.borderLight}` }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+      <div className="ops-g-205e294c">
+        <div className="ops-g-d4aaee81">
 
           {/* 왼쪽: 품명 */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: C.textFaint }}>#{item.line_no}</span>
-              {saved && <span style={{ fontSize: 11, color: C.success, fontWeight: 700 }}>✓ 저장됨</span>}
-              {needsQtyConfirm && <span style={{ fontSize: 10, fontWeight: 700, color: '#ea580c', background: '#fff7ed', border: '1px solid #fb923c', borderRadius: 5, padding: '1px 5px' }}>수량미확인</span>}
+          <div className="ops-g-50933f05">
+            <div className="ops-g-f65feaa0">
+              <span className="ops-g-5ebfc4c0">#{item.line_no}</span>
+              {saved && <span className="ops-g-97720fff">✓ 저장됨</span>}
+              {needsQtyConfirm && <span className="ops-g-83f80299">수량미확인</span>}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.text, lineHeight: 1.3, wordBreak: 'keep-all' }}>
+            <div className="ops-g-9e754cf6">
               {item.item_name || '(품명 없음)'}
             </div>
             {item.option_text && (
-              <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{item.option_text}</div>
+              <div className="ops-g-6e1aa17f">{item.option_text}</div>
             )}
             {(item.confirmed_by || item.updated_at) && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
+              <div className="ops-g-e5d8011a">
                 {item.confirmed_by && (
-                  <span style={{ fontSize: 10, color: C.textMuted }}>입력: {item.confirmed_by}</span>
+                  <span className="ops-g-3c5606c2">입력: {item.confirmed_by}</span>
                 )}
                 {item.updated_at && (
-                  <span style={{ fontSize: 10, color: C.textFaint }}>
+                  <span className="ops-g-ccbeb784">
                     {item.updated_at.replace('T', ' ').slice(0, 16)}
                   </span>
                 )}
@@ -491,9 +471,9 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           </div>
 
           {/* 오른쪽: 관리자 버튼 */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
+          <div className="ops-g-9d931539">
             {isAdmin && (
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div className="ops-g-8f404211">
                 <button onClick={() => editMode ? setEditMode(false) : openEditMode()} style={{
                   fontSize: 11, padding: '3px 9px', borderRadius: 6, fontWeight: 600,
                   background: C.borderLight, color: editMode ? C.brand : C.textMuted,
@@ -504,11 +484,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                 {onDelete && (
                   <button
                     onClick={() => { if (confirm(`"${item.item_name || '#' + item.line_no}" 삭제?`)) onDelete?.(); }}
-                    style={{
-                      fontSize: 11, padding: '3px 9px', borderRadius: 6, fontWeight: 600,
-                      background: C.borderLight, color: C.textMuted,
-                      border: `1px solid ${C.border}`, cursor: 'pointer',
-                    }}
+                    className="ops-g-d6e27b2b"
                   >삭제</button>
                 )}
               </div>
@@ -520,24 +496,17 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
       {/* ── 매칭 정보 한 줄 ── */}
       {!editMode && (
         isMatched ? (
-          <div style={{
-            padding: '6px 16px', borderBottom: `1px solid ${C.borderLight}`,
-            background: C.borderLight, fontSize: 12, color: C.textMuted,
-            display: 'flex', flexWrap: 'wrap', gap: '2px 8px', alignItems: 'center',
-          }}>
-            <span style={{ color: C.textFaint }}>공급처</span>
-            <span style={{ color: C.textSub, fontWeight: 600 }}>{item.matched_vendor}</span>
-            {item.matched_product && <><span style={{ color: C.border }}>·</span><span>{item.matched_product}</span></>}
-            {item.matched_option && <span style={{ color: C.textFaint }}>/ {item.matched_option}</span>}
+          <div className="ops-g-ccd3b6ad">
+            <span className="ops-g-a2b316f9">공급처</span>
+            <span className="ops-g-b24479d6">{item.matched_vendor}</span>
+            {item.matched_product && <><span className="ops-g-54df7224">·</span><span>{item.matched_product}</span></>}
+            {item.matched_option && <span className="ops-g-a2b316f9">/ {item.matched_option}</span>}
             {item.matched_barcode && (
-              <span style={{ color: C.textFaint, fontFamily: 'monospace', fontSize: 10, marginLeft: 4 }}>{item.matched_barcode}</span>
+              <span className="ops-g-f3ea8865">{item.matched_barcode}</span>
             )}
           </div>
         ) : (
-          <div style={{
-            padding: '6px 16px', borderBottom: `1px solid ${C.borderLight}`,
-            background: '#fffdf5', fontSize: 12, color: '#92400e',
-          }}>
+          <div className="ops-g-23669c35">
             ⚠ 미매칭
           </div>
         )
@@ -545,22 +514,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
       {/* ── 관리자 수정 폼 ── */}
       {editMode && (
-        <div style={{ padding: '12px 16px 14px', background: '#f9fafb', borderBottom: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10 }}>
+        <div className="ops-g-e7a16aa8">
+          <div className="ops-g-6b4bd5b3">
             품목 수정
           </div>
 
           {/* 바코드 검색 */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>바코드 검색 (선택 시 품명·옵션 자동입력)</div>
-            <div ref={editBarcodeRef} style={{ position: 'relative' }}>
+          <div className="ops-g-8e545338">
+            <div className="ops-g-f097867b">바코드 검색 (선택 시 품명·옵션 자동입력)</div>
+            <div ref={editBarcodeRef} className="ops-g-1d5e5023">
               {editSelectedBarcode ? (
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <div style={{ flex: 1, padding: '8px 10px', background: C.purpleLight, borderRadius: 8, fontSize: 12, color: C.purple, fontWeight: 600 }}>
+                <div className="ops-g-013fe721">
+                  <div className="ops-g-c3bb394c">
                     ✅ {editSelectedBarcode.바코드} — {editSelectedBarcode.제품명}{editSelectedBarcode.옵션 ? ' / ' + editSelectedBarcode.옵션 : ''}
                   </div>
                   <button onClick={() => { setEditSelectedBarcode(null); setEditBarcodeQuery(''); setEditBarcodeResults([]); }}
-                    style={{ padding: '6px 10px', background: C.borderLight, border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 11, color: C.textMuted }}>
+                    className="ops-g-9b2b9a8c">
                     변경
                   </button>
                 </div>
@@ -571,18 +540,14 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                     onChange={e => handleEditBarcodeInput(e.target.value)}
                     onFocus={() => setEditBarcodeOpen(true)}
                     placeholder="바코드번호 또는 제품명 검색"
-                    style={{ ...inputBase, background: '#fff' }}
+                    className="ui-control ops-g-635938c7"
                   />
-                  {editBarcodeLoading && <div style={{ fontSize: 11, color: C.textFaint, padding: '3px 2px' }}>검색 중…</div>}
+                  {editBarcodeLoading && <div className="ops-g-ed84ac13">검색 중…</div>}
                   {editBarcodeOpen && editBarcodeResults.length > 0 && (
-                    <div style={{
-                      position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 300,
-                      background: '#fff', border: `1px solid ${C.border}`, borderRadius: 8,
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.1)', maxHeight: 200, overflowY: 'auto', marginTop: 2,
-                    }}>
+                    <div className="ops-g-f771c9ea">
                       {editBarcodeResults.map(b => (
                         <div key={b.바코드} onMouseDown={() => selectEditBarcode(b)}
-                          style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}` }}>
+                          className="ops-g-04296f59">
                           <BarcodeItem b={b} />
                         </div>
                       ))}
@@ -594,104 +559,93 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           </div>
 
           {/* 품명 + 옵션 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div className="ops-g-ec5d3aef">
             <div>
-              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>품명</div>
+              <div className="ops-g-f097867b">품명</div>
               <input
                 value={editForm.item_name}
                 onChange={e => setEditForm(p => ({ ...p, item_name: e.target.value }))}
                 placeholder="품명"
-                style={{ ...inputBase, background: '#fff' }}
+                className="ui-control ops-g-635938c7"
               />
             </div>
             <div>
-              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>옵션</div>
+              <div className="ops-g-f097867b">옵션</div>
               <input
                 value={editForm.option_text}
                 onChange={e => setEditForm(p => ({ ...p, option_text: e.target.value }))}
                 placeholder="색상·사이즈 등"
-                style={{ ...inputBase, background: '#fff' }}
+                className="ui-control ops-g-635938c7"
               />
             </div>
           </div>
 
           {/* 공급처 위치 + 연락처 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+          <div className="ops-g-ec5d3aef">
             <div>
-              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>공급처 위치</div>
+              <div className="ops-g-f097867b">공급처 위치</div>
               <input
                 value={editForm.supplier_location}
                 onChange={e => setEditForm(p => ({ ...p, supplier_location: e.target.value }))}
                 placeholder="예) 동대문 A동 3층"
-                style={{ ...inputBase, background: '#fff' }}
+                className="ui-control ops-g-635938c7"
               />
             </div>
             <div>
-              <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>공급처 연락처</div>
+              <div className="ops-g-f097867b">공급처 연락처</div>
               <input
                 value={editForm.supplier_contact}
                 onChange={e => setEditForm(p => ({ ...p, supplier_contact: e.target.value }))}
                 placeholder="010-0000-0000"
-                style={{ ...inputBase, background: '#fff' }}
+                className="ui-control ops-g-635938c7"
               />
             </div>
           </div>
 
           {/* 메모 */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>메모</div>
+          <div className="ops-g-8e545338">
+            <div className="ops-g-f097867b">메모</div>
             <input
               value={editForm.memo}
               onChange={e => setEditForm(p => ({ ...p, memo: e.target.value }))}
               placeholder="메모"
-              style={{ ...inputBase, background: '#fff' }}
+              className="ui-control ops-g-635938c7"
             />
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="ops-g-ac734d21">
             <button onClick={handleEditSave} disabled={editSaving} style={{
               flex: 2, height: 40, background: editSaving ? '#d1d5db' : C.brand,
               color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
             }}>{editSaving ? '저장 중…' : '저장'}</button>
-            <button onClick={() => setEditMode(false)} style={{
-              flex: 1, height: 40, background: '#fff', border: `1px solid ${C.border}`,
-              borderRadius: 8, fontSize: 14, color: C.textMuted, cursor: 'pointer',
-            }}>취소</button>
+            <button onClick={() => setEditMode(false)} className="ops-g-02409999">취소</button>
           </div>
         </div>
       )}
 
       {/* ── 수량 + 상태 + 저장 ── */}
-      <div style={{ padding: '14px 16px 10px' }}>
+      <div className="ops-g-0f9ea867">
 
         {/* 수량 3칸 — 무채색 레이아웃 */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+        <div className="ops-g-f2c57763">
           {/* 장끼 (표시 전용) */}
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 5, letterSpacing: 0.3 }}>장끼</div>
-            <div style={{
-              background: C.borderLight, borderRadius: 10, padding: '10px 6px',
-              fontSize: 26, fontWeight: 900, color: C.textSub, lineHeight: 1,
-            }}>{item.janggi_qty}</div>
+          <div className="ops-g-e2e1e078">
+            <div className="ops-g-9aa3081d">장끼</div>
+            <div className="ops-g-e7e2d16f">{item.janggi_qty}</div>
           </div>
           {/* 실입고 */}
           <div>
-            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, textAlign: 'center', marginBottom: 5, letterSpacing: 0.3 }}>실입고</div>
+            <div className="ops-g-1d0006b7">실입고</div>
             <input
               type="number" inputMode="numeric" min={0}
               value={actualQty}
               onChange={e => setActualQty(Number(e.target.value))}
-              style={{
-                width: '100%', boxSizing: 'border-box', fontSize: 26, fontWeight: 900,
-                textAlign: 'center', padding: '9px 4px',
-                border: `1.5px solid ${C.border}`, borderRadius: 10,
-                color: C.text, background: '#fff', outline: 'none',
-              }}
+              className="ops-g-505665c2"
             />
           </div>
           {/* 미입고 */}
           <div>
-            <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, textAlign: 'center', marginBottom: 5, letterSpacing: 0.3 }}>미입고</div>
+            <div className="ops-g-1d0006b7">미입고</div>
             <input
               type="number" inputMode="numeric" min={0}
               value={missingQty}
@@ -708,7 +662,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
         {/* 이름 미입력 */}
         {!isAdmin && !workerName && (
-          <div style={{ marginBottom: 8, padding: '7px 12px', borderRadius: 8, background: '#fffdf5', border: `1px solid #fde68a`, fontSize: 12, color: '#92400e' }}>
+          <div className="ops-g-8e7ddfa8">
             ↑ 상단에서 이름을 먼저 입력해주세요
           </div>
         )}
@@ -729,14 +683,14 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
         </button>
 
         {/* ── 바코드 매칭 섹션 ── */}
-        <div style={{ marginBottom: 8 }}>
+        <div className="ops-g-e50f284b">
           <SectionToggle
             open={showMatch}
             label="🔍 상품명 · 도매처 수정 / 바코드 매칭"
             badge={
               item.matched_barcode
-                ? <span style={{ color: C.purple, fontWeight: 700 }}>✓ {item.matched_barcode}</span>
-                : <span style={{ color: C.textFaint }}>미매칭</span>
+                ? <span className="ops-g-7f9e75e2">✓ {item.matched_barcode}</span>
+                : <span className="ops-g-a2b316f9">미매칭</span>
             }
             onToggle={() => {
               setShowMatch(s => !s);
@@ -749,25 +703,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           />
 
           {showMatch && (
-            <div style={{
-              marginTop: 4, padding: 14,
-              background: '#fafafa', borderRadius: 12, border: `1px solid ${C.border}`,
-            }}>
+            <div className="ops-g-b164960e">
               {/* 상품명·도매처 입력 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <div className="ops-g-ec5d3aef">
                 <div>
-                  <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>상품명</div>
+                  <div className="ops-g-f097867b">상품명</div>
                   <input value={editItemName} onChange={e => setEditItemName(e.target.value)}
-                    placeholder="장끼 상품명" style={{ ...inputBase, background: '#fff' }} />
+                    placeholder="장끼 상품명" className="ui-control ops-g-635938c7" />
                 </div>
                 <div>
-                  <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 3 }}>도매처</div>
+                  <div className="ops-g-f097867b">도매처</div>
                   <input value={editWholesale} onChange={e => setEditWholesale(e.target.value)}
-                    placeholder="도매처 (예: NODI)" style={{ ...inputBase, background: '#fff' }} />
+                    placeholder="도매처 (예: NODI)" className="ui-control ops-g-635938c7" />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+              <div className="ops-g-5b6d9f7a">
                 <button onClick={saveItemFields} disabled={nameSaving} style={{
                   flex: 1, height: 36, background: nameSaving ? '#d1d5db' : C.brand,
                   color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
@@ -786,15 +737,12 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
               {/* 자동매칭 1건 */}
               {autoMatched && (
-                <div style={{
-                  marginBottom: 10, padding: 12,
-                  background: '#fff', border: `1px solid ${C.successBorder}`, borderRadius: 10,
-                }}>
-                  <div style={{ fontSize: 11, color: C.success, fontWeight: 600, marginBottom: 4 }}>✓ 자동매칭 후보</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>
+                <div className="ops-g-1a9b4751">
+                  <div className="ops-g-1de91d46">✓ 자동매칭 후보</div>
+                  <div className="ops-g-62dfb0bc">
                     {autoMatched.제품명}{autoMatched.옵션 ? ` / ${autoMatched.옵션}` : ''}
                   </div>
-                  <div style={{ fontSize: 11, color: C.textFaint, margin: '2px 0 8px', fontFamily: 'monospace' }}>
+                  <div className="ops-g-b3ab8026">
                     {autoMatched.바코드}{autoMatched.도매처 && ` · ${autoMatched.도매처}`}
                   </div>
                   <button onClick={() => handleSelectBarcode(autoMatched)} disabled={matchSaving} style={{
@@ -808,8 +756,8 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
               {/* 후보 다수 */}
               {!autoMatched && barcodeResults.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 6 }}>
+                <div className="ops-g-8e545338">
+                  <div className="ops-g-4d83c690">
                     후보 {barcodeResults.length}건 — 선택하세요
                   </div>
                   {barcodeResults.map(b => (
@@ -825,26 +773,22 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
               )}
 
               {/* 수동 검색 */}
-              <div style={{ borderTop: `1px solid ${C.borderLight}`, paddingTop: 10 }}>
-                <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, marginBottom: 5 }}>직접 검색</div>
+              <div className="ops-g-f439effd">
+                <div className="ops-g-c9a0bb12">직접 검색</div>
                 <input
                   value={barcodeQuery} onChange={e => handleBarcodeInput(e.target.value)}
                   placeholder="바코드 · 제품명 · 도매처 검색"
-                  style={{ ...inputBase, background: '#fff', marginBottom: 4 }}
+                  className="ui-control ops-g-3bedbc5d"
                 />
                 {!barcodeLoading && barcodeQuery && barcodeResults.length === 0 && !autoMatched && (
-                  <div style={{ fontSize: 12, color: C.textMuted }}>검색 결과 없음</div>
+                  <div className="ops-g-c266c2e3">검색 결과 없음</div>
                 )}
                 {barcodeQuery && barcodeResults.map(b => (
-                  <button key={b.바코드} onClick={() => handleSelectBarcode(b)} disabled={matchSaving} style={{
-                    width: '100%', textAlign: 'left', padding: '9px 12px', marginBottom: 4,
-                    borderRadius: 8, background: '#fff', border: `1px solid ${C.border}`,
-                    cursor: 'pointer', display: 'block',
-                  }}>
+                  <button key={b.바코드} onClick={() => handleSelectBarcode(b)} disabled={matchSaving} className="ops-g-fce267e1">
                     <BarcodeItem b={b} />
                   </button>
                 ))}
-                {matchSaved && <div style={{ fontSize: 12, color: C.success, marginTop: 4 }}>✓ 매칭 저장됨</div>}
+                {matchSaved && <div className="ops-g-35ba4f7e">✓ 매칭 저장됨</div>}
               </div>
             </div>
           )}
@@ -856,36 +800,26 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           label="📷 제품 사진"
           badge={
             photos.length > 0
-              ? <span style={{ color: C.brand, fontWeight: 700 }}>{photos.length}장</span>
-              : <span style={{ color: C.textFaint }}>없음</span>
+              ? <span className="ops-g-185c4a45">{photos.length}장</span>
+              : <span className="ops-g-a2b316f9">없음</span>
           }
           onToggle={() => setShowPhoto(s => !s)}
         />
         {showPhoto && (
-          <div style={{
-            marginTop: 4, padding: 12,
-            background: '#f9fafb', borderRadius: 12, border: `1px solid ${C.border}`,
-          }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className="ops-g-24cff590">
+            <div className="ops-g-2af48433">
               {photos.map(photo => (
-                <div key={photo.id} style={{ position: 'relative' }}>
+                <div key={photo.id} className="ops-g-1d5e5023">
                   <img
                     src={`${API_BASE}${photo.url}`}
                     alt="제품사진"
-                    style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 10, border: `1px solid ${C.border}`, cursor: 'pointer' }}
+                    className="ops-g-c174ec39"
                     onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
                   />
                   {isAdmin && (
                     <button
                       onClick={() => handlePhotoDelete(photo.id)}
-                      style={{
-                        position: 'absolute', top: -5, right: -5,
-                        width: 22, height: 22, borderRadius: '50%',
-                        background: C.danger, color: '#fff', border: 'none',
-                        fontSize: 13, cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
-                      }}
+                      className="ops-g-a9a19bff"
                     >×</button>
                   )}
                 </div>
@@ -896,10 +830,10 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 cursor: uploading ? 'wait' : 'pointer', color: C.textFaint, fontSize: 10,
               }}>
-                <span style={{ fontSize: 24 }}>{uploading ? '⏳' : '📷'}</span>
-                <span style={{ marginTop: 2 }}>{uploading ? '업로드 중' : '추가'}</span>
+                <span className="ops-g-e17804f5">{uploading ? '⏳' : '📷'}</span>
+                <span className="ops-g-93146bdd">{uploading ? '업로드 중' : '추가'}</span>
                 <input type="file" accept="image/*" capture="environment"
-                  style={{ display: 'none' }}
+                  className="ops-g-8251cb3b"
                   onChange={handlePhotoUpload} disabled={uploading}
                 />
               </label>
@@ -909,7 +843,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
 
         {/* ── Inbox 사진 선택 연결 (배치 inbox 사진 전체 표시) ── */}
         {inboxPhotos.length > 0 && (
-          <div style={{ marginTop: 8 }}>
+          <div className="ops-g-15d9cd55">
             <button
               onClick={() => setShowInboxPicker(v => !v)}
               style={{
@@ -923,11 +857,11 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
               {showInboxPicker ? ' ▲' : ' ▼'}
             </button>
             {showInboxPicker && (
-              <div style={{ marginTop: 4, padding: 10, background: '#f0f9ff', borderRadius: 10, border: '1px solid #bae6fd' }}>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+              <div className="ops-g-1a63a599">
+                <div className="ops-g-d87d1f57">
                   ✅ 이 품목에 연결됨 · 🔗 다른 품목에 연결됨 · 미연결은 클릭하여 연결
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+                <div className="ops-g-95807799">
                   {inboxPhotos.map(photo => {
                     // 이 품목에 연결됐는지 (item.photos 와 stored_filename 비교)
                     const linkedToThis = photos.some(p => photo.stored_filename && p.filename === photo.stored_filename);
@@ -949,10 +883,10 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                             <img
                               src={`${API_BASE}${photo.url}`}
                               alt={photo.filename || ''}
-                              style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }}
+                              className="ops-g-28611783"
                             />
                           ) : (
-                            <div style={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, background: '#e0f2fe' }}>📷</div>
+                            <div className="ops-g-49f87b5a">📷</div>
                           )}
                           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: linkedToThis ? 'rgba(34,197,94,0.8)' : linkedToOther ? 'rgba(245,158,11,0.8)' : 'rgba(0,0,0,0.5)', padding: '2px 4px', fontSize: 9, color: '#fff', textAlign: 'center' }}>
                             {inboxLinking === photo.id ? '연결 중…' : linkedToThis ? '✅ 연결됨' : linkedToOther ? '🔗 다른품목' : '선택'}
@@ -963,13 +897,7 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
                           <button
                             onClick={() => handleUnlinkInboxPhoto(photo.id)}
                             disabled={!!inboxLinking}
-                            style={{
-                              position: 'absolute', top: 2, right: 2,
-                              width: 18, height: 18, borderRadius: '50%',
-                              background: '#ef4444', color: '#fff', border: 'none',
-                              fontSize: 11, cursor: 'pointer', lineHeight: 1,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}
+                            className="ops-g-1455a639"
                             title="연결 해제"
                           >×</button>
                         )}
@@ -992,11 +920,11 @@ function ItemCard({ item, token, workerName, isAdmin, batchVendor, inboxPhotos, 
           }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: needsPhotoDecision ? '#ea580c' : C.textMuted, marginBottom: 6 }}>
               {needsPhotoDecision ? '⚠️ 사진 처리결정 필요' : '📸 사진 처리결정'}
-              {photoDecision && <span style={{ marginLeft: 6, fontWeight: 400 }}>
+              {photoDecision && <span className="ops-g-3b91985a">
                 ({photoDecision === 'photo' ? '업로드사진' : photoDecision === 'existing' ? '기존상품' : photoDecision === 'new' ? '신상품' : '사진없음'})
               </span>}
             </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <div className="ops-g-07988eb3">
               {(['photo', 'existing', 'new', 'none'] as const).map(v => {
                 const labels: Record<string, string> = { photo: '📷 업로드사진', existing: '🔗 기존상품', new: '🆕 신상품', none: '🚫 사진없음' };
                 const isActive = photoDecision === v;
@@ -1157,50 +1085,42 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
   };
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-      zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-    }} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{
-        background: '#fff', borderRadius: '20px 20px 0 0',
-        padding: '20px 18px 40px', width: '100%', maxWidth: 520,
-        maxHeight: '90vh', overflowY: 'auto',
-        boxShadow: '0 -4px 30px rgba(0,0,0,0.15)',
-      }}>
+    <div className="ops-g-86593efd" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ops-g-5c79db59">
         {/* handle bar */}
-        <div style={{ width: 40, height: 4, background: C.border, borderRadius: 2, margin: '0 auto 16px' }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <span style={{ fontWeight: 800, fontSize: 17 }}>품목 직접 추가</span>
-          <button onClick={onClose} style={{ background: C.borderLight, border: 'none', width: 32, height: 32, borderRadius: '50%', fontSize: 18, cursor: 'pointer', color: C.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+        <div className="ops-g-48df0bf0" />
+        <div className="ops-g-073d7268">
+          <span className="ops-g-4791020e">품목 직접 추가</span>
+          <button onClick={onClose} className="ops-g-df5cea67">×</button>
         </div>
 
         {/* 업체 */}
-        <label style={lbl}>업체</label>
-        <div ref={vendorRef} style={{ position: 'relative', marginBottom: 14 }}>
+        <label className="ops-label">업체</label>
+        <div ref={vendorRef} className="ops-g-afacf144">
           <input value={vendorQuery}
             onChange={e => { setVendorQuery(e.target.value); setVendorOpen(true); if (!e.target.value) { setSelectedVendors([]); setVendorDisplay(''); } }}
             onFocus={() => setVendorOpen(true)}
             placeholder="업체명 또는 별칭 검색"
-            style={inp} />
+            className="ui-control" />
           {vendorOpen && (fVendors.length > 0 || fAliases.length > 0) && (
             <div style={dropS}>
               {fVendors.length > 0 && <>
-                <div style={{ padding: '5px 12px', fontSize: 10, color: C.textFaint, fontWeight: 700, background: '#fafafa', borderBottom: `1px solid ${C.borderLight}` }}>📦 등록 업체</div>
+                <div className="ops-g-541cf7c6">📦 등록 업체</div>
                 {fVendors.map(v => (
                   <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
                     style={{ padding: '9px 14px', fontSize: 14, cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}`, background: vendorDisplay === v.name ? C.brandLight : undefined }}>
                     <strong>{v.name}</strong>
-                    {v.aliases.length > 0 && <span style={{ fontSize: 11, color: C.textFaint, marginLeft: 6 }}>({v.aliases.join(', ')})</span>}
+                    {v.aliases.length > 0 && <span className="ops-g-d587ed76">({v.aliases.join(', ')})</span>}
                   </div>
                 ))}
               </>}
               {fAliases.length > 0 && <>
-                <div style={{ padding: '5px 12px', fontSize: 10, color: C.textFaint, fontWeight: 700, background: '#fafafa', borderBottom: `1px solid ${C.borderLight}` }}>🏷️ 화주사 별칭</div>
+                <div className="ops-g-541cf7c6">🏷️ 화주사 별칭</div>
                 {fAliases.map(a => (
                   <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
-                    style={{ padding: '9px 14px', fontSize: 14, cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}` }}>
-                    <span style={{ fontWeight: 700, color: C.brand }}>{a.canonical}</span>
-                    {a.aliases.length > 0 && <span style={{ fontSize: 11, color: C.textFaint, marginLeft: 6 }}>→ {a.aliases.join(', ')}</span>}
+                    className="ops-g-114ea3f1">
+                    <span className="ops-g-185c4a45">{a.canonical}</span>
+                    {a.aliases.length > 0 && <span className="ops-g-d587ed76">→ {a.aliases.join(', ')}</span>}
                   </div>
                 ))}
               </>}
@@ -1209,26 +1129,26 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
         </div>
 
         {/* 바코드 */}
-        <label style={lbl}>
+        <label className="ops-label">
           바코드{' '}
           {barcodeLoading ? '(로딩 중…)' : selectedVendors.length > 0 && barcodeResults.length > 0 ? `(${barcodeResults.length}개)` : '(바코드 · 제품명 검색)'}
         </label>
-        <div ref={barcodeRef} style={{ position: 'relative', marginBottom: 14 }}>
+        <div ref={barcodeRef} className="ops-g-afacf144">
           {selectedBarcode ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div style={{ flex: 1, padding: '9px 12px', background: C.purpleLight, borderRadius: 10, fontSize: 13, color: C.purple, fontWeight: 600 }}>
+            <div className="ops-g-a580969f">
+              <div className="ops-g-62fa9953">
                 ✅ {selectedBarcode.바코드} — {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
               </div>
               <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); setApiSearchResults([]); }}
-                style={{ padding: '7px 12px', background: C.borderLight, border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, color: C.textMuted }}>변경</button>
+                className="ops-g-d89f60a0">변경</button>
             </div>
           ) : (
             <>
               {!barcodeLoading && selectedVendors.length > 0 && barcodeResults.length === 0 && (
-                <div style={{ marginBottom: 8, padding: '8px 12px', background: C.dangerLight, border: `1px solid ${C.dangerBorder}`, borderRadius: 8, fontSize: 12 }}>
-                  <span style={{ color: C.danger }}>"{vendorDisplay}" 등록 바코드 없음</span>
+                <div className="ops-g-90105026">
+                  <span className="ops-g-67b91ed6">"{vendorDisplay}" 등록 바코드 없음</span>
                   <a href="/journal-settings" target="_blank" rel="noreferrer"
-                    style={{ marginLeft: 8, color: C.brand, fontWeight: 700, textDecoration: 'underline' }}>+ 신규 등록</a>
+                    className="ops-g-7f8f4ca4">+ 신규 등록</a>
                 </div>
               )}
               <input
@@ -1236,17 +1156,17 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
                 onChange={e => handleBarcodeQueryChange(e.target.value)}
                 onFocus={() => setBarcodeOpen(true)}
                 placeholder={selectedVendors.length > 0 && barcodeResults.length > 0 ? `바코드·제품명 검색 (${barcodeResults.length}개)` : '바코드번호 또는 제품명'}
-                style={inp}
+                className="ui-control"
               />
-              {(barcodeLoading || apiSearchLoading) && <div style={{ fontSize: 11, color: C.textFaint, padding: '3px 2px' }}>검색 중…</div>}
+              {(barcodeLoading || apiSearchLoading) && <div className="ops-g-ed84ac13">검색 중…</div>}
               {!apiSearchLoading && selectedVendors.length === 0 && barcodeQuery.trim() && apiSearchResults.length === 0 && (
-                <div style={{ fontSize: 12, color: C.danger, padding: '3px 2px' }}>검색 결과 없음</div>
+                <div className="ops-g-291b392b">검색 결과 없음</div>
               )}
               {barcodeOpen && displayBarcodes.length > 0 && (
                 <div style={dropS}>
                   {displayBarcodes.map(b => (
                     <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
-                      style={{ padding: '9px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.borderLight}` }}>
+                      className="ops-g-3ade0c87">
                       <BarcodeItem b={b} />
                     </div>
                   ))}
@@ -1257,34 +1177,34 @@ function AddItemModal({ token, batchId, batchVendor, onClose, onAdded }: {
         </div>
 
         {/* 품명 */}
-        <label style={lbl}>품명 *</label>
+        <label className="ops-label">품명 *</label>
         <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))}
           placeholder="예) 타원 백팩" style={{ ...inp, marginBottom: 14 }} />
 
         {/* 옵션 */}
-        <label style={lbl}>옵션 (색상·사이즈)</label>
+        <label className="ops-label">옵션 (색상·사이즈)</label>
         <input value={form.option_text} onChange={e => setForm(f => ({ ...f, option_text: e.target.value }))}
           placeholder="예) 블랙, L" style={{ ...inp, marginBottom: 14 }} />
 
         {/* 수량 + 단가 */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 22 }}>
+        <div className="ops-g-13bc3815">
           <div>
-            <label style={lbl}>장끼 수량 *</label>
+            <label className="ops-label">장끼 수량 *</label>
             <input type="number" inputMode="numeric" min={1} value={form.janggi_qty}
               onChange={e => setForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
               style={{ ...inp, fontSize: 20, fontWeight: 800, textAlign: 'center' }} />
           </div>
           <div>
-            <label style={lbl}>단가 (선택)</label>
+            <label className="ops-label">단가 (선택)</label>
             <input type="number" inputMode="numeric" min={0} value={form.unit_price}
               onChange={e => setForm(f => ({ ...f, unit_price: e.target.value }))}
               placeholder="0" style={{ ...inp, textAlign: 'center' }} />
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div className="ops-g-bccf3703">
           <button onClick={onClose}
-            style={{ flex: 1, height: 50, border: `1px solid ${C.border}`, background: '#fff', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer', color: C.textMuted }}>
+            className="ops-g-0df9e4a9">
             취소
           </button>
           <button onClick={handleAdd} disabled={adding || !form.item_name.trim()}
@@ -1436,11 +1356,11 @@ export default function InboundWorkPage() {
 
   // ── 로딩 / 에러 화면 ──
   if (expired) return (
-    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ background: '#fff', borderRadius: 20, padding: 32, textAlign: 'center', maxWidth: 340, boxShadow: '0 4px 24px rgba(0,0,0,0.09)' }}>
-        <div style={{ fontSize: 56, marginBottom: 16 }}>🔒</div>
-        <div style={{ fontSize: 17, fontWeight: 800, color: C.text, marginBottom: 8 }}>링크가 만료되었습니다</div>
-        <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.7 }}>
+    <div className="ops-screen">
+      <div className="ops-screen-card">
+        <div className="ops-empty-icon">🔒</div>
+        <div className="ops-screen-title">링크가 만료되었습니다</div>
+        <div className="ops-screen-copy">
           실수량 입력 링크는 <strong>당일 자정</strong>까지만 유효합니다.<br />
           다음 날 접근이 필요하다면 관리자에게 문의하세요.
         </div>
@@ -1449,19 +1369,19 @@ export default function InboundWorkPage() {
   );
 
   if (error) return (
-    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div style={{ background: '#fff', borderRadius: 16, padding: 28, textAlign: 'center', maxWidth: 320, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}>
-        <div style={{ fontSize: 48, marginBottom: 12 }}>📦</div>
-        <div style={{ color: C.danger, fontSize: 14, fontWeight: 600 }}>{error}</div>
+    <div className="ops-screen">
+      <div className="ops-screen-card">
+        <div className="ops-empty-icon">📦</div>
+        <div className="ops-screen-title is-bad">{error}</div>
       </div>
     </div>
   );
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ textAlign: 'center', color: C.textMuted }}>
-        <div style={{ fontSize: 40, marginBottom: 10 }}>📦</div>
-        <div style={{ fontWeight: 600 }}>불러오는 중…</div>
+    <div className="ops-screen">
+      <div className="ops-screen-card">
+        <div className="ops-empty-icon">📦</div>
+        <div className="ops-screen-title">불러오는 중…</div>
       </div>
     </div>
   );
@@ -1472,227 +1392,143 @@ export default function InboundWorkPage() {
   const items      = batch.items || [];
   const doneCount  = items.filter(i => i.status !== 'pending').length;
   const progress   = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
-  const statusC    = BATCH_STATUS_COLOR[batch.status] || { bg: C.borderLight, color: C.textSub };
   const canClose        = ['confirming'].includes(batch.status);
   const canGradeComplete = ['inbound_done', 'grading', 'repairing'].includes(batch.status);
 
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Noto Sans KR', -apple-system, sans-serif" }}>
-
-      {/* ── 헤더 ── */}
-      <header style={{
-        position: 'sticky', top: 0, zIndex: 100,
-        background: 'linear-gradient(135deg, #1a1740 0%, #2d2a6b 100%)',
-        color: '#fff', padding: '13px 16px 11px',
-        boxShadow: '0 2px 12px rgba(26,23,64,0.4)',
-      }}>
-        <div style={{ maxWidth: 640, margin: '0 auto' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.2, letterSpacing: '-0.3px' }}>
-                📦 {batch.vendor}
-              </div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 3 }}>
+    <div className="ops-work">
+      <header className="ops-work-header">
+        <div className="ops-work-inner">
+          <div className="ops-work-top">
+            <div>
+              <div className="ops-work-title">📦 {batch.vendor}</div>
+              <div className="ops-work-meta">
                 {batch.inbound_date}
                 {batch.wholesale && ` · ${batch.wholesale}`}
               </div>
             </div>
-            <span style={{
-              flexShrink: 0, padding: '5px 13px', borderRadius: 20,
-              fontSize: 12, fontWeight: 700,
-              background: statusC.bg, color: statusC.color,
-            }}>
-              {batch.status_label}
-            </span>
+            <StatusBadge status={batch.status} label={batch.status_label} />
           </div>
-
           {items.length > 0 && (
-            <div style={{ marginTop: 11 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,0.6)', marginBottom: 5 }}>
+            <div className="ops-progress">
+              <div className="ops-progress-meta">
                 <span>진행률 {doneCount}/{items.length}건 완료</span>
-                <span style={{ fontWeight: 700, color: progress === 100 ? '#4ade80' : 'rgba(255,255,255,0.8)' }}>{progress}%</span>
+                <span className={progress === 100 ? 'ops-progress-pct is-done' : 'ops-progress-pct'}>{progress}%</span>
               </div>
-              <div style={{ height: 5, background: 'rgba(255,255,255,0.15)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%', width: `${progress}%`,
-                  background: progress === 100 ? '#4ade80' : '#818cf8',
-                  borderRadius: 3, transition: 'width 0.4s ease',
-                }} />
+              <div className="ops-progress-track">
+                <div className={progress === 100 ? 'ops-progress-bar is-done' : 'ops-progress-bar'} style={{ width: `${progress}%` }} />
               </div>
             </div>
           )}
         </div>
       </header>
 
-      {/* ── 작업자 이름 배너 (비로그인) ── */}
       {!isAdmin && (
-        <div style={{
-          background: workerName ? '#f0fdf4' : C.warningLight,
-          borderBottom: `2px solid ${workerName ? C.successBorder : C.warningBorder}`,
-        }}>
-          <div style={{ maxWidth: 640, margin: '0 auto', padding: '10px 16px' }}>
+        <div className={workerName ? 'ops-worker is-ready' : 'ops-worker'}>
+          <div className="ops-work-inner">
             {!workerName || showNameEdit ? (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: C.warning, whiteSpace: 'nowrap' }}>👤 이름</span>
+              <div className="ops-worker-row">
+                <span className="ops-worker-label">👤 이름</span>
                 <input
+                  className="ui-control ops-worker-input"
                   value={nameInput}
                   onChange={e => setNameInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') saveName(); }}
                   placeholder="이름을 입력하세요"
                   autoFocus
-                  style={{
-                    flex: 1, height: 38, padding: '0 12px', borderRadius: 10,
-                    border: `2px solid ${C.warningBorder}`, fontSize: 14, outline: 'none',
-                    background: '#fff',
-                  }}
                 />
-                <button onClick={saveName} disabled={!nameInput.trim()} style={{
-                  height: 38, padding: '0 16px', background: nameInput.trim() ? C.brand : '#d1d5db',
-                  color: '#fff', border: 'none', borderRadius: 10,
-                  fontSize: 13, fontWeight: 700, cursor: nameInput.trim() ? 'pointer' : 'not-allowed',
-                  whiteSpace: 'nowrap',
-                }}>확인</button>
+                <button onClick={saveName} disabled={!nameInput.trim()} className="ops-worker-ok">확인</button>
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 13, color: C.success, fontWeight: 700 }}>👤 {workerName}</span>
-                <button onClick={() => { setShowNameEdit(true); setNameInput(workerName); }}
-                  style={{ fontSize: 12, color: C.textMuted, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                  변경
-                </button>
+              <div className="ops-worker-set">
+                <span className="ops-worker-name">👤 {workerName}</span>
+                <button onClick={() => { setShowNameEdit(true); setNameInput(workerName); }} className="ops-linkish">변경</button>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ── 수량 요약 ── */}
-      <div style={{ background: '#fff', borderBottom: `1px solid ${C.borderLight}` }}>
-        <div style={{ maxWidth: 640, margin: '0 auto', padding: '12px 16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-            {[
-              { label: '장끼',   value: batch.total_janggi_qty  ?? 0, color: C.textSub  },
-              { label: '실입고', value: batch.total_actual_qty  ?? 0, color: C.success  },
-              { label: '미입고', value: batch.total_missing_qty ?? 0, color: (batch.total_missing_qty ?? 0) > 0 ? C.danger : C.textFaint },
-            ].map(s => (
-              <div key={s.label} style={{ textAlign: 'center', padding: '10px 4px', background: C.borderLight, borderRadius: 10 }}>
-                <div style={{ fontSize: 10, color: C.textFaint, fontWeight: 600, letterSpacing: 0.5, marginBottom: 3 }}>{s.label}</div>
-                <div style={{ fontSize: 24, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
-              </div>
-            ))}
+      <div className="ops-qty-band">
+        <div className="ops-work-inner ops-qty">
+          <div className="ops-qty-cell">
+            <div className="ops-qty-label">장끼</div>
+            <div className="ops-qty-value">{batch.total_janggi_qty ?? 0}</div>
+          </div>
+          <div className="ops-qty-cell">
+            <div className="ops-qty-label">실입고</div>
+            <div className="ops-qty-value is-ok">{batch.total_actual_qty ?? 0}</div>
+          </div>
+          <div className="ops-qty-cell">
+            <div className="ops-qty-label">미입고</div>
+            <div className={(batch.total_missing_qty ?? 0) > 0 ? 'ops-qty-value is-bad' : 'ops-qty-value is-muted'}>{batch.total_missing_qty ?? 0}</div>
           </div>
         </div>
       </div>
 
-      {/* ── 봇 수집 제품사진 inbox ── */}
       {inboxPhotos.length > 0 && (
-        <div style={{ maxWidth: 640, margin: '0 auto', padding: '8px 14px 0' }}>
+        <div className="ops-work-inner ops-inbox">
           <SectionToggle
             open={showInbox}
             label={`📦 봇 수집 제품사진 (${inboxPhotos.filter(p => !p.matched).length}장 미매칭 / 총 ${inboxPhotos.length}장)`}
             badge={
               inboxPhotos.some(p => !p.matched)
-                ? <span style={{ background: C.warningLight, color: C.warning, borderRadius: 8, padding: '1px 6px', fontSize: 11, fontWeight: 700 }}>매칭필요</span>
-                : <span style={{ background: C.successLight, color: C.success, borderRadius: 8, padding: '1px 6px', fontSize: 11, fontWeight: 700 }}>완료</span>
+                ? <Badge variant="warning">매칭필요</Badge>
+                : <Badge variant="success">완료</Badge>
             }
             onToggle={() => setShowInbox(v => !v)}
           />
           {showInbox && (
-            <div style={{ ...cardStyle, marginTop: 4, padding: 12 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div className="ops-card is-pad">
+              <div className="ops-photo-grid">
                 {inboxPhotos.map(photo => (
-                  <div key={photo.id} style={{
-                    position: 'relative', borderRadius: 10, overflow: 'hidden',
-                    border: `2px solid ${photo.matched ? C.successBorder : C.warningBorder}`,
-                    background: photo.matched ? C.successLight : C.warningLight,
-                  }}>
+                  <div key={photo.id} className={photo.matched ? 'ops-photo is-matched' : 'ops-photo'}>
                     {photo.url ? (
                       <img
                         src={`${API_BASE}${photo.url}`}
                         alt={photo.filename || '제품사진'}
-                        style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block', cursor: 'pointer' }}
                         onClick={() => window.open(`${API_BASE}${photo.url}`, '_blank')}
                       />
                     ) : (
-                      <div style={{ width: '100%', aspectRatio: '1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>📷</div>
+                      <div className="ops-photo-fallback">📷</div>
                     )}
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.5)', padding: '3px 5px', fontSize: 10, color: '#fff', textAlign: 'center' }}>
-                      {photo.matched ? '✅ 매칭완료' : '미매칭'}
-                    </div>
+                    <div className="ops-photo-cap">{photo.matched ? '✅ 매칭완료' : '미매칭'}</div>
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop: 8, fontSize: 12, color: C.textMuted, lineHeight: 1.6 }}>
-                봇 채팅에서 수집된 제품사진입니다. 품목 편집 → 바코드 선택 시 자동으로 사진 사전에 등록됩니다.
-              </div>
+              <div className="ops-help">봇 채팅에서 수집된 제품사진입니다. 품목 편집 → 바코드 선택 시 자동으로 사진 사전에 등록됩니다.</div>
             </div>
           )}
         </div>
       )}
 
-      {/* ── 품목 목록 ── */}
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '12px 14px' }}>
-
-        {/* OCR 메시지 */}
+      <div className="ops-work-inner ops-work-body">
         {ocrMsg && (
-          <div style={{
-            marginBottom: 12, padding: '11px 14px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-            background: ocrMsg.startsWith('✅') ? C.successLight : C.dangerLight,
-            color:      ocrMsg.startsWith('✅') ? C.success : C.danger,
-            border: `1px solid ${ocrMsg.startsWith('✅') ? C.successBorder : C.dangerBorder}`,
-          }}>
-            {ocrMsg}
-          </div>
+          <div className={ocrMsg.startsWith('✅') ? 'ops-note is-ok' : 'ops-note is-bad'}>{ocrMsg}</div>
         )}
 
         {items.length === 0 ? (
-          /* ─ 빈 상태 ─ */
-          <div style={{
-            ...cardStyle, padding: '32px 20px', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 48, marginBottom: 14 }}>📋</div>
-            {batch.status === 'ocr_pending' ? (
-              <>
-                <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 6 }}>장끼 OCR 대기 중</div>
-                <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.7 }}>
-                  아래 버튼으로 장끼 사진을 찍으면<br />AI가 품목을 자동으로 읽어드립니다.
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 6 }}>OCR 결과 없음</div>
-                <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.7 }}>
-                  다시 촬영하거나 직접 입력해주세요.
-                </div>
-              </>
-            )}
-
-            {isAdmin && (
-              <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <label style={{
-                  display: 'block', padding: '14px',
-                  background: ocrLoading ? '#d1d5db' : '#a16207',
-                  color: '#fff', borderRadius: 12, fontSize: 15, fontWeight: 700,
-                  cursor: ocrLoading ? 'not-allowed' : 'pointer', textAlign: 'center',
-                  boxShadow: ocrLoading ? 'none' : '0 4px 12px rgba(161,98,7,0.3)',
-                }}>
+          <EmptyState
+            className="ops-card"
+            icon="📋"
+            title={batch.status === 'ocr_pending' ? '장끼 OCR 대기 중' : 'OCR 결과 없음'}
+            description={batch.status === 'ocr_pending'
+              ? <>아래 버튼으로 장끼 사진을 찍으면<br />AI가 품목을 자동으로 읽어드립니다.</>
+              : <>다시 촬영하거나 직접 입력해주세요.</>}
+            action={isAdmin ? (
+              <div className="ops-stack">
+                <label className={ocrLoading ? 'ops-ocr is-busy' : 'ops-ocr'}>
                   {ocrLoading ? '🤖 AI 분석 중… (10~30초)' : '📷 장끼 사진 촬영 → AI 분석'}
-                  <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                  <input type="file" accept="image/*" capture="environment" className="ops-file"
                     disabled={ocrLoading}
                     onChange={e => { const f = e.target.files?.[0]; if (f) handleOcr(f); e.target.value = ''; }}
                   />
                 </label>
-                <button onClick={() => setShowAddModal(true)} style={{
-                  padding: '12px', background: C.brandLight, color: C.brand,
-                  border: `2px solid ${C.brandBorder}`, borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                }}>
-                  ➕ 품목 직접 입력
-                </button>
+                <button onClick={() => setShowAddModal(true)} className="ops-add">➕ 품목 직접 입력</button>
               </div>
-            )}
-          </div>
+            ) : null}
+          />
         ) : (
-          /* ─ 품목 카드 목록 ─ */
           items.map(item => (
             <ItemCard
               key={item.id}
@@ -1711,114 +1547,54 @@ export default function InboundWorkPage() {
           ))
         )}
 
-        {/* ── 관리자 액션 (품목 있을 때) ── */}
         {isAdmin && items.length > 0 && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 4, marginBottom: 4 }}>
-            <label style={{
-              flex: 1, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              background: ocrLoading ? '#d1d5db' : C.warningLight,
-              color: ocrLoading ? C.textMuted : C.warning,
-              border: `2px dashed ${C.warningBorder}`, borderRadius: 12,
-              fontSize: 13, fontWeight: 700, cursor: ocrLoading ? 'not-allowed' : 'pointer',
-            }}>
+          <div className="ops-choice-row">
+            <label className={ocrLoading ? 'ops-ocr is-busy' : 'ops-ocr'}>
               {ocrLoading ? '🤖 AI 분석 중…' : '🔄 장끼 재분석'}
-              <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+              <input type="file" accept="image/*" capture="environment" className="ops-file"
                 disabled={ocrLoading}
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleOcr(f); e.target.value = ''; }}
               />
             </label>
-            <button onClick={() => setShowAddModal(true)} style={{
-              flex: 1, height: 48, background: C.brandLight, color: C.brand,
-              border: `2px dashed ${C.brandBorder}`, borderRadius: 12,
-              fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            }}>
-              ➕ 품목 추가
-            </button>
+            <button onClick={() => setShowAddModal(true)} className="ops-add">➕ 품목 추가</button>
           </div>
         )}
 
-        {/* ── 수량 전부 장끼와 동일 (관리자, 수량 입력 단계) ── */}
         {isAdmin && canClose && items.length > 0 && (
-          <div style={{ marginBottom: 4 }}>
-            <button
-              onClick={handleFillAllJanggi}
-              disabled={fillingQty}
-              style={{
-                width: '100%', height: 40,
-                background: fillingQty ? '#d1d5db' : C.borderLight,
-                color: fillingQty ? C.textFaint : C.textSub,
-                border: `1px solid ${C.border}`, borderRadius: 10,
-                fontSize: 13, fontWeight: 600, cursor: fillingQty ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {fillingQty ? '설정 중…' : '📋 수량 전부 장끼와 동일 (미입력 품목만)'}
-            </button>
-          </div>
+          <button onClick={handleFillAllJanggi} disabled={fillingQty} className="ops-quiet">
+            {fillingQty ? '설정 중…' : '📋 수량 전부 장끼와 동일 (미입력 품목만)'}
+          </button>
         )}
 
-        {/* ── 입고 확인 완료 버튼 (관리자, confirming 상태) ── */}
         {isAdmin && canClose && (
-          <div style={{ paddingTop: 4, paddingBottom: 20 }}>
+          <div>
             {closeMsg && (
-              <div style={{
-                marginBottom: 12, padding: '11px 14px', borderRadius: 12, fontSize: 13, fontWeight: 600, whiteSpace: 'pre-line',
-                background: closeMsg.startsWith('✅') ? C.successLight : C.dangerLight,
-                color:      closeMsg.startsWith('✅') ? C.success : C.danger,
-                border: `1px solid ${closeMsg.startsWith('✅') ? C.successBorder : C.dangerBorder}`,
-              }}>
-                {closeMsg}
-              </div>
+              <div className={closeMsg.startsWith('✅') ? 'ops-note is-ok' : 'ops-note is-bad'}>{closeMsg}</div>
             )}
-
             {batch.status === 'confirming' && (
-              <button onClick={() => handleClose('am')} disabled={closing} style={{
-                width: '100%', height: 54,
-                background: closing ? '#d1d5db' : '#0369a1', color: '#fff',
-                border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800,
-                cursor: closing ? 'not-allowed' : 'pointer',
-                boxShadow: closing ? 'none' : '0 4px 16px rgba(3,105,161,0.35)',
-                letterSpacing: '-0.3px',
-              }}>
+              <button onClick={() => handleClose('am')} disabled={closing} className="ops-finish is-close">
                 {closing ? '처리 중…' : '✅ 입고 확인 완료'}
               </button>
             )}
           </div>
         )}
 
-        {/* ── 검품·양품화 완료 버튼 (관리자, inbound_done/grading/repairing 상태) ── */}
         {isAdmin && canGradeComplete && (
-          <div style={{ paddingTop: 4, paddingBottom: 20 }}>
+          <div>
             {gradeMsg && (
-              <div style={{
-                marginBottom: 12, padding: '11px 14px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-                background: gradeMsg.startsWith('✅') ? C.successLight : C.dangerLight,
-                color:      gradeMsg.startsWith('✅') ? C.success : C.danger,
-                border: `1px solid ${gradeMsg.startsWith('✅') ? C.successBorder : C.dangerBorder}`,
-              }}>
-                {gradeMsg}
-              </div>
+              <div className={gradeMsg.startsWith('✅') ? 'ops-note is-ok' : 'ops-note is-bad'}>{gradeMsg}</div>
             )}
-            <button onClick={handleGradeComplete} disabled={grading} style={{
-              width: '100%', height: 54,
-              background: grading ? '#d1d5db' : '#5b21b6', color: '#fff',
-              border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 800,
-              cursor: grading ? 'not-allowed' : 'pointer',
-              boxShadow: grading ? 'none' : '0 4px 16px rgba(91,33,182,0.35)',
-              letterSpacing: '-0.3px',
-            }}>
+            <button onClick={handleGradeComplete} disabled={grading} className="ops-finish is-grade">
               {grading ? '처리 중…' : '🔷 검품·양품화 완료'}
             </button>
           </div>
         )}
 
-        {/* ── 완료 상태 ── */}
         {batch.status === 'done' && (
-          <div style={{ padding: '28px 0', textAlign: 'center' }}>
-            <div style={{ fontSize: 56 }}>✅</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: C.success, marginTop: 10 }}>최종 완료</div>
-            {batch.closed_by && (
-              <div style={{ fontSize: 12, color: C.textMuted, marginTop: 4 }}>{batch.closed_by} 마감</div>
-            )}
+          <div className="ops-done">
+            <div className="ops-done-mark">✅</div>
+            <div className="ops-done-title">최종 완료</div>
+            {batch.closed_by && <div className="ops-help">{batch.closed_by} 마감</div>}
           </div>
         )}
       </div>

@@ -25,6 +25,12 @@ import {
   VendorAlias,
   RepairBarcode,
 } from '@/lib/api';
+import PageHeader from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { EmptyState, OpsModal, StatusBadge } from '@/components/operational';
 
 // ─────────────────────────────────────
 // 스타일 상수
@@ -72,31 +78,6 @@ const labelStyle: React.CSSProperties = {
 // 상태 배지
 // ─────────────────────────────────────
 
-const STATUS_COLOR: Record<string, { bg: string; color: string }> = {
-  ocr_pending:  { bg: '#f3f4f6', color: '#6b7280' },
-  confirming:   { bg: '#fef9c3', color: '#a16207' },
-  inbound_done: { bg: '#dbeafe', color: '#1d4ed8' },
-  grading:      { bg: '#ede9fe', color: '#7c3aed' },
-  repairing:    { bg: '#ffedd5', color: '#c2410c' },
-  done:         { bg: '#dcfce7', color: '#15803d' },
-  cancelled:    { bg: '#fee2e2', color: '#dc2626' },
-};
-
-
-
-function StatusBadge({ status, label, map }: { status: string; label: string; map: Record<string, { bg: string; color: string }> }) {
-  const c = map[status] || { bg: '#f3f4f6', color: '#6b7280' };
-  return (
-    <span style={{
-      padding: '2px 10px', borderRadius: 12,
-      fontSize: '0.75rem', fontWeight: 600,
-      backgroundColor: c.bg, color: c.color,
-      whiteSpace: 'nowrap',
-    }}>
-      {label}
-    </span>
-  );
-}
 
 // ─────────────────────────────────────
 // 유틸
@@ -123,34 +104,7 @@ function todayStr() {
 function Modal({ title, onClose, children, wide }: {
   title: string; onClose: () => void; children: React.ReactNode; wide?: boolean;
 }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-      paddingTop: '3rem', paddingBottom: '2rem',
-      overflowY: 'auto',
-    }}>
-      <div style={{
-        background: '#fff',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-lg)',
-        width: '100%',
-        maxWidth: wide ? '900px' : '520px',
-        margin: '0 1rem 2rem',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '1.1rem 1.5rem',
-          borderBottom: '1px solid var(--border)',
-        }}>
-          <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: 'var(--text-secondary)', lineHeight: 1 }}>×</button>
-        </div>
-        <div style={{ padding: '1.5rem' }}>{children}</div>
-      </div>
-    </div>
-  );
+  return <OpsModal title={title} onClose={onClose} wide={wide}>{children}</OpsModal>;
 }
 
 // ─────────────────────────────────────
@@ -298,73 +252,73 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
 
   return (
     <>
-      <tr style={{ background: '#fff' }}>
+      <tr className="ops-g-635938c7">
         {/* No */}
-        <td style={{ ...tdStyle, color: '#9ca3af', textAlign: 'center' }}>{item.line_no}</td>
+        <td className="ops-g-aa59be66">{item.line_no}</td>
         {/* 날짜 */}
-        <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{batchDate || '-'}</td>
+        <td className="ops-g-4d8da5fe">{batchDate || '-'}</td>
         {/* 업체명 */}
-        <td style={{ ...tdStyle, fontWeight: 500 }}>{batchVendor || '-'}</td>
+        <td className="ops-g-87f0f30f">{batchVendor || '-'}</td>
         {/* 도매처 */}
-        <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{batchWholesale || '-'}</td>
+        <td className="ops-g-4d8da5fe">{batchWholesale || '-'}</td>
         {/* 제품명 */}
         <td style={tdWrap}>
-          <div style={{ fontWeight: 500 }}>{item.item_name || '-'}</div>
+          <div className="ops-g-0728c5c8">{item.item_name || '-'}</div>
         </td>
         {/* 옵션 */}
         <td style={tdWrap}>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>{item.option_text || '-'}</div>
+          <div className="ops-g-ddcf39d9">{item.option_text || '-'}</div>
         </td>
         {/* 바코드 */}
-        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '0.75rem', color: '#6b7280' }}>
+        <td className="ops-g-efc72f05">
           {item.matched_barcode || '-'}
         </td>
         {/* 장끼수량 */}
-        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#1d4ed8' }}>{item.janggi_qty}</td>
+        <td className="ops-g-82a3554e">{item.janggi_qty}</td>
         {/* 실입고 */}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
+        <td className="ops-g-75b838b4">
           <input
             type="number" min={0} value={actualQty}
             onChange={e => setActualQty(Number(e.target.value))}
-            style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
+            className="ui-control ops-g-cd278a91"
           />
         </td>
         {/* 미입고 */}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
+        <td className="ops-g-75b838b4">
           <input
             type="number" min={0} value={missingQty}
             onChange={e => setMissingQty(Number(e.target.value))}
-            style={{ width: 52, ...inputStyle, textAlign: 'center', padding: '0.2rem 0.25rem' }}
+            className="ui-control ops-g-cd278a91"
           />
         </td>
         {/* 공급처상품명 */}
         <td style={tdWrap}>
-          <div style={{ fontSize: '0.78rem', color: '#7c3aed', fontWeight: 600 }}>{item.matched_vendor || '-'}</div>
-          <div style={{ fontSize: '0.78rem' }}>{item.matched_product || '-'}</div>
+          <div className="ops-g-badd327d">{item.matched_vendor || '-'}</div>
+          <div className="ops-g-ef18f090">{item.matched_product || '-'}</div>
         </td>
         {/* 공급처옵션 */}
-        <td style={{ ...tdStyle, color: 'var(--text-secondary)', fontSize: '0.78rem' }}>{item.matched_option || '-'}</td>
+        <td className="ops-g-37c1bf25">{item.matched_option || '-'}</td>
         {/* 공급처위치 */}
-        <td style={{ ...tdStyle, fontSize: '0.78rem', color: '#374151' }}>{item.supplier_location || '-'}</td>
+        <td className="ops-g-16c90e3b">{item.supplier_location || '-'}</td>
         {/* 공급처연락처 */}
-        <td style={{ ...tdStyle, fontSize: '0.78rem', color: '#374151' }}>{item.supplier_contact || '-'}</td>
+        <td className="ops-g-16c90e3b">{item.supplier_contact || '-'}</td>
         {/* 작성자 */}
-        <td style={{ ...tdStyle, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{batchCreatedBy || '-'}</td>
+        <td className="ops-g-c724402f">{batchCreatedBy || '-'}</td>
         {/* 수정시간 */}
-        <td style={{ ...tdStyle, fontSize: '0.73rem', color: '#9ca3af' }}>
+        <td className="ops-g-f38ca7bf">
           {item.updated_at ? item.updated_at.slice(0, 16).replace('T', ' ') : '-'}
         </td>
         {/* 사진 */}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
+        <td className="ops-g-75b838b4">
           {photoCount > 0
-            ? <span style={{ fontSize: '0.78rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, padding: '2px 6px' }}>📷 {photoCount}</span>
-            : <span style={{ fontSize: '0.75rem', color: '#d1d5db' }}>-</span>
+            ? <span className="ops-g-8f07b944">📷 {photoCount}</span>
+            : <span className="ops-g-e8d04424">-</span>
           }
         </td>
         {/* 액션 */}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
-          <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
-            <button onClick={save} disabled={saving} style={{ ...btn('#4361ee'), fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}>
+        <td className="ops-g-75b838b4">
+          <div className="ops-g-d98363cf">
+            <button onClick={save} disabled={saving} className="ops-g-04fc72e5">
               {saving ? '…' : '저장'}
             </button>
             <button
@@ -376,7 +330,7 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
             {onDelete && (
               <button
                 onClick={() => { if (confirm(`품목 "${item.item_name || item.line_no + '번'}"을 삭제하시겠습니까?`)) onDelete(); }}
-                style={{ ...btn('#ef4444'), fontSize: '0.73rem', padding: '0.2rem 0.5rem' }}
+                className="ops-g-7e722f8e"
               >
                 🗑
               </button>
@@ -386,15 +340,15 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
       </tr>
       {/* 수정 폼 인라인 */}
       {editMode && (
-        <tr style={{ background: '#f0f4ff' }}>
-          <td colSpan={19} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #e0e7ff' }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4361ee', marginBottom: 8 }}>✏️ 품목 정보 수정</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
+        <tr className="ops-g-dbf3858d">
+          <td colSpan={19} className="ops-g-ec3a38c5">
+            <div className="ops-g-6cdb8a4b">✏️ 품목 정보 수정</div>
+            <div className="ops-g-065d8d2b">
               {/* 바코드 검색 */}
-              <div ref={bcRef} style={{ position: 'relative', gridColumn: '1 / span 2' }}>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>
+              <div ref={bcRef} className="ops-g-0a31cd57">
+                <div className="ops-g-85c6f07c">
                   바코드 검색
-                  {bcLoading && <span style={{ marginLeft: 6, fontSize: '0.65rem', color: '#a5b4fc' }}>검색 중…</span>}
+                  {bcLoading && <span className="ops-g-983ea6e7">검색 중…</span>}
                 </div>
                 <input
                   value={bcQuery}
@@ -409,49 +363,49 @@ function ItemRow({ item, token, onUpdated, onDelete, batchVendor, batchDate, bat
                       <div
                         key={b.바코드}
                         onMouseDown={() => selectBcItem(b)}
-                        style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', fontSize: '0.78rem' }}
+                        className="ops-g-73f89ff9"
                         onMouseEnter={e => (e.currentTarget.style.background = '#eef2ff')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}
                       >
-                        <span style={{ fontWeight: 600, color: '#4361ee' }}>{b.바코드}</span>
-                        <span style={{ marginLeft: 6, color: '#374151' }}>{b.제품명}</span>
-                        {b.옵션 && <span style={{ marginLeft: 4, color: '#6b7280' }}>/ {b.옵션}</span>}
-                        {b.도매처 && <span style={{ marginLeft: 6, fontSize: '0.72rem', color: '#9ca3af' }}>[{b.도매처}]</span>}
+                        <span className="ops-g-2ad4d06d">{b.바코드}</span>
+                        <span className="ops-g-c238c143">{b.제품명}</span>
+                        {b.옵션 && <span className="ops-g-e43d399c">/ {b.옵션}</span>}
+                        {b.도매처 && <span className="ops-g-6b4570fe">[{b.도매처}]</span>}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
               <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처(업체명)</div>
+                <div className="ops-g-85c6f07c">공급처(업체명)</div>
                 <input value={editForm.matched_vendor} onChange={e => setEditForm(f => ({ ...f, matched_vendor: e.target.value }))} style={editInput} placeholder="공급처" />
               </div>
               <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 상품명</div>
+                <div className="ops-g-85c6f07c">공급처 상품명</div>
                 <input value={editForm.matched_product} onChange={e => setEditForm(f => ({ ...f, matched_product: e.target.value }))} style={editInput} placeholder="공급처 상품명" />
               </div>
               <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 옵션</div>
+                <div className="ops-g-85c6f07c">공급처 옵션</div>
                 <input value={editForm.matched_option} onChange={e => setEditForm(f => ({ ...f, matched_option: e.target.value }))} style={editInput} placeholder="공급처 옵션" />
               </div>
               <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 위치</div>
+                <div className="ops-g-85c6f07c">공급처 위치</div>
                 <input value={editForm.supplier_location} onChange={e => setEditForm(f => ({ ...f, supplier_location: e.target.value }))} style={editInput} placeholder="예) A동 3층" />
               </div>
               <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>공급처 연락처</div>
+                <div className="ops-g-85c6f07c">공급처 연락처</div>
                 <input value={editForm.supplier_contact} onChange={e => setEditForm(f => ({ ...f, supplier_contact: e.target.value }))} style={editInput} placeholder="010-0000-0000" />
               </div>
               <div>
-                <div style={{ fontSize: '0.73rem', color: '#9ca3af', marginBottom: 3 }}>메모</div>
+                <div className="ops-g-85c6f07c">메모</div>
                 <input value={editForm.memo} onChange={e => setEditForm(f => ({ ...f, memo: e.target.value }))} style={editInput} placeholder="메모" />
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="ops-g-ac734d21">
               <button onClick={saveEdit} disabled={editSaving} style={{ ...btn('#4361ee'), opacity: editSaving ? 0.5 : 1 }}>
                 {editSaving ? '저장 중…' : '수정 저장'}
               </button>
-              <button onClick={() => setEditMode(false)} style={btnOutline}>취소</button>
+              <button onClick={() => setEditMode(false)} className="btn btn-secondary">취소</button>
             </div>
           </td>
         </tr>
@@ -607,12 +561,7 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
     return (
       <button
         onClick={() => setOpen(true)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '0.5rem 1rem', border: '2px dashed #c7d2fe',
-          background: '#eef2ff', color: '#4361ee', borderRadius: 6,
-          fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', marginBottom: '0.75rem',
-        }}
+        className="ops-g-3857b8f7"
       >
         ➕ 품목 직접 추가
       </button>
@@ -620,22 +569,22 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
   }
 
   return (
-    <div style={{ marginBottom: '1rem', border: '1px solid #c7d2fe', borderRadius: 8, background: '#f8faff', padding: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-        <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#4361ee' }}>➕ 품목 직접 추가</span>
-        <button onClick={() => { setOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '1.1rem' }}>×</button>
+    <div className="ops-g-4f08436e">
+      <div className="ops-g-81b30176">
+        <span className="ops-g-e976d825">➕ 품목 직접 추가</span>
+        <button onClick={() => { setOpen(false); resetForm(); }} className="ops-g-eacc64a8">×</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
+      <div className="ops-g-7af22f65">
         {/* 업체 선택 */}
-        <div ref={vendorRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
-          <label style={lbl}>업체 (등록업체·별칭 검색)</label>
+        <div ref={vendorRef} className="ops-g-9b7d1e42">
+          <label className="ops-label">업체 (등록업체·별칭 검색)</label>
           <input
             value={vendorQuery}
             onChange={e => { setVendorQuery(e.target.value); setVendorOpen(true); if (!e.target.value) { setSelectedVendors([]); setVendorDisplay(''); } }}
             onFocus={() => setVendorOpen(true)}
             placeholder="업체명 또는 별칭 검색…"
-            style={inp}
+            className="ui-control"
           />
           {vendorOpen && (fVendors.length > 0 || fAliases.length > 0) && (
             <div style={dropBase}>
@@ -646,7 +595,7 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
                     <div key={v.name} onMouseDown={() => selectVendor(v.name, [v.name])}
                       style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13, background: vendorDisplay === v.name ? '#eef2ff' : undefined }}>
                       <strong>{v.name}</strong>
-                      {v.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>({v.aliases.join(', ')})</span>}
+                      {v.aliases.length > 0 && <span className="ops-g-d587ed76">({v.aliases.join(', ')})</span>}
                     </div>
                   ))}
                 </>
@@ -656,9 +605,9 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
                   <div style={grpLbl}>🏷️ 화주사 별칭</div>
                   {fAliases.map(a => (
                     <div key={a.canonical} onMouseDown={() => selectVendor(a.canonical, a.aliases)}
-                      style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}>
-                      <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{a.canonical}</span>
-                      {a.aliases.length > 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>→ {a.aliases.join(', ')}</span>}
+                      className="ops-g-14dafe32">
+                      <span className="ops-g-0db62ead">{a.canonical}</span>
+                      {a.aliases.length > 0 && <span className="ops-g-d587ed76">→ {a.aliases.join(', ')}</span>}
                     </div>
                   ))}
                 </>
@@ -668,26 +617,26 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
         </div>
 
         {/* 바코드 검색 */}
-        <div ref={barcodeRef} style={{ position: 'relative', gridColumn: '1 / -1' }}>
-          <label style={lbl}>바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
+        <div ref={barcodeRef} className="ops-g-9b7d1e42">
+          <label className="ops-label">바코드 검색 {barcodeLoading ? '(불러오는 중…)' : selectedVendors.length > 0 ? `(${barcodeResults.length}개)` : ''}</label>
           {selectedVendors.length === 0 ? (
-            <div style={{ fontSize: '0.8rem', color: '#9ca3af', padding: '0.4rem 0' }}>↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
+            <div className="ops-g-021306a7">↑ 업체를 먼저 선택하면 해당 업체 바코드를 검색할 수 있습니다.</div>
           ) : barcodeLoading ? (
-            <div style={{ fontSize: '0.8rem', color: '#9ca3af' }}>바코드 목록 불러오는 중…</div>
+            <div className="ops-g-9e6d18fb">바코드 목록 불러오는 중…</div>
           ) : barcodeResults.length === 0 ? (
-            <div style={{ padding: '0.6rem 0.8rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: '0.82rem' }}>
-              <span style={{ color: '#dc2626' }}>"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
-              <a href="/journal-settings" target="_blank" style={{ color: '#4361ee', fontWeight: 600 }}>신규 바코드 등록 →</a>
-              <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 3 }}>아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
+            <div className="ops-g-e0418eaa">
+              <span className="ops-g-67b91ed6">"{vendorDisplay}" 업체의 등록 바코드가 없습니다. </span>
+              <a href="/journal-settings" target="_blank" className="ops-g-2ad4d06d">신규 바코드 등록 →</a>
+              <div className="ops-g-f0797788">아래에 품명을 직접 입력하거나, 바코드 등록 후 다시 시도하세요.</div>
             </div>
           ) : (
             <>
               {selectedBarcode ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ flex: 1, padding: '0.4rem 0.65rem', background: '#ede9fe', borderRadius: 6, fontSize: '0.82rem', color: '#7c3aed', fontWeight: 500 }}>
+                <div className="ops-g-013fe721">
+                  <div className="ops-g-402cd9b0">
                     ✅ {selectedBarcode.바코드} — {selectedBarcode.업체명} / {selectedBarcode.제품명}{selectedBarcode.옵션 ? ' / ' + selectedBarcode.옵션 : ''}
                   </div>
-                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} style={{ ...btnOutline, padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>변경</button>
+                  <button onClick={() => { setSelectedBarcode(null); setBarcodeQuery(''); }} className="btn btn-secondary ops-g-023b6b39">변경</button>
                 </div>
               ) : (
                 <>
@@ -696,20 +645,20 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
                     onChange={e => { setBarcodeQuery(e.target.value); setBarcodeOpen(true); }}
                     onFocus={() => setBarcodeOpen(true)}
                     placeholder={`바코드·제품명 검색 (${barcodeResults.length}개 중)`}
-                    style={inp}
+                    className="ui-control"
                   />
                   {barcodeOpen && fBarcodes.length > 0 && (
                     <div style={dropBase}>
                       {fBarcodes.slice(0, 50).map(b => (
                         <div key={b.바코드} onMouseDown={() => selectBarcode(b)}
-                          style={{ padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          className="ops-g-74eb0c84">
+                          <div className="ops-g-5a263f2b">
                             <div>
-                              <span style={{ fontSize: 13, fontWeight: 500 }}>{b.제품명}</span>
-                              {b.옵션 && <span style={{ fontSize: 12, color: '#6b7280' }}> / {b.옵션}</span>}
-                              <div style={{ fontSize: 11, color: '#9ca3af', fontFamily: 'monospace' }}>{b.바코드}</div>
+                              <span className="ops-g-d5c56bff">{b.제품명}</span>
+                              {b.옵션 && <span className="ops-g-c266c2e3"> / {b.옵션}</span>}
+                              <div className="ops-g-19dbafec">{b.바코드}</div>
                             </div>
-                            <span style={{ fontSize: 11, color: '#7c3aed', flexShrink: 0, marginLeft: 8 }}>{b.업체명}</span>
+                            <span className="ops-g-6f885f65">{b.업체명}</span>
                           </div>
                         </div>
                       ))}
@@ -722,34 +671,34 @@ function AddItemSection({ token, batchId, batchVendor, onAdded }: {
         </div>
 
         {/* 품명 */}
-        <div style={{ gridColumn: '1 / -1' }}>
-          <label style={lbl}>품명 *</label>
-          <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))} placeholder="예) 타원 백팩" style={inp} />
+        <div className="ops-g-97e59dc7">
+          <label className="ops-label">품명 *</label>
+          <input value={form.item_name} onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))} placeholder="예) 타원 백팩" className="ui-control" />
         </div>
 
         {/* 옵션 */}
         <div>
-          <label style={lbl}>옵션</label>
-          <input value={form.option_text} onChange={e => setForm(f => ({ ...f, option_text: e.target.value }))} placeholder="블랙, L" style={inp} />
+          <label className="ops-label">옵션</label>
+          <input value={form.option_text} onChange={e => setForm(f => ({ ...f, option_text: e.target.value }))} placeholder="블랙, L" className="ui-control" />
         </div>
 
         {/* 장끼 수량 */}
         <div>
-          <label style={lbl}>장끼 수량 *</label>
+          <label className="ops-label">장끼 수량 *</label>
           <input type="number" min={1} value={form.janggi_qty} onChange={e => setForm(f => ({ ...f, janggi_qty: Number(e.target.value) }))}
             style={{ ...inp, textAlign: 'center', fontWeight: 700, fontSize: '1rem' }} />
         </div>
 
         {/* 단가 */}
-        <div style={{ gridColumn: '1 / -1' }}>
-          <label style={lbl}>단가 (선택)</label>
+        <div className="ops-g-97e59dc7">
+          <label className="ops-label">단가 (선택)</label>
           <input type="number" min={0} value={form.unit_price} onChange={e => setForm(f => ({ ...f, unit_price: e.target.value }))}
             placeholder="0" style={{ ...inp, maxWidth: 160 }} />
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => { setOpen(false); resetForm(); }} style={btnOutline}>취소</button>
+      <div className="ops-g-ac734d21">
+        <button onClick={() => { setOpen(false); resetForm(); }} className="btn btn-secondary">취소</button>
         <button
           onClick={handleAdd}
           disabled={adding || !form.item_name.trim()}
@@ -842,33 +791,33 @@ function VendorCombobox({ token, value, canonical, onChange }: VendorComboboxPro
   };
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
-      <div style={{ display: 'flex', gap: 4 }}>
+    <div ref={wrapRef} className="ops-g-1e81b652">
+      <div className="ops-g-8f404211">
         <input
           value={query}
           onChange={e => handleInput(e.target.value)}
           onFocus={() => setOpen(true)}
           placeholder="업체명 검색 또는 직접 입력"
-          style={{ ...inputStyle, flex: 1 }}
+          className="ui-control ops-g-52dcacf6"
           autoComplete="off"
         />
         <button
           type="button"
           onClick={() => setOpen(o => !o)}
-          style={{ ...btnOutline, padding: '0 10px', minWidth: 32, fontSize: 12 }}
+          className="btn btn-secondary ops-g-fa9eef55"
           title="목록 열기"
         >▾</button>
       </div>
 
       {/* 선택된 등록업체 뱃지 */}
       {canonical && (
-        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'var(--color-brand)', background: '#ede9fe', borderRadius: 4, padding: '2px 7px' }}>
+        <div className="ops-g-72b8d63f">
+          <span className="ops-g-7fe82697">
             📦 등록업체: {canonical}
           </span>
           <button
             type="button"
-            style={{ fontSize: 11, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            className="ops-g-c2ec2f6c"
             onClick={() => setAliasModal(registered.find(r => r.name === canonical) ?? { name: canonical, aliases: [] })}
             title="별칭 관리"
           >✎ 별칭</button>
@@ -888,14 +837,14 @@ function VendorCombobox({ token, value, canonical, onChange }: VendorComboboxPro
                   onMouseDown={() => selectRegistered(v)}
                 >
                   <div>
-                    <span style={{ fontWeight: 500 }}>{v.name}</span>
+                    <span className="ops-g-0728c5c8">{v.name}</span>
                     {v.aliases.length > 0 && (
-                      <span style={{ marginLeft: 6, fontSize: 11, color: '#9ca3af' }}>
+                      <span className="ops-g-d587ed76">
                         ({v.aliases.join(', ')})
                       </span>
                     )}
                   </div>
-                  {v.name === canonical && <span style={{ color: 'var(--color-brand)', fontSize: 12 }}>✓</span>}
+                  {v.name === canonical && <span className="ops-g-0cf82291">✓</span>}
                 </div>
               ))}
             </>
@@ -974,10 +923,10 @@ function AliasEditor({ token, vendor, onClose, onSaved }: {
   return (
     <div style={overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={box} onMouseDown={e => e.stopPropagation()}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: '0.75rem' }}>
+        <div className="ops-g-6981b207">
           ✎ &quot;{vendor.name}&quot; 별칭 관리
         </div>
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+        <div className="ops-g-eeda8aab">
           쉼표로 구분. OCR이 별칭으로 읽어도 이 업체 바코드 목록에서 매칭합니다.
         </div>
         <textarea
@@ -985,10 +934,10 @@ function AliasEditor({ token, vendor, onClose, onSaved }: {
           onChange={e => setAliases(e.target.value)}
           placeholder="예: ABC코리아, 에이비씨, ABC"
           rows={3}
-          style={{ ...inputStyle, width: '100%', resize: 'vertical' }}
+          className="ui-control ops-g-1cf39c73"
         />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <button onClick={onClose} style={btnOutline}>취소</button>
+        <div className="ops-g-44b4db5c">
+          <button onClick={onClose} className="btn btn-secondary">취소</button>
           <button onClick={save} disabled={saving} style={{ ...btn('var(--color-brand)'), opacity: saving ? 0.6 : 1 }}>
             {saving ? '저장 중…' : '저장'}
           </button>
@@ -1036,7 +985,7 @@ function CreateBatchModal({ token, onClose, onCreated }: {
     <Modal title="신규 입고 등록" onClose={onClose}>
       <div>
         <div style={fRow}>
-          <label style={labelStyle}>화주사 *</label>
+          <label className="ops-label">화주사 *</label>
           <VendorCombobox
             token={token}
             value={vendor}
@@ -1045,19 +994,19 @@ function CreateBatchModal({ token, onClose, onCreated }: {
           />
         </div>
         <div style={fRow}>
-          <label style={labelStyle}>입고일 *</label>
-          <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={inputStyle} />
+          <label className="ops-label">입고일 *</label>
+          <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} className="ui-control" />
         </div>
         <div style={fRow}>
-          <label style={labelStyle}>메모 (선택)</label>
+          <label className="ops-label">메모 (선택)</label>
           <input
             value={memo} onChange={e => setMemo(e.target.value)}
             placeholder="메모"
-            style={{ ...inputStyle, width: '100%' }}
+            className="ui-control ops-g-64c1cf9b"
           />
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '0.5rem' }}>
-          <button onClick={onClose} style={btnOutline}>취소</button>
+        <div className="ops-g-b82f4ad5">
+          <button onClick={onClose} className="btn btn-secondary">취소</button>
           <button onClick={handleCreate} disabled={saving} style={{ ...btn('var(--color-brand)'), opacity: saving ? 0.5 : 1 }}>
             {saving ? '생성 중…' : '입고 시작'}
           </button>
@@ -1103,34 +1052,34 @@ function EditBatchModal({ batch, token, onClose, onUpdated }: {
     <Modal title="입고 정보 수정" onClose={onClose}>
       <div>
         <div style={fRow}>
-          <label style={labelStyle}>화주사</label>
+          <label className="ops-label">화주사</label>
           <input
             value={vendor} onChange={e => setVendor(e.target.value)}
-            style={{ ...inputStyle, width: '100%' }}
+            className="ui-control ops-g-64c1cf9b"
           />
         </div>
         <div style={fRow}>
-          <label style={labelStyle}>입고일</label>
-          <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} style={inputStyle} />
+          <label className="ops-label">입고일</label>
+          <input type="date" value={inboundDate} onChange={e => setInboundDate(e.target.value)} className="ui-control" />
         </div>
         <div style={fRow}>
-          <label style={labelStyle}>도매처</label>
+          <label className="ops-label">도매처</label>
           <input
             value={wholesale} onChange={e => setWholesale(e.target.value)}
             placeholder="도매처 이름"
-            style={{ ...inputStyle, width: '100%' }}
+            className="ui-control ops-g-64c1cf9b"
           />
         </div>
         <div style={fRow}>
-          <label style={labelStyle}>메모</label>
+          <label className="ops-label">메모</label>
           <input
             value={memo} onChange={e => setMemo(e.target.value)}
             placeholder="메모"
-            style={{ ...inputStyle, width: '100%' }}
+            className="ui-control ops-g-64c1cf9b"
           />
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '0.5rem' }}>
-          <button onClick={onClose} style={btnOutline}>취소</button>
+        <div className="ops-g-b82f4ad5">
+          <button onClick={onClose} className="btn btn-secondary">취소</button>
           <button onClick={handleSave} disabled={saving} style={{ ...btn('#f59e0b'), opacity: saving ? 0.5 : 1 }}>
             {saving ? '저장 중…' : '수정 저장'}
           </button>
@@ -1216,60 +1165,33 @@ export default function InboundLogPage() {
     }
   }
 
-  const thStyle: React.CSSProperties = {
-    padding: '0.65rem 1rem', fontSize: '0.78rem', fontWeight: 600,
-    color: 'var(--text-secondary)', background: '#f8f9fc',
-    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
-  };
-  const tdStyle: React.CSSProperties = {
-    padding: '0.7rem 1rem', fontSize: '0.85rem', verticalAlign: 'middle',
-    borderBottom: '1px solid #f3f4f6',
-  };
-
   return (
-    <div style={{ padding: '1.5rem' }}>
-      {/* 타이틀 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        <div>
-          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)' }}>📦 입고일지</h1>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-            장끼 OCR → 상품 매칭 → 실수량 확인 → 양품화 → 마감
-          </p>
-        </div>
-        <button onClick={() => setShowCreate(true)} style={btn('var(--color-brand)')}>
-          + 입고 등록
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="입고일지"
+        subtitle="장끼 OCR → 상품 매칭 → 실수량 확인 → 양품화 → 마감"
+        actions={<Button type="button" onClick={() => setShowCreate(true)}>입고 등록</Button>}
+      />
 
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
-      {/* 필터 */}
-      <Card style={{ marginBottom: '1rem', padding: '0.85rem 1rem' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'flex-end' }}>
-          {/* 화주사 셀렉트박스 */}
-          <div>
-            <label style={labelStyle}>화주사 (업체명)</label>
-            <select
+      <div className="ops-filter-panel">
+        <div className="ops-filter">
+          <Field label="화주사">
+            <Select
               value={filterVendor}
               onChange={e => { setFilterVendor(e.target.value); setFilterAlias(''); }}
-              style={{ ...inputStyle, width: 150 }}
             >
               <option value="">전체</option>
               {vendorOptions.map(v => (
                 <option key={v} value={v}>{v}</option>
               ))}
-            </select>
-          </div>
-          {/* 별칭 셀렉트박스 */}
-          <div>
-            <label style={labelStyle}>
-              화주사 (별칭)
-              <span style={{ fontSize: '0.68rem', fontWeight: 400, color: '#9ca3af', marginLeft: 4 }}>일지설정 기준</span>
-            </label>
-            <select
+            </Select>
+          </Field>
+          <Field label="별칭" hint="일지설정 기준">
+            <Select
               value={filterAlias}
               onChange={e => { setFilterAlias(e.target.value); setFilterVendor(''); }}
-              style={{ ...inputStyle, width: 160 }}
             >
               <option value="">전체</option>
               {aliasGroups.map(g =>
@@ -1279,25 +1201,18 @@ export default function InboundLogPage() {
                   </option>
                 ))
               )}
-            </select>
-          </div>
-          {/* 도매처 셀렉트박스 */}
-          <div>
-            <label style={labelStyle}>도매처</label>
-            <select
-              value={filterWholesale}
-              onChange={e => setFilterWholesale(e.target.value)}
-              style={{ ...inputStyle, width: 150 }}
-            >
+            </Select>
+          </Field>
+          <Field label="도매처">
+            <Select value={filterWholesale} onChange={e => setFilterWholesale(e.target.value)}>
               <option value="">전체</option>
               {wholesaleOptions.map(w => (
                 <option key={w} value={w}>{w}</option>
               ))}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>상태</label>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ ...inputStyle, width: 140 }}>
+            </Select>
+          </Field>
+          <Field label="상태">
+            <Select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
               <option value="">전체</option>
               <option value="ocr_pending">장끼 확인 중</option>
               <option value="confirming">수량 확인 중</option>
@@ -1307,129 +1222,98 @@ export default function InboundLogPage() {
               <option value="done">최종완료</option>
               <option value="cancelled">취소</option>
               <option value="etc">기타</option>
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>기간</label>
-            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-              <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} style={inputStyle} />
-              <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>~</span>
-              <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} style={inputStyle} />
+            </Select>
+          </Field>
+          <Field label="기간" className="is-period">
+            <div className="ops-period">
+              <Input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+              <span>~</span>
+              <Input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
             </div>
+          </Field>
+          <div className="ops-filter-actions">
+            <Button type="button" onClick={() => load(token)}>조회</Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => { setFilterVendor(''); setFilterAlias(''); setFilterWholesale(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+            >
+              초기화
+            </Button>
           </div>
-          <button onClick={() => load(token)} style={btn('var(--color-brand)')}>조회</button>
-          <button
-            onClick={() => { setFilterVendor(''); setFilterAlias(''); setFilterWholesale(''); setFilterStatus(''); setFilterDateFrom(''); setFilterDateTo(''); }}
-            style={btnOutline}
-          >
-            초기화
-          </button>
         </div>
-        {/* 활성 필터 칩 표시 */}
         {(filterVendor || filterAlias || filterWholesale) && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #f3f4f6' }}>
-            <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', alignSelf: 'center' }}>필터:</span>
+          <div className="ops-chips">
             {filterVendor && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#ede9fe', color: '#7c3aed', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
-                🏢 화주사: {filterVendor}
-                <button onClick={() => setFilterVendor('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#7c3aed', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              <span className="ops-chip">
+                화주사: {filterVendor}
+                <button type="button" onClick={() => setFilterVendor('')} aria-label="화주사 필터 제거">×</button>
               </span>
             )}
             {filterAlias && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#dbeafe', color: '#1d4ed8', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
-                🏷️ 별칭: {filterAlias}
-                <button onClick={() => setFilterAlias('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1d4ed8', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              <span className="ops-chip">
+                별칭: {filterAlias}
+                <button type="button" onClick={() => setFilterAlias('')} aria-label="별칭 필터 제거">×</button>
               </span>
             )}
             {filterWholesale && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: '#fef9c3', color: '#a16207', borderRadius: 12, padding: '2px 10px', fontWeight: 600 }}>
-                🏪 도매처: {filterWholesale}
-                <button onClick={() => setFilterWholesale('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a16207', fontSize: '0.8rem', padding: 0, lineHeight: 1 }}>×</button>
+              <span className="ops-chip">
+                도매처: {filterWholesale}
+                <button type="button" onClick={() => setFilterWholesale('')} aria-label="도매처 필터 제거">×</button>
               </span>
             )}
           </div>
         )}
-      </Card>
-
-      {/* 결과 수 */}
-      <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-        총 {total}건
       </div>
 
-      {/* 목록 */}
+      <p className="ops-result-count">총 {total}건</p>
+
       {loading ? (
         <Loading />
       ) : batches.length === 0 ? (
         <Card>
-          <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📦</div>
-            <div style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>입고 데이터가 없습니다.</div>
-            <button onClick={() => setShowCreate(true)} style={btn('var(--color-brand)')}>
-              첫 입고 등록하기
-            </button>
-          </div>
+          <EmptyState
+            title="입고 데이터가 없습니다."
+            action={<Button type="button" onClick={() => setShowCreate(true)}>첫 입고 등록하기</Button>}
+          />
         </Card>
       ) : (
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <Card className="!tw-p-0 tw-overflow-hidden">
+          <div className="ops-table-wrap">
+            <table>
               <thead>
                 <tr>
-                  <th style={{ ...thStyle, textAlign: 'left' }}>입고일</th>
-                  <th style={{ ...thStyle, textAlign: 'left' }}>화주사</th>
-                  <th style={{ ...thStyle, textAlign: 'left' }}>도매처</th>
-                  <th style={{ ...thStyle, textAlign: 'center' }}>상태</th>
-                  <th style={{ ...thStyle, textAlign: 'center' }}>장끼수량</th>
-                  <th style={{ ...thStyle, textAlign: 'center' }}>실입고</th>
-                  <th style={{ ...thStyle, textAlign: 'center' }}>미입고</th>
-                  <th style={{ ...thStyle, textAlign: 'left' }}>등록자</th>
-                  <th style={{ ...thStyle, textAlign: 'left' }}>등록일시</th>
-                  <th style={thStyle}></th>
+                  <th>입고일</th>
+                  <th>화주사</th>
+                  <th>도매처</th>
+                  <th className="ops-center">상태</th>
+                  <th className="ops-center">장끼수량</th>
+                  <th className="ops-center">실입고</th>
+                  <th className="ops-center">미입고</th>
+                  <th>등록자</th>
+                  <th>등록일시</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {batches.map(b => (
-                  <tr
-                    key={b.id}
-                    onClick={() => openDetail(b)}
-                    style={{ cursor: 'pointer', transition: 'background 0.1s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#f0f4ff')}
-                    onMouseLeave={e => (e.currentTarget.style.background = '')}
-                  >
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{b.inbound_date}</td>
-                    <td style={tdStyle}>{b.vendor}</td>
-                    <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{b.wholesale || '-'}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center' }}>
-                      <StatusBadge status={b.status} label={b.status_label} map={STATUS_COLOR} />
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#1d4ed8' }}>{b.total_janggi_qty}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#15803d' }}>{b.total_actual_qty}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: b.total_missing_qty > 0 ? '#dc2626' : 'var(--text-muted)' }}>
+                  <tr key={b.id} className="ops-click-row" onClick={() => openDetail(b)}>
+                    <td className="ops-strong">{b.inbound_date}</td>
+                    <td>{b.vendor}</td>
+                    <td className="ops-subtle">{b.wholesale || '-'}</td>
+                    <td className="ops-center"><StatusBadge status={b.status} label={b.status_label} /></td>
+                    <td className="ops-num-info">{b.total_janggi_qty}</td>
+                    <td className="ops-num-ok">{b.total_actual_qty}</td>
+                    <td className={b.total_missing_qty > 0 ? 'ops-num-bad' : 'ops-num-muted'}>
                       {b.total_missing_qty > 0 ? b.total_missing_qty : '-'}
                     </td>
-                    <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{b.created_by || '-'}</td>
-                    <td style={{ ...tdStyle, fontSize: '0.78rem', color: 'var(--text-muted)' }}>{fmt(b.created_at)}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                        <button
-                          onClick={() => { window.location.href = `/inbound/${b.id}/overview`; }}
-                          style={{ background: 'none', border: '1px solid #c7d2fe', borderRadius: 4, color: '#4f46e5', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem', fontWeight: 600 }}
-                          title="통합 처리현황"
-                        >
-                          통합 현황
-                        </button>
-                        <button
-                          onClick={() => setEditingBatch(b)}
-                          style={{ background: 'none', border: '1px solid #fde68a', borderRadius: 4, color: '#d97706', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
-                        >
-                          수정
-                        </button>
-                        <button
-                          onClick={() => handleDelete(b.id)}
-                          style={{ background: 'none', border: '1px solid #fca5a5', borderRadius: 4, color: '#dc2626', fontSize: '0.78rem', cursor: 'pointer', padding: '0.25rem 0.6rem' }}
-                        >
-                          삭제
-                        </button>
+                    <td className="ops-subtle">{b.created_by || '-'}</td>
+                    <td className="ops-subtle">{fmt(b.created_at)}</td>
+                    <td className="ops-right" onClick={e => e.stopPropagation()}>
+                      <div className="ops-mini-row">
+                        <button type="button" className="ops-mini" onClick={() => { window.location.href = `/inbound/${b.id}/overview`; }} title="통합 처리현황">통합 현황</button>
+                        <button type="button" className="ops-mini is-warn" onClick={() => setEditingBatch(b)}>수정</button>
+                        <button type="button" className="ops-mini is-danger" onClick={() => handleDelete(b.id)}>삭제</button>
                       </div>
                     </td>
                   </tr>
