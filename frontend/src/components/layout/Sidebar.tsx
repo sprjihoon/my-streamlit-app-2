@@ -19,14 +19,19 @@ export function Sidebar({
 }) {
   return (
     <aside className="sidebar">
-      <h1>
-        <ShieldCheck size={18} strokeWidth={2} className="tw-shrink-0 tw-text-[#7b9cff]" />
-        틸리언 그룹웨어
-      </h1>
+      <div className="sidebar-brand">
+        <div className="sidebar-mark" aria-hidden>
+          <ShieldCheck size={16} strokeWidth={2.25} />
+        </div>
+        <div>
+          <div className="sidebar-brand-name">틸리언</div>
+          <div className="sidebar-brand-sub">그룹웨어</div>
+        </div>
+      </div>
 
       <UserPanel user={user} onChangePassword={onChangePassword} onLogout={onLogout} />
 
-      <nav className="!tw-gap-[2px]">
+      <nav>
         {(user?.is_admin
           ? NAV_GROUPS
           : [...NAV_GROUPS].sort((a, b) =>

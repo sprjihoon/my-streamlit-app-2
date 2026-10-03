@@ -2,18 +2,18 @@ import * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
-const badgeVariants = cva('tw-inline-flex tw-items-center', {
+const badgeVariants = cva('tw-inline-flex tw-items-center tw-rounded-full tw-px-2 tw-py-[2px] tw-text-[11px] tw-font-semibold', {
   variants: {
     variant: {
-      role: 'tw-mt-px tw-text-[0.7rem] tw-font-normal tw-normal-case tw-tracking-normal tw-text-white/45',
-      success: 'tw-rounded-[var(--radius-sm)] tw-bg-[#f0fdf4] tw-px-2 tw-py-0.5 tw-text-[0.75rem] tw-font-semibold tw-text-[#166534]',
-      warning: 'tw-rounded-[var(--radius-sm)] tw-bg-[#fffbeb] tw-px-2 tw-py-0.5 tw-text-[0.75rem] tw-font-semibold tw-text-[#92400e]',
-      danger: 'tw-rounded-[var(--radius-sm)] tw-bg-[#fef2f2] tw-px-2 tw-py-0.5 tw-text-[0.75rem] tw-font-semibold tw-text-[#991b1b]',
-      info: 'tw-rounded-[var(--radius-sm)] tw-bg-[#eff6ff] tw-px-2 tw-py-0.5 tw-text-[0.75rem] tw-font-semibold tw-text-[#1e40af]',
+      success: 'tw-bg-[#e8f7ee] tw-text-[#157347]',
+      warning: 'tw-bg-[#fff6e5] tw-text-[#9a6700]',
+      danger: 'tw-bg-[#fdecec] tw-text-[#b42318]',
+      info: 'tw-bg-[#eef2ff] tw-text-[#3451d1]',
+      neutral: 'tw-bg-[#f3f4f8] tw-text-[#4b5163]',
     },
   },
   defaultVariants: {
-    variant: 'info',
+    variant: 'neutral',
   },
 });
 

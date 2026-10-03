@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { NavItem } from './types';
 
@@ -26,43 +27,25 @@ export function NavGroup({
   }, [hasActive]);
 
   return (
-    <div className="tw-mb-[2px]">
+    <div className="sidebar-group">
       <button
+        type="button"
         onClick={() => setOpen(o => !o)}
-        className={cn(
-          'tw-mt-2 tw-flex tw-w-full tw-cursor-pointer tw-items-center tw-justify-between tw-rounded-[6px] tw-border-0 tw-px-3 tw-py-[0.45rem] tw-font-[inherit] tw-text-[0.675rem] tw-font-bold tw-uppercase tw-tracking-[0.08em] tw-transition-all tw-duration-150',
-          hasActive ? 'tw-bg-white/[0.12] tw-text-white' : 'tw-bg-transparent tw-text-white/50',
-        )}
+        className={cn('sidebar-group-btn', hasActive && 'is-active')}
       >
-        <span className="tw-flex tw-items-center tw-gap-2">
-          <span className="tw-flex tw-items-center tw-opacity-80">{icon}</span>
+        <span className="sidebar-group-label">
+          {icon}
           <span>{label}</span>
         </span>
-        <span
-          className={cn(
-            'tw-text-[0.55rem] tw-opacity-70 tw-transition-transform tw-duration-200',
-            open ? 'tw-rotate-180' : 'tw-rotate-0',
-          )}
-        >
-          ▼
-        </span>
+        <ChevronDown size={13} className={cn('sidebar-chevron', open && 'is-open')} />
       </button>
 
-      <div
-        className="tw-overflow-hidden tw-transition-[max-height] tw-duration-[250ms] tw-ease-in-out"
-        style={{ maxHeight: open ? `${items.length * 40}px` : '0px' }}
-      >
+      <div className="sidebar-items" style={{ maxHeight: open ? `${items.length * 36}px` : '0px' }}>
         {items.map(item => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(active ? 'active' : '', '!tw-gap-2 !tw-pl-4 !tw-text-[0.8375rem]')}
-            >
-              <span className={cn('tw-flex tw-shrink-0 tw-items-center', active ? 'tw-opacity-100' : 'tw-opacity-65')}>
-                {item.icon}
-              </span>
+            <Link key={item.href} href={item.href} className={active ? 'active' : ''}>
+              <span className="tw-flex tw-shrink-0 tw-items-center">{item.icon}</span>
               <span>{item.label}</span>
             </Link>
           );

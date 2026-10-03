@@ -21,17 +21,19 @@ const TableBody = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes
 TableBody.displayName = 'TableBody';
 
 const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(
-  ({ className, ...props }, ref) => <tr ref={ref} className={cn(className)} {...props} />,
+  ({ className, ...props }, ref) => <tr ref={ref} className={className} {...props} />,
 );
 TableRow.displayName = 'TableRow';
 
-const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => <th ref={ref} className={className} {...props} />,
+const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement> & { numeric?: boolean }>(
+  ({ className, numeric, ...props }, ref) => <th ref={ref} className={cn(numeric && 'cell-num', className)} {...props} />,
 );
 TableHead.displayName = 'TableHead';
 
-const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => <td ref={ref} className={className} {...props} />,
+const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement> & { numeric?: boolean; truncate?: boolean }>(
+  ({ className, numeric, truncate, ...props }, ref) => (
+    <td ref={ref} className={cn(numeric && 'cell-num', truncate && 'cell-truncate', className)} {...props} />
+  ),
 );
 TableCell.displayName = 'TableCell';
 
