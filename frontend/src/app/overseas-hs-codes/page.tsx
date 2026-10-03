@@ -14,15 +14,6 @@ import {
   type OverseasSavedHsPayload,
 } from '@/lib/api';
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -139,7 +130,7 @@ export default function OverseasHsCodesPage() {
       <Card title={`저장 HS코드 · ${items.length}건`}>
         <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <input
-            style={{ ...inputStyle, maxWidth: 280 }}
+            className="ui-control"
             value={query}
             placeholder="별칭, 품목명, HS코드 검색"
             onChange={(e) => setQuery(e.target.value)}
@@ -156,12 +147,12 @@ export default function OverseasHsCodesPage() {
         {showForm && (
           <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid var(--border)', borderRadius: 8 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <label>별칭<input style={inputStyle} value={form.label || ''} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))} /></label>
-              <label>HS코드 6자리<input style={inputStyle} value={form.hs_code} onChange={(e) => setForm((p) => ({ ...p, hs_code: e.target.value.replace(/\D/g, '').slice(0, 6) }))} /></label>
-              <label>한글명<input style={inputStyle} value={form.name_ko || ''} onChange={(e) => setForm((p) => ({ ...p, name_ko: e.target.value }))} /></label>
-              <label>영문명<input style={inputStyle} value={form.name_en} onChange={(e) => setForm((p) => ({ ...p, name_en: e.target.value }))} /></label>
-              <label>원산지<input style={inputStyle} value={form.origin_country || 'KR'} onChange={(e) => setForm((p) => ({ ...p, origin_country: e.target.value.toUpperCase() }))} /></label>
-              <label>그룹<input style={inputStyle} value={form.group_name || '저장품목'} onChange={(e) => setForm((p) => ({ ...p, group_name: e.target.value }))} /></label>
+              <label>별칭<input className="ui-control" value={form.label || ''} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))} /></label>
+              <label>HS코드 6자리<input className="ui-control" value={form.hs_code} onChange={(e) => setForm((p) => ({ ...p, hs_code: e.target.value.replace(/\D/g, '').slice(0, 6) }))} /></label>
+              <label>한글명<input className="ui-control" value={form.name_ko || ''} onChange={(e) => setForm((p) => ({ ...p, name_ko: e.target.value }))} /></label>
+              <label>영문명<input className="ui-control" value={form.name_en} onChange={(e) => setForm((p) => ({ ...p, name_en: e.target.value }))} /></label>
+              <label>원산지<input className="ui-control" value={form.origin_country || 'KR'} onChange={(e) => setForm((p) => ({ ...p, origin_country: e.target.value.toUpperCase() }))} /></label>
+              <label>그룹<input className="ui-control" value={form.group_name || '저장품목'} onChange={(e) => setForm((p) => ({ ...p, group_name: e.target.value }))} /></label>
             </div>
             <div style={{ marginTop: '1rem' }}>
               <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>

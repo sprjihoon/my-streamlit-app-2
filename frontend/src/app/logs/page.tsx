@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { Alert } from '@/components/Alert';
+import { KpiStrip } from '@/components/data';
+import { Button } from '@/components/ui/button';
+import PageHeader from '@/components/ui/page-header';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -240,33 +244,20 @@ export default function LogsPage() {
       ).sort((a, b) => b[1] - a[1]).slice(0, 8)
     : [];
 
-  const tabStyle = (t: Tab): React.CSSProperties => ({
-    padding: '0.5rem 1.25rem',
-    border: 'none',
-    background: tab === t ? '#2563eb' : '#f3f4f6',
-    color: tab === t ? 'white' : '#374151',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: tab === t ? 700 : 400,
-    fontSize: '0.875rem',
-  });
-
   return (
-    <div style={{ padding: '1.25rem', maxWidth: 1100, margin: '0 auto' }}>
+    <div>
       {/* 헤더 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>활동 로그 분석</h1>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button style={tabStyle('dashboard')} onClick={() => switchTab('dashboard')}>대시보드</button>
-          <button style={tabStyle('logs')} onClick={() => switchTab('logs')}>로그 목록</button>
-        </div>
-      </div>
+      <PageHeader
+        title="활동 로그 분석"
+        actions={
+          <div className="data-tabs tw-mb-0">
+            <Button type="button" variant={tab === 'dashboard' ? 'primary' : 'secondary'} onClick={() => switchTab('dashboard')}>대시보드</Button>
+            <Button type="button" variant={tab === 'logs' ? 'primary' : 'secondary'} onClick={() => switchTab('logs')}>로그 목록</Button>
+          </div>
+        }
+      />
 
-      {error && (
-        <div style={{ padding: '0.75rem 1rem', background: '#fef2f2', color: '#dc2626', borderRadius: 8, marginBottom: '1rem', fontSize: '0.875rem' }}>
-          {error}
-        </div>
-      )}
+      {error && <Alert type="error" message={error} />}
 
       {/* ── 대시보드 탭 ────────────────────────────────── */}
       {tab === 'dashboard' && (
@@ -276,19 +267,13 @@ export default function LogsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
             {/* 요약 KPI */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
-              {[
-                { label: '이번 주 활동', value: analytics.summary.this_week.toLocaleString(), sub: <Arrow pct={analytics.summary.week_change_pct} />, color: '#2563eb' },
-                { label: '지난 주 활동', value: analytics.summary.last_week.toLocaleString(), sub: null, color: '#6b7280' },
-                { label: '주간 활성 사용자', value: analytics.summary.active_users_7d + '명', sub: null, color: '#7c3aed' },
-              ].map((kpi, i) => (
-                <div key={i} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>{kpi.label}</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 700, color: kpi.color }}>{kpi.value}</div>
-                  {kpi.sub && <div style={{ marginTop: '0.2rem' }}>{kpi.sub}</div>}
-                </div>
-              ))}
-            </div>
+            <KpiStrip
+              items={[
+                { label: '이번 주 활동', value: analytics.summary.this_week.toLocaleString(), hint: <Arrow pct={analytics.summary.week_change_pct} /> },
+                { label: '지난 주 활동', value: analytics.summary.last_week.toLocaleString() },
+                { label: '주간 활성 사용자', value: `${analytics.summary.active_users_7d}명` },
+              ]}
+            />
 
             {/* 일별 추이 + 시간대 */}
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
@@ -367,7 +352,6 @@ export default function LogsPage() {
               </div>
             </div>
 
-
           </div>
         ) : null
       )}
@@ -380,22 +364,22 @@ export default function LogsPage() {
             <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151', marginBottom: '0.75rem' }}>🔍 필터</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem', marginBottom: '0.75rem' }}>
               {[
-                { label: '시작일', el: <input type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} style={inpStyle} /> },
-                { label: '종료일', el: <input type="date" value={fTo} onChange={e => setFTo(e.target.value)} style={inpStyle} /> },
+                { label: '시작일', el: <input type="date" value={fFrom} onChange={e => setFFrom(e.target.value)} className="ui-control" /> },
+                { label: '종료일', el: <input type="date" value={fTo} onChange={e => setFTo(e.target.value)} className="ui-control" /> },
                 { label: '액션 유형', el: (
-                  <select value={fAction} onChange={e => setFAction(e.target.value)} style={inpStyle}>
+                  <select value={fAction} onChange={e => setFAction(e.target.value)} className="ui-control">
                     <option value="">전체</option>
                     {logFilters?.action_types.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 )},
                 { label: '대상 유형', el: (
-                  <select value={fTarget} onChange={e => setFTarget(e.target.value)} style={inpStyle}>
+                  <select value={fTarget} onChange={e => setFTarget(e.target.value)} className="ui-control">
                     <option value="">전체</option>
                     {logFilters?.target_types.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 )},
                 { label: '사용자', el: (
-                  <select value={fUser} onChange={e => setFUser(e.target.value)} style={inpStyle}>
+                  <select value={fUser} onChange={e => setFUser(e.target.value)} className="ui-control">
                     <option value="">전체</option>
                     {logFilters?.users.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
@@ -424,26 +408,26 @@ export default function LogsPage() {
               <p style={{ color: '#9ca3af', textAlign: 'center', padding: '2rem' }}>로그가 없습니다.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ background: '#f9fafb' }}>
+                    <tr>
                       {['시각', '액션', '대상 유형', '대상명', '작업자', '상세'].map(h => (
-                        <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: 'left', borderBottom: '1px solid #e5e7eb', color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {logs.map(log => (
-                      <tr key={log.log_id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                        <td style={{ padding: '0.45rem 0.75rem', whiteSpace: 'nowrap', color: '#6b7280' }}>{fmtDt(log.created_at)}</td>
-                        <td style={{ padding: '0.45rem 0.75rem' }}>
+                      <tr key={log.log_id}>
+                        <td>{fmtDt(log.created_at)}</td>
+                        <td>
                           <span style={{ display: 'inline-block', padding: '0.15rem 0.5rem', borderRadius: 4, fontSize: '0.72rem', background: actionColor(log.action_type), color: 'white', whiteSpace: 'nowrap' }}>
                             {log.action_type}
                           </span>
                         </td>
-                        <td style={{ padding: '0.45rem 0.75rem', color: '#6b7280' }}>{log.target_type || '-'}</td>
+                        <td>{log.target_type || '-'}</td>
                         <td style={{ padding: '0.45rem 0.75rem', fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.target_name || '-'}</td>
-                        <td style={{ padding: '0.45rem 0.75rem', color: '#374151' }}>{log.user_nickname || '-'}</td>
+                        <td>{log.user_nickname || '-'}</td>
                         <td style={{ padding: '0.45rem 0.75rem', color: '#6b7280', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={log.details || ''}>{log.details || '-'}</td>
                       </tr>
                     ))}
@@ -457,11 +441,6 @@ export default function LogsPage() {
     </div>
   );
 }
-
-const inpStyle: React.CSSProperties = {
-  width: '100%', padding: '0.45rem 0.6rem', border: '1px solid #d1d5db',
-  borderRadius: 6, fontSize: '0.8rem', background: 'white', boxSizing: 'border-box',
-};
 
 const btnStyle: React.CSSProperties = {
   padding: '0.45rem 1rem', border: 'none', borderRadius: 6,

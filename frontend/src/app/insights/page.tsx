@@ -1,9 +1,13 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
+import { FilterBar, KpiStrip } from '@/components/data';
 import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
 import { Loading } from '@/components/Loading';
+import { Field } from '@/components/ui/field';
+import { Select } from '@/components/ui/select';
 import {
   getInsightsSummary,
   getTopProducts,
@@ -192,62 +196,34 @@ export default function InsightsPage() {
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>데이터 인사이트</h1>
+      <PageHeader title="데이터 인사이트" />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
       {/* 핵심 지표 */}
       {summary && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '0.875rem', color: '#666' }}>총 주문 건수</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatNumber(summary.total_orders)}건</div>
-            </div>
-          </Card>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '0.875rem', color: '#666' }}>총 출고 수량</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatNumber(summary.total_qty)}개</div>
-            </div>
-          </Card>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '0.875rem', color: '#666' }}>거래처 수</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatNumber(summary.total_vendors)}개</div>
-            </div>
-          </Card>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '0.875rem', color: '#666' }}>총 정산액</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatCurrency(summary.total_amount)}</div>
-            </div>
-          </Card>
-        </div>
+        <KpiStrip
+          items={[
+            { label: '총 주문 건수', value: `${formatNumber(summary.total_orders)}건` },
+            { label: '총 출고 수량', value: `${formatNumber(summary.total_qty)}개` },
+            { label: '거래처 수', value: `${formatNumber(summary.total_vendors)}개` },
+            { label: '총 정산액', value: formatCurrency(summary.total_amount) },
+          ]}
+        />
       )}
 
       {/* 기간 필터 */}
       {summary && summary.periods.length > 0 && (
-        <Card style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <label style={{ fontWeight: 500 }}>기간 필터:</label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              style={{
-                padding: '0.5rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                minWidth: '150px',
-              }}
-            >
+        <FilterBar>
+          <Field label="기간" className="tw-mb-0">
+            <Select value={period} onChange={(e) => setPeriod(e.target.value)}>
               <option value="">전체</option>
               {summary.periods.map((p) => (
                 <option key={p} value={p}>{p}</option>
               ))}
-            </select>
-          </div>
-        </Card>
+            </Select>
+          </Field>
+        </FilterBar>
       )}
 
       {/* 탭 */}
@@ -281,20 +257,20 @@ export default function InsightsPage() {
               {topProducts.length === 0 ? (
                 <p>데이터가 없습니다.</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd', width: '60px' }}>순위</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>상품명</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총판매수량</th>
+                    <tr>
+                      <th className="tw-text-center">순위</th>
+                      <th>상품명</th>
+                      <th className="cell-num">총판매수량</th>
                     </tr>
                   </thead>
                   <tbody>
                     {topProducts.map((item) => (
                       <tr key={item.rank}>
-                        <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{item.rank}</td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.product}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.quantity)}</td>
+                        <td className="tw-text-center">{item.rank}</td>
+                        <td>{item.product}</td>
+                        <td className="cell-num">{formatNumber(item.quantity)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -309,24 +285,24 @@ export default function InsightsPage() {
               {topVendorsByQty.length === 0 ? (
                 <p>데이터가 없습니다.</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd', width: '60px' }}>순위</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총출고수량</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>주문건수</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>평균수량/건</th>
+                    <tr>
+                      <th className="tw-text-center">순위</th>
+                      <th>거래처</th>
+                      <th className="cell-num">총출고수량</th>
+                      <th className="cell-num">주문건수</th>
+                      <th className="cell-num">평균수량/건</th>
                     </tr>
                   </thead>
                   <tbody>
                     {topVendorsByQty.map((item) => (
                       <tr key={item.rank}>
-                        <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{item.rank}</td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.vendor}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.total_qty)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.order_count)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{item.avg_qty_per_order.toFixed(1)}</td>
+                        <td className="tw-text-center">{item.rank}</td>
+                        <td>{item.vendor}</td>
+                        <td className="cell-num">{formatNumber(item.total_qty)}</td>
+                        <td className="cell-num">{formatNumber(item.order_count)}</td>
+                        <td className="cell-num">{item.avg_qty_per_order.toFixed(1)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -341,24 +317,24 @@ export default function InsightsPage() {
               {topVendorsByRevenue.length === 0 ? (
                 <p>매출 데이터가 없습니다.</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd', width: '60px' }}>순위</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총매출</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>주문건수</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>객단가</th>
+                    <tr>
+                      <th className="tw-text-center">순위</th>
+                      <th>거래처</th>
+                      <th className="cell-num">총매출</th>
+                      <th className="cell-num">주문건수</th>
+                      <th className="cell-num">객단가</th>
                     </tr>
                   </thead>
                   <tbody>
                     {topVendorsByRevenue.map((item) => (
                       <tr key={item.rank}>
-                        <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{item.rank}</td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.vendor}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatCurrency(item.total_revenue)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.order_count)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatCurrency(item.avg_order_value)}</td>
+                        <td className="tw-text-center">{item.rank}</td>
+                        <td>{item.vendor}</td>
+                        <td className="cell-num">{formatCurrency(item.total_revenue)}</td>
+                        <td className="cell-num">{formatNumber(item.order_count)}</td>
+                        <td className="cell-num">{formatCurrency(item.avg_order_value)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -462,24 +438,24 @@ export default function InsightsPage() {
                     {invoiceSummary.category_breakdown.length === 0 ? (
                       <p>데이터가 없습니다.</p>
                     ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <table>
                         <thead>
-                          <tr style={{ backgroundColor: '#f5f5f5' }}>
-                            <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>항목 분류</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총 금액</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총 수량</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>항목 수</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>비율</th>
+                          <tr>
+                            <th>항목 분류</th>
+                            <th className="cell-num">총 금액</th>
+                            <th className="cell-num">총 수량</th>
+                            <th className="cell-num">항목 수</th>
+                            <th className="cell-num">비율</th>
                           </tr>
                         </thead>
                         <tbody>
                           {invoiceSummary.category_breakdown.map((item, idx) => (
                             <tr key={idx}>
-                              <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>{item.category}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatCurrency(item.total_amount)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.total_qty)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.item_count)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              <td>{item.category}</td>
+                              <td className="cell-num">{formatCurrency(item.total_amount)}</td>
+                              <td className="cell-num">{formatNumber(item.total_qty)}</td>
+                              <td className="cell-num">{formatNumber(item.item_count)}</td>
+                              <td className="cell-num">
                                 {invoiceSummary.total_amount > 0 
                                   ? `${((item.total_amount / invoiceSummary.total_amount) * 100).toFixed(1)}%`
                                   : '-'}
@@ -488,18 +464,18 @@ export default function InsightsPage() {
                           ))}
                         </tbody>
                         <tfoot>
-                          <tr style={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
-                            <td style={{ padding: '0.75rem' }}>합계</td>
-                            <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                          <tr>
+                            <td>합계</td>
+                            <td className="cell-num">
                               {formatCurrency(invoiceSummary.category_breakdown.reduce((sum, i) => sum + i.total_amount, 0))}
                             </td>
-                            <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                            <td className="cell-num">
                               {formatNumber(invoiceSummary.category_breakdown.reduce((sum, i) => sum + i.total_qty, 0))}
                             </td>
-                            <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                            <td className="cell-num">
                               {formatNumber(invoiceSummary.category_breakdown.reduce((sum, i) => sum + i.item_count, 0))}
                             </td>
-                            <td style={{ padding: '0.75rem', textAlign: 'right' }}>100%</td>
+                            <td className="cell-num">100%</td>
                           </tr>
                         </tfoot>
                       </table>
@@ -511,24 +487,24 @@ export default function InsightsPage() {
                     {invoiceSummary.vendor_breakdown.length === 0 ? (
                       <p>데이터가 없습니다.</p>
                     ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <table>
                         <thead>
-                          <tr style={{ backgroundColor: '#f5f5f5' }}>
-                            <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd', width: '60px' }}>순위</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총 청구 금액</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>항목 수</th>
-                            <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>비율</th>
+                          <tr>
+                            <th className="tw-text-center">순위</th>
+                            <th>거래처</th>
+                            <th className="cell-num">총 청구 금액</th>
+                            <th className="cell-num">항목 수</th>
+                            <th className="cell-num">비율</th>
                           </tr>
                         </thead>
                         <tbody>
                           {invoiceSummary.vendor_breakdown.map((item, idx) => (
                             <tr key={idx}>
-                              <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{idx + 1}</td>
-                              <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.vendor_name || item.vendor}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>{formatCurrency(item.total_amount)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.item_count)}</td>
-                              <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                              <td className="tw-text-center">{idx + 1}</td>
+                              <td>{item.vendor_name || item.vendor}</td>
+                              <td className="cell-num">{formatCurrency(item.total_amount)}</td>
+                              <td className="cell-num">{formatNumber(item.item_count)}</td>
+                              <td className="cell-num">
                                 {invoiceSummary.total_amount > 0 
                                   ? `${((item.total_amount / invoiceSummary.total_amount) * 100).toFixed(1)}%`
                                   : '-'}
@@ -552,34 +528,29 @@ export default function InsightsPage() {
               {monthlyTrend.length === 0 ? (
                 <p>데이터가 없습니다.</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>년월</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총출고수량</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>주문건수</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>성장률</th>
+                    <tr>
+                      <th>년월</th>
+                      <th className="cell-num">총출고수량</th>
+                      <th className="cell-num">주문건수</th>
+                      <th className="cell-num">성장률</th>
                       {monthlyTrend[0]?.total_revenue !== undefined && (
-                        <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>총매출</th>
+                        <th className="cell-num">총매출</th>
                       )}
                     </tr>
                   </thead>
                   <tbody>
                     {monthlyTrend.map((item) => (
                       <tr key={item.period}>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.period}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.total_qty)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(item.order_count)}</td>
-                        <td style={{ 
-                          padding: '0.5rem', 
-                          textAlign: 'right', 
-                          borderBottom: '1px solid #eee',
-                          color: item.qty_growth !== null ? (item.qty_growth > 0 ? 'green' : item.qty_growth < 0 ? 'red' : 'inherit') : 'inherit'
-                        }}>
+                        <td>{item.period}</td>
+                        <td className="cell-num">{formatNumber(item.total_qty)}</td>
+                        <td className="cell-num">{formatNumber(item.order_count)}</td>
+                        <td className="cell-num">
                           {item.qty_growth !== null ? `${item.qty_growth > 0 ? '+' : ''}${item.qty_growth.toFixed(1)}%` : '-'}
                         </td>
                         {item.total_revenue !== undefined && (
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatCurrency(item.total_revenue)}</td>
+                          <td className="cell-num">{formatCurrency(item.total_revenue)}</td>
                         )}
                       </tr>
                     ))}
@@ -644,11 +615,11 @@ export default function InsightsPage() {
 
                   {searchResults.data.length > 0 ? (
                     <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <table>
                         <thead>
-                          <tr style={{ backgroundColor: '#f5f5f5' }}>
+                          <tr>
                             {Object.keys(searchResults.data[0]).map((key) => (
-                              <th key={key} style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                              <th key={key}>
                                 {key}
                               </th>
                             ))}
@@ -658,7 +629,7 @@ export default function InsightsPage() {
                           {searchResults.data.map((row, idx) => (
                             <tr key={idx}>
                               {Object.values(row).map((val, vidx) => (
-                                <td key={vidx} style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                                <td key={vidx}>
                                   {String(val ?? '')}
                                 </td>
                               ))}

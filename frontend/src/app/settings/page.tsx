@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Card from '../../components/Card';
 import Loading from '../../components/Loading';
 import PageHeader from '../../components/PageHeader';
+import { Alert } from '../../components/Alert';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -19,7 +20,6 @@ interface CompanySettings {
   representative: string;
   updated_at?: string;
 }
-
 
 const defaultSettings: CompanySettings = {
   company_name: '',
@@ -97,25 +97,6 @@ export default function SettingsPage() {
     setSettings(prev => ({ ...prev, [field]: value }));
   }
 
-  const inputStyle = {
-    width: '100%',
-    padding: '0.5rem',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-    fontSize: '0.9rem',
-  };
-
-  const labelStyle = {
-    display: 'block',
-    marginBottom: '0.25rem',
-    fontWeight: 'bold' as const,
-    color: '#333',
-  };
-
-  const fieldGroupStyle = {
-    marginBottom: '1rem',
-  };
-
   if (loading) {
     return <Loading />;
   }
@@ -124,115 +105,113 @@ export default function SettingsPage() {
     <div>
       <PageHeader title="회사 설정" subtitle="사업자 정보 및 계좌 정보를 관리합니다" />
 
-      {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
-      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
+      {error && <Alert type="error" message={error} />}
+      {success && <Alert type="success" message={success} />}
 
       {!isAdmin && (
-        <div className="alert alert-warning" style={{ marginBottom: '1rem' }}>
-          관리자만 설정을 수정할 수 있습니다. (읽기 전용)
-        </div>
+        <Alert type="warning" message="관리자만 설정을 수정할 수 있습니다. (읽기 전용)" />
       )}
 
       <Card title="사업자 정보">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>상호 (회사명)</label>
+        <div className="data-form-grid">
+          <div className="form-group">
+            <label className="ops-label">상호 (회사명)</label>
             <input
               type="text"
               value={settings.company_name}
               onChange={(e) => handleChange('company_name', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               disabled={!isAdmin}
             />
           </div>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>사업자번호</label>
+          <div className="form-group">
+            <label className="ops-label">사업자번호</label>
             <input
               type="text"
               value={settings.business_number}
               onChange={(e) => handleChange('business_number', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               placeholder="000-00-00000"
               disabled={!isAdmin}
             />
           </div>
         </div>
 
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>소재지 (주소)</label>
+        <div className="form-group">
+          <label className="ops-label">소재지 (주소)</label>
           <input
             type="text"
             value={settings.address}
             onChange={(e) => handleChange('address', e.target.value)}
-            style={inputStyle}
+            className="ui-control"
             disabled={!isAdmin}
           />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>업태</label>
+        <div className="data-form-grid">
+          <div className="form-group">
+            <label className="ops-label">업태</label>
             <input
               type="text"
               value={settings.business_type}
               onChange={(e) => handleChange('business_type', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               disabled={!isAdmin}
             />
           </div>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>종목</label>
+          <div className="form-group">
+            <label className="ops-label">종목</label>
             <input
               type="text"
               value={settings.business_item}
               onChange={(e) => handleChange('business_item', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               disabled={!isAdmin}
             />
           </div>
         </div>
 
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>대표자명</label>
+        <div className="form-group">
+          <label className="ops-label">대표자명</label>
           <input
             type="text"
             value={settings.representative}
             onChange={(e) => handleChange('representative', e.target.value)}
-            style={inputStyle}
+            className="ui-control"
             disabled={!isAdmin}
           />
         </div>
       </Card>
 
-      <Card title="계좌 정보" style={{ marginTop: '1rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>은행명</label>
+      <Card title="계좌 정보" className="tw-mt-3">
+        <div className="data-form-grid">
+          <div className="form-group">
+            <label className="ops-label">은행명</label>
             <input
               type="text"
               value={settings.bank_name}
               onChange={(e) => handleChange('bank_name', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               disabled={!isAdmin}
             />
           </div>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>예금주</label>
+          <div className="form-group">
+            <label className="ops-label">예금주</label>
             <input
               type="text"
               value={settings.account_holder}
               onChange={(e) => handleChange('account_holder', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               disabled={!isAdmin}
             />
           </div>
-          <div style={fieldGroupStyle}>
-            <label style={labelStyle}>계좌번호</label>
+          <div className="form-group">
+            <label className="ops-label">계좌번호</label>
             <input
               type="text"
               value={settings.account_number}
               onChange={(e) => handleChange('account_number', e.target.value)}
-              style={inputStyle}
+              className="ui-control"
               disabled={!isAdmin}
             />
           </div>
@@ -240,7 +219,7 @@ export default function SettingsPage() {
       </Card>
 
       {isAdmin && (
-        <div style={{ marginTop: '1.5rem', textAlign: 'right' }}>
+        <div className="tw-mt-4 tw-text-right">
           <button
             onClick={handleSave}
             disabled={saving}
@@ -252,9 +231,7 @@ export default function SettingsPage() {
       )}
 
       {settings.updated_at && (
-        <p style={{ marginTop: '1rem', color: '#666', fontSize: '0.85rem' }}>
-          마지막 수정: {settings.updated_at}
-        </p>
+        <p className="caption tw-mt-3">마지막 수정: {settings.updated_at}</p>
       )}
     </div>
   );

@@ -1,9 +1,13 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
 import { Loading } from '@/components/Loading';
+import { FilterBar } from '@/components/data';
+import { Field } from '@/components/ui/field';
+import { Select } from '@/components/ui/select';
 import {
   getOutBasicRates,
   saveOutBasicRates,
@@ -246,59 +250,30 @@ export default function RatesPage() {
     setMaterialData(updated);
   }
 
-  const inputStyle = {
-    padding: '0.5rem',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-    width: '100%',
-  };
-
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>글로벌 요금표 관리</h1>
+    <div>
+      <PageHeader title="글로벌 요금표 관리" />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      <Card>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
-          <label style={{ fontWeight: 500 }}>요금 테이블 선택:</label>
-          <select
-            value={selectedTable}
-            onChange={(e) => setSelectedTable(e.target.value as TableType)}
-            style={{
-              padding: '0.5rem',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              minWidth: '200px',
-            }}
-          >
+      <FilterBar>
+        <Field label="요금 테이블">
+          <Select value={selectedTable} onChange={(e) => setSelectedTable(e.target.value as TableType)}>
             {Object.entries(TABLE_INFO).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
+              <option key={key} value={key}>{label}</option>
             ))}
-          </select>
-
-          {selectedTable === 'shipping_zone' && (
-            <>
-              <label style={{ fontWeight: 500, marginLeft: '1rem' }}>요금제:</label>
-              <select
-                value={rateType}
-                onChange={(e) => setRateType(e.target.value as '표준' | 'A')}
-                style={{
-                  padding: '0.5rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                }}
-              >
-                <option value="표준">표준</option>
-                <option value="A">A</option>
-              </select>
-            </>
-          )}
-        </div>
-      </Card>
+          </Select>
+        </Field>
+        {selectedTable === 'shipping_zone' && (
+          <Field label="요금제">
+            <Select value={rateType} onChange={(e) => setRateType(e.target.value as '표준' | 'A')}>
+              <option value="표준">표준</option>
+              <option value="A">A</option>
+            </Select>
+          </Field>
+        )}
+      </FilterBar>
 
       <Card title={`${TABLE_INFO[selectedTable]} 수정`} style={{ marginTop: '1rem' }}>
         {loading ? (
@@ -307,13 +282,13 @@ export default function RatesPage() {
           <>
             {/* 출고비 테이블 */}
             {selectedTable === 'out_basic' && (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table>
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <tr>
+                    <th>
                       SKU 구간
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>
+                    <th className="cell-num">
                       단가 (원)
                     </th>
                   </tr>
@@ -321,20 +296,20 @@ export default function RatesPage() {
                 <tbody>
                   {outBasicData.map((row, idx) => (
                     <tr key={idx}>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="text"
                           value={row.sku_group}
                           onChange={(e) => updateOutBasic(idx, 'sku_group', e.target.value)}
-                          style={inputStyle}
+                          className="ui-control"
                         />
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="number"
                           value={row.단가}
                           onChange={(e) => updateOutBasic(idx, '단가', e.target.value)}
-                          style={{ ...inputStyle, textAlign: 'right' }}
+                          className="ui-control"
                         />
                       </td>
                     </tr>
@@ -345,13 +320,13 @@ export default function RatesPage() {
 
             {/* 추가 작업 단가 테이블 */}
             {selectedTable === 'out_extra' && (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table>
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <tr>
+                    <th>
                       항목
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>
+                    <th className="cell-num">
                       단가 (원)
                     </th>
                   </tr>
@@ -359,20 +334,20 @@ export default function RatesPage() {
                 <tbody>
                   {outExtraData.map((row, idx) => (
                     <tr key={idx}>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="text"
                           value={row.항목}
                           onChange={(e) => updateOutExtra(idx, '항목', e.target.value)}
-                          style={inputStyle}
+                          className="ui-control"
                         />
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="number"
                           value={row.단가}
                           onChange={(e) => updateOutExtra(idx, '단가', e.target.value)}
-                          style={{ ...inputStyle, textAlign: 'right' }}
+                          className="ui-control"
                         />
                       </td>
                     </tr>
@@ -383,22 +358,22 @@ export default function RatesPage() {
 
             {/* 배송 요금 구간 테이블 */}
             {selectedTable === 'shipping_zone' && (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table>
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <tr>
+                    <th>
                       요금제
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                    <th>
                       구간
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>
+                    <th className="cell-num">
                       최소 길이 (cm)
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>
+                    <th className="cell-num">
                       최대 길이 (cm)
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>
+                    <th className="cell-num">
                       요금 (원)
                     </th>
                   </tr>
@@ -406,44 +381,44 @@ export default function RatesPage() {
                 <tbody>
                   {shippingZoneData.map((row, idx) => (
                     <tr key={idx}>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="text"
                           value={row.요금제}
                           onChange={(e) => updateShippingZone(idx, '요금제', e.target.value)}
-                          style={inputStyle}
+                          className="ui-control"
                         />
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="text"
                           value={row.구간}
                           onChange={(e) => updateShippingZone(idx, '구간', e.target.value)}
-                          style={inputStyle}
+                          className="ui-control"
                         />
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="number"
                           value={row.len_min_cm}
                           onChange={(e) => updateShippingZone(idx, 'len_min_cm', e.target.value)}
-                          style={{ ...inputStyle, textAlign: 'right' }}
+                          className="ui-control"
                         />
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="number"
                           value={row.len_max_cm}
                           onChange={(e) => updateShippingZone(idx, 'len_max_cm', e.target.value)}
-                          style={{ ...inputStyle, textAlign: 'right' }}
+                          className="ui-control"
                         />
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <input
                           type="number"
                           value={row.요금}
                           onChange={(e) => updateShippingZone(idx, '요금', e.target.value)}
-                          style={{ ...inputStyle, textAlign: 'right' }}
+                          className="ui-control"
                         />
                       </td>
                     </tr>
@@ -454,13 +429,13 @@ export default function RatesPage() {
 
             {/* 부자재 요금표 테이블 */}
             {selectedTable === 'material_rates' && (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table>
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <tr>
+                    <th>
                       항목
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>
+                    <th className="cell-num">
                       단가 (원)
                     </th>
                   </tr>
@@ -468,27 +443,27 @@ export default function RatesPage() {
                 <tbody>
                   {materialData.length === 0 ? (
                     <tr>
-                      <td colSpan={2} style={{ padding: '1rem', textAlign: 'center', color: '#666' }}>
+                      <td colSpan={2} className="tw-text-center">
                         데이터가 없습니다. CSV 파일을 업로드하세요.
                       </td>
                     </tr>
                   ) : (
                     materialData.map((row, idx) => (
                       <tr key={idx}>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                        <td>
                           <input
                             type="text"
                             value={row.항목}
                             onChange={(e) => updateMaterial(idx, '항목', e.target.value)}
-                            style={inputStyle}
+                            className="ui-control"
                           />
                         </td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                        <td>
                           <input
                             type="number"
                             value={row.단가}
                             onChange={(e) => updateMaterial(idx, '단가', e.target.value)}
-                            style={{ ...inputStyle, textAlign: 'right' }}
+                            className="ui-control"
                           />
                         </td>
                       </tr>

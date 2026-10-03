@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/Card';
@@ -128,9 +129,9 @@ export default function InvoiceAnalyticsPage() {
   ];
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
+    <div>
       <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>청구금액 분석</h1>
+        <PageHeader title="청구금액 분석" />
         <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontSize: '0.8125rem' }}>
           인보이스 기반 월별 청구금액 추이를 확인합니다.
         </p>
@@ -238,42 +239,39 @@ export default function InvoiceAnalyticsPage() {
                   <p style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>데이터가 없습니다.</p>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <table>
                       <thead>
-                        <tr style={{ backgroundColor: '#f5f5f5' }}>
-                          <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>월</th>
-                          <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>인보이스 수</th>
-                          <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>청구금액</th>
-                          <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>전월 대비</th>
+                        <tr>
+                          <th>월</th>
+                          <th className="cell-num">인보이스 수</th>
+                          <th className="cell-num">청구금액</th>
+                          <th className="cell-num">전월 대비</th>
                         </tr>
                       </thead>
                       <tbody>
                         {trendData.map((row) => (
                           <tr key={row.period}>
-                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>{row.period}</td>
-                            <td style={{ padding: '0.6rem 0.75rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{row.invoice_count}건</td>
-                            <td style={{ padding: '0.6rem 0.75rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>
+                            <td>{row.period}</td>
+                            <td className="cell-num">{row.invoice_count}건</td>
+                            <td className="cell-num">
                               {formatFullCurrency(row.total_amount)}
                             </td>
-                            <td style={{
-                              padding: '0.6rem 0.75rem', textAlign: 'right', borderBottom: '1px solid #eee',
-                              color: row.growth !== null ? (row.growth > 0 ? '#4CAF50' : row.growth < 0 ? '#F44336' : '#666') : '#999',
-                            }}>
+                            <td className="cell-num">
                               {row.growth !== null ? `${row.growth > 0 ? '+' : ''}${row.growth.toFixed(1)}%` : '-'}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr style={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
-                          <td style={{ padding: '0.75rem' }}>합계</td>
-                          <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                        <tr>
+                          <td>합계</td>
+                          <td className="cell-num">
                             {trendData.reduce((s, r) => s + r.invoice_count, 0)}건
                           </td>
-                          <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                          <td className="cell-num">
                             {formatFullCurrency(trendData.reduce((s, r) => s + r.total_amount, 0))}
                           </td>
-                          <td style={{ padding: '0.75rem' }}></td>
+                          <td></td>
                         </tr>
                       </tfoot>
                     </table>
@@ -317,17 +315,17 @@ export default function InvoiceAnalyticsPage() {
                   <p style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>데이터가 없습니다.</p>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <table>
                       <thead>
-                        <tr style={{ backgroundColor: '#f5f5f5' }}>
+                        <tr>
                           <th style={{ padding: '0.6rem', textAlign: 'left', borderBottom: '2px solid #ddd', position: 'sticky', left: 0, backgroundColor: '#f5f5f5', minWidth: 80 }}>월</th>
                           {categoryData.categories.map((cat) => (
-                            <th key={cat} style={{ padding: '0.6rem', textAlign: 'right', borderBottom: '2px solid #ddd', minWidth: 100 }}>
+                            <th key={cat} className="cell-num">
                               <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, backgroundColor: CATEGORY_COLORS[cat] || '#9E9E9E', marginRight: 4, verticalAlign: 'middle' }} />
                               {cat}
                             </th>
                           ))}
-                          <th style={{ padding: '0.6rem', textAlign: 'right', borderBottom: '2px solid #ddd', fontWeight: 'bold', minWidth: 110 }}>월 합계</th>
+                          <th className="cell-num">월 합계</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -339,11 +337,11 @@ export default function InvoiceAnalyticsPage() {
                                 {row.period as string}
                               </td>
                               {categoryData.categories.map((cat) => (
-                                <td key={cat} style={{ padding: '0.5rem 0.6rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                                <td key={cat} className="cell-num">
                                   {(row[cat] as number) ? formatFullCurrency(row[cat] as number) : '-'}
                                 </td>
                               ))}
-                              <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>
+                              <td className="cell-num">
                                 {formatFullCurrency(rowTotal)}
                               </td>
                             </tr>
@@ -351,17 +349,17 @@ export default function InvoiceAnalyticsPage() {
                         })}
                       </tbody>
                       <tfoot>
-                        <tr style={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
+                        <tr>
                           <td style={{ padding: '0.6rem', position: 'sticky', left: 0, backgroundColor: '#f5f5f5' }}>합계</td>
                           {categoryData.categories.map((cat) => {
                             const catTotal = categoryData.data.reduce((s, row) => s + ((row[cat] as number) || 0), 0);
                             return (
-                              <td key={cat} style={{ padding: '0.6rem', textAlign: 'right' }}>
+                              <td key={cat} className="cell-num">
                                 {formatFullCurrency(catTotal)}
                               </td>
                             );
                           })}
-                          <td style={{ padding: '0.6rem', textAlign: 'right' }}>
+                          <td className="cell-num">
                             {formatFullCurrency(
                               categoryData.data.reduce((total, row) =>
                                 total + categoryData.categories.reduce((s, cat) => s + ((row[cat] as number) || 0), 0), 0
@@ -414,17 +412,17 @@ export default function InvoiceAnalyticsPage() {
                   <p style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>데이터가 없습니다.</p>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <table>
                       <thead>
-                        <tr style={{ backgroundColor: '#f5f5f5' }}>
+                        <tr>
                           <th style={{ padding: '0.6rem', textAlign: 'left', borderBottom: '2px solid #ddd', position: 'sticky', left: 0, backgroundColor: '#f5f5f5', minWidth: 80 }}>월</th>
                           {vendorData.vendors.map((v, idx) => (
-                            <th key={v} style={{ padding: '0.6rem', textAlign: 'right', borderBottom: '2px solid #ddd', minWidth: 110 }}>
+                            <th key={v} className="cell-num">
                               <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', backgroundColor: VENDOR_COLORS[idx % VENDOR_COLORS.length], marginRight: 4, verticalAlign: 'middle' }} />
                               {v}
                             </th>
                           ))}
-                          <th style={{ padding: '0.6rem', textAlign: 'right', borderBottom: '2px solid #ddd', fontWeight: 'bold', minWidth: 110 }}>월 합계</th>
+                          <th className="cell-num">월 합계</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -436,11 +434,11 @@ export default function InvoiceAnalyticsPage() {
                                 {row.period as string}
                               </td>
                               {vendorData.vendors.map((v) => (
-                                <td key={v} style={{ padding: '0.5rem 0.6rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                                <td key={v} className="cell-num">
                                   {(row[v] as number) ? formatFullCurrency(row[v] as number) : '-'}
                                 </td>
                               ))}
-                              <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>
+                              <td className="cell-num">
                                 {formatFullCurrency(rowTotal)}
                               </td>
                             </tr>
@@ -448,17 +446,17 @@ export default function InvoiceAnalyticsPage() {
                         })}
                       </tbody>
                       <tfoot>
-                        <tr style={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
+                        <tr>
                           <td style={{ padding: '0.6rem', position: 'sticky', left: 0, backgroundColor: '#f5f5f5' }}>합계</td>
                           {vendorData.vendors.map((v) => {
                             const vTotal = vendorData.data.reduce((s, row) => s + ((row[v] as number) || 0), 0);
                             return (
-                              <td key={v} style={{ padding: '0.6rem', textAlign: 'right' }}>
+                              <td key={v} className="cell-num">
                                 {formatFullCurrency(vTotal)}
                               </td>
                             );
                           })}
-                          <td style={{ padding: '0.6rem', textAlign: 'right' }}>
+                          <td className="cell-num">
                             {formatFullCurrency(
                               vendorData.data.reduce((total, row) =>
                                 total + vendorData.vendors.reduce((s, v) => s + ((row[v] as number) || 0), 0), 0

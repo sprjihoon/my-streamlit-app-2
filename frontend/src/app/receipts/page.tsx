@@ -1,6 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert } from '@/components/Alert';
+import { Card } from '@/components/Card';
+import { FilterBar, KpiStrip, TableSummary } from '@/components/data';
+import { EmptyState } from '@/components/operational/empty-state';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import PageHeader from '@/components/ui/page-header';
+import { Select } from '@/components/ui/select';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -129,23 +138,23 @@ function ItemRow({
       borderRadius: '4px', fontSize: '0.82rem',
     };
     return (
-      <tr style={{ backgroundColor: '#f0f6ff' }}>
-        <td style={{ padding: '0.4rem' }}>
+      <tr>
+        <td>
           <input style={inp} value={draft.item_name ?? ''} onChange={e => setDraft(d => ({ ...d, item_name: e.target.value }))} placeholder="품명" />
         </td>
-        <td style={{ padding: '0.4rem' }}>
+        <td>
           <input style={inp} value={draft.option_text ?? ''} onChange={e => setDraft(d => ({ ...d, option_text: e.target.value }))} placeholder="옵션" />
         </td>
-        <td style={{ padding: '0.4rem' }}>
+        <td>
           <input style={{ ...inp, width: '80px' }} type="number" value={draft.unit_price ?? ''} onChange={e => setDraft(d => ({ ...d, unit_price: e.target.value ? Number(e.target.value) : null }))} />
         </td>
-        <td style={{ padding: '0.4rem' }}>
+        <td>
           <input style={{ ...inp, width: '60px' }} type="number" value={draft.quantity ?? ''} onChange={e => setDraft(d => ({ ...d, quantity: e.target.value ? Number(e.target.value) : null }))} />
         </td>
-        <td style={{ padding: '0.4rem' }}>
+        <td>
           <input style={{ ...inp, width: '90px' }} type="number" value={draft.amount ?? ''} onChange={e => setDraft(d => ({ ...d, amount: e.target.value ? Number(e.target.value) : null }))} />
         </td>
-        <td style={{ padding: '0.4rem' }} colSpan={2}>
+        <td colSpan={2}>
           <button onClick={handleSave} style={{ padding: '0.3rem 0.7rem', backgroundColor: '#198754', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem', marginRight: '4px' }}>저장</button>
           <button onClick={() => { setDraft({ ...item }); setEditing(false); }} style={{ padding: '0.3rem 0.6rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}>취소</button>
         </td>
@@ -154,21 +163,21 @@ function ItemRow({
   }
 
   return (
-    <tr style={{ backgroundColor: rowBg, borderBottom: '1px solid #f0f0f0' }}>
-      <td style={{ padding: '0.5rem 0.75rem', fontWeight: 500 }}>
+    <tr>
+      <td>
         {item.item_name || <span style={{ color: '#dc3545' }}>미추출</span>}
         {needsReview && <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', backgroundColor: '#fff3cd', color: '#856404', padding: '1px 5px', borderRadius: '3px' }}>확인필요</span>}
       </td>
-      <td style={{ padding: '0.5rem 0.75rem', color: '#6c757d', fontSize: '0.85rem' }}>
+      <td>
         {[item.option_text, item.color, item.size].filter(Boolean).join(' / ') || '-'}
       </td>
-      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>{fmt(item.unit_price)}</td>
-      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>{item.quantity ?? '-'}</td>
-      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 600 }}>{fmt(item.amount)}</td>
-      <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem', color: '#dc3545' }}>
+      <td className="cell-num">{fmt(item.unit_price)}</td>
+      <td className="cell-num">{item.quantity ?? '-'}</td>
+      <td className="cell-num">{fmt(item.amount)}</td>
+      <td>
         {item.warnings.join(', ') || ''}
       </td>
-      <td style={{ padding: '0.5rem 0.75rem' }}>
+      <td>
         <button onClick={() => setEditing(true)} style={{ padding: '0.2rem 0.6rem', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>수정</button>
       </td>
     </tr>
@@ -322,11 +331,11 @@ function ReceiptDetail({
             {saving && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#6c757d' }}>저장 중...</span>}
           </h4>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                <tr>
                   {['품명', '옵션', '단가', '수량', '금액', '경고', ''].map(h => (
-                    <th key={h} style={{ padding: '0.5rem 0.75rem', textAlign: h === '단가' || h === '수량' || h === '금액' ? 'right' : 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} className="cell-num">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -337,8 +346,8 @@ function ReceiptDetail({
               </tbody>
               <tfoot>
                 <tr style={{ borderTop: '2px solid #dee2e6', backgroundColor: '#f8f9fa' }}>
-                  <td colSpan={4} style={{ padding: '0.5rem 0.75rem', fontWeight: 600, textAlign: 'right' }}>합계</td>
-                  <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700, color: '#0d6efd' }}>{fmt(totalCalc)}</td>
+                  <td colSpan={4} className="cell-num">합계</td>
+                  <td className="cell-num">{fmt(totalCalc)}</td>
                   <td colSpan={2} />
                 </tr>
               </tfoot>
@@ -408,138 +417,107 @@ export default function ReceiptsPage() {
   const monthlyTotal = receipts.reduce((s, r) => s + (r.total_amount || 0), 0);
   const reviewCount = receipts.filter(r => r.needs_review).length;
 
-  const card: React.CSSProperties = {
-    backgroundColor: 'white', borderRadius: '8px', padding: '1.5rem',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginBottom: '1.5rem',
-  };
-
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1000px' }}>
-      <h2 style={{ marginBottom: '0.25rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)' }}>영수증 처리</h2>
-      <p style={{ color: '#6c757d', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
-        장끼 / 영수증 사진을 업로드하면 GPT-4o Vision이 자동으로 분석합니다.
-      </p>
+    <div>
+      <PageHeader
+        title="영수증 처리"
+        subtitle="장끼 / 영수증 사진을 업로드하면 GPT-4o Vision이 자동으로 분석합니다."
+      />
 
-      {/* 업로드 */}
-      <div style={card}>
+      <Card>
         {uploading ? (
-          <div style={{ textAlign: 'center', padding: '2rem' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🤖</div>
-            <p style={{ margin: 0, fontWeight: 600 }}>GPT-4o Vision 분석 중...</p>
-            <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6c757d' }}>잠시만 기다려주세요 (10~20초)</p>
+          <div className="tw-py-4 tw-text-center">
+            <p className="tw-m-0 tw-font-semibold">GPT-4o Vision 분석 중...</p>
+            <p className="caption tw-mt-1">잠시만 기다려주세요 (10~20초)</p>
           </div>
         ) : (
           <UploadZone onUpload={handleUpload} />
         )}
         {uploadMsg && (
-          <div style={{
-            marginTop: '1rem', padding: '0.75rem 1rem', borderRadius: '6px',
-            backgroundColor: uploadMsg.ok ? '#d1e7dd' : '#f8d7da',
-            color: uploadMsg.ok ? '#0a3622' : '#842029',
-          }}>
-            {uploadMsg.text}
-          </div>
+          <Alert type={uploadMsg.ok ? 'success' : 'error'} message={uploadMsg.text} />
         )}
-      </div>
+      </Card>
 
-      {/* 요약 카드 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-        {[
-          { label: '이번 달 합계', value: monthlyTotal.toLocaleString('ko-KR') + '원', color: '#0d6efd' },
-          { label: '총 건수', value: `${receipts.length}건`, color: '#495057' },
-          { label: '확인 필요', value: `${reviewCount}건`, color: reviewCount > 0 ? '#856404' : '#198754' },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ ...card, marginBottom: 0, textAlign: 'center' }}>
-            <p style={{ margin: 0, fontSize: '0.8rem', color: '#6c757d' }}>{label}</p>
-            <p style={{ margin: '0.25rem 0 0', fontSize: '1.3rem', fontWeight: 700, color }}>{value}</p>
-          </div>
-        ))}
-      </div>
+      <KpiStrip
+        items={[
+          { label: '이번 달 합계', value: `${monthlyTotal.toLocaleString('ko-KR')}원` },
+          { label: '총 건수', value: `${receipts.length}건` },
+          { label: '확인 필요', value: <span className={reviewCount > 0 ? 'tw-text-tillion-warning' : 'tw-text-tillion-success'}>{reviewCount}건</span> },
+        ]}
+      />
 
-      {/* 필터 + 엑셀 다운로드 */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}
-          style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }}>
-          {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
-        </select>
-        <select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))}
-          style={{ padding: '0.4rem 0.75rem', border: '1px solid #dee2e6', borderRadius: '4px', fontSize: '0.875rem' }}>
-          <option value={0}>전체 월</option>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-            <option key={m} value={m}>{m}월</option>
-          ))}
-        </select>
-        <span style={{ fontSize: '0.85rem', color: '#6c757d' }}>{receipts.length}건</span>
-        <div style={{ marginLeft: 'auto' }}>
+      <FilterBar
+        trailing={
           <a
+            className="btn btn-success"
             href={`${API_URL}/receipt/bulk-excel?token=${token}&year=${filterYear}${filterMonth ? `&month=${filterMonth}` : ''}`}
             download
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
-              padding: '0.4rem 1rem', backgroundColor: '#1a7f4b', color: 'white',
-              textDecoration: 'none', borderRadius: '6px', fontSize: '0.85rem', fontWeight: 600,
-            }}
           >
-            📥 엑셀 다운로드 ({receipts.length}건)
+            엑셀 다운로드 ({receipts.length}건)
           </a>
-        </div>
-      </div>
+        }
+      >
+        <Field label="연도">
+          <Select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))}>
+            {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}년</option>)}
+          </Select>
+        </Field>
+        <Field label="월">
+          <Select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))}>
+            <option value={0}>전체 월</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+              <option key={m} value={m}>{m}월</option>
+            ))}
+          </Select>
+        </Field>
+      </FilterBar>
+      <TableSummary>{receipts.length}건</TableSummary>
 
       {/* 목록 */}
-      <div style={card}>
+      <Card>
         {loading ? (
-          <p style={{ textAlign: 'center', color: '#6c757d', padding: '2rem' }}>로딩 중...</p>
+          <p className="caption tw-py-6 tw-text-center">로딩 중...</p>
         ) : receipts.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#6c757d', padding: '2rem' }}>
-            등록된 영수증이 없습니다. 위에서 사진을 업로드해 보세요.
-          </p>
+          <EmptyState title="등록된 영수증이 없습니다." description="위에서 사진을 업로드해 보세요." />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+          <table>
             <thead>
-              <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+              <tr>
             {['거래처', '종류', '거래일', '금액', '처리자', '처리시간', '수기', '상태', ''].map(h => (
-                    <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h}>{h}</th>
                   ))}
               </tr>
             </thead>
             <tbody>
               {receipts.map(r => (
-                <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0', backgroundColor: r.needs_review ? '#fffbea' : 'white' }}>
-                  <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>
+                <tr key={r.id}>
+                  <td>
                     {r.store_name || <span style={{ color: '#aaa' }}>미추출</span>}
                   </td>
-                  <td style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontSize: '0.82rem' }}>{r.receipt_type}</td>
-                  <td style={{ padding: '0.6rem 0.75rem', color: '#6c757d' }}>{r.order_date || '-'}</td>
-                  <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>{fmt(r.total_amount)}</td>
-                  <td style={{ padding: '0.6rem 0.75rem', color: '#495057', fontSize: '0.85rem' }}>
+                  <td>{r.receipt_type}</td>
+                  <td>{r.order_date || '-'}</td>
+                  <td>{fmt(r.total_amount)}</td>
+                  <td>
                     {r.processor_name || '-'}
                   </td>
-                  <td style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                  <td>
                     {fmtDatetime(r.created_at)}
                   </td>
-                  <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
+                  <td className="tw-text-center">
                     {r.is_handwritten ? '✍️' : ''}
                   </td>
-                  <td style={{ padding: '0.6rem 0.75rem' }}>
-                    {r.needs_review
-                      ? <span style={{ padding: '0.2rem 0.5rem', backgroundColor: '#fff3cd', color: '#856404', borderRadius: '4px', fontSize: '0.78rem' }}>확인필요</span>
-                      : <span style={{ padding: '0.2rem 0.5rem', backgroundColor: '#d1e7dd', color: '#0a3622', borderRadius: '4px', fontSize: '0.78rem' }}>정상</span>
-                    }
+                  <td>
+                    <Badge variant={r.needs_review ? 'warning' : 'success'}>{r.needs_review ? '확인필요' : '정상'}</Badge>
                   </td>
-                  <td style={{ padding: '0.6rem 0.75rem' }}>
-                    <button
-                      onClick={() => setSelected(r)}
-                      style={{ padding: '0.25rem 0.7rem', backgroundColor: '#0d6efd', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
-                    >
-                      상세
-                    </button>
+                  <td>
+                    <Button type="button" variant="secondary" onClick={() => setSelected(r)}>상세</Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </div>
+      </Card>
 
       {/* 상세 모달 */}
       {selected && (

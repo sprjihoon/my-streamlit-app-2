@@ -1,8 +1,11 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import Card from '../../components/Card';
 import Loading from '../../components/Loading';
+import { Alert } from '../../components/Alert';
+import { Button } from '@/components/ui/button';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -275,80 +278,46 @@ export default function StoragePage() {
     return num.toLocaleString();
   }
 
-  const inputStyle = {
-    width: '100%',
-    padding: '0.5rem',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-  };
-
-  const tabStyle = (active: boolean) => ({
-    padding: '0.75rem 1.5rem',
-    backgroundColor: active ? '#2196F3' : '#f5f5f5',
-    color: active ? 'white' : '#333',
-    border: 'none',
-    borderRadius: '4px 4px 0 0',
-    cursor: 'pointer',
-    fontWeight: active ? 'bold' : 'normal',
-  });
-
   return (
-    <div style={{ padding: '1rem' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>보관료 관리</h1>
+    <div>
+      <PageHeader title="보관료 관리" />
 
-      {error && <div className="alert alert-error" style={{ marginBottom: '1rem', position: 'relative' }}>{error}<button onClick={() => setError(null)} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: '1rem' }}>×</button></div>}
-      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
+      {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+      {success && <Alert type="success" message={success} />}
 
-      {/* 탭 */}
-      <div style={{ marginBottom: '0' }}>
-        <button style={tabStyle(activeTab === 'vendor')} onClick={() => setActiveTab('vendor')}>
-          거래처별 보관료
-        </button>
-        <button style={tabStyle(activeTab === 'rates')} onClick={() => setActiveTab('rates')}>
-          보관료 단가표
-        </button>
+      <div className="data-tabs">
+        <Button type="button" variant={activeTab === 'vendor' ? 'primary' : 'secondary'} onClick={() => setActiveTab('vendor')}>거래처별 보관료</Button>
+        <Button type="button" variant={activeTab === 'rates' ? 'primary' : 'secondary'} onClick={() => setActiveTab('rates')}>보관료 단가표</Button>
       </div>
 
       {/* 보관료 단가표 탭 */}
       {activeTab === 'rates' && (
         <Card title="💰 보관료 단가표" style={{ borderTopLeftRadius: 0 }}>
           {isAdmin && (
-            <div style={{ marginBottom: '1rem' }}>
-              <button
-                onClick={handleNewRate}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                }}
-              >
-                ➕ 새 단가 추가
-              </button>
+            <div className="tw-mb-3">
+              <Button type="button" variant="success" onClick={handleNewRate}>새 단가 추가</Button>
             </div>
           )}
 
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table>
             <thead>
-              <tr style={{ backgroundColor: '#f5f5f5' }}>
-                <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>품목명</th>
-                <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>단가</th>
-                <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>단위</th>
-                <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>설명</th>
-                {isAdmin && <th style={{ padding: '0.75rem', borderBottom: '2px solid #ddd' }}>관리</th>}
+              <tr>
+                <th>품목명</th>
+                <th className="cell-num">단가</th>
+                <th className="tw-text-center">단위</th>
+                <th>설명</th>
+                {isAdmin && <th>관리</th>}
               </tr>
             </thead>
             <tbody>
               {rates.map((rate) => (
                 <tr key={rate.rate_id}>
-                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>{rate.item_name}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(rate.unit_price)}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{rate.unit}</td>
-                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>{rate.description}</td>
+                  <td>{rate.item_name}</td>
+                  <td className="cell-num">₩{formatNumber(rate.unit_price)}</td>
+                  <td className="tw-text-center">{rate.unit}</td>
+                  <td>{rate.description}</td>
                   {isAdmin && (
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                    <td>
                       <div style={{ display: 'flex', gap: '0.25rem' }}>
                         <button onClick={() => handleEditRate(rate)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>수정</button>
                         <button onClick={() => handleDeleteRate(rate.rate_id!)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>삭제</button>
@@ -417,33 +386,33 @@ export default function StoragePage() {
               <p style={{ color: '#666' }}>등록된 보관료 내역이 없습니다.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>기간</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>품목</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>수량</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>단가</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>금액</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>비고</th>
-                      {isAdmin && <th style={{ padding: '0.75rem', borderBottom: '2px solid #ddd' }}>관리</th>}
+                    <tr>
+                      <th>거래처</th>
+                      <th>기간</th>
+                      <th>품목</th>
+                      <th className="cell-num">수량</th>
+                      <th className="cell-num">단가</th>
+                      <th className="cell-num">금액</th>
+                      <th>비고</th>
+                      {isAdmin && <th>관리</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {storages.map((storage) => (
                       <tr key={storage.storage_id} style={{ opacity: storage.is_active ? 1 : 0.5 }}>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                        <td>
                           {vendors.find(v => v.vendor === storage.vendor_id)?.name || storage.vendor_id}
                         </td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{storage.period}</td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{storage.item_name}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(storage.qty)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(storage.unit_price)}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>₩{formatNumber(storage.amount)}</td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>{storage.remark || '-'}</td>
+                        <td>{storage.period}</td>
+                        <td>{storage.item_name}</td>
+                        <td className="cell-num">{formatNumber(storage.qty)}</td>
+                        <td className="cell-num">₩{formatNumber(storage.unit_price)}</td>
+                        <td className="cell-num">₩{formatNumber(storage.amount)}</td>
+                        <td>{storage.remark || '-'}</td>
                         {isAdmin && (
-                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                          <td>
                             <div style={{ display: 'flex', gap: '0.25rem' }}>
                               <button onClick={() => handleEditStorage(storage)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>수정</button>
                               <button onClick={() => handleDeleteStorage(storage.storage_id!)} style={{ padding: '0.25rem 0.5rem', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>삭제</button>
@@ -454,9 +423,9 @@ export default function StoragePage() {
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr style={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
-                      <td colSpan={5} style={{ padding: '0.75rem', textAlign: 'right' }}>합계:</td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>₩{formatNumber(storages.reduce((sum, s) => sum + s.amount, 0))}</td>
+                    <tr>
+                      <td colSpan={5} className="cell-num">합계:</td>
+                      <td className="cell-num">₩{formatNumber(storages.reduce((sum, s) => sum + s.amount, 0))}</td>
                       <td colSpan={isAdmin ? 2 : 1}></td>
                     </tr>
                   </tfoot>
@@ -502,7 +471,7 @@ export default function StoragePage() {
               <select
                 value={editingStorage.vendor_id}
                 onChange={(e) => handleStorageChange('vendor_id', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               >
                 <option value="">선택하세요</option>
                 {vendors.map((v) => (
@@ -517,7 +486,7 @@ export default function StoragePage() {
                 type="month"
                 value={editingStorage.period}
                 onChange={(e) => handleStorageChange('period', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               />
               <small style={{ color: '#666' }}>* 활성 상태면 매월 자동 청구됩니다</small>
             </div>
@@ -527,7 +496,7 @@ export default function StoragePage() {
               <select
                 value={editingStorage.rate_id || ''}
                 onChange={(e) => handleStorageChange('rate_id', Number(e.target.value))}
-                style={inputStyle}
+                className="ui-control"
               >
                 <option value="">직접 입력</option>
                 {rates.map((r) => (
@@ -542,7 +511,7 @@ export default function StoragePage() {
                 type="text"
                 value={editingStorage.item_name}
                 onChange={(e) => handleStorageChange('item_name', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               />
             </div>
 
@@ -553,7 +522,7 @@ export default function StoragePage() {
                   type="number"
                   value={editingStorage.qty}
                   onChange={(e) => handleStorageChange('qty', Number(e.target.value))}
-                  style={inputStyle}
+                  className="ui-control"
                 />
               </div>
               <div>
@@ -562,7 +531,7 @@ export default function StoragePage() {
                   type="number"
                   value={editingStorage.unit_price}
                   onChange={(e) => handleStorageChange('unit_price', Number(e.target.value))}
-                  style={inputStyle}
+                  className="ui-control"
                 />
               </div>
               <div>
@@ -571,7 +540,7 @@ export default function StoragePage() {
                   type="number"
                   value={editingStorage.amount}
                   readOnly
-                  style={{ ...inputStyle, backgroundColor: '#f5f5f5' }}
+                  className="ui-control"
                 />
               </div>
             </div>
@@ -582,7 +551,7 @@ export default function StoragePage() {
                 type="text"
                 value={editingStorage.remark}
                 onChange={(e) => handleStorageChange('remark', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               />
             </div>
 
@@ -650,7 +619,7 @@ export default function StoragePage() {
                 type="text"
                 value={editingRate.item_name}
                 onChange={(e) => setEditingRate({ ...editingRate, item_name: e.target.value })}
-                style={inputStyle}
+                className="ui-control"
                 placeholder="예: PLT, 단프라"
               />
             </div>
@@ -662,7 +631,7 @@ export default function StoragePage() {
                   type="number"
                   value={editingRate.unit_price}
                   onChange={(e) => setEditingRate({ ...editingRate, unit_price: Number(e.target.value) })}
-                  style={inputStyle}
+                  className="ui-control"
                 />
               </div>
               <div>
@@ -671,7 +640,7 @@ export default function StoragePage() {
                   type="text"
                   value={editingRate.unit}
                   onChange={(e) => setEditingRate({ ...editingRate, unit: e.target.value })}
-                  style={inputStyle}
+                  className="ui-control"
                 />
               </div>
             </div>
@@ -682,7 +651,7 @@ export default function StoragePage() {
                 type="text"
                 value={editingRate.description}
                 onChange={(e) => setEditingRate({ ...editingRate, description: e.target.value })}
-                style={inputStyle}
+                className="ui-control"
               />
             </div>
 

@@ -1,8 +1,14 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import Card from '../../components/Card';
 import Loading from '../../components/Loading';
+import { Alert } from '../../components/Alert';
+import { FilterBar } from '@/components/data';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Select } from '@/components/ui/select';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -184,70 +190,33 @@ export default function VendorChargesPage() {
     return num.toLocaleString();
   }
 
-  const inputStyle = {
-    width: '100%',
-    padding: '0.5rem',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-  };
-
   if (loading && charges.length === 0) {
     return <Loading />;
   }
 
   return (
-    <div style={{ padding: '1rem' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>거래처별 추가 비용 관리</h1>
+    <div>
+      <PageHeader title="거래처별 추가 비용 관리" />
 
-      {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
-      {success && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{success}</div>}
+      {error && <Alert type="error" message={error} />}
+      {success && <Alert type="success" message={success} />}
 
-      {/* 필터 및 추가 버튼 */}
-      <Card title="🔍 필터">
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ marginRight: '0.5rem' }}>거래처:</label>
-            <select
-              value={selectedVendor}
-              onChange={(e) => setSelectedVendor(e.target.value)}
-              style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #ddd' }}
-            >
-              <option value="">전체</option>
-              {vendors.map((v) => (
-                <option key={v.vendor} value={v.vendor}>
-                  {v.name || v.vendor}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-            />
-            비활성 항목 표시
-          </label>
-
-          {isAdmin && (
-            <button
-              onClick={handleNew}
-              style={{
-                marginLeft: 'auto',
-                padding: '0.5rem 1rem',
-                backgroundColor: '#4CAF50',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
-            >
-              새 항목 추가
-            </button>
-          )}
-        </div>
-      </Card>
+      <FilterBar
+        trailing={isAdmin ? <Button type="button" variant="success" onClick={handleNew}>새 항목 추가</Button> : null}
+      >
+        <Field label="거래처">
+          <Select value={selectedVendor} onChange={(e) => setSelectedVendor(e.target.value)}>
+            <option value="">전체</option>
+            {vendors.map((v) => (
+              <option key={v.vendor} value={v.vendor}>{v.name || v.vendor}</option>
+            ))}
+          </Select>
+        </Field>
+        <label className="tw-mb-[2px] tw-flex tw-items-center tw-gap-2 tw-text-[13px]">
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          비활성 항목 표시
+        </label>
+      </FilterBar>
 
       {/* 목록 */}
       <Card title={`청구 비용 목록 (${charges.length}건)`} style={{ marginTop: '1rem' }}>
@@ -257,37 +226,37 @@ export default function VendorChargesPage() {
           <p style={{ color: '#666' }}>등록된 항목이 없습니다.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>유형</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>품명</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>수량</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>단가</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>금액</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>비고</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>상태</th>
-                  {isAdmin && <th style={{ padding: '0.75rem', borderBottom: '2px solid #ddd' }}>관리</th>}
+                <tr>
+                  <th>거래처</th>
+                  <th>유형</th>
+                  <th>품명</th>
+                  <th className="cell-num">수량</th>
+                  <th className="cell-num">단가</th>
+                  <th className="cell-num">금액</th>
+                  <th>비고</th>
+                  <th className="tw-text-center">상태</th>
+                  {isAdmin && <th>관리</th>}
                 </tr>
               </thead>
               <tbody>
                 {charges.map((charge) => (
                   <tr key={charge.charge_id} style={{ opacity: charge.is_active ? 1 : 0.5 }}>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                    <td>
                       {vendors.find(v => v.vendor === charge.vendor_id)?.name || charge.vendor_id}
                     </td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{charge.charge_type}</td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{charge.item_name}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{formatNumber(charge.qty)}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>₩{formatNumber(charge.unit_price)}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold' }}>₩{formatNumber(charge.amount)}</td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>{charge.remark || '-'}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>
+                    <td>{charge.charge_type}</td>
+                    <td>{charge.item_name}</td>
+                    <td className="cell-num">{formatNumber(charge.qty)}</td>
+                    <td className="cell-num">₩{formatNumber(charge.unit_price)}</td>
+                    <td className="cell-num">₩{formatNumber(charge.amount)}</td>
+                    <td>{charge.remark || '-'}</td>
+                    <td className="tw-text-center">
                       {charge.is_active ? '✅' : '❌'}
                     </td>
                     {isAdmin && (
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                      <td>
                         <div style={{ display: 'flex', gap: '0.25rem' }}>
                           <button
                             onClick={() => handleEdit(charge)}
@@ -365,7 +334,7 @@ export default function VendorChargesPage() {
               <select
                 value={editingCharge.vendor_id}
                 onChange={(e) => handleChargeChange('vendor_id', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               >
                 <option value="">선택하세요</option>
                 {vendors.map((v) => (
@@ -381,7 +350,7 @@ export default function VendorChargesPage() {
               <select
                 value={editingCharge.charge_type}
                 onChange={(e) => handleChargeChange('charge_type', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               >
                 <option value="기타">기타</option>
                 <option value="월정액">월정액</option>
@@ -395,7 +364,7 @@ export default function VendorChargesPage() {
                 type="text"
                 value={editingCharge.item_name}
                 onChange={(e) => handleChargeChange('item_name', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
                 placeholder="예: 보관비 (11월)"
               />
             </div>
@@ -407,7 +376,7 @@ export default function VendorChargesPage() {
                   type="number"
                   value={editingCharge.qty}
                   onChange={(e) => handleChargeChange('qty', Number(e.target.value))}
-                  style={inputStyle}
+                  className="ui-control"
                 />
               </div>
               <div>
@@ -416,7 +385,7 @@ export default function VendorChargesPage() {
                   type="number"
                   value={editingCharge.unit_price}
                   onChange={(e) => handleChargeChange('unit_price', Number(e.target.value))}
-                  style={inputStyle}
+                  className="ui-control"
                 />
               </div>
               <div>
@@ -425,7 +394,7 @@ export default function VendorChargesPage() {
                   type="number"
                   value={editingCharge.amount}
                   onChange={(e) => handleChargeChange('amount', Number(e.target.value))}
-                  style={{ ...inputStyle, backgroundColor: '#f5f5f5' }}
+                  className="ui-control"
                 />
               </div>
             </div>
@@ -436,7 +405,7 @@ export default function VendorChargesPage() {
                 type="text"
                 value={editingCharge.remark}
                 onChange={(e) => handleChargeChange('remark', e.target.value)}
-                style={inputStyle}
+                className="ui-control"
               />
             </div>
 

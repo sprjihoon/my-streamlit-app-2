@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
@@ -287,9 +288,7 @@ export default function WorkLogPage() {
 
   return (
     <div style={{ padding: '1rem' }}>
-      <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        작업일지
-      </h1>
+      <PageHeader title="작업일지" />
 
       {message && (
         <Alert 
@@ -524,44 +523,44 @@ export default function WorkLogPage() {
           <p style={{ color: '#666' }}>작업일지가 없습니다.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>날짜</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>업체명</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>작업</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>수량</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>단가</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>합계</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>작성자</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>출처</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>저장시간</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>수정자</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>수정시간</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #ddd' }}>작업</th>
+                <tr>
+                  <th>날짜</th>
+                  <th>업체명</th>
+                  <th>작업</th>
+                  <th className="cell-num">수량</th>
+                  <th className="cell-num">단가</th>
+                  <th className="cell-num">합계</th>
+                  <th>작성자</th>
+                  <th>출처</th>
+                  <th>저장시간</th>
+                  <th>수정자</th>
+                  <th>수정시간</th>
+                  <th className="tw-text-center">작업</th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((log) => (
-                  <tr key={log.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '0.5rem' }}>{log.날짜 || '-'}</td>
-                    <td style={{ padding: '0.5rem', fontWeight: '500' }}>{log.업체명 || '-'}</td>
-                    <td style={{ padding: '0.5rem' }}>{log.분류 || '-'}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right' }}>{log.수량?.toLocaleString() || '-'}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right' }}>{formatPrice(log.단가)}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: '600', color: '#16a34a' }}>
+                  <tr key={log.id}>
+                    <td>{log.날짜 || '-'}</td>
+                    <td>{log.업체명 || '-'}</td>
+                    <td>{log.분류 || '-'}</td>
+                    <td className="cell-num">{log.수량?.toLocaleString() || '-'}</td>
+                    <td className="cell-num">{formatPrice(log.단가)}</td>
+                    <td className="cell-num">
                       {formatPrice(log.합계)}
                     </td>
-                    <td style={{ padding: '0.5rem' }}>{log.작성자 || '-'}</td>
-                    <td style={{ padding: '0.5rem' }}>{getSourceBadge(log.출처)}</td>
-                    <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
+                    <td>{log.작성자 || '-'}</td>
+                    <td>{getSourceBadge(log.출처)}</td>
+                    <td>
                       {formatDateTime(log.저장시간)}
                     </td>
-                    <td style={{ padding: '0.5rem' }}>{log.수정자 || '-'}</td>
-                    <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666' }}>
+                    <td>{log.수정자 || '-'}</td>
+                    <td>
                       {formatDateTime(log.수정시간)}
                     </td>
-                    <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                    <td className="tw-text-center">
                       <button
                         onClick={() => handleEdit(log)}
                         style={{

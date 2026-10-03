@@ -14,15 +14,6 @@ import {
   type OverseasSavedAddressPayload,
 } from '@/lib/api';
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -153,15 +144,15 @@ export default function OverseasRecipientsPage() {
         {showForm && (
           <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid var(--border)', borderRadius: 8 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <label>별칭<input style={inputStyle} value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))} /></label>
-              <label>국가코드<input style={inputStyle} value={form.countrycd} onChange={(e) => setForm((p) => ({ ...p, countrycd: e.target.value.toUpperCase() }))} /></label>
-              <label>이름(영문)<input style={inputStyle} value={form.recipient_name} onChange={(e) => setForm((p) => ({ ...p, recipient_name: e.target.value }))} /></label>
-              <label>전화<input style={inputStyle} value={form.recipient_phone || ''} onChange={(e) => setForm((p) => ({ ...p, recipient_phone: e.target.value }))} /></label>
-              <label>이메일<input style={inputStyle} value={form.recipient_email || ''} onChange={(e) => setForm((p) => ({ ...p, recipient_email: e.target.value }))} /></label>
-              <label>우편번호<input style={inputStyle} value={form.zipcode || ''} onChange={(e) => setForm((p) => ({ ...p, zipcode: e.target.value }))} /></label>
-              <label>주/도<input style={inputStyle} value={form.addr1 || ''} onChange={(e) => setForm((p) => ({ ...p, addr1: e.target.value }))} /></label>
-              <label>시/군<input style={inputStyle} value={form.addr2 || ''} onChange={(e) => setForm((p) => ({ ...p, addr2: e.target.value }))} /></label>
-              <label style={{ gridColumn: '1 / -1' }}>상세주소<input style={inputStyle} value={form.addr3} onChange={(e) => setForm((p) => ({ ...p, addr3: e.target.value }))} /></label>
+              <label>별칭<input className="ui-control" value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))} /></label>
+              <label>국가코드<input className="ui-control" value={form.countrycd} onChange={(e) => setForm((p) => ({ ...p, countrycd: e.target.value.toUpperCase() }))} /></label>
+              <label>이름(영문)<input className="ui-control" value={form.recipient_name} onChange={(e) => setForm((p) => ({ ...p, recipient_name: e.target.value }))} /></label>
+              <label>전화<input className="ui-control" value={form.recipient_phone || ''} onChange={(e) => setForm((p) => ({ ...p, recipient_phone: e.target.value }))} /></label>
+              <label>이메일<input className="ui-control" value={form.recipient_email || ''} onChange={(e) => setForm((p) => ({ ...p, recipient_email: e.target.value }))} /></label>
+              <label>우편번호<input className="ui-control" value={form.zipcode || ''} onChange={(e) => setForm((p) => ({ ...p, zipcode: e.target.value }))} /></label>
+              <label>주/도<input className="ui-control" value={form.addr1 || ''} onChange={(e) => setForm((p) => ({ ...p, addr1: e.target.value }))} /></label>
+              <label>시/군<input className="ui-control" value={form.addr2 || ''} onChange={(e) => setForm((p) => ({ ...p, addr2: e.target.value }))} /></label>
+              <label style={{ gridColumn: '1 / -1' }}>상세주소<input className="ui-control" value={form.addr3} onChange={(e) => setForm((p) => ({ ...p, addr3: e.target.value }))} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <input type="checkbox" checked={!!form.is_default} onChange={(e) => setForm((p) => ({ ...p, is_default: e.target.checked }))} />
                 기본 수취인

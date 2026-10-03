@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/Card';
@@ -229,7 +230,7 @@ export default function UploadPage() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: '1rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>원본 데이터 업로드</h1>
+      <PageHeader title="원본 데이터 업로드" />
 
       {!isAdmin && (
         <Alert type="error" message="업로드 권한이 없습니다. 관리자만 업로드할 수 있습니다." onClose={() => {}} />

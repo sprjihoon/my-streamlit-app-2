@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
@@ -480,11 +481,9 @@ export default function LeavePage() {
   };
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '960px' }}>
+    <div>
       <div style={{ marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0, lineHeight: 1.3 }}>
-          연월차 관리
-        </h1>
+        <PageHeader title="연월차 관리" />
         <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
           근로기준법 기준 | 1일 = 7시간 (10:00~18:00)
         </p>
@@ -786,32 +785,32 @@ export default function LeavePage() {
               <p style={{ color: '#6c757d', fontSize: '0.875rem' }}>신청 내역이 없습니다.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ borderBottom: '2px solid #dee2e6' }}>
+                    <tr>
                       {['#', '종류', '기간', '일수', '사유', '상태', '결재자', ''].map(h => (
-                        <th key={h} style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {requests.map(r => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                        <td style={{ padding: '0.6rem 0.5rem', color: '#6c757d' }}>#{r.id}</td>
-                        <td style={{ padding: '0.6rem 0.5rem', whiteSpace: 'nowrap' }}>{r.leave_type}</td>
-                        <td style={{ padding: '0.6rem 0.5rem', whiteSpace: 'nowrap' }}>
+                      <tr key={r.id}>
+                        <td>#{r.id}</td>
+                        <td>{r.leave_type}</td>
+                        <td>
                           {r.start_date === r.end_date ? r.start_date : `${r.start_date} ~ ${r.end_date}`}
                         </td>
-                        <td style={{ padding: '0.6rem 0.5rem', whiteSpace: 'nowrap' }}>{r.days_requested}일</td>
-                        <td style={{ padding: '0.6rem 0.5rem', color: '#495057' }}>{r.reason || '-'}</td>
-                        <td style={{ padding: '0.6rem 0.5rem' }}><StatusBadge status={r.status} /></td>
-                        <td style={{ padding: '0.6rem 0.5rem', fontSize: '0.75rem', color: '#6c757d' }}>
+                        <td>{r.days_requested}일</td>
+                        <td>{r.reason || '-'}</td>
+                        <td><StatusBadge status={r.status} /></td>
+                        <td>
                           {r.approvals ? r.approvals.split('|').map((a, i) => {
                             const [name, st] = a.split(':');
                             return <span key={i} style={{ marginRight: 4 }}>{name}: <StatusBadge status={st} /></span>;
                           }) : '-'}
                         </td>
-                        <td style={{ padding: '0.6rem 0.5rem' }}>
+                        <td>
                           {(() => {
                             const today = new Date().toISOString().slice(0, 10);
                             const isPast = r.end_date < today;
@@ -994,30 +993,30 @@ export default function LeavePage() {
                 <p style={{ color: '#6c757d', fontSize: '0.875rem' }}>처리한 결재 이력이 없습니다.</p>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <table>
                     <thead>
-                      <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                      <tr>
                         {['처리일시', '신청자', '종류', '기간', '일수', '결과', '사유/코멘트'].map(h => (
-                          <th key={h} style={{ padding: '0.5rem 0.6rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={h}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {approvalHistory.map(h => (
-                        <tr key={h.approval_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>
+                        <tr key={h.approval_id}>
+                          <td>
                             {h.acted_at ? new Date(h.acted_at).toLocaleDateString('ko-KR') : '-'}
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600 }}>
+                          <td>
                             {h.requester_nickname}
                             <span style={{ fontSize: '0.72rem', color: '#aaa', display: 'block' }}>{h.requester_department}</span>
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem' }}>{h.leave_type}</td>
-                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>
+                          <td>{h.leave_type}</td>
+                          <td>
                             {h.start_date === h.end_date ? h.start_date : `${h.start_date}~${h.end_date}`}
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem' }}>{h.days_requested}일</td>
-                          <td style={{ padding: '0.45rem 0.6rem' }}>
+                          <td>{h.days_requested}일</td>
+                          <td>
                             <StatusBadge status={h.status} />
                             {h.req_status === 'cancelled' && h.status === 'approved' && (
                               <span style={{ display: 'block', fontSize: '0.68rem', color: '#fd7e14', marginTop: '2px' }}>신청자 취소됨</span>
@@ -1064,34 +1063,34 @@ export default function LeavePage() {
             <div style={card}>
               <h4 style={{ marginBottom: '1rem' }}>{year}년 전체 직원 연차 현황</h4>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ borderBottom: '2px solid #dee2e6', backgroundColor: '#f8f9fa' }}>
+                    <tr>
                       {['이름', '팀', '직급', '총 부여', '사용', '잔여', '비고'].map(h => (
-                        <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {adminData.map((u) => (
-                      <tr key={u.user_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                        <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>{u.nickname}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', color: '#495057' }}>{u.department || '-'}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', color: '#495057' }}>{u.position || '-'}</td>
+                      <tr key={u.user_id}>
+                        <td>{u.nickname}</td>
+                        <td>{u.department || '-'}</td>
+                        <td>{u.position || '-'}</td>
                         {u.exempt ? (
                           <td colSpan={4} style={{ padding: '0.6rem 0.75rem', color: '#6c757d', fontStyle: 'italic' }}>연차 관리 제외</td>
                         ) : u.no_join_date ? (
-                          <td colSpan={4} style={{ padding: '0.6rem 0.75rem', color: '#dc3545' }}>입사일 미등록</td>
+                          <td colSpan={4}>입사일 미등록</td>
                         ) : (
                           <>
-                            <td style={{ padding: '0.6rem 0.75rem' }}>{u.total_days}일</td>
-                            <td style={{ padding: '0.6rem 0.75rem' }}>{u.used_days}일</td>
-                            <td style={{ padding: '0.6rem 0.75rem' }}>
+                            <td>{u.total_days}일</td>
+                            <td>{u.used_days}일</td>
+                            <td>
                               <span style={{ color: u.remaining_days < 0 ? '#dc3545' : u.remaining_days < 3 ? '#856404' : '#0a3622', fontWeight: 600 }}>
                                 {u.remaining_days}일
                               </span>
                             </td>
-                            <td style={{ padding: '0.6rem 0.75rem' }}>
+                            <td>
                               {u.remaining_days < 0 && <span style={{ fontSize: '0.75rem', color: '#dc3545' }}>마이너스</span>}
                             </td>
                           </>
@@ -1139,11 +1138,11 @@ export default function LeavePage() {
                 <p style={{ color: '#6c757d', fontSize: '0.875rem' }}>조건에 맞는 신청내역이 없습니다.</p>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <table>
                     <thead>
-                      <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #dee2e6' }}>
+                      <tr>
                         {['#', '신청자', '팀', '종류', '기간', '일수', '사유', '상태', '결재자', '취소정보', '신청일'].map(h => (
-                          <th key={h} style={{ padding: '0.5rem 0.6rem', textAlign: 'left', fontWeight: 600, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={h}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1154,20 +1153,20 @@ export default function LeavePage() {
                           backgroundColor: r.status === 'cancelled' ? '#fafafa' : r.status === 'rejected' ? '#fff8f8' : 'white',
                           opacity: r.status === 'cancelled' ? 0.75 : 1,
                         }}>
-                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>#{r.id}</td>
-                          <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.nickname}</td>
-                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>{r.department || '-'}</td>
-                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>{r.leave_type}</td>
-                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>
+                          <td>#{r.id}</td>
+                          <td>{r.nickname}</td>
+                          <td>{r.department || '-'}</td>
+                          <td>{r.leave_type}</td>
+                          <td>
                             {r.start_date === r.end_date ? r.start_date : `${r.start_date}~${r.end_date}`}
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem', whiteSpace: 'nowrap' }}>{r.days_requested}일</td>
+                          <td>{r.days_requested}일</td>
                           <td style={{ padding: '0.45rem 0.6rem', color: '#555', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                             title={r.reason || ''}>
                             {r.reason || '-'}
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem' }}><StatusBadge status={r.status} /></td>
-                          <td style={{ padding: '0.45rem 0.6rem', fontSize: '0.75rem', color: '#6c757d' }}>
+                          <td><StatusBadge status={r.status} /></td>
+                          <td>
                             {r.approvals ? r.approvals.split('|').map((a, i) => {
                               const [name, st] = a.split(':');
                               const color = st === 'approved' ? '#198754' : st === 'rejected' ? '#dc3545' : st === 'skipped' ? '#aaa' : '#6c757d';
@@ -1179,7 +1178,7 @@ export default function LeavePage() {
                               );
                             }) : <span style={{ color: '#ccc' }}>결재라인없음</span>}
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem', fontSize: '0.75rem' }}>
+                          <td>
                             {(r.status === 'cancelled' || r.status === 'cancel_requested') && (
                               <div style={{ color: '#e65100' }}>
                                 {r.cancelled_by && <div>취소: {r.cancelled_by}</div>}
@@ -1190,7 +1189,7 @@ export default function LeavePage() {
                             )}
                             {r.status !== 'cancelled' && r.status !== 'cancel_requested' && <span style={{ color: '#ccc' }}>-</span>}
                           </td>
-                          <td style={{ padding: '0.45rem 0.6rem', color: '#6c757d', whiteSpace: 'nowrap' }}>
+                          <td>
                             {new Date(r.created_at).toLocaleDateString('ko-KR')}
                           </td>
                         </tr>

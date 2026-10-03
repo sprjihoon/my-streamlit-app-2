@@ -112,7 +112,7 @@ export default function DomesticShippingListPage() {
                     <td>{item.price || '-'}</td>
                     <td>{statusLabel(item)}</td>
                     <td>{item.created_by}</td>
-                    <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <a className="btn btn-secondary" href={`/domestic-print/${item.id}`} target="_blank" rel="noreferrer">송장</a>
                       {item.status !== 'canceled' && (
                         <button type="button" className="btn btn-primary" style={{ marginLeft: 6 }} onClick={() => void handleCancel(item)}>접수 취소</button>

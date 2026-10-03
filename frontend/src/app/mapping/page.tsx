@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/Card';
@@ -409,8 +410,8 @@ export default function MappingPage() {
   const totalUnmatched = unmatchedAliases.reduce((sum, u) => sum + u.count, 0);
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>거래처 매핑 관리</h1>
+    <div>
+      <PageHeader title="거래처 매핑 관리" />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
@@ -638,28 +639,28 @@ export default function MappingPage() {
         
         {showMappingSummary && (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd', whiteSpace: 'nowrap' }}>
+                <tr>
+                  <th>
                     거래처
                   </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd', whiteSpace: 'nowrap' }}>
+                  <th>
                     상태
                   </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <th>
                     입고전표
                   </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <th>
                     배송통계
                   </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <th>
                     우체국접수
                   </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <th>
                     우체국반품
                   </th>
-                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>
+                  <th>
                     작업일지
                   </th>
                 </tr>
@@ -680,7 +681,7 @@ export default function MappingPage() {
                       }}
                       onClick={() => handleSelectVendor(m.vendor)}
                     >
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', fontWeight: 500 }}>
+                      <td>
                         {m.vendor}
                         {m.name && m.name !== m.vendor && (
                           <span style={{ color: '#666', fontWeight: 'normal', marginLeft: '0.5rem' }}>
@@ -688,22 +689,22 @@ export default function MappingPage() {
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                      <td className="tw-text-center">
                         {m.active === 'YES' ? '🟢' : '⚪'}
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.inbound_slip.length ? '#333' : '#ccc' }}>
+                      <td>
                         {m.inbound_slip.length > 0 ? m.inbound_slip.join(', ') : '-'}
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.shipping_stats.length ? '#333' : '#ccc' }}>
+                      <td>
                         {m.shipping_stats.length > 0 ? m.shipping_stats.join(', ') : '-'}
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.kpost_in.length ? '#333' : '#ccc' }}>
+                      <td>
                         {m.kpost_in.length > 0 ? m.kpost_in.join(', ') : '-'}
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.kpost_ret.length ? '#333' : '#ccc' }}>
+                      <td>
                         {m.kpost_ret.length > 0 ? m.kpost_ret.join(', ') : '-'}
                       </td>
-                      <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: m.work_log.length ? '#333' : '#ccc' }}>
+                      <td>
                         {m.work_log.length > 0 ? m.work_log.join(', ') : '-'}
                       </td>
                     </tr>
@@ -728,16 +729,16 @@ export default function MappingPage() {
             <p style={{ color: '#ff9800', marginBottom: '1rem' }}>
               미매칭 alias {totalUnmatched.toLocaleString()}건 발견
             </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                <tr>
+                  <th>
                     파일 타입
                   </th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                  <th>
                     미매칭 별칭
                   </th>
-                  <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>
+                  <th className="cell-num">
                     건수
                   </th>
                 </tr>
@@ -745,14 +746,14 @@ export default function MappingPage() {
               <tbody>
                 {unmatchedAliases.map((item) => (
                   <tr key={item.file_type}>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                    <td>
                       {FILE_TYPE_NAMES[item.file_type] || item.file_type}
                     </td>
-                    <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', fontSize: '0.875rem', color: '#666' }}>
+                    <td>
                       {item.aliases.slice(0, 5).join(', ')}
                       {item.aliases.length > 5 && ` ... 외 ${item.aliases.length - 5}건`}
                     </td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                    <td className="cell-num">
                       {item.count.toLocaleString()}
                     </td>
                   </tr>

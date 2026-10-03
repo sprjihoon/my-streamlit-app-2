@@ -1,9 +1,11 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
+import { KpiStrip } from '@/components/data';
 import { calculateInvoice, getVendors, Vendor } from '@/lib/api';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -315,8 +317,8 @@ export default function InvoicePage() {
   }
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>인보이스 계산</h1>
+    <div>
+      <PageHeader title="인보이스 계산" />
 
       {!isAdmin && (
         <Alert type="error" message="계산 권한이 없습니다. 관리자만 인보이스를 계산할 수 있습니다." onClose={() => {}} />
@@ -325,32 +327,14 @@ export default function InvoicePage() {
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
       {/* 거래처 통계 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
-        <Card>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{totalCount}개</div>
-            <div style={{ color: '#666' }}>전체 거래처</div>
-          </div>
-        </Card>
-        <Card>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'green' }}>{activeCount}개</div>
-            <div style={{ color: '#666' }}>🟢 활성</div>
-          </div>
-        </Card>
-        <Card>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#999' }}>{inactiveCount}개</div>
-            <div style={{ color: '#666' }}>⚪ 비활성</div>
-          </div>
-        </Card>
-        <Card>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2196F3' }}>{selectedVendors.length}개</div>
-            <div style={{ color: '#666' }}>선택됨</div>
-          </div>
-        </Card>
-      </div>
+      <KpiStrip
+        items={[
+          { label: '전체 거래처', value: `${totalCount}개` },
+          { label: '활성', value: <span className="tw-text-tillion-success">{activeCount}개</span> },
+          { label: '비활성', value: `${inactiveCount}개` },
+          { label: '선택됨', value: `${selectedVendors.length}개` },
+        ]}
+      />
 
       {/* 모드 선택 */}
       <Card style={{ marginBottom: '1rem' }}>
@@ -667,24 +651,20 @@ export default function InvoicePage() {
               </div>
 
               <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
-                      <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                      <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>결과</th>
-                      <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>소요시간</th>
+                    <tr>
+                      <th>거래처</th>
+                      <th>결과</th>
+                      <th className="cell-num">소요시간</th>
                     </tr>
                   </thead>
                   <tbody>
                     {batchLogs.map((log, idx) => (
-                      <tr key={idx} style={{
-                        backgroundColor: log.status === 'processing' ? '#fff3e0' :
-                          log.status === 'success' ? '#e8f5e9' :
-                            log.status === 'error' ? '#ffebee' : 'transparent'
-                      }}>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{log.vendor}</td>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{log.message}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
+                      <tr key={idx}>
+                        <td>{log.vendor}</td>
+                        <td>{log.message}</td>
+                        <td className="cell-num">
                           {log.duration ? `${log.duration.toFixed(2)}s` : '-'}
                         </td>
                       </tr>
@@ -756,31 +736,31 @@ export default function InvoicePage() {
                 {result.items.length === 0 ? (
                   <p style={{ color: '#666' }}>계산된 항목이 없습니다.</p>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table>
                     <thead>
-                      <tr style={{ backgroundColor: '#f5f5f5' }}>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>항목</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>수량</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>단가</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '2px solid #ddd' }}>금액</th>
-                        <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>비고</th>
+                      <tr>
+                        <th>항목</th>
+                        <th className="cell-num">수량</th>
+                        <th className="cell-num">단가</th>
+                        <th className="cell-num">금액</th>
+                        <th>비고</th>
                       </tr>
                     </thead>
                     <tbody>
                       {result.items.map((item, i) => (
-                        <tr key={i} style={{ backgroundColor: item.금액 < 0 ? '#fff5f5' : 'transparent' }}>
-                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{item.항목}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.수량 < 0 ? '#dc2626' : 'inherit' }}>{formatNumber(item.수량)}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.단가 < 0 ? '#dc2626' : 'inherit' }}>₩{formatNumber(item.단가)}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: item.금액 < 0 ? '#dc2626' : 'inherit', fontWeight: item.금액 < 0 ? 'bold' : 'normal' }}>₩{formatNumber(item.금액)}</td>
-                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee', color: '#666' }}>{item.비고 || '-'}</td>
+                        <tr key={i}>
+                          <td>{item.항목}</td>
+                          <td className="cell-num">{formatNumber(item.수량)}</td>
+                          <td className="cell-num">₩{formatNumber(item.단가)}</td>
+                          <td className="cell-num">₩{formatNumber(item.금액)}</td>
+                          <td>{item.비고 || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr style={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>
-                        <td colSpan={3} style={{ padding: '0.75rem' }}>합계</td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>₩{formatNumber(result.total_amount)}</td>
+                      <tr>
+                        <td colSpan={3}>합계</td>
+                        <td className="cell-num">₩{formatNumber(result.total_amount)}</td>
                         <td></td>
                       </tr>
                     </tfoot>

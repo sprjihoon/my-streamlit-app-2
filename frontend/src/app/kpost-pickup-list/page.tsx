@@ -44,15 +44,6 @@ const TREAT_STATUS_OPTIONS = [
   { code: '신청취소',  label: '신청취소' },
 ];
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -362,16 +353,16 @@ export default function KpostPickupListPage() {
         >
           <label>
             수거일 (시작)
-            <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <input type="date" className="ui-control" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           </label>
           <label>
             수거일 (종료)
-            <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            <input type="date" className="ui-control" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </label>
           <label>
             수취인
             <input
-              style={inputStyle}
+              className="ui-control"
               value={recipientFilter}
               onChange={(e) => setRecipientFilter(e.target.value)}
               placeholder="이름 입력 또는 선택"
@@ -387,7 +378,7 @@ export default function KpostPickupListPage() {
           <label>
             접수자
             <input
-              style={inputStyle}
+              className="ui-control"
               value={createdByFilter}
               onChange={(e) => setCreatedByFilter(e.target.value)}
               placeholder="이름 입력 또는 선택"
@@ -403,7 +394,7 @@ export default function KpostPickupListPage() {
           <label>
             배송상태
             <select
-              style={inputStyle}
+              className="ui-control"
               value={treatStatusFilter}
               onChange={(e) => setTreatStatusFilter(e.target.value)}
             >
@@ -451,7 +442,7 @@ export default function KpostPickupListPage() {
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
                   페이지당
                   <select
-                    style={{ ...inputStyle, width: 'auto', padding: '0.25rem 0.5rem' }}
+                    className="ui-control"
                     value={pageSize}
                     onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
                   >
@@ -465,7 +456,7 @@ export default function KpostPickupListPage() {
                   <thead>
                     <tr>
                       {isAdmin && (
-                        <th style={{ width: '1%', whiteSpace: 'nowrap' }}>
+                        <th>
                           <input
                             type="checkbox"
                             title="전체 선택/해제"
@@ -486,7 +477,7 @@ export default function KpostPickupListPage() {
                       <SortTh col="treat_status"   label="상태" />
                       <SortTh col="created_by"     label="접수자" />
                       <SortTh col="canceled_by"    label="취소자" />
-                      <th style={{ whiteSpace: 'nowrap', width: '1%' }}></th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -522,7 +513,7 @@ export default function KpostPickupListPage() {
                             [{item.zipcode}] {item.addr1} {item.addr2}
                           </td>
                           <td>{item.pickup_date}</td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
+                          <td>
                             {boxLabel(item.box_size)}
                           </td>
                           <td style={{ maxWidth: '160px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.82rem', color: 'var(--text-muted, #6b7280)' }}>
@@ -559,7 +550,7 @@ export default function KpostPickupListPage() {
                               ? (<>{item.canceled_by}<div className="text-muted" style={{ fontSize: '0.8rem' }}>{item.canceled_at?.replace('T', ' ').slice(0, 16)}</div></>)
                               : <span className="text-muted">-</span>}
                           </td>
-                          <td style={{ whiteSpace: 'nowrap', verticalAlign: 'middle', width: '1%' }}>
+                          <td>
                             <div style={{ display: 'flex', gap: '0.3rem' }}>
                               {canCancel(item) && (
                                 <button type="button" className="btn btn-secondary" onClick={() => handleCancel(item.id, item.tracking_no)}>

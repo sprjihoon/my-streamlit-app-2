@@ -136,7 +136,7 @@ export default function BillingAnalyticsPage() {
   );
 
   return (
-    <div style={{ padding: '1.25rem', maxWidth: 1100 }}>
+    <div>
       {/* 헤더 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div>
@@ -282,27 +282,27 @@ export default function BillingAnalyticsPage() {
             data.unpaid_list.length === 0
               ? <p style={{ color: '#16a34a', fontSize: '0.875rem' }}>✅ 미수금이 없습니다.</p>
               : <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ background: '#fef2f2', borderBottom: '2px solid #fca5a5' }}>
+                    <tr>
                       {['거래처', '청구일', '납기일', '청구금액', '입금액', '미수금액', '상태'].map(h => (
-                        <th key={h} style={{ padding: '0.45rem 0.6rem', textAlign: 'left', color: '#9f1239', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {data.unpaid_list.map(r => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid #fee2e2', background: r.overdue ? '#fff5f5' : 'white' }}>
-                        <td style={{ padding: '0.4rem 0.6rem', fontWeight: 600 }}>
+                      <tr key={r.id}>
+                        <td>
                           {r.client_name}
                           {r.overdue && <span style={{ marginLeft: 4, fontSize: '0.65rem', background: '#dc2626', color: 'white', padding: '1px 5px', borderRadius: 3 }}>연체</span>}
                         </td>
-                        <td style={{ padding: '0.4rem 0.6rem', color: '#6b7280' }}>{r.invoice_date}</td>
-                        <td style={{ padding: '0.4rem 0.6rem', color: r.overdue ? '#dc2626' : '#6b7280', fontWeight: r.overdue ? 700 : 400 }}>{r.due_date || '-'}</td>
-                        <td style={{ padding: '0.4rem 0.6rem' }}>{r.total_amount.toLocaleString()}</td>
-                        <td style={{ padding: '0.4rem 0.6rem', color: '#16a34a' }}>{r.paid_amount.toLocaleString()}</td>
-                        <td style={{ padding: '0.4rem 0.6rem', color: '#dc2626', fontWeight: 700 }}>{r.unpaid_amount.toLocaleString()}</td>
-                        <td style={{ padding: '0.4rem 0.6rem' }}>
+                        <td>{r.invoice_date}</td>
+                        <td>{r.due_date || '-'}</td>
+                        <td>{r.total_amount.toLocaleString()}</td>
+                        <td>{r.paid_amount.toLocaleString()}</td>
+                        <td>{r.unpaid_amount.toLocaleString()}</td>
+                        <td>
                           <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 700, background: r.status === '부분납' ? '#fff7ed' : '#fef2f2', color: r.status === '부분납' ? '#ea580c' : '#dc2626' }}>
                             {r.status}
                           </span>
@@ -312,8 +312,8 @@ export default function BillingAnalyticsPage() {
                   </tbody>
                   <tfoot>
                     <tr style={{ background: '#fef2f2', borderTop: '2px solid #fca5a5' }}>
-                      <td colSpan={5} style={{ padding: '0.45rem 0.6rem', fontWeight: 700, color: '#9f1239' }}>합계</td>
-                      <td style={{ padding: '0.45rem 0.6rem', fontWeight: 700, color: '#dc2626' }}>
+                      <td colSpan={5}>합계</td>
+                      <td>
                         {data.unpaid_list.reduce((s, r) => s + r.unpaid_amount, 0).toLocaleString()}원
                       </td>
                       <td />

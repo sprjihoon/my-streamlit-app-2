@@ -14,15 +14,6 @@ import {
   type SavedRecipientPayload,
 } from '@/lib/api';
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -230,7 +221,7 @@ export default function SavedRecipientsPage() {
               <label style={{ gridColumn: '1 / -1' }}>
                 별칭 (예: 본사, 경기창고)
                 <input
-                  style={inputStyle}
+                  className="ui-control"
                   value={form.label}
                   placeholder="별칭 입력"
                   onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
@@ -239,7 +230,7 @@ export default function SavedRecipientsPage() {
               <label>
                 수취인 이름
                 <input
-                  style={inputStyle}
+                  className="ui-control"
                   value={form.recipient_name}
                   onChange={(e) => setForm((p) => ({ ...p, recipient_name: e.target.value }))}
                 />
@@ -247,7 +238,7 @@ export default function SavedRecipientsPage() {
               <label>
                 연락처
                 <input
-                  style={inputStyle}
+                  className="ui-control"
                   value={form.recipient_phone}
                   placeholder="01012345678"
                   onChange={(e) => setForm((p) => ({ ...p, recipient_phone: e.target.value }))}
@@ -257,11 +248,11 @@ export default function SavedRecipientsPage() {
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
                   <label style={{ flex: '0 0 120px' }}>
                     우편번호
-                    <input style={inputStyle} value={form.zipcode} readOnly />
+                    <input className="ui-control" value={form.zipcode} readOnly />
                   </label>
                   <label style={{ flex: 1 }}>
                     도로명 주소
-                    <input style={inputStyle} value={form.addr1} readOnly />
+                    <input className="ui-control" value={form.addr1} readOnly />
                   </label>
                   <button type="button" className="btn btn-secondary" onClick={openPostcode}>
                     주소 검색
@@ -271,7 +262,7 @@ export default function SavedRecipientsPage() {
               <label style={{ gridColumn: '1 / -1' }}>
                 상세주소 (동·호·층)
                 <input
-                  style={inputStyle}
+                  className="ui-control"
                   value={form.addr2}
                   placeholder="예: 3층, 201호, 제3층"
                   onChange={(e) => setForm((p) => ({ ...p, addr2: e.target.value }))}
