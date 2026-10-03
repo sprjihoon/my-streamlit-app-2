@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
+import Alert from '@/components/Alert';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 
@@ -78,62 +79,38 @@ export function PasswordChangeModal({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent
-        aria-describedby={undefined}
-        className="tw-w-[350px] tw-rounded-[8px] tw-p-8"
+        className="ui-dialog"
+        overlayClassName="tw-bg-[rgba(16,18,32,0.48)]"
         onEscapeKeyDown={(event) => event.preventDefault()}
       >
-        <DialogTitle asChild>
-          <h3 className="tw-mb-4 tw-flex tw-items-center tw-gap-2">
-            <KeyRound size={18} className="tw-text-tillion-brand" /> 비밀번호 변경
-          </h3>
-        </DialogTitle>
+        <div className="ui-dialog-header">
+          <DialogTitle asChild>
+            <h3>
+              <KeyRound size={16} className="tw-text-tillion-brand" /> 비밀번호 변경
+            </h3>
+          </DialogTitle>
+          <DialogDescription>현재 비밀번호를 확인한 뒤 새 비밀번호를 저장합니다.</DialogDescription>
+        </div>
 
-        {passwordError && (
-          <div className="tw-mb-4 tw-rounded tw-bg-[#ffebee] tw-p-2 tw-text-[0.875rem] tw-text-[#c62828]">
-            {passwordError}
-          </div>
-        )}
+        <div className="ui-dialog-body">
+          {passwordError && <Alert type="error">{passwordError}</Alert>}
+          {passwordSuccess && <Alert type="success">{passwordSuccess}</Alert>}
 
-        {passwordSuccess && (
-          <div className="tw-mb-4 tw-rounded tw-bg-[#e8f5e9] tw-p-2 tw-text-[0.875rem] tw-text-[#2e7d32]">
-            {passwordSuccess}
-          </div>
-        )}
+          <Field label="현재 비밀번호" required>
+            <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+          </Field>
+          <Field label="새 비밀번호" required hint="4자 이상">
+            <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          </Field>
+          <Field label="새 비밀번호 확인" required>
+            <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+          </Field>
+        </div>
 
-        <Field label="현재 비밀번호">
-          <Input
-            tone="plain"
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            className="tw-border-[#ddd] tw-p-2"
-          />
-        </Field>
-
-        <Field label="새 비밀번호">
-          <Input
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            className="tw-border-[#ddd] tw-p-2"
-          />
-        </Field>
-
-        <Field label="새 비밀번호 확인">
-          <Input
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            className="tw-border-[#ddd] tw-p-2"
-          />
-        </Field>
-
-        <div className="tw-flex tw-gap-2">
-          <Button variant="changeSubmit" onClick={handleChangePassword} disabled={changingPassword}>
+        <div className="ui-dialog-actions">
+          <Button variant="secondary" onClick={onClose}>취소</Button>
+          <Button variant="primary" onClick={handleChangePassword} disabled={changingPassword}>
             {changingPassword ? '변경 중...' : '변경'}
-          </Button>
-          <Button variant="cancel" onClick={onClose}>
-            취소
           </Button>
         </div>
       </DialogContent>

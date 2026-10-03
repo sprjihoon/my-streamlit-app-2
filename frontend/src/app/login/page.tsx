@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SAVED_ID_KEY = 'saved_username';
@@ -78,97 +80,48 @@ export default function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        padding: '1rem',
-      }}
-    >
-      <Card style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', fontWeight: 700 }}>인보이스 관리 시스템</h1>
-          <p style={{ color: '#666' }}>로그인이 필요합니다</p>
+    <div className="login-shell">
+      <form className="login-panel" onSubmit={handleLogin}>
+        <div className="login-brand">
+          <div className="sidebar-mark" aria-hidden>T</div>
+          <div className="login-brand-copy">
+            <h1>틸리언</h1>
+            <p>그룹웨어에 로그인합니다</p>
+          </div>
         </div>
 
         {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              아이디
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="아이디 입력"
-              autoComplete="username"
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              비밀번호
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="비밀번호 입력"
-              autoComplete="current-password"
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-              }}
-            />
-          </div>
-
-          {/* 아이디 저장 */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', userSelect: 'none' }}>
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#4CAF50' }}
-              />
-              <span style={{ fontSize: '0.875rem', color: '#555' }}>아이디 저장</span>
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              backgroundColor: loading ? '#ccc' : '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              cursor: loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {loading ? '로그인 중...' : '로그인'}
-          </button>
-        </form>
-
-      </Card>
+        <Field label="아이디" required>
+          <Input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="아이디 입력"
+            autoComplete="username"
+          />
+        </Field>
+        <Field label="비밀번호" required>
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="비밀번호 입력"
+            autoComplete="current-password"
+          />
+        </Field>
+        <label className="login-remember">
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+          />
+          아이디 저장
+        </label>
+        <Button type="submit" variant="primary" disabled={loading} className="tw-w-full">
+          {loading ? '로그인 중...' : '로그인'}
+        </Button>
+      </form>
     </div>
   );
 }

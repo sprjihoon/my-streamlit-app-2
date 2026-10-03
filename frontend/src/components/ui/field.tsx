@@ -3,19 +3,27 @@ import { cn } from '@/lib/utils';
 
 export function Field({
   label,
+  hint,
+  error,
+  required,
   className,
-  labelClassName,
   children,
 }: {
   label: string;
+  hint?: string;
+  error?: string;
+  required?: boolean;
   className?: string;
-  labelClassName?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn('tw-mb-4', className)}>
-      <label className={cn('tw-mb-2 tw-block tw-font-medium', labelClassName)}>{label}</label>
+    <div className={cn('form-group', className)}>
+      <label>
+        {label}
+        {required ? <span className="field-required">*</span> : null}
+      </label>
       {children}
+      {error ? <p className="field-error">{error}</p> : hint ? <p className="field-help">{hint}</p> : null}
     </div>
   );
 }
