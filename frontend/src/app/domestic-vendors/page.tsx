@@ -225,6 +225,8 @@ export default function DomesticVendorsPage() {
             addrError={fieldErrors.sender_addr1}
             disabled={saving}
             onDetail={(value) => setField('sender_addr2', value)}
+            onZip={(value) => setField('sender_zip', value)}
+            onAddr={(value) => setField('sender_addr1', value)}
             onPick={(picked) => {
               setForm((prev) => ({ ...prev, sender_zip: picked.zip, sender_addr1: picked.addr1 }));
               dropError('sender_zip');

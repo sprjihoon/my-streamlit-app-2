@@ -11,11 +11,13 @@ import {
   createDomesticShipping,
   getDomesticMeta,
   listDomesticVendors,
+  listSavedRecipients,
   previewDomesticShipping,
   type DomesticBoxSize,
   type DomesticPreview,
   type DomesticSubmitPayload,
   type DomesticVendor,
+  type SavedRecipient,
 } from '@/lib/api';
 import {
   classifyDomesticError,
@@ -68,6 +70,8 @@ export default function DomesticShippingPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [liveReady, setLiveReady] = useState(false);
   const [vendors, setVendors] = useState<DomesticVendor[]>([]);
+  const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
+  const [selectedSavedId, setSelectedSavedId] = useState('');
   const [boxSizes, setBoxSizes] = useState<DomesticBoxSize[]>([]);
   const [form, setForm] = useState<DomesticSubmitPayload>(emptyForm());
   const [preview, setPreview] = useState<DomesticPreview | null>(null);
@@ -96,13 +100,15 @@ export default function DomesticShippingPage() {
     }
     (async () => {
       try {
-        const [meta, vendorRes] = await Promise.all([
+        const [meta, vendorRes, savedRes] = await Promise.all([
           getDomesticMeta(stored),
           listDomesticVendors(stored),
+          listSavedRecipients(stored).catch(() => ({ items: [] as SavedRecipient[] })),
         ]);
         setLiveReady(meta.live_ready);
         setBoxSizes(meta.box_sizes || []);
         setVendors(vendorRes.items || []);
+        setSavedRecipients(savedRes.items || []);
         setForm((prev) => ({ ...prev, test_mode: !meta.live_ready }));
       } catch (err) {
         setBanner(classifyDomesticError(err, 'shipment'));
@@ -151,8 +157,29 @@ export default function DomesticShippingPage() {
 
   function setField(key: keyof DomesticSubmitPayload, value: string) {
     setPreview(null);
+    if (String(key).startsWith('recipient_')) setSelectedSavedId('');
     setForm((prev) => ({ ...prev, [key]: value }));
     dropError(key);
+  }
+
+  function applySavedRecipient(id: string) {
+    if (!id) {
+      setSelectedSavedId('');
+      return;
+    }
+    const saved = savedRecipients.find((item) => String(item.id) === id);
+    if (!saved) return;
+    setSelectedSavedId(id);
+    setPreview(null);
+    setForm((prev) => ({
+      ...prev,
+      ...(saved.recipient_name != null ? { recipient_name: saved.recipient_name } : {}),
+      ...(saved.recipient_phone != null ? { recipient_phone: saved.recipient_phone } : {}),
+      ...(saved.zipcode != null ? { recipient_zip: saved.zipcode } : {}),
+      ...(saved.addr1 != null ? { recipient_addr1: saved.addr1 } : {}),
+      ...(saved.addr2 != null ? { recipient_addr2: saved.addr2 } : {}),
+    }));
+    ['recipient_name', 'recipient_phone', 'recipient_zip', 'recipient_addr1'].forEach(dropError);
   }
 
   function setCount(key: 'goods_qty' | 'label_count', raw: string) {
@@ -169,6 +196,7 @@ export default function DomesticShippingPage() {
         ? { ...prev, recipient_zip: picked.zip, recipient_addr1: picked.addr1 }
         : { ...prev, print_sender_zip: picked.zip, print_sender_addr1: picked.addr1 }
     ));
+    if (prefix === 'recipient') setSelectedSavedId('');
     dropError(prefix === 'recipient' ? 'recipient_zip' : 'print_sender_zip');
     dropError(prefix === 'recipient' ? 'recipient_addr1' : 'print_sender_addr1');
   }
@@ -261,6 +289,7 @@ export default function DomesticShippingPage() {
     setResult(null);
     setPreview(null);
     setConfirmPreview(null);
+    setSelectedSavedId('');
     setBanner(null);
     setFieldErrors({});
     setForm((prev) => ({
@@ -355,6 +384,8 @@ export default function DomesticShippingPage() {
               addrError={fieldErrors.print_sender_addr1}
               disabled={locked}
               onDetail={(value) => setField('print_sender_addr2', value)}
+              onZip={(value) => setField('print_sender_zip', value)}
+              onAddr={(value) => setField('print_sender_addr1', value)}
               onPick={(picked) => pickAddress('print_sender', picked)}
               onError={(message) => setBanner({ kind: 'network', message })}
             />
@@ -362,6 +393,25 @@ export default function DomesticShippingPage() {
 
           <section className="domestic-block domestic-block-primary">
             <p className="domestic-section">받는 사람</p>
+            <div className="domestic-row">
+              <label className="domestic-field w-vendor" htmlFor="saved_recipient">
+                저장된 주소지
+                <select
+                  id="saved_recipient"
+                  value={selectedSavedId}
+                  disabled={locked || savedRecipients.length === 0}
+                  onChange={(event) => applySavedRecipient(event.target.value)}
+                >
+                  <option value="">
+                    {savedRecipients.length === 0 ? '저장된 주소지가 없습니다' : '선택하면 받는 사람만 채웁니다'}
+                  </option>
+                  {savedRecipients.map((item) => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <a className="btn btn-secondary" href="/saved-recipients">주소지 관리</a>
+            </div>
             <div className="domestic-row">
               <label className={`domestic-field w-name${fieldErrors.recipient_name ? ' is-invalid' : ''}`} htmlFor="recipient_name">
                 이름
@@ -385,6 +435,8 @@ export default function DomesticShippingPage() {
               addrError={fieldErrors.recipient_addr1}
               disabled={locked}
               onDetail={(value) => setField('recipient_addr2', value)}
+              onZip={(value) => setField('recipient_zip', value)}
+              onAddr={(value) => setField('recipient_addr1', value)}
               onPick={(picked) => pickAddress('recipient', picked)}
               onError={(message) => setBanner({ kind: 'network', message })}
             />

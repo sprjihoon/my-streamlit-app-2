@@ -15,6 +15,8 @@ export function AddressSearch({
   detailError,
   disabled,
   onDetail,
+  onZip,
+  onAddr,
   onPick,
   onError,
 }: {
@@ -29,17 +31,24 @@ export function AddressSearch({
   detailError?: string;
   disabled?: boolean;
   onDetail: (value: string) => void;
+  onZip: (value: string) => void;
+  onAddr: (value: string) => void;
   onPick: (value: { zip: string; addr1: string }) => void;
   onError: (message: string) => void;
 }) {
   const [searching, setSearching] = useState(false);
+  const [manual, setManual] = useState(false);
 
   async function search() {
     if (searching || disabled) return;
     setSearching(true);
     try {
-      await openDaumPostcode(onPick);
+      await openDaumPostcode((picked) => {
+        setManual(false);
+        onPick(picked);
+      });
     } catch (err) {
+      setManual(true);
       onError(err instanceof Error ? err.message : '주소 검색을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setSearching(false);
@@ -54,9 +63,10 @@ export function AddressSearch({
           <input
             id={zipId}
             value={zip}
-            readOnly
+            readOnly={!manual}
             aria-invalid={Boolean(zipError)}
             aria-describedby={zipError ? `${zipId}-error` : undefined}
+            onChange={(event) => onZip(event.target.value)}
           />
           {zipError ? <span className="domestic-field-error" id={`${zipId}-error`}>{zipError}</span> : null}
         </label>
@@ -65,15 +75,21 @@ export function AddressSearch({
           <input
             id={addrId}
             value={addr1}
-            readOnly
+            readOnly={!manual}
             aria-invalid={Boolean(addrError)}
             aria-describedby={addrError ? `${addrId}-error` : undefined}
+            onChange={(event) => onAddr(event.target.value)}
           />
           {addrError ? <span className="domestic-field-error" id={`${addrId}-error`}>{addrError}</span> : null}
         </label>
         <button type="button" className="btn btn-secondary" disabled={disabled || searching} onClick={() => void search()}>
           {searching ? '검색 준비...' : '주소 검색'}
         </button>
+        {manual ? null : (
+          <button type="button" className="btn btn-ghost" disabled={disabled} onClick={() => setManual(true)}>
+            직접 입력
+          </button>
+        )}
       </div>
       <label className={`domestic-field w-detail${detailError ? ' is-invalid' : ''}`} htmlFor={detailId}>
         상세주소
