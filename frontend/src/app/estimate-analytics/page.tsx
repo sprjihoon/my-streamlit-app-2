@@ -1,7 +1,10 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import { Loading } from '@/components/Loading';
+import { DateRangeControl, FilterBar } from '@/components/data';
+import { Button } from '@/components/ui/button';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -191,23 +194,10 @@ export default function EstimateAnalyticsPage() {
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    padding: '0.5rem 0.65rem', border: '1px solid #d1d5db', borderRadius: 8,
-    fontSize: '0.85rem', outline: 'none', background: '#fff',
-  };
-
   const btnStyle: React.CSSProperties = {
     padding: '0.5rem 1rem', border: 'none', borderRadius: 8,
     fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', transition: 'all .15s',
   };
-
-  const presetBtn = (active: boolean): React.CSSProperties => ({
-    padding: '0.35rem 0.75rem', border: '1px solid',
-    borderColor: active ? '#3b82f6' : '#e5e7eb',
-    borderRadius: 6, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
-    background: active ? '#eff6ff' : '#fff',
-    color: active ? '#3b82f6' : '#6b7280',
-  });
 
   const cardStyle: React.CSSProperties = {
     background: '#fff',
@@ -222,68 +212,34 @@ export default function EstimateAnalyticsPage() {
     padding: '1.25rem 1rem',
   };
 
-  const tabStyle = (active: boolean): React.CSSProperties => ({
-    padding: '0.6rem 1.25rem',
-    background: active ? '#3b82f6' : '#f3f4f6',
-    color: active ? '#fff' : '#6b7280',
-    border: 'none',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontWeight: 600,
-    fontSize: '0.85rem',
-  });
-
   const visitorTotalPages = Math.max(1, Math.ceil(visitorTotal / pageSize));
   const calcTotalPages = Math.max(1, Math.ceil(calcTotal / pageSize));
 
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto', padding: '1rem' }}>
-      <h1 style={{ fontSize: '1.375rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        견적서 로그 분석
-      </h1>
+    <div>
+      <PageHeader title="견적서 로그 분석" />
 
       {/* 필터 바 */}
-      <div style={{
-        background: '#fff', padding: '1rem', borderRadius: 12,
-        boxShadow: '0 1px 3px rgba(0,0,0,.08)', marginBottom: '1rem',
-      }}>
-        {/* 날짜 프리셋 */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-          {PRESETS.map(p => (
-            <button key={p} style={presetBtn(preset === p)} onClick={() => applyPreset(p)}>{p}</button>
+      <FilterBar
+        trailing={(dateFrom || dateTo) && preset !== '전체' ? (
+          <span className="caption">{dateFrom || '전체'} ~ {dateTo || '전체'}</span>
+        ) : null}
+      >
+        <div className="data-tabs tw-mb-0">
+          {PRESETS.map((p) => (
+            <Button key={p} type="button" variant={preset === p ? 'primary' : 'secondary'} onClick={() => applyPreset(p)}>{p}</Button>
           ))}
         </div>
-        {/* 직접입력 시 날짜 인풋 표시 */}
         {preset === '직접입력' && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>시작일</label>
-              <input type="date" style={inputStyle} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>종료일</label>
-              <input type="date" style={inputStyle} value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-            </div>
-          </div>
+          <DateRangeControl from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
         )}
-        {(dateFrom || dateTo) && preset !== '전체' && (
-          <div style={{ marginTop: 6, fontSize: '0.75rem', color: '#6b7280' }}>
-            📅 {dateFrom || '전체'} ~ {dateTo || '전체'}
-          </div>
-        )}
-      </div>
+      </FilterBar>
 
       {/* 탭 */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-        <button style={tabStyle(activeTab === 'overview')} onClick={() => setActiveTab('overview')}>
-          개요
-        </button>
-        <button style={tabStyle(activeTab === 'visitors')} onClick={() => setActiveTab('visitors')}>
-          방문자 로그
-        </button>
-        <button style={tabStyle(activeTab === 'calculations')} onClick={() => setActiveTab('calculations')}>
-          견적 계산 로그
-        </button>
+      <div className="data-tabs">
+        <Button type="button" variant={activeTab === 'overview' ? 'primary' : 'secondary'} onClick={() => setActiveTab('overview')}>개요</Button>
+        <Button type="button" variant={activeTab === 'visitors' ? 'primary' : 'secondary'} onClick={() => setActiveTab('visitors')}>방문자 로그</Button>
+        <Button type="button" variant={activeTab === 'calculations' ? 'primary' : 'secondary'} onClick={() => setActiveTab('calculations')}>견적 계산 로그</Button>
       </div>
 
       {loading && activeTab === 'overview' ? (
@@ -538,18 +494,18 @@ export default function EstimateAnalyticsPage() {
                 <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>총 {fmt(visitorTotal)}건</span>
               </div>
               <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as const }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>일시</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>IP</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>위치</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>OS</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>브라우저</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>디바이스</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>모바일</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>체류시간</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>유입경로</th>
+                    <tr>
+                      <th>일시</th>
+                      <th>IP</th>
+                      <th>위치</th>
+                      <th>OS</th>
+                      <th>브라우저</th>
+                      <th className="tw-text-center">디바이스</th>
+                      <th className="tw-text-center">모바일</th>
+                      <th className="tw-text-center">체류시간</th>
+                      <th>유입경로</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -580,10 +536,10 @@ export default function EstimateAnalyticsPage() {
                       };
                       const source = getSourceDisplay();
                       return (
-                      <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', color: '#6b7280' }}>{v.created_at}</td>
+                      <tr key={v.id}>
+                        <td>{v.created_at}</td>
                         <td style={{ padding: '0.6rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{v.ip_address}</td>
-                        <td style={{ padding: '0.6rem', fontSize: '0.8rem' }}>
+                        <td>
                           {v.country || v.region || v.city ? (
                             <span title={[v.country, v.region, v.city].filter(Boolean).join(', ')}>
                               {v.city || v.region || v.country || '-'}
@@ -592,10 +548,10 @@ export default function EstimateAnalyticsPage() {
                             <span style={{ color: '#9ca3af' }}>-</span>
                           )}
                         </td>
-                        <td style={{ padding: '0.6rem' }}>{v.os}</td>
-                        <td style={{ padding: '0.6rem' }}>{v.browser}</td>
-                        <td style={{ padding: '0.6rem', textAlign: 'center' }}>{v.device_type}</td>
-                        <td style={{ padding: '0.6rem', textAlign: 'center' }}>
+                        <td>{v.os}</td>
+                        <td>{v.browser}</td>
+                        <td className="tw-text-center">{v.device_type}</td>
+                        <td className="tw-text-center">
                           {v.is_mobile === true ? (
                             <span style={{
                               display: 'inline-block', padding: '2px 8px', borderRadius: 10,
@@ -610,7 +566,7 @@ export default function EstimateAnalyticsPage() {
                             <span style={{ color: '#9ca3af' }}>-</span>
                           )}
                         </td>
-                        <td style={{ padding: '0.6rem', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        <td className="tw-text-center">
                           {v.duration_seconds > 0 ? (
                             <span style={{
                               display: 'inline-block', padding: '2px 8px', borderRadius: 10,
@@ -622,7 +578,7 @@ export default function EstimateAnalyticsPage() {
                             <span style={{ color: '#d1d5db', fontSize: '0.8rem' }}>-</span>
                           )}
                         </td>
-                        <td style={{ padding: '0.6rem' }} title={v.utm_campaign ? `캠페인: ${v.utm_campaign}` : v.referrer || ''}>
+                        <td title={v.utm_campaign ? `캠페인: ${v.utm_campaign}` : v.referrer || ''}>
                           <span style={{
                             display: 'inline-block', padding: '2px 8px', borderRadius: 10,
                             fontSize: '0.75rem', fontWeight: 600,
@@ -678,26 +634,26 @@ export default function EstimateAnalyticsPage() {
                 <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>총 {fmt(calcTotal)}건</span>
               </div>
               <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as const }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>일시</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>IP</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>업체명</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'left', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>이메일</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'center', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>브랜드</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>월 출고건</th>
-                      <th style={{ padding: '0.7rem 0.6rem', textAlign: 'right', fontWeight: 600, borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>총 금액</th>
+                    <tr>
+                      <th>일시</th>
+                      <th>IP</th>
+                      <th>업체명</th>
+                      <th>이메일</th>
+                      <th className="tw-text-center">브랜드</th>
+                      <th className="cell-num">월 출고건</th>
+                      <th className="cell-num">총 금액</th>
                     </tr>
                   </thead>
                   <tbody>
                     {calculations.map((c) => (
-                      <tr key={c.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', color: '#6b7280' }}>{c.created_at}</td>
+                      <tr key={c.id}>
+                        <td>{c.created_at}</td>
                         <td style={{ padding: '0.6rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{c.ip_address}</td>
-                        <td style={{ padding: '0.6rem', fontWeight: 500 }}>{c.company_name || '-'}</td>
-                        <td style={{ padding: '0.6rem', color: '#6b7280' }}>{c.email || '-'}</td>
-                        <td style={{ padding: '0.6rem', textAlign: 'center' }}>
+                        <td>{c.company_name || '-'}</td>
+                        <td>{c.email || '-'}</td>
+                        <td className="tw-text-center">
                           <span style={{
                             display: 'inline-block', padding: '2px 10px', borderRadius: 12,
                             fontSize: '0.75rem', fontWeight: 600,
@@ -707,8 +663,8 @@ export default function EstimateAnalyticsPage() {
                             {BRAND_LABEL[c.brand_type] || c.brand_type}
                           </span>
                         </td>
-                        <td style={{ padding: '0.6rem', textAlign: 'right' }}>{fmt(c.monthly_outbound || 0)}</td>
-                        <td style={{ padding: '0.6rem', textAlign: 'right', fontWeight: 600, color: '#1d4ed8' }}>₩{fmt(c.total_amount || 0)}</td>
+                        <td className="cell-num">{fmt(c.monthly_outbound || 0)}</td>
+                        <td className="cell-num">₩{fmt(c.total_amount || 0)}</td>
                       </tr>
                     ))}
                   </tbody>

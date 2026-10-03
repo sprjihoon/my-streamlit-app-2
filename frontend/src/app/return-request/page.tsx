@@ -25,15 +25,6 @@ declare global {
   }
 }
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -106,7 +97,6 @@ export default function ReturnRequestPage() {
   const [selectedSavedId, setSelectedSavedId] = useState('');
   const [saveAddress, setSaveAddress] = useState(false);
   const [addressAlias, setAddressAlias] = useState('');
-
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
@@ -254,7 +244,7 @@ export default function ReturnRequestPage() {
             <label style={{ flex: '1 1 240px' }}>
               저장된 주소지 별칭
               <select
-                style={inputStyle}
+                className="ui-control"
                 value={selectedSavedId}
                 onChange={(e) => applySavedById(e.target.value)}
                 disabled={savedRecipients.length === 0}
@@ -280,7 +270,7 @@ export default function ReturnRequestPage() {
           <label>
             수취인 이름
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.recipient_name}
               onChange={(e) => updateForm('recipient_name', e.target.value)}
             />
@@ -288,7 +278,7 @@ export default function ReturnRequestPage() {
           <label>
             연락처
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.recipient_phone}
               placeholder="01012345678"
               onChange={(e) => updateForm('recipient_phone', e.target.value)}
@@ -298,11 +288,11 @@ export default function ReturnRequestPage() {
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
               <label style={{ flex: '0 0 120px' }}>
                 우편번호
-                <input style={inputStyle} value={form.zipcode} readOnly />
+                <input className="ui-control" value={form.zipcode} readOnly />
               </label>
               <label style={{ flex: 1 }}>
                 도로명 주소
-                <input style={inputStyle} value={form.addr1} readOnly />
+                <input className="ui-control" value={form.addr1} readOnly />
               </label>
               <button type="button" className="btn btn-secondary" onClick={openPostcode}>
                 주소 검색
@@ -312,7 +302,7 @@ export default function ReturnRequestPage() {
           <label style={{ gridColumn: '1 / -1' }}>
             상세주소 (동·호·층)
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.addr2}
               placeholder="예: 3층, 201호, 제3층"
               onChange={(e) => updateForm('addr2', e.target.value)}
@@ -322,7 +312,7 @@ export default function ReturnRequestPage() {
             수거 희망일
             <input
               type="date"
-              style={inputStyle}
+              className="ui-control"
               value={form.pickup_date}
               min={minPickupDate || undefined}
               max={maxPickupDate || undefined}
@@ -335,7 +325,7 @@ export default function ReturnRequestPage() {
           <label>
             품명
             <select
-              style={inputStyle}
+              className="ui-control"
               value={form.goods_name}
               onChange={(e) => {
       
@@ -351,7 +341,7 @@ export default function ReturnRequestPage() {
           <label>
             박스 규격
             <select
-              style={inputStyle}
+              className="ui-control"
               value={form.box_size}
               onChange={(e) => {
       
@@ -371,7 +361,7 @@ export default function ReturnRequestPage() {
               type="number"
               min="1"
               max="99"
-              style={inputStyle}
+              className="ui-control"
               value={form.box_quantity || 1}
               onChange={(e) => {
       
@@ -383,7 +373,7 @@ export default function ReturnRequestPage() {
           <label style={{ gridColumn: '1 / -1' }}>
             수거 메모
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.notes}
               onChange={(e) => {
                 setForm((p) => ({ ...p, notes: e.target.value }));
@@ -416,7 +406,7 @@ export default function ReturnRequestPage() {
             <label style={{ display: 'block', marginTop: '0.7rem' }}>
               주소지 별칭
               <input
-                style={inputStyle}
+                className="ui-control"
                 value={addressAlias}
                 placeholder="예: 본사, 경기창고"
                 maxLength={50}

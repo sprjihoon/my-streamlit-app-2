@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useEffect, useRef, useState } from 'react';
 import { Card } from '@/components/Card';
@@ -27,13 +28,6 @@ import {
   RepairDefect,
   VendorAlias,
 } from '@/lib/api';
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.5rem',
-  border: '1px solid #ddd',
-  borderRadius: '4px',
-};
 
 const btn = (bg: string): React.CSSProperties => ({
   padding: '0.5rem 1rem',
@@ -302,29 +296,29 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
           <Field label="바코드 *">
-            <input value={form.바코드} disabled={!!editing} onChange={(e) => setForm({ ...form, 바코드: e.target.value })} style={inputStyle} placeholder="ON56S152917" />
+            <input value={form.바코드} disabled={!!editing} onChange={(e) => setForm({ ...form, 바코드: e.target.value })} className="ui-control" placeholder="ON56S152917" />
           </Field>
           <Field label="업체명 *">
-            <input value={form.업체명} onChange={(e) => setForm({ ...form, 업체명: e.target.value })} style={inputStyle} placeholder="자체제작_베으" />
+            <input value={form.업체명} onChange={(e) => setForm({ ...form, 업체명: e.target.value })} className="ui-control" placeholder="자체제작_베으" />
           </Field>
           <Field label="제품명 *">
-            <input value={form.제품명} onChange={(e) => setForm({ ...form, 제품명: e.target.value })} style={inputStyle} placeholder="릴리프T" />
+            <input value={form.제품명} onChange={(e) => setForm({ ...form, 제품명: e.target.value })} className="ui-control" placeholder="릴리프T" />
           </Field>
           <Field label="옵션">
-            <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} style={inputStyle} placeholder="블랙" />
+            <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} className="ui-control" placeholder="블랙" />
           </Field>
           <Field label="도매처">
-            <input value={form.도매처} onChange={(e) => setForm({ ...form, 도매처: e.target.value })} style={inputStyle} placeholder="줄리" />
+            <input value={form.도매처} onChange={(e) => setForm({ ...form, 도매처: e.target.value })} className="ui-control" placeholder="줄리" />
           </Field>
           <Field label="상품코드">
-            <input value={form.상품코드} onChange={(e) => setForm({ ...form, 상품코드: e.target.value })} style={inputStyle} />
+            <input value={form.상품코드} onChange={(e) => setForm({ ...form, 상품코드: e.target.value })} className="ui-control" />
           </Field>
           <Field label="로케이션">
-            <input value={form.로케이션} onChange={(e) => setForm({ ...form, 로케이션: e.target.value })} style={inputStyle} />
+            <input value={form.로케이션} onChange={(e) => setForm({ ...form, 로케이션: e.target.value })} className="ui-control" />
           </Field>
         </div>
         <Field label="상품명(긴 이름)">
-          <input value={form.상품명} onChange={(e) => setForm({ ...form, 상품명: e.target.value })} style={{ ...inputStyle, marginTop: 8 }} />
+          <input value={form.상품명} onChange={(e) => setForm({ ...form, 상품명: e.target.value })} className="ui-control" />
         </Field>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button onClick={saveManual} style={btn('#2563eb')}>{editing ? '수정 저장' : '등록'}</button>
@@ -362,8 +356,8 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
       <div style={{ marginTop: '1rem' }}>
         <Card title={`등록된 바코드 (${total}건)`}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="바코드·제품명 검색" style={{ ...inputStyle, maxWidth: 240 }} />
-            <select value={vendor} onChange={(e) => setVendor(e.target.value)} style={{ ...inputStyle, maxWidth: 200 }}>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="바코드·제품명 검색" className="ui-control" />
+            <select value={vendor} onChange={(e) => setVendor(e.target.value)} className="ui-control">
               <option value="">전체 업체</option>
               {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
@@ -373,26 +367,26 @@ function BarcodesTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'
             <p style={{ color: '#666' }}>등록된 바코드가 없습니다.</p>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <table>
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <tr>
                     {['바코드', '업체명', '도매처', '제품명', '옵션', '상품코드', '로케이션', '출처', ''].map((h) => (
-                      <th key={h} style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
+                      <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((row) => (
-                    <tr key={row.바코드} style={{ borderBottom: '1px solid #eee' }}>
+                    <tr key={row.바코드}>
                       <td style={{ padding: '0.5rem', fontFamily: 'monospace' }}>{row.바코드}</td>
-                      <td style={{ padding: '0.5rem' }}>{row.업체명}</td>
-                      <td style={{ padding: '0.5rem', color: '#7c3aed' }}>{row.도매처 || '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{row.제품명}</td>
-                      <td style={{ padding: '0.5rem' }}>{row.옵션 || '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{row.상품코드 || '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{row.로케이션 || '-'}</td>
-                      <td style={{ padding: '0.5rem' }}>{row.출처 || '-'}</td>
-                      <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
+                      <td>{row.업체명}</td>
+                      <td>{row.도매처 || '-'}</td>
+                      <td>{row.제품명}</td>
+                      <td>{row.옵션 || '-'}</td>
+                      <td>{row.상품코드 || '-'}</td>
+                      <td>{row.로케이션 || '-'}</td>
+                      <td>{row.출처 || '-'}</td>
+                      <td>
                         <button onClick={() => {
                           setEditing(row);
                           setForm({ 바코드: row.바코드, 업체명: row.업체명, 제품명: row.제품명, 옵션: row.옵션 || '', 도매처: row.도매처 || '', 상품코드: row.상품코드 || '', 로케이션: row.로케이션 || '', 상품명: row.상품명 || '' });
@@ -530,7 +524,7 @@ function VendorAliasTab({ onMessage }: { onMessage: (m: { type: 'success' | 'err
               value={newCanonical}
               onChange={e => setNewCanonical(e.target.value)}
               placeholder="예) 베으그룹"
-              style={inputStyle}
+              className="ui-control"
             />
           </Field>
           <Field label="포함 업체명 (DB에서 선택하거나 직접 입력)">
@@ -546,7 +540,7 @@ function VendorAliasTab({ onMessage }: { onMessage: (m: { type: 'success' | 'err
               value={newMemo}
               onChange={e => setNewMemo(e.target.value)}
               placeholder="선택 메모"
-              style={inputStyle}
+              className="ui-control"
             />
           </Field>
           <button
@@ -565,9 +559,9 @@ function VendorAliasTab({ onMessage }: { onMessage: (m: { type: 'success' | 'err
           <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>등록된 별칭이 없습니다. 위에서 추가하세요.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table>
               <thead>
-                <tr style={{ background: '#f9fafb' }}>
+                <tr>
                   <th style={thStyle}>별칭명</th>
                   <th style={thStyle}>포함 업체명</th>
                   <th style={thStyle}>메모</th>
@@ -659,7 +653,7 @@ function EditAliasModal({ initial, vendorOptions, saving, onClose, onSave }: {
         </Field>
         <div style={{ marginTop: 10 }}>
           <Field label="메모">
-            <input value={memo} onChange={e => setMemo(e.target.value)} style={inputStyle} />
+            <input value={memo} onChange={e => setMemo(e.target.value)} className="ui-control" />
           </Field>
         </div>
         <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 8 }}>
@@ -734,34 +728,34 @@ function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error';
         <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: 12 }}>봇·웹 수동 입력이 같은 목록을 씁니다. 별칭은 쉼표로 구분합니다. 예: 바느질,바느질작업</p>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr auto auto', gap: 8, alignItems: 'end', marginBottom: 16 }}>
           <Field label="작업명 *">
-            <input value={workForm.작업명} disabled={!!editingWork} onChange={(e) => setWorkForm({ ...workForm, 작업명: e.target.value })} placeholder="스팀작업" style={inputStyle} />
+            <input value={workForm.작업명} disabled={!!editingWork} onChange={(e) => setWorkForm({ ...workForm, 작업명: e.target.value })} placeholder="스팀작업" className="ui-control" />
           </Field>
           <Field label="기본비용 *">
-            <input type="number" min={0} value={workForm.기본비용} onChange={(e) => setWorkForm({ ...workForm, 기본비용: Number(e.target.value) })} style={inputStyle} />
+            <input type="number" min={0} value={workForm.기본비용} onChange={(e) => setWorkForm({ ...workForm, 기본비용: Number(e.target.value) })} className="ui-control" />
           </Field>
           <Field label="별칭">
-            <input value={workForm.별칭} onChange={(e) => setWorkForm({ ...workForm, 별칭: e.target.value })} placeholder="스팀" style={inputStyle} />
+            <input value={workForm.별칭} onChange={(e) => setWorkForm({ ...workForm, 별칭: e.target.value })} placeholder="스팀" className="ui-control" />
           </Field>
           <button onClick={saveWork} style={btn('#2563eb')}>{editingWork ? '수정 저장' : '추가'}</button>
           {editingWork && <button onClick={() => { setEditingWork(null); setWorkForm(emptyWork); }} style={btn('#6b7280')}>취소</button>}
         </div>
         {loading ? <Loading /> : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
+                <tr>
                   {['작업명', '기본비용', '별칭', ''].map((h) => (
-                    <th key={h} style={{ padding: '0.5rem', textAlign: h === '기본비용' ? 'right' : 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
+                    <th key={h} className="cell-num">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {workTypes.map((w) => (
-                  <tr key={w.작업명} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '0.5rem', fontWeight: 500 }}>{w.작업명}</td>
-                    <td style={{ padding: '0.5rem', textAlign: 'right' }}>{w.기본비용.toLocaleString()}원</td>
-                    <td style={{ padding: '0.5rem', color: '#666' }}>{w.별칭 || '-'}</td>
-                    <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
+                  <tr key={w.작업명}>
+                    <td>{w.작업명}</td>
+                    <td className="cell-num">{w.기본비용.toLocaleString()}원</td>
+                    <td>{w.별칭 || '-'}</td>
+                    <td>
                       <button onClick={() => { setEditingWork(w.작업명); setWorkForm({ 작업명: w.작업명, 기본비용: w.기본비용, 별칭: w.별칭 || '' }); }} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>수정</button>
                       <button onClick={() => setDeletingWork(w.작업명)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>삭제</button>
                     </td>
@@ -778,30 +772,30 @@ function CatalogTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error';
           <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: 12 }}>채팅에서 구멍수선처럼 별칭이 와도 마스터 불량명으로 맞춥니다.</p>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr auto auto', gap: 8, alignItems: 'end', marginBottom: 16 }}>
             <Field label="불량명 *">
-              <input value={defectForm.불량명} disabled={!!editingDefect} onChange={(e) => setDefectForm({ ...defectForm, 불량명: e.target.value })} placeholder="구멍" style={inputStyle} />
+              <input value={defectForm.불량명} disabled={!!editingDefect} onChange={(e) => setDefectForm({ ...defectForm, 불량명: e.target.value })} placeholder="구멍" className="ui-control" />
             </Field>
             <Field label="별칭">
-              <input value={defectForm.별칭} onChange={(e) => setDefectForm({ ...defectForm, 별칭: e.target.value })} placeholder="구멍수선" style={inputStyle} />
+              <input value={defectForm.별칭} onChange={(e) => setDefectForm({ ...defectForm, 별칭: e.target.value })} placeholder="구멍수선" className="ui-control" />
             </Field>
             <button onClick={saveDefect} style={btn('#2563eb')}>{editingDefect ? '수정 저장' : '추가'}</button>
             {editingDefect && <button onClick={() => { setEditingDefect(null); setDefectForm(emptyDefect); }} style={btn('#6b7280')}>취소</button>}
           </div>
           {loading ? <Loading /> : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+              <table>
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <tr>
                     {['불량명', '별칭', ''].map((h) => (
-                      <th key={h} style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>{h}</th>
+                      <th key={h}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {defects.map((d) => (
-                    <tr key={d.불량명} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '0.5rem', fontWeight: 500 }}>{d.불량명}</td>
-                      <td style={{ padding: '0.5rem', color: '#666' }}>{d.별칭 || '-'}</td>
-                      <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
+                    <tr key={d.불량명}>
+                      <td>{d.불량명}</td>
+                      <td>{d.별칭 || '-'}</td>
+                      <td>
                         <button onClick={() => { setEditingDefect(d.불량명); setDefectForm({ 불량명: d.불량명, 별칭: d.별칭 || '' }); }} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>수정</button>
                         <button onClick={() => setDeletingDefect(d.불량명)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>삭제</button>
                       </td>
@@ -979,27 +973,27 @@ function OcrTestTab() {
               <p style={{ color: '#9ca3af', fontSize: '0.875rem' }}>인식된 품목이 없습니다.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ background: '#f9fafb' }}>
+                    <tr>
                       {['#', '품명', '색상/옵션', '단가', '수량', '금액', '신뢰도', '검토'].map(h => (
-                        <th key={h} style={{ padding: '0.5rem 0.6rem', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontSize: '0.8rem', color: '#6b7280', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {result.items.map(item => (
-                      <tr key={item.lineNo} style={{ borderBottom: '1px solid #f3f4f6', background: item.needsReview ? '#fffbeb' : 'transparent' }}>
-                        <td style={{ padding: '0.5rem 0.6rem', color: '#9ca3af' }}>{item.lineNo}</td>
-                        <td style={{ padding: '0.5rem 0.6rem', fontWeight: 600 }}>{item.itemName || '-'}</td>
-                        <td style={{ padding: '0.5rem 0.6rem', color: '#7c3aed' }}>{[item.color, item.optionText].filter(Boolean).join(' / ') || '-'}</td>
-                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right' }}>{item.unitPrice != null ? item.unitPrice.toLocaleString() : '-'}</td>
-                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center', fontWeight: 700 }}>{item.quantity ?? '-'}</td>
-                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right' }}>{item.amount != null ? item.amount.toLocaleString() : '-'}</td>
-                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center' }}>
+                      <tr key={item.lineNo}>
+                        <td>{item.lineNo}</td>
+                        <td>{item.itemName || '-'}</td>
+                        <td>{[item.color, item.optionText].filter(Boolean).join(' / ') || '-'}</td>
+                        <td className="cell-num">{item.unitPrice != null ? item.unitPrice.toLocaleString() : '-'}</td>
+                        <td className="tw-text-center">{item.quantity ?? '-'}</td>
+                        <td className="cell-num">{item.amount != null ? item.amount.toLocaleString() : '-'}</td>
+                        <td className="tw-text-center">
                           <span style={{ color: confColor(item.confidence), fontWeight: 600 }}>{confLabel(item.confidence)}</span>
                         </td>
-                        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center' }}>
+                        <td className="tw-text-center">
                           {item.needsReview
                             ? <span style={{ color: '#dc2626', fontSize: '0.78rem' }}>🔴 요망</span>
                             : <span style={{ color: '#15803d', fontSize: '0.78rem' }}>✅ OK</span>}
@@ -1030,8 +1024,8 @@ export default function JournalSettingsPage() {
   ];
 
   return (
-    <div style={{ padding: '1rem', maxWidth: 1100, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '1rem' }}>일지 설정</h1>
+    <div>
+      <PageHeader title="일지 설정" />
 
       {message && (
         <div style={{

@@ -1,9 +1,14 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
 import { Loading } from '@/components/Loading';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { FilterBar } from '@/components/data';
 import {
   getVendors,
   getVendor,
@@ -208,32 +213,21 @@ export default function VendorsPage() {
     onChange: (values: string[]) => void;
   }) {
     return (
-      <div style={{ marginBottom: '1rem' }}>
-        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-          {label}
-        </label>
-        <select
+      <Field label={label}>
+        <Select
           multiple
           value={selected}
+          className="tw-min-h-[100px]"
           onChange={(e) => {
             const values = Array.from(e.target.selectedOptions, (opt) => opt.value);
             onChange(values);
           }}
-          style={{
-            width: '100%',
-            minHeight: '100px',
-            padding: '0.5rem',
-            border: '1px solid #ddd',
-            borderRadius: '4px',
-          }}
         >
           {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
+            <option key={opt} value={opt}>{opt}</option>
           ))}
-        </select>
-      </div>
+        </Select>
+      </Field>
     );
   }
 
@@ -249,27 +243,13 @@ export default function VendorsPage() {
     onChange: (v: string) => void;
   }) {
     return (
-      <div style={{ marginBottom: '1rem' }}>
-        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-          {label}
-        </label>
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            border: '1px solid #ddd',
-            borderRadius: '4px',
-          }}
-        >
+      <Field label={label}>
+        <Select value={value} onChange={(e) => onChange(e.target.value)}>
           {options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
+            <option key={opt} value={opt}>{opt}</option>
           ))}
-        </select>
-      </div>
+        </Select>
+      </Field>
     );
   }
 
@@ -278,60 +258,51 @@ export default function VendorsPage() {
   }
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem', fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>거래처 매핑 리스트</h1>
+    <div>
+      <PageHeader title="거래처 매핑 리스트" />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
       {/* 검색 & 필터 */}
-      <Card>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
+      <FilterBar>
+        <Field label="검색">
+          <Input
             type="text"
-            placeholder="검색어 (거래처/별칭)"
+            placeholder="거래처/별칭"
             value={searchKeyword}
             onChange={(e) => setSearchKeyword(e.target.value)}
-            style={{
-              padding: '0.5rem',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              width: '250px',
-            }}
           />
-          <select
+        </Field>
+        <Field label="상태">
+          <Select
             value={filterMode}
             onChange={(e) => setFilterMode(e.target.value as 'all' | 'active' | 'inactive')}
-            style={{
-              padding: '0.5rem',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-            }}
           >
             <option value="all">전체 ({vendors.length})</option>
             <option value="active">활성만 ({activeCount})</option>
             <option value="inactive">비활성만 ({inactiveCount})</option>
-          </select>
-        </div>
-      </Card>
+          </Select>
+        </Field>
+      </FilterBar>
 
       {/* 거래처 목록 테이블 */}
       <Card title="거래처 목록" style={{ marginTop: '1rem' }}>
         <div style={{ overflowX: 'auto', maxHeight: '400px', overflowY: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table>
             <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f5f5f5' }}>
               <tr>
-                <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>거래처</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>활성</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>요금타입</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>SKU구간</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>바코드</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>박스</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>완충재</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>PP봉투</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>택배봉투</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>출고영상</th>
-                <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '2px solid #ddd' }}>반품영상</th>
+                <th>거래처</th>
+                <th className="tw-text-center">활성</th>
+                <th className="tw-text-center">요금타입</th>
+                <th className="tw-text-center">SKU구간</th>
+                <th className="tw-text-center">바코드</th>
+                <th className="tw-text-center">박스</th>
+                <th className="tw-text-center">완충재</th>
+                <th className="tw-text-center">PP봉투</th>
+                <th className="tw-text-center">택배봉투</th>
+                <th className="tw-text-center">출고영상</th>
+                <th className="tw-text-center">반품영상</th>
               </tr>
             </thead>
             <tbody>
@@ -344,19 +315,19 @@ export default function VendorsPage() {
                     backgroundColor: selectedVendor?.vendor === v.vendor ? '#e3f2fd' : 'transparent',
                   }}
                 >
-                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>{v.vendor}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee', color: v.active === 'YES' ? 'green' : 'gray' }}>
+                  <td>{v.vendor}</td>
+                  <td className="tw-text-center">
                     {v.active || 'YES'}
                   </td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.rate_type}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.sku_group}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.barcode_f}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.custbox_f}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.void_f}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.pp_bag_f}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.mailer_f}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.video_out_f}</td>
-                  <td style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #eee' }}>{v.video_ret_f}</td>
+                  <td className="tw-text-center">{v.rate_type}</td>
+                  <td className="tw-text-center">{v.sku_group}</td>
+                  <td className="tw-text-center">{v.barcode_f}</td>
+                  <td className="tw-text-center">{v.custbox_f}</td>
+                  <td className="tw-text-center">{v.void_f}</td>
+                  <td className="tw-text-center">{v.pp_bag_f}</td>
+                  <td className="tw-text-center">{v.mailer_f}</td>
+                  <td className="tw-text-center">{v.video_out_f}</td>
+                  <td className="tw-text-center">{v.video_ret_f}</td>
                 </tr>
               ))}
             </tbody>

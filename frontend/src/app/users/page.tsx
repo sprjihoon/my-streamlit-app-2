@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
 import { Loading } from '@/components/Loading';
+import PageHeader from '@/components/ui/page-header';
+import { Button } from '@/components/ui/button';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -31,23 +33,6 @@ interface ActorInfo {
   position: string;
   department: string;
 }
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.5rem 0.75rem',
-  border: '1px solid #ddd',
-  borderRadius: '6px',
-  fontSize: '0.9rem',
-  boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  marginBottom: '0.35rem',
-  fontWeight: 600,
-  fontSize: '0.85rem',
-  color: '#444',
-};
 
 const DEPT_COLORS: Record<string, string> = {
   '패션팀': '#6366f1',
@@ -274,11 +259,9 @@ export default function UsersPage() {
 
   if (!actorInfo?.can_manage) {
     return (
-      <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto' }}>
+      <div>
         <Alert type="error" message="사용자 관리 권한이 없습니다. (관리자/팀장/인사과장만 접근 가능)" />
-        <button onClick={() => router.push('/')} style={{ marginTop: '1rem', padding: '0.5rem 1rem', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-          홈으로 돌아가기
-        </button>
+        <Button type="button" className="tw-mt-3" onClick={() => router.push('/')}>홈으로 돌아가기</Button>
       </div>
     );
   }
@@ -290,16 +273,19 @@ export default function UsersPage() {
   const ungrouped = users.filter(u => !u.department || !DEPARTMENTS.includes(u.department));
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1100px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-        <h1 style={{ margin: 0, fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)' }}>사용자 관리</h1>
-        <button
-          onClick={() => { setShowForm(!showForm); resetForm(); }}
-          className={showForm ? 'btn btn-secondary' : 'btn btn-success'}
-        >
-          {showForm ? '취소' : '직원 추가'}
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="사용자 관리"
+        actions={
+          <button
+            type="button"
+            onClick={() => { setShowForm(!showForm); resetForm(); }}
+            className={showForm ? 'btn btn-secondary' : 'btn btn-success'}
+          >
+            {showForm ? '취소' : '직원 추가'}
+          </button>
+        }
+      />
 
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
@@ -312,33 +298,33 @@ export default function UsersPage() {
           <form onSubmit={handleCreateUser}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
               <div>
-                <label style={labelStyle}>아이디 <span style={{ color: 'red' }}>*</span></label>
-                <input style={inputStyle} type="text" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="로그인 아이디" />
+                <label className="ops-label">아이디 <span style={{ color: 'red' }}>*</span></label>
+                <input className="ui-control" type="text" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="로그인 아이디" />
               </div>
               <div>
-                <label style={labelStyle}>성함 <span style={{ color: 'red' }}>*</span></label>
-                <input style={inputStyle} type="text" value={form.nickname} onChange={e => setForm(f => ({ ...f, nickname: e.target.value }))} placeholder="실명" />
+                <label className="ops-label">성함 <span style={{ color: 'red' }}>*</span></label>
+                <input className="ui-control" type="text" value={form.nickname} onChange={e => setForm(f => ({ ...f, nickname: e.target.value }))} placeholder="실명" />
               </div>
               <div>
-                <label style={labelStyle}>입사일 <span style={{ color: 'red' }}>*</span></label>
-                <input style={inputStyle} type="date" value={form.join_date} onChange={e => setForm(f => ({ ...f, join_date: e.target.value }))} />
+                <label className="ops-label">입사일 <span style={{ color: 'red' }}>*</span></label>
+                <input className="ui-control" type="date" value={form.join_date} onChange={e => setForm(f => ({ ...f, join_date: e.target.value }))} />
               </div>
               <div>
-                <label style={labelStyle}>소속 팀</label>
-                <select style={inputStyle} value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} disabled={actorInfo?.position === '팀장'}>
+                <label className="ops-label">소속 팀</label>
+                <select className="ui-control" value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} disabled={actorInfo?.position === '팀장'}>
                   <option value="">선택...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>직급</label>
-                <select style={inputStyle} value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))}>
+                <label className="ops-label">직급</label>
+                <select className="ui-control" value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))}>
                   {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>네이버웍스 ID</label>
-                <input style={inputStyle} type="text" value={form.naver_works_id} onChange={e => setForm(f => ({ ...f, naver_works_id: e.target.value }))} placeholder="미입력 시 아이디와 동일" />
+                <label className="ops-label">네이버웍스 ID</label>
+                <input className="ui-control" type="text" value={form.naver_works_id} onChange={e => setForm(f => ({ ...f, naver_works_id: e.target.value }))} placeholder="미입력 시 아이디와 동일" />
               </div>
             </div>
 
@@ -374,24 +360,24 @@ export default function UsersPage() {
               <h3 style={{ margin: 0, color }}>{dept}</h3>
               <span style={{ fontSize: '0.8rem', color: '#999' }}>({list.length}명)</span>
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+            <table>
               <thead>
-                <tr style={{ backgroundColor: '#f8f9fa' }}>
+                <tr>
                   {['성함', '아이디', '직급', '입사일', '결재자', '연차제외', '권한', '전결', '작업'].map(h => (
-                    <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', borderBottom: '2px solid #e0e0e0', fontWeight: 600, color: '#555', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {list.map(user => (
-                  <tr key={user.user_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.6rem 0.75rem', fontWeight: 600 }}>{user.nickname}</td>
-                    <td style={{ padding: '0.6rem 0.75rem', color: '#666' }}>{user.username}</td>
-                    <td style={{ padding: '0.6rem 0.75rem' }}>
+                  <tr key={user.user_id}>
+                    <td>{user.nickname}</td>
+                    <td>{user.username}</td>
+                    <td>
                       <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.78rem', backgroundColor: `${color}20`, color }}>{user.position || '-'}</span>
                     </td>
-                    <td style={{ padding: '0.6rem 0.75rem', color: '#666' }}>{user.join_date || '-'}</td>
-                    <td style={{ padding: '0.6rem 0.75rem', color: '#555', fontSize: '0.85rem' }}>
+                    <td>{user.join_date || '-'}</td>
+                    <td>
                       {user.approver_id
                         ? (() => {
                             const approver = users.find(u => u.user_id === user.approver_id);
@@ -405,21 +391,21 @@ export default function UsersPage() {
                         : <span style={{ color: '#ccc' }}>-</span>
                       }
                     </td>
-                    <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
+                    <td className="tw-text-center">
                       {user.leave_exempt ? <span style={{ color: '#888', fontSize: '0.8rem' }}>제외</span> : <span style={{ color: '#4CAF50', fontSize: '0.8rem' }}>관리</span>}
                     </td>
-                    <td style={{ padding: '0.6rem 0.75rem' }}>
+                    <td>
                       <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.78rem', backgroundColor: user.is_admin ? '#e3f2fd' : '#f5f5f5', color: user.is_admin ? '#1976d2' : '#666' }}>
                         {user.is_admin ? '관리자' : '일반'}
                       </span>
                     </td>
-                    <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
+                    <td className="tw-text-center">
                       {user.can_jeongyeol
                         ? <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', backgroundColor: '#fff3e0', color: '#e65100', fontWeight: 700 }}>전결</span>
                         : <span style={{ color: '#ccc', fontSize: '0.8rem' }}>-</span>
                       }
                     </td>
-                    <td style={{ padding: '0.6rem 0.75rem' }}>
+                    <td>
                       <button onClick={() => handleEditClick(user)} style={{ padding: '0.25rem 0.6rem', marginRight: '0.4rem', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}>수정</button>
                       {actorInfo?.is_admin && (
                         <button onClick={() => handleDeleteUser(user.user_id, user.username)} style={{ padding: '0.25rem 0.6rem', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}>삭제</button>
@@ -447,38 +433,38 @@ export default function UsersPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
               <div>
-                <label style={labelStyle}>성함</label>
-                <input style={inputStyle} type="text" value={editForm.nickname} onChange={e => setEditForm(f => ({ ...f, nickname: e.target.value }))} />
+                <label className="ops-label">성함</label>
+                <input className="ui-control" type="text" value={editForm.nickname} onChange={e => setEditForm(f => ({ ...f, nickname: e.target.value }))} />
               </div>
               <div>
-                <label style={labelStyle}>새 비밀번호 <span style={{ color: '#aaa', fontWeight: 400 }}>(변경 시만)</span></label>
-                <input style={inputStyle} type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} placeholder="변경할 비밀번호" />
+                <label className="ops-label">새 비밀번호 <span style={{ color: '#aaa', fontWeight: 400 }}>(변경 시만)</span></label>
+                <input className="ui-control" type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} placeholder="변경할 비밀번호" />
               </div>
               <div>
-                <label style={labelStyle}>소속 팀</label>
-                <select style={inputStyle} value={editForm.department} onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))} disabled={actorInfo?.position === '팀장'}>
+                <label className="ops-label">소속 팀</label>
+                <select className="ui-control" value={editForm.department} onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))} disabled={actorInfo?.position === '팀장'}>
                   <option value="">선택...</option>
                   {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>직급</label>
-                <select style={inputStyle} value={editForm.position} onChange={e => setEditForm(f => ({ ...f, position: e.target.value }))}>
+                <label className="ops-label">직급</label>
+                <select className="ui-control" value={editForm.position} onChange={e => setEditForm(f => ({ ...f, position: e.target.value }))}>
                   <option value="">선택...</option>
                   {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>입사일</label>
-                <input style={inputStyle} type="date" value={editForm.join_date} onChange={e => setEditForm(f => ({ ...f, join_date: e.target.value }))} />
+                <label className="ops-label">입사일</label>
+                <input className="ui-control" type="date" value={editForm.join_date} onChange={e => setEditForm(f => ({ ...f, join_date: e.target.value }))} />
               </div>
               <div>
-                <label style={labelStyle}>네이버웍스 ID</label>
-                <input style={inputStyle} type="text" value={editForm.naver_works_id} onChange={e => setEditForm(f => ({ ...f, naver_works_id: e.target.value }))} />
+                <label className="ops-label">네이버웍스 ID</label>
+                <input className="ui-control" type="text" value={editForm.naver_works_id} onChange={e => setEditForm(f => ({ ...f, naver_works_id: e.target.value }))} />
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
-                <label style={labelStyle}>결재자 <span style={{ color: '#aaa', fontWeight: 400 }}>(연차 신청 시 1차 결재자)</span></label>
-                <select style={inputStyle} value={editForm.approver_id} onChange={e => setEditForm(f => ({ ...f, approver_id: e.target.value }))}>
+                <label className="ops-label">결재자 <span style={{ color: '#aaa', fontWeight: 400 }}>(연차 신청 시 1차 결재자)</span></label>
+                <select className="ui-control" value={editForm.approver_id} onChange={e => setEditForm(f => ({ ...f, approver_id: e.target.value }))}>
                   <option value="">없음 (결재라인 없음)</option>
                   {users
                     .filter(u => u.user_id !== editUser?.user_id)

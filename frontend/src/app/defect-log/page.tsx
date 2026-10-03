@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
@@ -22,13 +23,6 @@ import {
 import { downloadDefectLogExcel } from '@/lib/defectLogExcel';
 
 const RESULT_OPTIONS = ['업체반송', '반품', '기타'] as const;
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.5rem',
-  border: '1px solid #ddd',
-  borderRadius: '4px',
-};
 
 const btn = (bg: string): React.CSSProperties => ({
   padding: '0.5rem 1rem',
@@ -96,12 +90,7 @@ export default function DefectLogPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   return (
     <div style={{ padding: '1rem' }}>
-      <h1 style={{
-        fontSize: '1.375rem', fontWeight: 700, marginBottom: '1rem',
-        color: 'var(--text-primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)',
-      }}>
-        불량일지
-      </h1>
+      <PageHeader title="불량일지" />
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
       <LogsTab onMessage={setMessage} />
     </div>
@@ -226,29 +215,29 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>시작일</label>
-            <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} style={inputStyle} />
+            <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className="ui-control" />
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>종료일</label>
-            <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} style={inputStyle} />
+            <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className="ui-control" />
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>업체명</label>
-            <select value={vendor} onChange={(e) => setVendor(e.target.value)} style={inputStyle}>
+            <select value={vendor} onChange={(e) => setVendor(e.target.value)} className="ui-control">
               <option value="">전체</option>
               {filters?.vendors.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>불량명</label>
-            <select value={defect} onChange={(e) => setDefect(e.target.value)} style={inputStyle}>
+            <select value={defect} onChange={(e) => setDefect(e.target.value)} className="ui-control">
               <option value="">전체</option>
               {filters?.defects.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>처리결과</label>
-            <select value={resultFilter} onChange={(e) => setResultFilter(e.target.value)} style={inputStyle}>
+            <select value={resultFilter} onChange={(e) => setResultFilter(e.target.value)} className="ui-control">
               <option value="">전체</option>
               <option value="미처리">미처리</option>
               {RESULT_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -256,7 +245,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
           </div>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: 4 }}>작성자</label>
-            <select value={author} onChange={(e) => setAuthor(e.target.value)} style={inputStyle}>
+            <select value={author} onChange={(e) => setAuthor(e.target.value)} className="ui-control">
               <option value="">전체</option>
               {filters?.authors.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
@@ -354,28 +343,28 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
           ) : (
             <>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                <table>
                   <thead>
-                    <tr style={{ backgroundColor: '#f5f5f5' }}>
+                    <tr>
                       {['날짜', '업체명', '제품명', '옵션', '바코드', '불량명', '수량', '비고', '작성자', '처리결과', '수정자', '수정시간', '사진', ''].map((h) => (
-                        <th key={h} style={{ padding: '0.5rem', textAlign: h === '수량' ? 'right' : 'left', borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
+                        <th key={h} className="cell-num">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {logs.map((log) => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid #eee' }}>
-                        <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>{log.날짜 || '-'}</td>
-                        <td style={{ padding: '0.5rem', fontWeight: 500 }}>{log.업체명 || '-'}</td>
-                        <td style={{ padding: '0.5rem' }}>{log.제품명 || '-'}</td>
-                        <td style={{ padding: '0.5rem' }}>{log.옵션 || '-'}</td>
+                      <tr key={log.id}>
+                        <td>{log.날짜 || '-'}</td>
+                        <td>{log.업체명 || '-'}</td>
+                        <td>{log.제품명 || '-'}</td>
+                        <td>{log.옵션 || '-'}</td>
                         <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>{log.바코드 || '-'}</td>
-                        <td style={{ padding: '0.5rem', fontWeight: 500, color: '#dc2626' }}>{log.불량명 || '-'}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right' }}>{log.수량?.toLocaleString() ?? '-'}</td>
-                        <td style={{ padding: '0.5rem', color: '#666' }}>{log.비고 || '-'}</td>
-                        <td style={{ padding: '0.5rem' }}>{log.작성자 || '-'}</td>
+                        <td>{log.불량명 || '-'}</td>
+                        <td className="cell-num">{log.수량?.toLocaleString() ?? '-'}</td>
+                        <td>{log.비고 || '-'}</td>
+                        <td>{log.작성자 || '-'}</td>
                         {/* 처리결과 인라인 드롭다운 */}
-                        <td style={{ padding: '0.5rem', minWidth: 100 }}>
+                        <td>
                           {updatingResult === log.id ? (
                             <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>저장 중...</span>
                           ) : (
@@ -396,9 +385,9 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
                             </select>
                           )}
                         </td>
-                        <td style={{ padding: '0.5rem', color: '#666' }}>{log.수정자 || '-'}</td>
-                        <td style={{ padding: '0.5rem', fontSize: '0.75rem', color: '#666', whiteSpace: 'nowrap' }}>{formatDateTime(log.수정시간)}</td>
-                        <td style={{ padding: '0.5rem' }}>
+                        <td>{log.수정자 || '-'}</td>
+                        <td>{formatDateTime(log.수정시간)}</td>
+                        <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {[
                               ['사진1', log.before_image],
@@ -409,7 +398,7 @@ function LogsTab({ onMessage }: { onMessage: (m: { type: 'success' | 'error'; te
                             ))}
                           </div>
                         </td>
-                        <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>
+                        <td>
                           <button onClick={() => setEditing(log)} style={{ ...btn('#3b82f6'), padding: '0.25rem 0.5rem', fontSize: '0.75rem', marginRight: 4 }}>수정</button>
                           <button onClick={() => setDeletingId(log.id)} style={{ ...btn('#ef4444'), padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>삭제</button>
                         </td>
@@ -575,7 +564,7 @@ function DefectFormModal({
     <Modal title={title} onClose={onClose} maxWidth={820}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem 1.25rem' }}>
         <Field label="날짜 *">
-          <input type="date" value={form.날짜} onChange={(e) => setForm({ ...form, 날짜: e.target.value })} style={inputStyle} />
+          <input type="date" value={form.날짜} onChange={(e) => setForm({ ...form, 날짜: e.target.value })} className="ui-control" />
         </Field>
         <Field label="바코드">
           <div style={{ display: 'flex', gap: 8 }}>
@@ -584,7 +573,7 @@ function DefectFormModal({
               onChange={(e) => { setForm({ ...form, 바코드: e.target.value }); setLookupHint(''); setLookupOk(false); }}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchBarcode(); } }}
               placeholder="바코드 입력 후 검색"
-              style={inputStyle}
+              className="ui-control"
             />
             <button
               type="button"
@@ -602,29 +591,29 @@ function DefectFormModal({
           )}
         </Field>
         <Field label="업체명">
-          <input value={form.업체명} onChange={(e) => { setForm({ ...form, 업체명: e.target.value }); setLookupHint(''); setLookupOk(false); }} style={inputStyle} />
+          <input value={form.업체명} onChange={(e) => { setForm({ ...form, 업체명: e.target.value }); setLookupHint(''); setLookupOk(false); }} className="ui-control" />
         </Field>
         <Field label="제품명">
-          <input value={form.제품명} onChange={(e) => { setForm({ ...form, 제품명: e.target.value }); setLookupHint(''); setLookupOk(false); }} style={inputStyle} />
+          <input value={form.제품명} onChange={(e) => { setForm({ ...form, 제품명: e.target.value }); setLookupHint(''); setLookupOk(false); }} className="ui-control" />
         </Field>
         <Field label="옵션">
-          <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} placeholder="블랙" style={inputStyle} />
+          <input value={form.옵션} onChange={(e) => setForm({ ...form, 옵션: e.target.value })} placeholder="블랙" className="ui-control" />
         </Field>
         <Field label="불량명">
-          <input value={form.불량명} onChange={(e) => setForm({ ...form, 불량명: e.target.value })} placeholder="구멍, 열펜, 올풀림 등" style={inputStyle} />
+          <input value={form.불량명} onChange={(e) => setForm({ ...form, 불량명: e.target.value })} placeholder="구멍, 열펜, 올풀림 등" className="ui-control" />
         </Field>
         <Field label="수량">
-          <input type="number" min={1} value={form.수량} onChange={(e) => setForm({ ...form, 수량: Number(e.target.value) })} style={inputStyle} />
+          <input type="number" min={1} value={form.수량} onChange={(e) => setForm({ ...form, 수량: Number(e.target.value) })} className="ui-control" />
         </Field>
         <Field label="처리결과">
-          <select value={form.처리결과} onChange={(e) => setForm({ ...form, 처리결과: e.target.value })} style={inputStyle}>
+          <select value={form.처리결과} onChange={(e) => setForm({ ...form, 처리결과: e.target.value })} className="ui-control">
             <option value="">미처리</option>
             {RESULT_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </Field>
         <div style={{ gridColumn: '1 / -1' }}>
           <Field label="비고">
-            <input value={form.비고} onChange={(e) => setForm({ ...form, 비고: e.target.value })} style={inputStyle} />
+            <input value={form.비고} onChange={(e) => setForm({ ...form, 비고: e.target.value })} className="ui-control" />
           </Field>
         </div>
         <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

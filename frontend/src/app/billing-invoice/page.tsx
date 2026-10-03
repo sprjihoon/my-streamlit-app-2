@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { KpiStrip } from '@/components/data';
+import { Button } from '@/components/ui/button';
+import PageHeader from '@/components/ui/page-header';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -157,23 +160,23 @@ function DetailModal({ invId, token, onClose }: { invId: string; token: string; 
 
         <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#374151', marginBottom: '0.5rem' }}>항목 ({data.items?.length}개)</div>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+          <table>
             <thead>
-              <tr style={{ background: '#1a3c6e', color: 'white' }}>
+              <tr>
                 {['No', '품명', '카테고리', '수량', '단가', '금액', '비고'].map(h => (
-                  <th key={h} style={{ padding: '0.4rem 0.6rem', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th key={h}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {data.items?.map((it, i) => (
-                <tr key={i} style={{ background: (it.amount || 0) < 0 ? '#fef2f2' : i % 2 === 0 ? 'white' : '#f9fafb', borderBottom: '1px solid #f3f4f6' }}>
-                  <td style={{ padding: '0.35rem 0.6rem', color: '#9ca3af' }}>{it.line_no}</td>
-                  <td style={{ padding: '0.35rem 0.6rem', fontWeight: 500 }}>{it.item_name}</td>
-                  <td style={{ padding: '0.35rem 0.6rem' }}><span style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: 4, fontSize: '0.7rem' }}>{(it as any).category || '-'}</span></td>
-                  <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>{it.quantity?.toLocaleString() ?? '-'}</td>
-                  <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right' }}>{it.unit_price?.toLocaleString() ?? '-'}</td>
-                  <td style={{ padding: '0.35rem 0.6rem', textAlign: 'right', fontWeight: 600, color: (it.amount || 0) < 0 ? '#dc2626' : '#111' }}>
+                <tr key={i}>
+                  <td>{it.line_no}</td>
+                  <td>{it.item_name}</td>
+                  <td><span style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: 4, fontSize: '0.7rem' }}>{(it as any).category || '-'}</span></td>
+                  <td className="cell-num">{it.quantity?.toLocaleString() ?? '-'}</td>
+                  <td className="cell-num">{it.unit_price?.toLocaleString() ?? '-'}</td>
+                  <td className="cell-num">
                     {it.amount?.toLocaleString() ?? '-'}
                   </td>
                   <td style={{ padding: '0.35rem 0.6rem', color: '#6b7280', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.memo || '-'}</td>
@@ -397,39 +400,30 @@ export default function BillingInvoicePage() {
   const maxBilled = Math.max(...monthlySorted.map(([, v]) => v.billed), 1);
 
   return (
-    <div style={{ padding: '1.25rem', maxWidth: 1100 }}>
-      <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <h2 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>실 인보이스 관리</h2>
-          <p style={{ color: '#6b7280', fontSize: '0.8rem' }}>청구금액 엑셀 업로드 → 업체별 납부 추적</p>
-        </div>
-        {/* 탭 */}
-        <div style={{ display: 'flex', gap: '0.35rem' }}>
-          {([['list', '📋 목록'], ['analytics', '📊 분석']] as const).map(([tab, label]) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ padding: '0.4rem 1rem', borderRadius: 8, border: '1px solid', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
-                borderColor: activeTab === tab ? '#1a3c6e' : '#e5e7eb',
-                background: activeTab === tab ? '#1a3c6e' : 'white',
-                color: activeTab === tab ? 'white' : '#374151' }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        title="실 인보이스 관리"
+        subtitle="청구금액 엑셀 업로드 후 업체별 납부를 추적합니다."
+        actions={
+          <div className="data-tabs tw-mb-0">
+            {([['list', '목록'], ['analytics', '분석']] as const).map(([tab, label]) => (
+              <Button key={tab} type="button" variant={activeTab === tab ? 'primary' : 'secondary'} onClick={() => setActiveTab(tab)}>
+                {label}
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
       {activeTab === 'list' && (<>
       {/* KPI */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>        {[
-          { label: '조회 건수', value: `${invoices.length}건`, color: '#1a3c6e' },
-          { label: '총 청구액', value: totalBilled.toLocaleString() + '원', color: '#1d4ed8' },
-          { label: '미수금', value: totalUnpaid.toLocaleString() + '원', color: totalUnpaid > 0 ? '#dc2626' : '#16a34a' },
-        ].map(k => (
-          <div key={k.label} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-            <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginBottom: '0.2rem' }}>{k.label}</div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: k.color }}>{k.value}</div>
-          </div>
-        ))}
-      </div>
+      <KpiStrip
+        items={[
+          { label: '조회 건수', value: `${invoices.length}건` },
+          { label: '총 청구액', value: `${totalBilled.toLocaleString()}원` },
+          { label: '미수금', value: <span className={totalUnpaid > 0 ? 'tw-text-tillion-danger' : 'tw-text-tillion-success'}>{totalUnpaid.toLocaleString()}원</span> },
+        ]}
+      />
 
       {/* 월별 청구 현황 */}
       {monthlySorted.length > 0 && (
@@ -585,11 +579,11 @@ export default function BillingInvoicePage() {
           <p style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>등록된 청구서가 없습니다.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+            <table>
               <thead>
-                <tr style={{ background: '#1a3c6e', color: 'white' }}>
+                <tr>
                   {['청구일', '거래처', '서비스월', '청구합계', '입금액', '미수금', '상태', '업로더', ''].map(h => (
-                    <th key={h} style={{ padding: '0.6rem 0.75rem', textAlign: 'left', whiteSpace: 'nowrap', fontWeight: 600 }}>{h}</th>
+                    <th key={h}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -598,14 +592,14 @@ export default function BillingInvoicePage() {
                   const unpaid = (inv.total_amount || 0) - (inv.paid_amount || 0);
                   const overdue = inv.due_date && inv.due_date < new Date().toISOString().slice(0, 10) && inv.status !== '완납';
                   return (
-                    <tr key={inv.id} style={{ borderBottom: '1px solid #f3f4f6', background: overdue ? '#fff5f5' : i % 2 === 0 ? 'white' : '#fafafa' }}>
-                      <td style={{ padding: '0.55rem 0.75rem', whiteSpace: 'nowrap' }}>{fmtDt(inv.invoice_date)}{overdue && <span style={{ marginLeft: 4, color: '#dc2626', fontSize: '0.68rem' }}>연체</span>}</td>
-                      <td style={{ padding: '0.55rem 0.75rem', fontWeight: 600 }}>{inv.client_name}</td>
-                      <td style={{ padding: '0.55rem 0.75rem', color: '#6b7280' }}>{inv.service_month || '-'}</td>
-                      <td style={{ padding: '0.55rem 0.75rem', fontWeight: 600 }}>{(inv.total_amount || 0).toLocaleString()}</td>
-                      <td style={{ padding: '0.55rem 0.75rem', color: '#16a34a' }}>{(inv.paid_amount || 0).toLocaleString()}</td>
-                      <td style={{ padding: '0.55rem 0.75rem', color: unpaid > 0 ? '#dc2626' : '#16a34a', fontWeight: unpaid > 0 ? 700 : 400 }}>{unpaid.toLocaleString()}</td>
-                      <td style={{ padding: '0.55rem 0.75rem' }}>
+                    <tr key={inv.id}>
+                      <td>{fmtDt(inv.invoice_date)}{overdue && <span style={{ marginLeft: 4, color: '#dc2626', fontSize: '0.68rem' }}>연체</span>}</td>
+                      <td>{inv.client_name}</td>
+                      <td>{inv.service_month || '-'}</td>
+                      <td>{(inv.total_amount || 0).toLocaleString()}</td>
+                      <td>{(inv.paid_amount || 0).toLocaleString()}</td>
+                      <td>{unpaid.toLocaleString()}</td>
+                      <td>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleToggleStatus(inv); }}
                           title={inv.status === '완납' ? '클릭하면 미납으로 변경' : '클릭하면 완납으로 변경'}
@@ -613,8 +607,8 @@ export default function BillingInvoicePage() {
                           <StatusBadge status={inv.status} />
                         </button>
                       </td>
-                      <td style={{ padding: '0.55rem 0.75rem', color: '#9ca3af' }}>{inv.created_by || '-'}</td>
-                      <td style={{ padding: '0.4rem 0.75rem' }}>
+                      <td>{inv.created_by || '-'}</td>
+                      <td>
                         <div style={{ display: 'flex', gap: '0.35rem' }}>
                           <button onClick={(e) => { e.stopPropagation(); setDetailId(inv.id); }} style={{ ...btnSm, background: '#eff6ff', color: '#1d4ed8' }}>상세</button>
                           <button onClick={(e) => { e.stopPropagation(); setPayingInv(inv); }} style={{ ...btnSm, background: '#f0fdf4', color: '#16a34a' }}>납부</button>
@@ -714,24 +708,24 @@ export default function BillingInvoicePage() {
                 <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: '1rem' }}>
                   <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#374151', marginBottom: '0.75rem' }}>🏢 거래처별 청구 현황</div>
                   {analytics.by_client.length === 0 ? <div style={{ color: '#9ca3af', fontSize: '0.8rem' }}>데이터 없음</div> : (
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                    <table>
                       <thead>
-                        <tr style={{ borderBottom: '1px solid #e5e7eb', color: '#6b7280' }}>
-                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'left', fontWeight: 600 }}>거래처</th>
-                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'right', fontWeight: 600 }}>청구액</th>
-                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'right', fontWeight: 600 }}>미수금</th>
-                          <th style={{ padding: '0.3rem 0.4rem', textAlign: 'center', fontWeight: 600 }}>납부율</th>
+                        <tr>
+                          <th>거래처</th>
+                          <th className="cell-num">청구액</th>
+                          <th className="cell-num">미수금</th>
+                          <th className="tw-text-center">납부율</th>
                         </tr>
                       </thead>
                       <tbody>
                         {analytics.by_client.map((c: any) => (
-                          <tr key={c.client_name} style={{ borderBottom: '1px solid #f9fafb' }}>
-                            <td style={{ padding: '0.35rem 0.4rem', fontWeight: 600, color: '#1a3c6e' }}>{c.client_name}</td>
-                            <td style={{ padding: '0.35rem 0.4rem', textAlign: 'right', color: '#374151' }}>{(c.total / 10000).toFixed(0)}만</td>
-                            <td style={{ padding: '0.35rem 0.4rem', textAlign: 'right', color: c.unpaid > 0 ? '#dc2626' : '#16a34a', fontWeight: c.unpaid > 0 ? 700 : 400 }}>
+                          <tr key={c.client_name}>
+                            <td>{c.client_name}</td>
+                            <td className="cell-num">{(c.total / 10000).toFixed(0)}만</td>
+                            <td className="cell-num">
                               {c.unpaid > 0 ? `${(c.unpaid / 10000).toFixed(0)}만` : '완납'}
                             </td>
-                            <td style={{ padding: '0.35rem 0.4rem' }}>
+                            <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <div style={{ flex: 1, height: 6, background: '#f3f4f6', borderRadius: 3 }}>
                                   <div style={{ height: '100%', width: `${Math.min(c.payment_rate, 100)}%`, background: c.payment_rate >= 100 ? '#16a34a' : c.payment_rate >= 50 ? '#f59e0b' : '#dc2626', borderRadius: 3 }} />

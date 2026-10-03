@@ -1,6 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Alert } from '@/components/Alert';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import PageHeader from '@/components/ui/page-header';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -246,66 +251,47 @@ export default function CertificatesPage() {
   if (!info) return null;
 
   return (
-    <div style={{ padding: '1.25rem', maxWidth: 900 }}>
-      {/* 헤더 (인쇄 시 숨김) */}
-      <div className="no-print" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>📄 증명서 발급</h2>
-        <p style={{ color: '#6c757d', fontSize: '0.875rem' }}>발급 후 브라우저 인쇄 기능으로 PDF 저장이 가능합니다.</p>
+    <div>
+      <div className="no-print">
+        <PageHeader
+          title="증명서 발급"
+          subtitle="발급 후 브라우저 인쇄로 PDF를 저장할 수 있습니다."
+        />
       </div>
 
-      {/* 컨트롤 패널 */}
-      <div className="no-print" style={{
-        background: 'white', border: '1px solid #e5e7eb', borderRadius: 10,
-        padding: '1.25rem', marginBottom: '1.5rem', display: 'flex', gap: '1rem',
-        alignItems: 'flex-end', flexWrap: 'wrap',
-      }}>
-        {/* 종류 선택 */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.3rem', fontWeight: 600 }}>증명서 종류</label>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            {([['employment', '재직증명서'], ['career', '경력증명서']] as const).map(([val, label]) => (
-              <button key={val} onClick={() => setCertType(val)}
-                style={{
-                  padding: '0.45rem 1.1rem', border: '2px solid',
-                  borderColor: certType === val ? '#1a3c6e' : '#d1d5db',
-                  background: certType === val ? '#1a3c6e' : 'white',
-                  color: certType === val ? 'white' : '#374151',
-                  borderRadius: 6, cursor: 'pointer', fontWeight: certType === val ? 700 : 400,
-                  fontSize: '0.875rem',
-                }}>
-                {label}
-              </button>
-            ))}
+      <div className="no-print">
+        <div className="data-filter">
+          <div className="data-filter-fields">
+            <Field label="증명서 종류" className="tw-mb-0">
+              <div className="data-tabs tw-mb-0">
+                {([['employment', '재직증명서'], ['career', '경력증명서']] as const).map(([val, label]) => (
+                  <Button key={val} type="button" variant={certType === val ? 'primary' : 'secondary'} onClick={() => setCertType(val)}>
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </Field>
+            <Field label="발급 목적" className="tw-mb-0 tw-min-w-[220px] tw-flex-1">
+              <Input
+                type="text"
+                value={purpose}
+                onChange={e => setPurpose(e.target.value)}
+                placeholder="예: 금융기관 제출용, 관공서 제출용"
+              />
+            </Field>
+          </div>
+          <div className="data-filter-actions">
+            <Button type="button" onClick={handlePrint} disabled={printing}>
+              {printing ? '준비 중...' : 'PDF / 인쇄'}
+            </Button>
           </div>
         </div>
-
-        {/* 발급 목적 */}
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <label style={{ display: 'block', fontSize: '0.8rem', color: '#6b7280', marginBottom: '0.3rem', fontWeight: 600 }}>발급 목적</label>
-          <input
-            type="text"
-            value={purpose}
-            onChange={e => setPurpose(e.target.value)}
-            placeholder="예: 금융기관 제출용, 관공서 제출용 ..."
-            style={{ width: '100%', padding: '0.45rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.875rem', boxSizing: 'border-box' }}
-          />
-        </div>
-
-        {/* 인쇄 버튼 */}
-        <button onClick={handlePrint} disabled={printing}
-          style={{
-            padding: '0.5rem 1.5rem', background: printing ? '#9ca3af' : '#1a3c6e',
-            color: 'white', border: 'none', borderRadius: 6,
-            cursor: printing ? 'default' : 'pointer', fontWeight: 700, fontSize: '0.875rem',
-            whiteSpace: 'nowrap',
-          }}>
-          🖨️ {printing ? '준비 중...' : 'PDF / 인쇄'}
-        </button>
       </div>
 
-      {/* 안내 */}
-      <div className="no-print" style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '1.5rem', fontSize: '0.8rem', color: '#1d4ed8' }}>
-        💡 PDF 저장 방법: 인쇄 버튼 클릭 → 프린터를 <strong>"PDF로 저장"</strong> 선택 → 저장
+      <div className="no-print">
+        <Alert type="info">
+          PDF 저장: 인쇄 버튼 → 프린터를 &quot;PDF로 저장&quot;으로 선택한 뒤 저장합니다.
+        </Alert>
       </div>
 
       {/* 증명서 미리보기 — A4 고정 비율 유지 */}

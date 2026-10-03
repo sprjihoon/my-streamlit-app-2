@@ -14,15 +14,6 @@ import {
   type OverseasSavedSenderPayload,
 } from '@/lib/api';
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-};
-
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message;
@@ -149,13 +140,13 @@ export default function OverseasSendersPage() {
         {showForm && (
           <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid var(--border)', borderRadius: 8 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <label>별칭<input style={inputStyle} value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))} /></label>
-              <label>이름<input style={inputStyle} value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} /></label>
-              <label>전화<input style={inputStyle} value={form.phone || ''} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} /></label>
-              <label>우편번호<input style={inputStyle} value={form.zipcode || ''} onChange={(e) => setForm((p) => ({ ...p, zipcode: e.target.value }))} /></label>
-              <label>시/도<input style={inputStyle} value={form.addr1 || ''} onChange={(e) => setForm((p) => ({ ...p, addr1: e.target.value }))} /></label>
-              <label>구/군<input style={inputStyle} value={form.addr2 || ''} onChange={(e) => setForm((p) => ({ ...p, addr2: e.target.value }))} /></label>
-              <label style={{ gridColumn: '1 / -1' }}>상세주소<input style={inputStyle} value={form.addr3 || ''} onChange={(e) => setForm((p) => ({ ...p, addr3: e.target.value }))} /></label>
+              <label>별칭<input className="ui-control" value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))} /></label>
+              <label>이름<input className="ui-control" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} /></label>
+              <label>전화<input className="ui-control" value={form.phone || ''} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} /></label>
+              <label>우편번호<input className="ui-control" value={form.zipcode || ''} onChange={(e) => setForm((p) => ({ ...p, zipcode: e.target.value }))} /></label>
+              <label>시/도<input className="ui-control" value={form.addr1 || ''} onChange={(e) => setForm((p) => ({ ...p, addr1: e.target.value }))} /></label>
+              <label>구/군<input className="ui-control" value={form.addr2 || ''} onChange={(e) => setForm((p) => ({ ...p, addr2: e.target.value }))} /></label>
+              <label style={{ gridColumn: '1 / -1' }}>상세주소<input className="ui-control" value={form.addr3 || ''} onChange={(e) => setForm((p) => ({ ...p, addr3: e.target.value }))} /></label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <input type="checkbox" checked={!!form.is_default} onChange={(e) => setForm((p) => ({ ...p, is_default: e.target.checked }))} />
                 기본 발송인

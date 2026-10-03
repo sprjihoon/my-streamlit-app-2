@@ -182,7 +182,7 @@ export default function OverseasShippingListPage() {
                     </td>
                     <td>{it.status === 'canceled' ? '취소' : it.is_test ? '테스트' : '접수'}</td>
                     <td>{it.created_by}</td>
-                    <td className="overseas-list-actions" style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                    <td className="overseas-list-actions" onClick={(e) => e.stopPropagation()}>
                       <a href={`/overseas-print/${it.id}`} className="btn btn-secondary" target="_blank" rel="noreferrer">
                         출력서류
                       </a>

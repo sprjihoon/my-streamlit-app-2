@@ -33,21 +33,11 @@ const METHOD_LABEL: Record<string, string> = {
   KPACKET: 'K-Packet',
 };
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '0.55rem 0.7rem',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  fontFamily: 'inherit',
-  fontSize: '0.9rem',
-  background: '#f8fafc',
-};
-
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <label>
       {label}
-      <input style={inputStyle} value={value} readOnly />
+      <input className="ui-control" value={value} readOnly />
     </label>
   );
 }

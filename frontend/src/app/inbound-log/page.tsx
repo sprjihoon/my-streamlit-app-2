@@ -66,18 +66,9 @@ const inputStyle: React.CSSProperties = {
   background: '#fff',
 };
 
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: '0.8rem',
-  fontWeight: 600,
-  marginBottom: '0.3rem',
-  color: 'var(--text-secondary)',
-};
-
 // ─────────────────────────────────────
 // 상태 배지
 // ─────────────────────────────────────
-
 
 // ─────────────────────────────────────
 // 유틸

@@ -118,24 +118,24 @@ function ItemRow({ item }: { item: ItemDetail }) {
         onClick={() => hasDetail && setOpen(o => !o)}
         style={{ borderBottom: `1px solid ${C.border}`, background: open ? '#fafbff' : C.card, cursor: hasDetail ? 'pointer' : 'default' }}
       >
-        <td style={{ padding: '0.5rem 0.6rem', color: C.muted, fontSize: '0.75rem', width: 28 }}>{item.line_no}</td>
-        <td style={{ padding: '0.5rem 0.6rem' }}>
+        <td>{item.line_no}</td>
+        <td>
           <div style={{ fontWeight: 500, fontSize: '0.85rem', color: C.text }}>{name}</div>
           {option && <div style={{ fontSize: '0.72rem', color: C.muted }}>{option}</div>}
           {item.needs_matching && <span style={{ fontSize: '0.68rem', color: C.warn }}>⚠ 매칭필요</span>}
         </td>
-        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', fontWeight: 600 }}>{item.janggi_qty}</td>
-        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', fontWeight: 700, color: C.success }}>{item.actual_qty}</td>
-        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', fontWeight: 700, color: defectQtySum > 0 ? C.text : C.success }}>
+        <td className="cell-num">{item.janggi_qty}</td>
+        <td className="cell-num">{item.actual_qty}</td>
+        <td className="cell-num">
           {defectQtySum > 0 ? normalQtyDisplay : item.actual_qty}
         </td>
-        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', color: defectQtySum > 0 ? C.danger : C.muted }}>
+        <td className="cell-num">
           {defectQtySum > 0 ? defectQtySum : '-'}
         </td>
-        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'right', color: item.missing_qty > 0 ? C.danger : C.muted }}>
+        <td className="cell-num">
           {item.missing_qty > 0 ? item.missing_qty : '-'}
         </td>
-        <td style={{ padding: '0.5rem 0.6rem' }}>
+        <td>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             {item.photos.length > 0 && chip('#0284c7', '#e0f2fe', `📷${item.photos.length}`, true)}
             {item.defect_logs.length > 0 && chip(C.danger, C.dangerLight, `불량${defectQtySum}개`, true)}
@@ -143,14 +143,14 @@ function ItemRow({ item }: { item: ItemDetail }) {
             {item.confirmed_by && chip(C.muted, '#f1f5f9', item.confirmed_by, true)}
           </div>
         </td>
-        <td style={{ padding: '0.5rem 0.6rem', textAlign: 'center', color: C.muted, fontSize: '0.8rem', width: 24 }}>
+        <td className="tw-text-center">
           {hasDetail ? (open ? '▲' : '▼') : ''}
         </td>
       </tr>
 
       {open && (
-        <tr style={{ background: '#f8fafc' }}>
-          <td colSpan={9} style={{ padding: '0.75rem 1rem', borderBottom: `1px solid ${C.border}` }}>
+        <tr>
+          <td colSpan={9}>
             {item.photos.length > 0 && (
               <div style={{ marginBottom: '0.75rem' }}>
                 <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.muted, marginBottom: 6 }}>📷 품목 사진</div>
@@ -437,7 +437,7 @@ function DetailPageInner() {
         </button>
       </div>
 
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: '1.25rem 1rem' }}>
+      <div>
         {loading && <div style={{ textAlign: 'center', padding: '3rem', color: C.muted }}>불러오는 중...</div>}
         {error && <div style={{ padding: '2rem', color: C.danger }}>{error}</div>}
 
@@ -544,11 +544,11 @@ function DetailPageInner() {
                 {/* 품목 테이블 */}
                 {batch.items.length > 0 ? (
                   <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                    <table>
                       <thead>
-                        <tr style={{ background: '#f1f5f9' }}>
+                        <tr>
                           {['#', '상품명/옵션', '장끼', '실수량', '정상', '불량', '누락', '사진·이력', ''].map((h, i) => (
-                            <th key={i} style={{ padding: '0.4rem 0.6rem', textAlign: i >= 2 && i <= 6 ? 'right' : 'left', color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap', fontSize: '0.75rem' }}>{h}</th>
+                            <th key={i} className="cell-num">{h}</th>
                           ))}
                         </tr>
                       </thead>

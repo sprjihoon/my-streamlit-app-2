@@ -1,4 +1,5 @@
 'use client';
+import PageHeader from '@/components/ui/page-header';
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -108,10 +109,10 @@ export default function InboundOverviewPage() {
   }, [load]);
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 1000, margin: '0 auto', background: C.bg, minHeight: '100vh' }}>
+    <div>
       {/* 헤더 */}
       <div style={{ marginBottom: '1.25rem' }}>
-        <h1 style={{ fontSize: '1.2rem', fontWeight: 700, color: C.text, margin: 0 }}>통합 현황</h1>
+        <PageHeader title="통합 현황" />
         <p style={{ fontSize: '0.82rem', color: C.muted, marginTop: 3 }}>화주사 × 입고일 단위 · 여러 도매처 일괄 확인</p>
       </div>
 
