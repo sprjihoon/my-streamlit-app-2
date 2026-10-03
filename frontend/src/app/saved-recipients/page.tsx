@@ -13,6 +13,7 @@ import {
   type SavedRecipient,
   type SavedRecipientPayload,
 } from '@/lib/api';
+import { openDaumPostcode } from '@/lib/daum-postcode';
 
 function parseApiError(err: unknown): string {
   if (err instanceof Error) {
@@ -70,27 +71,18 @@ export default function SavedRecipientsPage() {
     })();
   }, []);
 
-  function openPostcode() {
-    const run = () => {
-      if (!window.daum?.Postcode) return;
-      new window.daum.Postcode({
-        oncomplete: (data) => {
-          setForm((prev) => ({
-            ...prev,
-            zipcode: data.zonecode,
-            addr1: data.roadAddress || data.jibunAddress,
-          }));
-        },
-      }).open();
-    };
-    if (window.daum?.Postcode) {
-      run();
-      return;
+  async function openPostcode() {
+    try {
+      await openDaumPostcode((picked) => {
+        setForm((prev) => ({
+          ...prev,
+          zipcode: picked.zip,
+          addr1: picked.addr1,
+        }));
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '주소 검색을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
     }
-    const script = document.createElement('script');
-    script.src = 'https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
-    script.onload = run;
-    document.body.appendChild(script);
   }
 
   async function handleSave() {
