@@ -10,6 +10,8 @@ const badgeVariants = cva('tw-inline-flex tw-items-center tw-rounded-full tw-px-
       danger: 'tw-bg-[#fdecec] tw-text-[#b42318]',
       info: 'tw-bg-[#eef2ff] tw-text-[#3451d1]',
       neutral: 'tw-bg-[#f3f4f8] tw-text-[#4b5163]',
+      grading: 'tw-bg-[#ede9fe] tw-text-[#6d28d9]',
+      repairing: 'tw-bg-[#ffedd5] tw-text-[#c2410c]',
     },
   },
   defaultVariants: {

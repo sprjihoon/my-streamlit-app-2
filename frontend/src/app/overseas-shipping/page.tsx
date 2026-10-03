@@ -5,6 +5,7 @@ import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
+import { DataSection as FormSection } from '@/components/operational';
 import AddressSuggestionDialog from '@/components/AddressSuggestionDialog';
 import OverseasRecipientPickerModal from '@/components/OverseasRecipientPickerModal';
 import {
@@ -104,40 +105,6 @@ function HsMenu({
         </button>
       ))}
     </div>
-  );
-}
-
-function FormSection({
-  title,
-  first,
-  children,
-}: {
-  title: string;
-  first?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        marginTop: first ? 0 : '1.1rem',
-        paddingTop: first ? 0 : '1rem',
-        borderTop: first ? 'none' : '2px solid #cbd5e1',
-      }}
-    >
-      <h3
-        style={{
-          margin: '0 0 0.9rem',
-          fontSize: '0.95rem',
-          fontWeight: 700,
-          color: 'var(--text-primary)',
-          letterSpacing: 0,
-          textTransform: 'none',
-        }}
-      >
-        {title}
-      </h3>
-      {children}
-    </section>
   );
 }
 
@@ -615,10 +582,10 @@ export default function OverseasShippingPage() {
       const text = field === 'receivemail'
         ? '영문 이메일로 입력해주세요.'
         : `우체국에 넣을 수 없는 문자: ${fieldErrors[field]}`;
-      return <span style={{ color: '#b91c1c', fontSize: '0.78rem', fontWeight: 600 }}>{text}</span>;
+      return <span className="tw-text-[#b91c1c] tw-text-[0.78rem] tw-font-semibold">{text}</span>;
     }
     if (fieldNotes[field]) {
-      return <span style={{ color: '#1d4ed8', fontSize: '0.78rem' }}>{fieldNotes[field]}</span>;
+      return <span className="tw-text-[#1d4ed8] tw-text-[0.78rem]">{fieldNotes[field]}</span>;
     }
     return null;
   }
@@ -1080,7 +1047,7 @@ export default function OverseasShippingPage() {
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
       {printId && (
-        <p style={{ margin: '0 0 1rem' }}>
+        <p className="tw-mt-0 tw-mx-0 tw-mb-[1rem]">
           <a href={`/overseas-print/${printId}`} className="btn btn-primary" target="_blank" rel="noreferrer">
             출력서류 인쇄
           </a>
@@ -1128,21 +1095,21 @@ export default function OverseasShippingPage() {
       <div className="overseas-intake">
       <div>
       <Card title="접수 정보">
-        <p className="text-muted" style={{ marginBottom: '1rem' }}>
+        <p className="text-muted tw-mb-[1rem]">
           {liveReady ? `실접수 가능 · 기본 발송지 ${senderAddr}` : `EMS 키가 없어 테스트 접수로 저장됩니다. 기본 발송지 ${senderAddr}`}
           {GMAPS_KEY ? ' · 구글 주소검색 가능' : ' · 구글 주소키 없음(직접 입력)'}
         </p>
 
         <FormSection title="주문 엑셀" first>
-          <p className="text-muted" style={{ marginTop: 0 }}>
+          <p className="text-muted tw-mt-0">
             합포 1건의 주문 엑셀을 올리면 수취인, 주소, 제품명, 수량을 채웁니다. 품목란은 HS 품목이라 비워 둡니다.
           </p>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="tw-items-center tw-flex tw-flex-wrap tw-gap-[0.5rem]">
             <input
               ref={excelInputRef}
               type="file"
               accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              style={{ display: 'none' }}
+              className="tw-hidden"
               onChange={(e) => void handleExcelFile(e.target.files?.[0] || null)}
             />
             <button
@@ -1156,7 +1123,7 @@ export default function OverseasShippingPage() {
             {excelName && <span className="text-muted">{excelName}</span>}
           </div>
           {excelGroups.length > 1 && (
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+            <div className="tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mt-[0.75rem]">
               {excelGroups.map((group, index) => (
                 <button
                   key={`${group.bundle_no}-${index}`}
@@ -1171,12 +1138,12 @@ export default function OverseasShippingPage() {
           )}
         </FormSection>
 
-        <FormSection title="발송인">
-        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label style={{ flex: '1 1 240px' }}>
+        <FormSection title="발송인" tone="sender">
+        <div className="tw-items-end tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mb-[1rem]">
+          <label className="tw-flex-[1_1_240px]">
             저장된 발송인
             <select
-              style={inputStyle}
+              className="ui-control"
               value={selectedSenderId}
               onChange={(e) => {
                 const item = savedSenders.find((a) => String(a.id) === e.target.value);
@@ -1196,11 +1163,11 @@ export default function OverseasShippingPage() {
           <button type="button" className="btn btn-secondary" disabled={!selectedSenderId} onClick={handleDeleteSavedSender}>삭제</button>
           <a href="/overseas-senders" className="btn btn-secondary">목록</a>
         </div>
-        <div style={fieldGrid}>
+        <div className="ops-field-grid">
           <label>
             발송인 이름
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.sender_name || ''}
               placeholder={defaultSender}
               onChange={(e) => setForm((p) => ({ ...p, sender_name: e.target.value }))}
@@ -1209,7 +1176,7 @@ export default function OverseasShippingPage() {
           <label>
             발송인 전화
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.sender_tel || ''}
               placeholder="+8210..."
               onChange={(e) => setForm((p) => ({ ...p, sender_tel: e.target.value }))}
@@ -1218,7 +1185,7 @@ export default function OverseasShippingPage() {
           <label>
             발송인 우편번호
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.sender_zipcode || ''}
               onChange={(e) => setForm((p) => ({ ...p, sender_zipcode: e.target.value }))}
             />
@@ -1253,13 +1220,13 @@ export default function OverseasShippingPage() {
           <label>
             발송인 별칭
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.save_sender_label || ''}
               placeholder="스프링풀필먼트"
               onChange={(e) => setForm((p) => ({ ...p, save_sender_label: e.target.value }))}
             />
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mt-[1.4rem]">
             <input
               type="checkbox"
               checked={!!form.save_sender}
@@ -1267,7 +1234,7 @@ export default function OverseasShippingPage() {
             />
             접수와 함께 발송인 저장
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem]">
             <input
               type="checkbox"
               checked={!!form.save_sender_default}
@@ -1278,9 +1245,9 @@ export default function OverseasShippingPage() {
         </div>
         </FormSection>
 
-        <FormSection title="수취인">
-        <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label style={{ flex: '1 1 260px' }}>
+        <FormSection title="수취인" tone="recipient">
+        <div className="tw-items-end tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mb-[1rem]">
+          <label className="tw-flex-[1_1_260px]">
             저장된 수취인
             <button
               type="button"
@@ -1303,11 +1270,11 @@ export default function OverseasShippingPage() {
           <button type="button" className="btn btn-secondary" disabled={!selectedSavedId} onClick={handleDeleteSaved}>삭제</button>
         </div>
 
-        <div style={fieldGrid}>
+        <div className="ops-field-grid">
           <label>
             배송방법
             <select
-              style={inputStyle}
+              className="ui-control"
               value={form.shipping_method}
               onChange={(e) => changeMethod(e.target.value as OverseasShippingPayload['shipping_method'])}
             >
@@ -1325,13 +1292,13 @@ export default function OverseasShippingPage() {
           <label>
             국가
             <input
-              style={{ ...inputStyle, marginBottom: '0.35rem' }}
+              className="ui-control tw-mb-[0.35rem]"
               value={nationQuery}
               placeholder="국가명·코드 검색 (예: 일본, JP)"
               onChange={(e) => setNationQuery(e.target.value)}
             />
             <select
-              style={inputStyle}
+              className="ui-control"
               value={form.countrycd}
               onChange={(e) => setForm((p) => ({ ...p, countrycd: e.target.value }))}
             >
@@ -1345,13 +1312,13 @@ export default function OverseasShippingPage() {
                 ))
               )}
             </select>
-            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+            <span className="text-muted tw-text-[0.78rem]">
               {nationsFallback ? '우체국 국가목록을 받지 못해 임시 목록입니다.' : '우체국 API 발송가능국'} · {nations.length}개
             </span>
           </label>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>우편물 종류</div>
-            <div style={{ display: 'flex', gap: 8 }}>
+          <div className="tw-col-span-full">
+            <div className="tw-text-[0.85rem] tw-font-semibold tw-mb-[6px]">우편물 종류</div>
+            <div className="tw-flex tw-gap-[8px]">
               <button
                 type="button"
                 className="btn"
@@ -1383,7 +1350,7 @@ export default function OverseasShippingPage() {
                 서류
               </button>
             </div>
-            <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+            <span className="text-muted tw-text-[0.78rem]">
               {canDocument
                 ? '화물·서류 요금이 다릅니다. 선택한 유형으로 접수됩니다.'
                 : 'K-Packet은 화물만 가능합니다.'}
@@ -1402,7 +1369,7 @@ export default function OverseasShippingPage() {
           <label>
             연락처
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.receivetelno}
               placeholder="+819012345678"
               onChange={(e) => setForm((p) => ({ ...p, receivetelno: e.target.value }))}
@@ -1420,7 +1387,7 @@ export default function OverseasShippingPage() {
           <label>
             우편번호
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.receivezipcode}
               onChange={(e) => setForm((p) => ({ ...p, receivezipcode: e.target.value }))}
               onBlur={() => void triggerAddressValidation({ silent: true })}
@@ -1446,7 +1413,7 @@ export default function OverseasShippingPage() {
             />
             <FieldMark field="receiveaddr2" />
           </label>
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="tw-col-span-full">
             <label>
               상세주소 (영문){GMAPS_KEY ? ' · 구글 검색' : ''}{validating ? ' · 검증 중...' : ''}
               <input
@@ -1460,13 +1427,13 @@ export default function OverseasShippingPage() {
               />
               <FieldMark field="receiveaddr3" />
             </label>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.55rem' }}>
+            <div className="tw-items-center tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mt-[0.55rem]">
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-primary tw-min-w-[140px]"
                 onClick={() => void triggerAddressValidation()}
                 disabled={validating || !GMAPS_KEY}
-                style={{ minWidth: 140 }}
+               
               >
                 {validating ? '검증 중...' : '구글 주소 검증'}
               </button>
@@ -1477,13 +1444,13 @@ export default function OverseasShippingPage() {
           <label>
             주소록 별칭
             <input
-              style={inputStyle}
+              className="ui-control"
               value={form.save_address_label || ''}
               placeholder="일본 오사카 창고"
               onChange={(e) => setForm((p) => ({ ...p, save_address_label: e.target.value }))}
             />
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1.4rem' }}>
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mt-[1.4rem]">
             <input
               type="checkbox"
               checked={!!form.save_address}
@@ -1491,7 +1458,7 @@ export default function OverseasShippingPage() {
             />
             접수와 함께 수취인 저장
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem]">
             <input
               type="checkbox"
               checked={!!form.save_address_default}
@@ -1513,20 +1480,20 @@ export default function OverseasShippingPage() {
             <input
               type="number"
               min={1}
-              style={inputStyle}
+              className="ui-control"
               value={form.totweight || ''}
               placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, totweight: parseInt(e.target.value, 10) || 0 }))}
             />
             {isDocument && (
-              <span className="text-muted" style={{ fontSize: '0.78rem' }}>
+              <span className="text-muted tw-text-[0.78rem]">
                 서류 요금은 300g~2kg 구간으로 계산됩니다
                 {form.shipping_method === 'EMS_PREMIUM' ? ' · 프리미엄 서류 최대 500g' : ' · EMS 서류 최대 2kg'}
               </span>
             )}
           </label>
           {isDocument ? (
-            <div className="text-muted" style={{ fontSize: '0.85rem', alignSelf: 'center' }}>
+            <div className="text-muted tw-self-center tw-text-[0.85rem]">
               서류는 박스 크기·부피중량을 적용하지 않습니다.
             </div>
           ) : (
@@ -1536,7 +1503,7 @@ export default function OverseasShippingPage() {
             <input
               type="number"
               min={1}
-              style={inputStyle}
+              className="ui-control"
               value={form.boxlength || ''}
               placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, boxlength: parseInt(e.target.value, 10) || 0 }))}
@@ -1547,7 +1514,7 @@ export default function OverseasShippingPage() {
             <input
               type="number"
               min={1}
-              style={inputStyle}
+              className="ui-control"
               value={form.boxwidth || ''}
               placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, boxwidth: parseInt(e.target.value, 10) || 0 }))}
@@ -1558,7 +1525,7 @@ export default function OverseasShippingPage() {
             <input
               type="number"
               min={1}
-              style={inputStyle}
+              className="ui-control"
               value={form.boxheight || ''}
               placeholder="직접 입력"
               onChange={(e) => setForm((p) => ({ ...p, boxheight: parseInt(e.target.value, 10) || 0 }))}
@@ -1566,7 +1533,7 @@ export default function OverseasShippingPage() {
           </label>
             </>
           )}
-          <label style={{ gridColumn: '1 / -1' }}>
+          <label className="tw-col-span-full">
             메모
             <input
               style={styleFor('notes')}
@@ -1599,7 +1566,7 @@ export default function OverseasShippingPage() {
             {quoteLoading && !quoteParcel ? (
               <span className="text-muted">조회 중</span>
             ) : quoteParcel && !quoteParcel.ok ? (
-              <span style={{ color: '#b91c1c', fontWeight: 600, fontSize: '0.8rem' }}>{quoteParcel.error}</span>
+              <span className="tw-text-[#b91c1c] tw-text-[0.8rem] tw-font-semibold">{quoteParcel.error}</span>
             ) : quoteParcel?.totalFee != null ? (
               <span className="fee-choice-price">{quoteParcel.totalFee.toLocaleString()}원</span>
             ) : (
@@ -1621,7 +1588,7 @@ export default function OverseasShippingPage() {
               {quoteLoading && !quoteDocument ? (
                 <span className="text-muted">조회 중</span>
               ) : quoteDocument && !quoteDocument.ok ? (
-                <span style={{ color: '#b91c1c', fontWeight: 600, fontSize: '0.8rem' }}>{quoteDocument.error}</span>
+                <span className="tw-text-[#b91c1c] tw-text-[0.8rem] tw-font-semibold">{quoteDocument.error}</span>
               ) : quoteDocument?.totalFee != null ? (
                 <span className="fee-choice-price">{quoteDocument.totalFee.toLocaleString()}원</span>
               ) : (
@@ -1631,9 +1598,9 @@ export default function OverseasShippingPage() {
           )}
         </div>
         {quoteLoading && quoteFee == null ? (
-          <div style={{ marginTop: 8, fontSize: '0.9rem' }}>요금 조회 중...</div>
+          <div className="tw-text-[0.9rem] tw-mt-[8px]">요금 조회 중...</div>
         ) : quoteError && quoteFee == null ? (
-          <div style={{ marginTop: 8, color: '#b91c1c', fontWeight: 600 }}>{quoteError}</div>
+          <div className="tw-text-[#b91c1c] tw-font-semibold tw-mt-[8px]">{quoteError}</div>
         ) : quoteFee != null ? (
           <div className="fee-lines">
             <div className="fee-line">
@@ -1661,12 +1628,12 @@ export default function OverseasShippingPage() {
               </>
             )}
             {quoteDuty?.ineligibleReason && (
-              <div style={{ fontSize: '0.8rem', color: '#b45309', fontWeight: 600 }}>
+              <div className="tw-text-[#b45309] tw-text-[0.8rem] tw-font-semibold">
                 {quoteDuty.ineligibleReason}
               </div>
             )}
             {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
-              <div className="text-muted" style={{ fontSize: '0.8rem' }}>
+              <div className="text-muted tw-text-[0.8rem]">
                 신고가액을 입력하면 관세 선납이 나옵니다.
               </div>
             )}
@@ -1687,13 +1654,13 @@ export default function OverseasShippingPage() {
             </div>
           </div>
         ) : (
-          <div className="text-muted" style={{ marginTop: 8 }}>중량을 입력하면 우체국 요금이 표시됩니다.</div>
+          <div className="text-muted tw-mt-[8px]">중량을 입력하면 우체국 요금이 표시됩니다.</div>
         )}
       </Card>
 
       <Card title="접수">
         {liveReady && (
-          <label style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center' }}>
+          <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mb-[0.75rem]">
             <input
               type="checkbox"
               checked={!!form.test_mode}
@@ -1702,8 +1669,8 @@ export default function OverseasShippingPage() {
             테스트 접수 (우체국에 실제 신청하지 않음)
           </label>
         )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
-          <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={saving} style={{ width: '100%' }}>
+        <div className="tw-flex tw-flex-col tw-gap-[0.55rem]">
+          <button type="button" className="btn btn-primary tw-w-full" onClick={handleSubmit} disabled={saving}>
             {saving ? '접수 중...' : liveReady && !form.test_mode ? '해외배송 접수' : '테스트 접수'}
           </button>
           <div className="fee-links">
@@ -1718,7 +1685,7 @@ export default function OverseasShippingPage() {
       </div>
 
       <Card title="세관 인보이스">
-        <p className="text-muted" style={{ marginBottom: '0.75rem' }}>
+        <p className="text-muted tw-mb-[0.75rem]">
           {isDocument
             ? '서류도 내용품명(영문)을 입력하세요. 예: Documents. '
             : '제품명은 주문 상품이고, 품목은 HS 품목입니다. 한글·영문·HS 6자리로 검색합니다. '}
@@ -1752,14 +1719,14 @@ export default function OverseasShippingPage() {
                 <td />
                 <td>
                   <div className="overseas-bulk-cell">
-                    <input style={inputStyle} aria-label="제품명 일괄" value={bulkItem.product_name} placeholder="같은 제품명" onChange={(e) => setBulkItem((p) => ({ ...p, product_name: e.target.value }))} />
+                    <input className="ui-control" aria-label="제품명 일괄" value={bulkItem.product_name} placeholder="같은 제품명" onChange={(e) => setBulkItem((p) => ({ ...p, product_name: e.target.value }))} />
                     <button type="button" className="btn btn-secondary" onClick={applyBulkProduct}>넣기</button>
                   </div>
                 </td>
                 <td>
                   <div className="overseas-bulk-cell">
                     <input
-                      style={inputStyle}
+                      className="ui-control"
                       aria-label="품목 일괄"
                       value={bulkItem.name_en}
                       placeholder="같은 HS 품목"
@@ -1787,25 +1754,25 @@ export default function OverseasShippingPage() {
                 </td>
                 <td>
                   <div className="overseas-bulk-cell">
-                    <input style={inputStyle} aria-label="수량 일괄" type="number" min={1} value={bulkItem.quantity} placeholder="수량" onChange={(e) => setBulkItem((p) => ({ ...p, quantity: e.target.value }))} />
+                    <input className="ui-control" aria-label="수량 일괄" type="number" min={1} value={bulkItem.quantity} placeholder="수량" onChange={(e) => setBulkItem((p) => ({ ...p, quantity: e.target.value }))} />
                     <button type="button" className="btn btn-secondary" onClick={applyBulkQuantity}>넣기</button>
                   </div>
                 </td>
                 <td>
                   <div className="overseas-bulk-cell">
-                    <input style={inputStyle} aria-label="단가 일괄" type="number" min={0.01} step="0.01" value={bulkItem.unit_price_usd} placeholder="USD" onChange={(e) => setBulkItem((p) => ({ ...p, unit_price_usd: e.target.value }))} />
+                    <input className="ui-control" aria-label="단가 일괄" type="number" min={0.01} step="0.01" value={bulkItem.unit_price_usd} placeholder="USD" onChange={(e) => setBulkItem((p) => ({ ...p, unit_price_usd: e.target.value }))} />
                     <button type="button" className="btn btn-secondary" onClick={applyBulkPrice}>넣기</button>
                   </div>
                 </td>
                 <td>
                   <div className="overseas-bulk-cell">
-                    <input style={inputStyle} aria-label="HS 일괄" value={bulkItem.hs_code} placeholder="6자리" onChange={(e) => setBulkItem((p) => ({ ...p, hs_code: e.target.value.replace(/\D/g, '') }))} />
+                    <input className="ui-control" aria-label="HS 일괄" value={bulkItem.hs_code} placeholder="6자리" onChange={(e) => setBulkItem((p) => ({ ...p, hs_code: e.target.value.replace(/\D/g, '') }))} />
                     <button type="button" className="btn btn-secondary" onClick={applyBulkHs}>넣기</button>
                   </div>
                 </td>
                 <td>
                   <div className="overseas-bulk-cell">
-                    <input style={inputStyle} aria-label="원산지 일괄" value={bulkItem.origin_country} placeholder="KR" onChange={(e) => setBulkItem((p) => ({ ...p, origin_country: e.target.value }))} />
+                    <input className="ui-control" aria-label="원산지 일괄" value={bulkItem.origin_country} placeholder="KR" onChange={(e) => setBulkItem((p) => ({ ...p, origin_country: e.target.value }))} />
                     <button type="button" className="btn btn-secondary" onClick={applyBulkOrigin}>넣기</button>
                   </div>
                 </td>
@@ -1853,14 +1820,14 @@ export default function OverseasShippingPage() {
                       )}
                     </td>
                     <td>
-                      <input style={inputStyle} aria-label={`${i + 1}행 수량`} type="number" min={1} value={item.quantity} onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value, 10) || 1 })} />
+                      <input className="ui-control" aria-label={`${i + 1}행 수량`} type="number" min={1} value={item.quantity} onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value, 10) || 1 })} />
                     </td>
                     <td>
-                      <input style={inputStyle} aria-label={`${i + 1}행 단가`} type="number" min={0.01} step="0.01" value={item.unit_price_usd || ''} placeholder="USD" onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })} />
+                      <input className="ui-control" aria-label={`${i + 1}행 단가`} type="number" min={0.01} step="0.01" value={item.unit_price_usd || ''} placeholder="USD" onChange={(e) => updateItem(i, { unit_price_usd: parseFloat(e.target.value) || 0 })} />
                     </td>
                     <td>
                       <input
-                        style={inputStyle}
+                        className="ui-control"
                         aria-label={`${i + 1}행 HS코드`}
                         value={item.hs_code || ''}
                         placeholder="6자리"
@@ -1875,7 +1842,7 @@ export default function OverseasShippingPage() {
                       />
                     </td>
                     <td>
-                      <input style={inputStyle} aria-label={`${i + 1}행 원산지`} value={item.origin_country || ''} placeholder="KR" onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
+                      <input className="ui-control" aria-label={`${i + 1}행 원산지`} value={item.origin_country || ''} placeholder="KR" onChange={(e) => updateItem(i, { origin_country: e.target.value })} />
                     </td>
                     <td>
                       <div className="overseas-row-actions">
@@ -1889,7 +1856,7 @@ export default function OverseasShippingPage() {
             </tbody>
           </table>
         </div>
-        <button type="button" className="btn btn-secondary" style={{ marginTop: '0.75rem' }} onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
+        <button type="button" className="btn btn-secondary tw-mt-[0.75rem]" onClick={() => setForm((p) => ({ ...p, items: [...p.items, newItem()] }))}>
           품목 추가
         </button>
       </Card>
