@@ -151,6 +151,7 @@ export async function createDomesticShipping(token: string, payload: DomesticSub
       is_test: boolean;
       duplicate_guard?: boolean;
       partial?: boolean;
+      preview?: DomesticPreview;
     }>(`/domestic-shipping${domesticQuery(token)}`, {
       method: 'POST',
       body: JSON.stringify({ ...payload, confirm: true }),

@@ -1075,24 +1075,62 @@ tbody tr:hover { background: #f6f7fb; }
   .grid-5 { grid-template-columns: 1fr; }
   .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric-value { font-size: 1.15rem; }
+  .domestic-page .page-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.65rem;
+  }
+  .domestic-page .page-header-actions {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+  .domestic-field,
+  .domestic-field input,
+  .domestic-field select,
   .domestic-field.w-addr input,
   .domestic-field.w-vendor select,
   .domestic-field.w-box select,
-  .domestic-field.w-notes input {
+  .domestic-field.w-notes input,
+  .domestic-filters label,
+  .domestic-filters input,
+  .domestic-filters select {
     width: 100%;
+    max-width: 100%;
+  }
+  .domestic-address-line,
+  .domestic-row,
+  .domestic-actions,
+  .domestic-row-actions {
+    align-items: stretch;
+  }
+  .domestic-dialog {
+    width: min(32rem, calc(100vw - 1.5rem));
   }
 }
 
 .domestic-form {
-  max-width: 42rem;
+  max-width: 68rem;
+  width: 100%;
 }
 .domestic-form .card-header {
   text-transform: none;
   letter-spacing: 0;
   font-size: 0.95rem;
 }
+.domestic-block + .domestic-block {
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+.domestic-block-primary {
+  background: #f8f9fd;
+  margin-left: -0.2rem;
+  margin-right: -0.2rem;
+  padding: 0.75rem 0.2rem 0.15rem;
+  border-radius: 8px;
+}
 .domestic-section {
-  margin: 0.85rem 0 0.4rem;
+  margin: 0 0 0.45rem;
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-secondary);
@@ -1108,6 +1146,8 @@ tbody tr:hover { background: #f6f7fb; }
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  min-width: 0;
+  max-width: 100%;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-secondary);
@@ -1154,6 +1194,128 @@ tbody tr:hover { background: #f6f7fb; }
 }
 .domestic-facts dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.domestic-field.is-invalid input,
+.domestic-field.is-invalid select {
+  border-color: var(--color-danger);
+}
+.domestic-field-error {
+  color: var(--color-danger-dark);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.domestic-actions,
+.domestic-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+.domestic-address {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+}
+.domestic-address-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.7rem;
+  align-items: flex-end;
+}
+.domestic-address-line .w-addr,
+.domestic-row .w-notes {
+  flex: 1 1 16rem;
+}
+.domestic-address-line .w-addr input,
+.domestic-field.w-detail input,
+.domestic-field.w-notes input {
+  width: 100%;
+}
+.domestic-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.7rem;
+  align-items: flex-end;
+  margin-bottom: 0.85rem;
+}
+.domestic-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.domestic-filters input,
+.domestic-filters select {
+  width: 11rem;
+  max-width: 100%;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 400;
+  color: var(--text-primary);
+  background: #fff;
+}
+.domestic-filters label:first-child input {
+  width: 16rem;
+}
+.domestic-list-row {
+  cursor: pointer;
+}
+.domestic-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.domestic-copy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.4rem;
+  align-items: center;
+}
+.domestic-copy-btn {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.75rem;
+}
+.domestic-copy-ok,
+.domestic-copy-bad {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.domestic-copy-ok { color: var(--color-success); }
+.domestic-copy-bad { color: var(--color-danger-dark); }
+.domestic-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: min(40rem, calc(100vh - 2rem));
+  overflow: auto;
+  padding: 1.15rem 1.2rem 1.2rem;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+}
+.domestic-dialog-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+.domestic-dialog-copy {
+  margin: 0 0 0.8rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.domestic-dialog-facts {
+  margin-bottom: 0.9rem;
+}
+.domestic-result-links {
+  margin: 0.8rem 0;
+  padding-left: 1.1rem;
+}
+.domestic-page {
+  max-width: 100%;
 }
 
 /* ─────────────────────────────────────────
