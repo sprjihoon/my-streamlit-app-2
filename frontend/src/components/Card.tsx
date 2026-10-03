@@ -1,4 +1,5 @@
 import React from 'react';
+import { Card as UiCard, CardContent, CardHeader } from '@/components/ui/card';
 
 interface CardProps {
   title?: string;
@@ -8,7 +9,6 @@ interface CardProps {
   noPadding?: boolean;
 }
 
-// 문자열 앞의 이모지 자동 제거
 function stripEmoji(str: string): string {
   return str.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+/u, '').trim();
 }
@@ -16,17 +16,15 @@ function stripEmoji(str: string): string {
 export function Card({ title, children, style, actions, noPadding }: CardProps) {
   const cleanTitle = title ? stripEmoji(title) : undefined;
   return (
-    <div className="card" style={{ ...(noPadding ? { padding: 0 } : {}), ...style }}>
+    <UiCard className={noPadding ? '!tw-p-0' : undefined} style={style}>
       {cleanTitle && (
-        <div className="card-header" style={actions ? { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } : undefined}>
+        <CardHeader className={actions ? 'tw-justify-between' : undefined}>
           <span>{cleanTitle}</span>
-          {actions && <div style={{ display: 'flex', gap: '0.5rem' }}>{actions}</div>}
-        </div>
+          {actions && <div className="tw-flex tw-gap-2">{actions}</div>}
+        </CardHeader>
       )}
-      <div style={noPadding ? { padding: '1.25rem 1.5rem' } : undefined}>
-        {children}
-      </div>
-    </div>
+      <CardContent className={noPadding ? 'tw-px-6 tw-py-5' : undefined}>{children}</CardContent>
+    </UiCard>
   );
 }
 

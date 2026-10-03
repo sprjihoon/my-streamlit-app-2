@@ -5,6 +5,9 @@ import Card from '@/components/Card';
 import Loading from '@/components/Loading';
 import Alert from '@/components/Alert';
 import PageHeader from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
+import { Metric } from '@/components/ui/metric';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { checkHealth, getUploadList } from '@/lib/api';
 
 /**
@@ -61,14 +64,12 @@ export default function Dashboard() {
       <Card title="API 상태">
         {health ? (
           <div className="flex gap-1">
-            <div className="metric">
-              <div className="metric-value" style={{ color: 'var(--color-success)', fontSize: '1.2rem' }}>●</div>
-              <div className="metric-label">상태: {health.status}</div>
-            </div>
-            <div className="metric">
-              <div className="metric-value">{health.version}</div>
-              <div className="metric-label">버전</div>
-            </div>
+            <Metric
+              value="●"
+              label={`상태: ${health.status}`}
+              valueClassName="!tw-text-[1.2rem] !tw-text-tillion-success"
+            />
+            <Metric value={health.version} label="버전" />
           </div>
         ) : (
           <Alert type="warning">API 서버에 연결할 수 없습니다.</Alert>
@@ -85,10 +86,7 @@ export default function Dashboard() {
             { key: 'kpost_ret', label: '우체국반품' },
             { key: 'work_log', label: '작업일지' },
           ].map((t) => (
-            <div key={t.key} className="metric">
-              <div className="metric-value">{tableStats[t.key] || 0}</div>
-              <div className="metric-label">{t.label}</div>
-            </div>
+            <Metric key={t.key} value={tableStats[t.key] || 0} label={t.label} />
           ))}
         </div>
       </Card>
@@ -98,37 +96,35 @@ export default function Dashboard() {
         {uploads.length === 0 ? (
           <p className="text-muted">업로드된 파일이 없습니다.</p>
         ) : (
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>테이블</th>
-                  <th>파일명</th>
-                  <th>업로드 시각</th>
-                </tr>
-              </thead>
-              <tbody>
-                {uploads.slice(0, 5).map((u, i) => (
-                  <tr key={i}>
-                    <td>{u.table_name}</td>
-                    <td>{u.원본명 || '-'}</td>
-                    <td>{u.업로드시각}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>테이블</TableHead>
+                <TableHead>파일명</TableHead>
+                <TableHead>업로드 시각</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {uploads.slice(0, 5).map((u, i) => (
+                <TableRow key={i}>
+                  <TableCell>{u.table_name}</TableCell>
+                  <TableCell>{u.원본명 || '-'}</TableCell>
+                  <TableCell>{u.업로드시각}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </Card>
 
       {/* 빠른 링크 */}
       <Card title="빠른 작업">
         <div className="flex gap-1">
-          <a href="/upload" className="btn btn-primary">데이터 업로드</a>
-          <a href="/return-request" className="btn btn-secondary">회수신청</a>
-          <a href="/overseas-shipping" className="btn btn-secondary">해외배송</a>
-          <a href="/invoice" className="btn btn-success">인보이스 계산</a>
-          <a href="/invoice-list" className="btn btn-secondary">인보이스 목록</a>
+          <Button variant="primary" asChild><a href="/upload">데이터 업로드</a></Button>
+          <Button variant="secondary" asChild><a href="/return-request">회수신청</a></Button>
+          <Button variant="secondary" asChild><a href="/overseas-shipping">해외배송</a></Button>
+          <Button variant="success" asChild><a href="/invoice">인보이스 계산</a></Button>
+          <Button variant="secondary" asChild><a href="/invoice-list">인보이스 목록</a></Button>
         </div>
       </Card>
     </div>

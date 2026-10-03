@@ -92,7 +92,7 @@ export default function RootLayout({
           <link rel="icon" href="/favicon.png" type="image/png" />
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         </head>
-        <body style={isPublicPage ? { background: '#000', minHeight: '100vh' } : undefined}>{children}</body>
+        <body className={isPublicPage ? 'tw-min-h-screen tw-bg-black' : undefined}>{children}</body>
       </html>
     );
   }
@@ -106,7 +106,7 @@ export default function RootLayout({
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
         <body>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+          <div className="tw-flex tw-h-screen tw-items-center tw-justify-center">
             <p>로딩 중...</p>
           </div>
         </body>
