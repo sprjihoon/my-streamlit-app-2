@@ -2,6 +2,7 @@
 
 import './globals.css';
 import './operational.css';
+import './data.css';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { MustChangePasswordModal } from '@/components/layout/MustChangePasswordModal';
