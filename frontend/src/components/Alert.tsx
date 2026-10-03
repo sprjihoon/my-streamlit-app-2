@@ -1,6 +1,4 @@
-/**
- * 알림 컴포넌트
- */
+import { Alert as UiAlert } from '@/components/ui/alert';
 
 interface AlertProps {
   type: 'success' | 'warning' | 'error' | 'info';
@@ -11,28 +9,18 @@ interface AlertProps {
 
 export function Alert({ type, message, children, onClose }: AlertProps) {
   return (
-    <div className={`alert alert-${type}`} style={{ position: 'relative', marginBottom: '1rem' }}>
+    <UiAlert type={type}>
       {message || children}
       {onClose && (
         <button
           onClick={onClose}
-          style={{
-            position: 'absolute',
-            right: '10px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '1.2rem',
-          }}
+          className="tw-absolute tw-right-[10px] tw-top-1/2 tw--translate-y-1/2 tw-cursor-pointer tw-border-0 tw-bg-transparent tw-text-[1.2rem]"
         >
           ×
         </button>
       )}
-    </div>
+    </UiAlert>
   );
 }
 
 export default Alert;
-

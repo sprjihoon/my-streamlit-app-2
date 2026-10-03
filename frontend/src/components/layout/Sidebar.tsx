@@ -20,15 +20,13 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <h1>
-        <ShieldCheck size={18} strokeWidth={2} style={{ color: '#7b9cff', flexShrink: 0 }} />
+        <ShieldCheck size={18} strokeWidth={2} className="tw-shrink-0 tw-text-[#7b9cff]" />
         틸리언 그룹웨어
       </h1>
 
       <UserPanel user={user} onChangePassword={onChangePassword} onLogout={onLogout} />
 
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-        {/* 일반 그룹 (아코디언) — adminOnly 항목은 관리자만 표시 */}
-        {/* 비관리자는 그룹웨어 카테고리를 맨 위로 */}
+      <nav className="!tw-gap-[2px]">
         {(user?.is_admin
           ? NAV_GROUPS
           : [...NAV_GROUPS].sort((a, b) =>
@@ -48,7 +46,6 @@ export function Sidebar({
           );
         })}
 
-        {/* 실 인보이스 (관리자 전용) */}
         {user?.is_admin && (
           <NavGroup
             label="실 청구서"
@@ -58,7 +55,6 @@ export function Sidebar({
           />
         )}
 
-        {/* 관리자 전용 */}
         {user?.is_admin && (
           <NavGroup
             label="관리자"

@@ -2,6 +2,10 @@
 
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -72,108 +76,67 @@ export function PasswordChangeModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          backgroundColor: 'white',
-          borderRadius: '8px',
-          padding: '2rem',
-          width: '350px',
-        }}
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="tw-w-[350px] tw-rounded-[8px] tw-p-8"
+        onEscapeKeyDown={(event) => event.preventDefault()}
       >
-        <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <KeyRound size={18} style={{ color: '#4361ee' }} /> 비밀번호 변경
-        </h3>
+        <DialogTitle asChild>
+          <h3 className="tw-mb-4 tw-flex tw-items-center tw-gap-2">
+            <KeyRound size={18} className="tw-text-tillion-brand" /> 비밀번호 변경
+          </h3>
+        </DialogTitle>
 
         {passwordError && (
-          <div style={{ padding: '0.5rem', marginBottom: '1rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', fontSize: '0.875rem' }}>
+          <div className="tw-mb-4 tw-rounded tw-bg-[#ffebee] tw-p-2 tw-text-[0.875rem] tw-text-[#c62828]">
             {passwordError}
           </div>
         )}
 
         {passwordSuccess && (
-          <div style={{ padding: '0.5rem', marginBottom: '1rem', backgroundColor: '#e8f5e9', color: '#2e7d32', borderRadius: '4px', fontSize: '0.875rem' }}>
+          <div className="tw-mb-4 tw-rounded tw-bg-[#e8f5e9] tw-p-2 tw-text-[0.875rem] tw-text-[#2e7d32]">
             {passwordSuccess}
           </div>
         )}
 
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>현재 비밀번호</label>
-          <input
+        <Field label="현재 비밀번호">
+          <Input
+            tone="plain"
             type="password"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
-            style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+            className="tw-border-[#ddd] tw-p-2"
           />
-        </div>
+        </Field>
 
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>새 비밀번호</label>
-          <input
+        <Field label="새 비밀번호">
+          <Input
             type="password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+            className="tw-border-[#ddd] tw-p-2"
           />
-        </div>
+        </Field>
 
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>새 비밀번호 확인</label>
-          <input
+        <Field label="새 비밀번호 확인">
+          <Input
             type="password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            style={{ width: '100%', padding: '0.5rem', border: '1px solid #ddd', borderRadius: '4px' }}
+            className="tw-border-[#ddd] tw-p-2"
           />
-        </div>
+        </Field>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button
-            onClick={handleChangePassword}
-            disabled={changingPassword}
-            style={{
-              flex: 1,
-              padding: '0.5rem',
-              backgroundColor: changingPassword ? '#ccc' : '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: changingPassword ? 'not-allowed' : 'pointer',
-            }}
-          >
+        <div className="tw-flex tw-gap-2">
+          <Button variant="changeSubmit" onClick={handleChangePassword} disabled={changingPassword}>
             {changingPassword ? '변경 중...' : '변경'}
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1,
-              padding: '0.5rem',
-              backgroundColor: '#9e9e9e',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
+          </Button>
+          <Button variant="cancel" onClick={onClose}>
             취소
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

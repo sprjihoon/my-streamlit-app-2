@@ -2,6 +2,10 @@
 
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { Field } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -37,44 +41,55 @@ export function MustChangePasswordModal({ onSuccess }: { onSuccess: () => void }
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-      <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '2rem', width: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-          <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'center' }}>
-            <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <KeyRound size={24} style={{ color: '#4361ee' }} />
+    <Dialog open>
+      <DialogContent
+        overlayClassName="tw-z-[9999] tw-bg-black/70"
+        className="tw-z-[10000] tw-w-[380px] tw-rounded-[12px] tw-p-8 tw-shadow-[0_20px_60px_rgba(0,0,0,0.3)]"
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => event.preventDefault()}
+      >
+        <div className="tw-mb-6 tw-text-center">
+          <div className="tw-mb-3 tw-flex tw-justify-center">
+            <div className="tw-flex tw-h-[52px] tw-w-[52px] tw-items-center tw-justify-center tw-rounded-full tw-bg-tillion-brand-light">
+              <KeyRound size={24} className="tw-text-tillion-brand" />
             </div>
           </div>
-          <h3 style={{ margin: 0, marginBottom: '0.5rem' }}>비밀번호 변경 필요</h3>
-          <p style={{ margin: 0, fontSize: '0.875rem', color: '#6c757d' }}>
+          <DialogTitle asChild>
+            <h3 className="tw-mb-2 tw-mt-0">비밀번호 변경 필요</h3>
+          </DialogTitle>
+          <DialogDescription className="tw-m-0 tw-text-[0.875rem] tw-text-[#6c757d]">
             초기 비밀번호(123456)를 변경해야 합니다.<br />
             새 비밀번호를 설정해주세요.
-          </p>
+          </DialogDescription>
         </div>
         {error && (
-          <div style={{ padding: '0.5rem', marginBottom: '1rem', backgroundColor: '#f8d7da', color: '#842029', borderRadius: '4px', fontSize: '0.875rem' }}>
+          <div className="tw-mb-4 tw-rounded tw-bg-[#f8d7da] tw-p-2 tw-text-[0.875rem] tw-text-[#842029]">
             {error}
           </div>
         )}
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.875rem' }}>새 비밀번호</label>
-            <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
+          <Field label="새 비밀번호" labelClassName="tw-mb-1 tw-text-[0.875rem]">
+            <Input
+              type="password"
+              value={newPw}
+              onChange={e => setNewPw(e.target.value)}
               placeholder="새 비밀번호 (4자 이상)"
-              style={{ width: '100%', padding: '0.6rem', border: '1px solid #dee2e6', borderRadius: '4px' }} />
-          </div>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'block', fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.875rem' }}>새 비밀번호 확인</label>
-            <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
+            />
+          </Field>
+          <Field label="새 비밀번호 확인" className="tw-mb-6" labelClassName="tw-mb-1 tw-text-[0.875rem]">
+            <Input
+              type="password"
+              value={confirmPw}
+              onChange={e => setConfirmPw(e.target.value)}
               placeholder="비밀번호 재입력"
-              style={{ width: '100%', padding: '0.6rem', border: '1px solid #dee2e6', borderRadius: '4px' }} />
-          </div>
-          <button type="submit" disabled={loading}
-            style={{ width: '100%', padding: '0.75rem', backgroundColor: loading ? '#ccc' : '#0d6efd', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}>
+            />
+          </Field>
+          <Button type="submit" variant="forcedSubmit" disabled={loading}>
             {loading ? '변경 중...' : '비밀번호 변경'}
-          </button>
+          </Button>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
