@@ -110,7 +110,8 @@ def test_treat_status_label_maps_picked_up_to_completed():
     assert treat_status_label("01") == "수거완료"
     assert treat_status_label("00") == "신청접수"
     assert treat_status_label("1", "집하완료") == "수거완료"
-    assert treat_status_label("", "집하완료") == "수거완료"
+    # 빈 코드는 신청접수로 정규화된다. 집하완료 fallback은 코드가 비어 있으면 보지 않는다.
+    assert treat_status_label("", "집하완료") == "신청접수"
     # 신규 세분화 코드
     assert treat_status_label("04") == "운송장출력"
     assert treat_status_label("05") == "수거준비"
@@ -120,23 +121,20 @@ def test_treat_status_label_maps_picked_up_to_completed():
     assert treat_status_label("03") == "배달완료"
 
 
-def test_treat_status_from_tracking_text_granular():
-    """우체국 공개 종적조회 텍스트 → 처리상태코드 매핑 검증."""
-    assert treat_status_from_tracking_text("집하완료 동대구우체국") == "01"
-    assert treat_status_from_tracking_text("배달완료") == "03"
-    assert treat_status_from_tracking_text("운송장출력") == "04"
-    assert treat_status_from_tracking_text("수거준비 중") == "05"
-    assert treat_status_from_tracking_text("접수확인 완료") == "08"   # 우체국 접수확인은 08로 분리
-    assert treat_status_from_tracking_text("배차신청 완료") == "09"   # 배차신청은 09로 분리
-    assert treat_status_from_tracking_text("이동중") == "02"
-    assert treat_status_from_tracking_text("발송 처리") == "02"
-    assert treat_status_from_tracking_text("배달중") == "07"
-    assert treat_status_from_tracking_text("배달준비") == "06"
-    # 배달완료가 가장 우선
-    assert treat_status_from_tracking_text("배달완료 배달중 이동중") == "03"
-    # 집하완료가 배달중보다 우선
-    assert treat_status_from_tracking_text("집하완료 이동중") == "01"
-    # 인식 불가 텍스트
+def test_treat_status_from_tracking_text_returns_korean_status():
+    """공개 종적조회 텍스트는 DB에 저장하는 Korean text를 반환한다."""
+    assert treat_status_from_tracking_text("집하완료 동대구우체국") == "수거완료"
+    assert treat_status_from_tracking_text("배달완료") == "배달완료"
+    assert treat_status_from_tracking_text("운송장출력") == "운송장출력"
+    assert treat_status_from_tracking_text("수거준비 중") == "수거준비"
+    assert treat_status_from_tracking_text("접수확인 완료") == "접수확인"
+    assert treat_status_from_tracking_text("배차신청 완료") == "배차신청"
+    assert treat_status_from_tracking_text("이동중") == "이동중"
+    assert treat_status_from_tracking_text("발송 처리") == "이동중"
+    assert treat_status_from_tracking_text("배달중") == "배달중"
+    assert treat_status_from_tracking_text("배달준비") == "배달준비"
+    assert treat_status_from_tracking_text("배달완료 배달중 이동중") == "배달완료"
+    assert treat_status_from_tracking_text("집하완료 이동중") == "수거완료"
     assert treat_status_from_tracking_text("알 수 없음") is None
     assert treat_status_from_tracking_text(None) is None
 
@@ -318,8 +316,8 @@ def test_refresh_status_uses_public_tracking_when_getresinfo_stays_requested(iso
 
 
 def test_refresh_status_skips_only_delivered(isolated_runtime, monkeypatch):
-    """배달완료('03')만 송장조회에서 제외되어야 한다.
-    수거완료('01')는 배달완료까지 계속 추적하므로 제외하지 않는다."""
+    """저장된 상태가 '배달완료'인 건만 송장조회에서 제외한다.
+    '수거완료'는 배달완료까지 계속 추적한다."""
     token = _seed_user(isolated_runtime["db"])
 
     # 수거완료 건 — 아직 배달중이므로 계속 조회해야 함
@@ -329,11 +327,11 @@ def test_refresh_status_skips_only_delivered(isolated_runtime, monkeypatch):
 
     with sqlite3.connect(isolated_runtime["db"]) as con:
         con.execute(
-            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='01', treat_status_name='수거완료', pickup_date=? WHERE id=?",
+            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='수거완료', treat_status_name='수거완료', pickup_date=? WHERE id=?",
             (date.today().isoformat(), c1["id"]),
         )
         con.execute(
-            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='03', treat_status_name='배달완료', pickup_date=? WHERE id=?",
+            "UPDATE kpost_pickup_requests SET is_test=0, treat_status='배달완료', treat_status_name='배달완료', pickup_date=? WHERE id=?",
             (date.today().isoformat(), c2["id"]),
         )
         con.commit()
@@ -353,14 +351,13 @@ def test_refresh_status_skips_only_delivered(isolated_runtime, monkeypatch):
     )
 
     result = refresh_pickup_statuses(token)
-    # 수거완료('01') 건은 계속 조회 → checked=1, 배달완료('03') 건은 제외
+    # 수거완료 건은 계속 조회 → checked=1, 배달완료 건은 제외
     assert result["checked"] == 1, f"수거완료 건은 계속 조회해야 합니다. checked={result['checked']}"
     assert api_call_count == 1, f"수거완료 건 1건만 API 호출해야 합니다. called {api_call_count} times"
 
-    # 배달완료 건은 DB에서 제외됐으므로 여전히 '03'
     items = list_pickups(token)["items"]
     delivered = next(i for i in items if i["id"] == c2["id"])
-    assert delivered["treat_status"] == "03", "배달완료 건은 변경되지 않아야 합니다"
+    assert delivered["treat_status"] == "배달완료", "배달완료 건은 변경되지 않아야 합니다"
 
 
 def test_missing_detail_rejected_when_live_like_validation(isolated_runtime, monkeypatch):
@@ -406,19 +403,29 @@ def test_saved_recipient_alias_crud_and_autofill_fields(isolated_runtime):
     assert item["addr1"].startswith("서울")
     assert item["addr2"] == "201호"
 
+    again = save_recipient(_saved_req(recipient_name="다른사람"), token)
+    assert again["success"] is True
+    assert again["id"] == item["id"]
+    listed_again = list_saved_recipients(token)
+    assert len(listed_again["items"]) == 1
+    assert listed_again["items"][0]["recipient_name"] == "홍길동"
+
+    other = save_recipient(_saved_req(label="창고2", recipient_phone="01099998888"), token)
     try:
-        save_recipient(_saved_req(), token)
-        raise AssertionError("duplicate alias should fail")
+        update_saved_recipient(item["id"], _saved_req(label="창고2"), token)
+        raise AssertionError("duplicate label update should fail")
     except HTTPException as exc:
         assert exc.status_code == 400
-        assert "본사" in str(exc.detail)
+        assert "창고2" in str(exc.detail)
 
     updated = update_saved_recipient(item["id"], _saved_req(label="경기창고"), token)
     assert updated["label"] == "경기창고"
-    assert list_saved_recipients(token)["items"][0]["label"] == "경기창고"
+    labels = {row["id"]: row["label"] for row in list_saved_recipients(token)["items"]}
+    assert labels[item["id"]] == "경기창고"
 
     deleted = delete_saved_recipient(item["id"], token)
     assert deleted["success"] is True
+    delete_saved_recipient(other["id"], token)
     assert list_saved_recipients(token)["items"] == []
 
 
