@@ -27,6 +27,18 @@ import {
 
 type Pending = { kind: 'cancel' | 'delete'; item: DomesticShipment } | null;
 
+const PAGE_SIZES = [10, 30, 50, 100];
+
+function pageMarks(totalPages: number, safePage: number): Array<number | '…'> {
+  const pages = Array.from({ length: totalPages }, (_, index) => index + 1)
+    .filter((page) => page === 1 || page === totalPages || Math.abs(page - safePage) <= 2);
+  return pages.reduce<Array<number | '…'>>((marks, page, index) => {
+    if (index > 0 && page - pages[index - 1] > 1) marks.push('…');
+    marks.push(page);
+    return marks;
+  }, []);
+}
+
 function cancelCopy(item: DomesticShipment) {
   const no = item.tracking_no || item.order_no;
   return item.is_test
@@ -55,6 +67,8 @@ export default function DomesticShippingListPage() {
   const [pending, setPending] = useState<Pending>(null);
   const [acting, setActing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [pageSize, setPageSize] = useState(30);
+  const [currentPage, setCurrentPage] = useState(1);
   const actingRef = useRef(false);
 
   async function load(tok: string) {
@@ -84,9 +98,13 @@ export default function DomesticShippingListPage() {
   function updateFilters(next: ListFilters) {
     setFilters(next);
     replaceListFilters(next);
+    setCurrentPage(1);
   }
 
   const filtered = useMemo(() => filterShipments(items, filters), [items, filters]);
+  const totalPages = filtered.length === 0 ? 0 : Math.ceil(filtered.length / pageSize);
+  const safePage = totalPages === 0 ? 1 : Math.min(currentPage, totalPages);
+  const pageItems = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const vendorOptions = useMemo(() => {
     const map = new Map<number, string>();
     items.forEach((item) => {
@@ -229,6 +247,25 @@ export default function DomesticShippingListPage() {
         ) : filtered.length === 0 ? (
           <p className="text-muted">검색 결과가 없습니다.</p>
         ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem', flexWrap: 'wrap' }}>
+              <span className="text-muted" style={{ fontSize: '0.85rem' }}>
+                {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, filtered.length)} / {filtered.length}건
+              </span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.85rem' }}>
+                페이지당
+                <select
+                  className="ui-control"
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setCurrentPage(1);
+                  }}
+                >
+                  {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}건</option>)}
+                </select>
+              </label>
+            </div>
           <div className="table-container">
             <table>
               <thead>
@@ -237,7 +274,7 @@ export default function DomesticShippingListPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((item) => (
+                {pageItems.map((item) => (
                   <tr key={item.id} className="domestic-list-row" onClick={() => { window.location.href = detailHref(item.id); }}>
                     <td>{(item.created_at || '').replace('T', ' ').slice(0, 16)}</td>
                     <td>{item.vendor_name}</td>
@@ -262,6 +299,30 @@ export default function DomesticShippingListPage() {
               </tbody>
             </table>
           </div>
+            {totalPages > 1 ? (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.3rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === 1} onClick={() => setCurrentPage(1)}>«</button>
+                <button type="button" className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === 1} onClick={() => setCurrentPage((page) => page - 1)}>‹</button>
+                {pageMarks(totalPages, safePage).map((mark, index) => (
+                  mark === '…' ? (
+                    <span key={`ellipsis-${index}`} style={{ padding: '0 0.3rem', color: 'var(--text-muted)' }}>…</span>
+                  ) : (
+                    <button
+                      key={mark}
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '0.3rem 0.6rem', ...(mark === safePage ? { background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' } : {}) }}
+                      onClick={() => setCurrentPage(mark)}
+                    >
+                      {mark}
+                    </button>
+                  )
+                ))}
+                <button type="button" className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === totalPages} onClick={() => setCurrentPage((page) => page + 1)}>›</button>
+                <button type="button" className="btn btn-secondary" style={{ padding: '0.3rem 0.6rem' }} disabled={safePage === totalPages} onClick={() => setCurrentPage(totalPages)}>»</button>
+              </div>
+            ) : null}
+          </>
         )}
       </Card>
 

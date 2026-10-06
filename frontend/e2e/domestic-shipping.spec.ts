@@ -99,6 +99,8 @@ test('list filter, detail copy, and cancel dismissal', async ({ page }) => {
   const calls = await installApi(page, STAFF);
   await page.goto('/domestic-shipping-list');
   await expect(page.getByText('1234567890123')).toBeVisible();
+  await expect(page.getByText('1–1 / 1건')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: '페이지당' })).toHaveValue('30');
   await page.getByRole('combobox', { name: '상태' }).selectOption('canceled');
   await expect(page.getByText('검색 결과가 없습니다.')).toBeVisible();
   await page.getByRole('button', { name: '초기화' }).click();
@@ -115,4 +117,42 @@ test('list filter, detail copy, and cancel dismissal', async ({ page }) => {
   await expect(page.getByText('복사했습니다.')).toBeVisible();
   await page.getByRole('link', { name: '목록으로' }).click();
   await expect(page.getByRole('heading', { name: '출고 목록' })).toBeVisible();
+});
+
+test('list pages thirty rows and returns to the first page on search', async ({ page }) => {
+  await page.route('http://localhost:8000/domestic-shipping**', async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'GET' && url.pathname === '/domestic-shipping') {
+      const items = Array.from({ length: 31 }, (_, index) => ({
+        id: index + 1,
+        vendor_id: 1,
+        vendor_name: '스프링',
+        recipient_name: `수취${index + 1}`,
+        tracking_no: `T${String(index + 1).padStart(12, '0')}`,
+        order_no: `D-${index + 1}`,
+        price: '3500',
+        status: 'requested',
+        is_test: true,
+        created_by: '물류담당',
+        created_at: '2026-10-04T09:00:00',
+      }));
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items }) });
+    }
+    return route.fallback();
+  });
+  await page.goto('/domestic-shipping-list');
+  await expect(page.getByText('1–30 / 31건')).toBeVisible();
+  await expect(page.getByText('T000000000001')).toBeVisible();
+  await expect(page.getByText('T000000000031')).toHaveCount(0);
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await expect(page.getByText('31–31 / 31건')).toBeVisible();
+  await expect(page.getByText('T000000000031')).toBeVisible();
+  await expect(page.getByText('T000000000001')).toHaveCount(0);
+  await page.getByRole('textbox', { name: '검색' }).fill('T000000000001');
+  await expect(page.getByText('1–1 / 1건')).toBeVisible();
+  await expect(page.getByText('T000000000001')).toBeVisible();
+  await page.getByRole('combobox', { name: '페이지당' }).selectOption('10');
+  await page.getByRole('button', { name: '초기화' }).click();
+  await expect(page.getByText('1–10 / 31건')).toBeVisible();
+  await expect(page.getByText('T000000000011')).toHaveCount(0);
 });
