@@ -102,6 +102,10 @@ test('list filter, detail copy, and cancel dismissal', async ({ page }) => {
   await page.getByRole('combobox', { name: '상태' }).selectOption('canceled');
   await expect(page.getByText('검색 결과가 없습니다.')).toBeVisible();
   await page.getByRole('button', { name: '초기화' }).click();
+  await page.getByRole('button', { name: '송장조회' }).click();
+  await expect(page.getByText('송장 1건 조회. 배달완료 1건')).toBeVisible();
+  await expect(page.getByRole('cell', { name: '배달완료' })).toBeVisible();
+  expect(calls.filter((call) => call.method === 'POST' && call.path === '/domestic-shipping/refresh-status')).toHaveLength(1);
   await page.getByRole('button', { name: '접수 취소' }).click();
   await page.getByRole('dialog').getByRole('button', { name: '취소', exact: true }).first().click();
   expect(calls.filter((call) => call.path.includes('/cancel'))).toHaveLength(0);

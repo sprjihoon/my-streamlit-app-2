@@ -366,7 +366,7 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 - 서버가 켜질 때 업체명이 스프링풀필먼트인 출고 업체가 없으면 회수접수 센터 정보로 한 건 넣는다. 공급지번호 `260940699`, 주소는 대구광역시 동구 동촌로 1, 동대구우체국 2층 소포실이다. 같은 이름이 있으면 다시 넣지 않는다.
 - 회수신청과 출고 접수 입력칸은 화면 가로를 끝까지 채우지 않는다. 폼은 64rem 안에 두고, 좁은 화면에서만 가로를 다시 채운다.
 - 확인 전 미리보기는 기록하지 않는다. 우체국 키가 없거나 테스트 접수면 우체국을 부르지 않고 테스트 등기번호로 저장한다.
-- 접수목록(`/domestic-shipping-list`)에서 송장, 접수 취소, 관리자 삭제를 한다. 실접수 취소는 계약소포 `GetResCancelCmd`다. 우체국이 거절하면 상태는 접수 그대로이고 사유를 보여 준다. 취소된 건도 송장은 남고, 종이 위에 취소된 접수라고 표시한다.
+- 접수목록(`/domestic-shipping-list`)에서 송장, 접수 취소, 관리자 삭제를 한다. 송장조회는 회수신청과 같이 실접수만 우체국에 물어 배송상태를 저장한다. 일반 계약소포 `GetResInfo`(`reqType` 1)를 본 뒤 송장번호 종적조회로 보완하고, 배달완료는 다시 묻지 않는다. 상태는 뒤로 가지 않는다. 테스트 접수와 취소 건은 조회하지 않는다. 실접수 취소는 계약소포 `GetResCancelCmd`다. 우체국이 거절하면 상태는 접수 그대로이고 사유를 보여 준다. 취소된 건도 송장은 남고, 종이 위에 취소된 접수라고 표시한다.
 - 우체국 API는 송장 PDF를 주지 않는다. 송장은 신형 C형(111×171mm)을 가로로 둔 171×111mm 종이에, 답안지에서 잰 칸에 받는 사람·등기번호·바코드를 찍는다. 보내는 사람 칸에는 접수 화면에서 고친 값이 들어간다. 집배코드는 modo 와 같이 받는 사람 우편번호로 찾아 A1, 135, 동서울, 서울강남, 10 30 자리에 찍고, 바코드 옆 숫자는 그 우편번호의 구분코스다. 우체국이 돌려준 가상번호가 있으면 받는 사람 전화 칸과 오른쪽 번호에 찍고, 등기번호 QR을 답안지 자리에 넣는다. 가상번호가 없으면 입력한 전화를 찍는다. 화면은 `/domestic-print/{id}` 다.
 - 구분코스 메모. `06236` 테헤란로 152는 집배코드 파일과 우체국 계약 API(`biz.epost.go.kr`, `target=delivArea`)가 둘 다 `courseNo` 100이다. 우체국 전산 답안지의 102는 `courseNo`, `delivAreaCd`, `prclPathSeq`에 없어서 출처를 확정하지 못했다. 배송에 문제를 주는 차이로 보지 않고 여기까지 둔다.
 
@@ -381,6 +381,7 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 | `POST` | `/domestic-shipping` | 확인 후 접수 |
 | `GET` | `/domestic-shipping/{id}/label` | 송장 1장. `format=pdf` |
 | `GET` | `/domestic-shipping/labels` | 여러 장 송장. `ids=1,2`, `format=pdf` |
+| `POST` | `/domestic-shipping/refresh-status` | 실접수 송장조회. 배송상태를 저장 |
 | `POST` | `/domestic-shipping/{id}/cancel` | 확인 후 취소 |
 | `DELETE` | `/domestic-shipping/{id}` | 관리자만 삭제. 실접수는 우체국 취소 후 삭제 |
 
@@ -414,6 +415,8 @@ cd frontend && npm run dev
 ## 변경 이력
 
 ### 2026-10-06
+- **feat(domestic-shipping): 출고 목록에서 송장조회로 배송상태를 받는다**
+  - 회수신청 송장조회와 같이 실접수를 우체국에 물어 배달완료까지 저장한다
 - **feat(overseas-shipping): 상품견본을 골라 우체국 EM_gubun Sample로 접수한다**
   - 화물 내용품은 상품, 선물, 상품견본이다. 출력 서류 Sample 칸을 체크한다
   - 상품견본 관세는 상품과 같다. 미국 우편 선물 100달러 면세는 선물에만 적용한다

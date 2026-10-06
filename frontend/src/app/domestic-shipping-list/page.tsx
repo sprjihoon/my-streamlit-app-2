@@ -11,6 +11,7 @@ import {
   cancelDomesticShipping,
   deleteDomesticShipping,
   listDomesticShipments,
+  refreshDomesticShippingStatuses,
   type DomesticShipment,
 } from '@/lib/api';
 import {
@@ -53,6 +54,7 @@ export default function DomesticShippingListPage() {
   const [filters, setFilters] = useState<ListFilters>(emptyListFilters);
   const [pending, setPending] = useState<Pending>(null);
   const [acting, setActing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const actingRef = useRef(false);
 
   async function load(tok: string) {
@@ -99,6 +101,22 @@ export default function DomesticShippingListPage() {
     return `/domestic-shipping-list/${id}${query}`;
   }
 
+  async function handleRefreshStatus() {
+    if (!token || refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await refreshDomesticShippingStatuses(token);
+      await load(token);
+      setSuccess(result.message || `송장조회 완료. 배달완료 ${result.delivered}건`);
+    } catch (err) {
+      setError(classifyDomesticError(err, 'shipment').message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   function dismissPending() {
     if (actingRef.current) return;
     setPending(null);
@@ -132,7 +150,7 @@ export default function DomesticShippingListPage() {
     <div className="domestic-page">
       <PageHeader
         title="출고 목록"
-        subtitle={loaded && !loadError ? (searching ? `검색 결과 ${filtered.length}건 · 전체 ${items.length}건` : `${items.length}건`) : undefined}
+        subtitle={loaded && !loadError ? (searching ? `검색 결과 ${filtered.length}건 · 전체 ${items.length}건` : `송장조회로 배송상태를 받습니다. ${items.length}건`) : undefined}
         actions={(
           <>
             <a href="/domestic-shipping" className="btn btn-primary">새 접수</a>
@@ -197,6 +215,11 @@ export default function DomesticShippingListPage() {
           {searching ? (
             <button type="button" className="btn btn-ghost" onClick={() => updateFilters(emptyListFilters())}>
               초기화
+            </button>
+          ) : null}
+          {token && !loadError ? (
+            <button type="button" className="btn btn-primary" onClick={() => void handleRefreshStatus()} disabled={refreshing}>
+              {refreshing ? '송장조회 중...' : '송장조회'}
             </button>
           ) : null}
         </div>

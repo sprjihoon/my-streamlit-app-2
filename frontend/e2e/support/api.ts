@@ -121,6 +121,7 @@ export async function installApi(page: Page, user: SessionUser) {
   await page.route('**://*.epost.go.kr/**', (route) => route.abort());
   await page.route('**://*.fedex.com/**', (route) => route.abort());
 
+  let domesticTreat = '';
   await page.route('http://localhost:8000/**', async (route) => {
     const request = route.request();
     record(request);
@@ -194,11 +195,24 @@ export async function installApi(page: Page, user: SessionUser) {
         },
       });
     }
+    if (path === '/domestic-shipping/refresh-status' && method === 'POST') {
+      domesticTreat = '배달완료';
+      return json(route, {
+        success: true,
+        checked: 1,
+        delivered: 1,
+        failed: 0,
+        message: '송장 1건 조회. 배달완료 1건',
+      });
+    }
     if (path === '/domestic-shipping' && method === 'POST') {
       return json(route, { success: true, id: 7, order_no: 'D-100', tracking_no: '1234567890123', tracking_nos: ['1234567890123'], is_test: true });
     }
-    if (path === '/domestic-shipping' && method === 'GET') return json(route, { items: [DOMESTIC_ITEM] });
-    if (path === '/domestic-shipping/7' && method === 'GET') return json(route, DOMESTIC_ITEM);
+    const domesticItem = domesticTreat
+      ? { ...DOMESTIC_ITEM, is_test: false, treat_status: domesticTreat, treat_status_name: domesticTreat }
+      : DOMESTIC_ITEM;
+    if (path === '/domestic-shipping' && method === 'GET') return json(route, { items: [domesticItem] });
+    if (path === '/domestic-shipping/7' && method === 'GET') return json(route, domesticItem);
     if (path === '/kpost-pickup/meta') {
       return json(route, {
         vendor: 'spring',

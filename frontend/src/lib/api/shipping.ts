@@ -78,6 +78,8 @@ export interface DomesticShipment {
   post_office: string;
   status: string;
   is_test: boolean;
+  treat_status?: string | null;
+  treat_status_name?: string | null;
   created_by: string;
   created_at: string;
   canceled_at?: string;
@@ -173,6 +175,16 @@ export async function createDomesticShipping(token: string, payload: DomesticSub
 
 export async function listDomesticShipments(token: string) {
   return fetchApi<{ items: DomesticShipment[] }>(`/domestic-shipping${domesticQuery(token)}`);
+}
+
+export async function refreshDomesticShippingStatuses(token: string) {
+  return fetchApi<{
+    success: boolean;
+    checked: number;
+    delivered: number;
+    failed: number;
+    message?: string;
+  }>(`/domestic-shipping/refresh-status${domesticQuery(token)}`, { method: 'POST' });
 }
 
 export async function getDomesticShipment(token: string, id: number) {

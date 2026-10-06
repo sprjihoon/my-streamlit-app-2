@@ -14,6 +14,8 @@ from backend.app.api.domestic_shipping import (
     create_domestic,
     create_vendor,
     delete_domestic,
+    list_domestic,
+    refresh_domestic_statuses,
     delete_domestic_saved_recipient,
     domestic_label,
     ensure_domestic_tables,
@@ -340,3 +342,83 @@ def test_admin_delete_rejects_staff(isolated_runtime):
     with pytest.raises(HTTPException) as exc:
         delete_domestic(created["id"], token)
     assert exc.value.status_code == 403
+
+
+def _live_row(db_path: str, shipment_id: int, **fields: str) -> None:
+    sets = ", ".join(f"{key}=?" for key in fields)
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            f"UPDATE domestic_shipments SET is_test=0, {sets} WHERE id=?",
+            (*fields.values(), shipment_id),
+        )
+        con.commit()
+
+
+def test_refresh_status_uses_outbound_lookup_then_tracking(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    vendor_id = create_vendor(_vendor(), token)["id"]
+    created = create_domestic(_submit(vendor_id), token)
+    assert list_domestic(token)["items"][0]["treat_status"] == "신청접수"
+    _live_row(isolated_runtime["db"], created["id"], tracking_no="1234567890123")
+    seen: list[str] = []
+
+    def fake_res(order_no, req_ymd, req_type="2", cust_no=None, **kwargs):
+        seen.append(req_type)
+        return {"treatStusCd": "신청접수", "treatStusNm": "신청접수", "regiNo": "1234567890123"}
+
+    monkeypatch.setattr("backend.app.api.domestic_shipping.get_res_info", fake_res)
+    monkeypatch.setattr(
+        "backend.app.api.domestic_shipping.track_regi_no",
+        lambda regi_no: {"treatStusCd": "배달완료", "treatStusNm": "배달완료", "regiNo": regi_no},
+    )
+    result = refresh_domestic_statuses(token)
+    assert seen == ["1"]
+    assert result["checked"] == 1
+    assert result["delivered"] == 1
+    assert "배달완료 1건" in result["message"]
+    item = list_domestic(token)["items"][0]
+    assert item["treat_status"] == "배달완료"
+    assert item["treat_status_name"] == "배달완료"
+
+
+def test_refresh_status_skips_delivered_test_and_does_not_go_backward(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    vendor_id = create_vendor(_vendor(), token)["id"]
+    moving = create_domestic(_submit(vendor_id), token)
+    done = create_domestic(_submit(vendor_id, recipient_name="이영희", recipient_phone="01099998888"), token)
+    untouched = create_domestic(_submit(vendor_id, recipient_name="김테스트", recipient_phone="01077776666"), token)
+    _live_row(
+        isolated_runtime["db"],
+        moving["id"],
+        tracking_no="7111111111111",
+        treat_status="배달중",
+        treat_status_name="배달중",
+    )
+    _live_row(
+        isolated_runtime["db"],
+        done["id"],
+        tracking_no="7222222222222",
+        treat_status="배달완료",
+        treat_status_name="배달완료",
+    )
+    calls = {"res": 0, "track": 0}
+
+    def fake_res(order_no, req_ymd, req_type="2", cust_no=None, **kwargs):
+        calls["res"] += 1
+        return {"treatStusCd": "신청접수", "treatStusNm": "신청접수", "regiNo": ""}
+
+    def fake_track(regi_no):
+        calls["track"] += 1
+        return {"treatStusCd": "신청접수", "treatStusNm": "신청접수", "regiNo": regi_no}
+
+    monkeypatch.setattr("backend.app.api.domestic_shipping.get_res_info", fake_res)
+    monkeypatch.setattr("backend.app.api.domestic_shipping.track_regi_no", fake_track)
+    result = refresh_domestic_statuses(token)
+    assert result["checked"] == 1
+    assert result["delivered"] == 0
+    assert calls == {"res": 1, "track": 1}
+    items = {row["id"]: row for row in list_domestic(token)["items"]}
+    assert items[moving["id"]]["treat_status"] == "배달중"
+    assert items[done["id"]]["treat_status"] == "배달완료"
+    assert items[untouched["id"]]["is_test"] is True
+    assert items[untouched["id"]]["treat_status"] == "신청접수"

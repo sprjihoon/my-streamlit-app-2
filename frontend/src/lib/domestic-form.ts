@@ -257,10 +257,16 @@ export function classifyDomesticError(err: unknown, scope: 'shipment' | 'vendor'
   return { kind: 'server', message };
 }
 
-export function domesticStatusLabel(item: { status: string; is_test: boolean }) {
+export function domesticStatusLabel(item: {
+  status: string;
+  is_test: boolean;
+  treat_status?: string | null;
+  treat_status_name?: string | null;
+}) {
   if (item.status === 'canceled') return '취소';
   if (item.is_test) return '테스트';
-  return '접수';
+  const delivery = (item.treat_status_name || item.treat_status || '').trim();
+  return delivery || '접수';
 }
 
 export function emptyListFilters(): ListFilters {

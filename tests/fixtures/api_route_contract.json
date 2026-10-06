@@ -86,18 +86,23 @@
     "PUT /kpost-pickup/saved-recipients/{recipient_id}"
   ],
   "/domestic-shipping": [
+    "DELETE /domestic-shipping/saved-recipients/{recipient_id}",
     "DELETE /domestic-shipping/vendors/{vendor_id}",
     "DELETE /domestic-shipping/{shipment_id}",
     "GET /domestic-shipping",
     "GET /domestic-shipping/labels",
     "GET /domestic-shipping/meta",
+    "GET /domestic-shipping/saved-recipients",
     "GET /domestic-shipping/vendors",
     "GET /domestic-shipping/{shipment_id}",
     "GET /domestic-shipping/{shipment_id}/label",
     "POST /domestic-shipping",
     "POST /domestic-shipping/preview",
+    "POST /domestic-shipping/refresh-status",
+    "POST /domestic-shipping/saved-recipients",
     "POST /domestic-shipping/vendors",
     "POST /domestic-shipping/{shipment_id}/cancel",
+    "PUT /domestic-shipping/saved-recipients/{recipient_id}",
     "PUT /domestic-shipping/vendors/{vendor_id}"
   ],
   "/overseas-shipping": [

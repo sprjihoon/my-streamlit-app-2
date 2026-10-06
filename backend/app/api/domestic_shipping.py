@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,13 +17,17 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from backend.app.api.kpost_pickup import _get_user
+from backend.app.api.kpost_pickup.tracking import _apply_tracking_info
 from backend.app.api.logs import add_log
 from backend.app.services.epost.client import (
     EpostError,
     cancel_order,
+    get_res_info,
     has_epost_credentials,
     insert_order,
+    lookup_req_ymds,
     mock_insert_order,
+    track_regi_no,
 )
 from backend.app.services.epost.domestic_label import (
     build_domestic_label_pdf,
@@ -30,6 +35,7 @@ from backend.app.services.epost.domestic_label import (
 )
 from backend.app.services.epost.fields import (
     EPOST_CONTRACT_COMP_NM,
+    FINAL_TREAT_STATUSES,
     PICKUP_BOX_SIZES,
     normalize_addr1,
     normalize_phone,
@@ -174,6 +180,11 @@ def ensure_domestic_tables() -> None:
         columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
         if "goods_qty" not in columns:
             con.execute("ALTER TABLE domestic_shipments ADD COLUMN goods_qty INTEGER NOT NULL DEFAULT 1")
+        columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
+        if "treat_status" not in columns:
+            con.execute("ALTER TABLE domestic_shipments ADD COLUMN treat_status TEXT")
+        if "treat_status_name" not in columns:
+            con.execute("ALTER TABLE domestic_shipments ADD COLUMN treat_status_name TEXT")
         _seed_spring_vendor(con)
         con.commit()
 
@@ -403,7 +414,7 @@ def _shipment_dict(row: tuple) -> dict[str, Any]:
         "goods_name", "box_size", "weight", "volume", "notes",
         "order_no", "tracking_no", "req_no", "res_no", "res_date", "price", "post_office",
         "status", "is_test", "created_by", "created_at", "canceled_at", "canceled_by",
-        "v_tel_no", "goods_qty",
+        "v_tel_no", "goods_qty", "treat_status", "treat_status_name",
     )
     item = dict(zip(keys, row))
     item["is_test"] = bool(item["is_test"])
@@ -551,6 +562,89 @@ def list_domestic(token: str):
             "SELECT * FROM domestic_shipments ORDER BY id DESC LIMIT 500"
         ).fetchall()
     return {"items": [_shipment_dict(row) for row in rows]}
+
+
+def _sync_domestic_tracking(item: dict[str, Any]) -> dict[str, Any]:
+    """출고는 일반 계약소포(reqType 1)다. 접수조회 다음 종적조회로 배송상태를 받는다."""
+    if item.get("order_no"):
+        for req_ymd in lookup_req_ymds(item.get("res_date"), item.get("created_at")):
+            try:
+                info = get_res_info(item["order_no"], req_ymd, "1")
+            except Exception:
+                continue
+            _apply_tracking_info(item, info)
+            break
+    if item.get("treat_status") not in FINAL_TREAT_STATUSES and item.get("tracking_no"):
+        try:
+            _apply_tracking_info(item, track_regi_no(item["tracking_no"]))
+        except Exception:
+            pass
+    return item
+
+
+@router.post("/refresh-status")
+def refresh_domestic_statuses(token: str):
+    """접수 목록의 실접수 송장을 우체국에 물어 배송상태를 저장한다."""
+    _get_user(token)
+    ensure_domestic_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM domestic_shipments
+            WHERE status = 'requested' AND is_test = 0
+              AND (treat_status IS NULL OR treat_status NOT IN ('배달완료'))
+              AND (
+                (order_no IS NOT NULL AND order_no != '')
+                OR (tracking_no IS NOT NULL AND tracking_no != '')
+              )
+            ORDER BY id DESC
+            LIMIT 200
+            """
+        ).fetchall()
+    items = [_shipment_dict(row) for row in rows]
+    checked = 0
+    delivered = 0
+    failed = 0
+
+    def _process(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        if item.get("treat_status") in FINAL_TREAT_STATUSES:
+            return "skip", item
+        try:
+            _sync_domestic_tracking(item)
+            return "checked", item
+        except Exception:
+            return "failed", item
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(_process, item) for item in items]
+        for future in as_completed(futures):
+            status, item = future.result()
+            if status == "checked":
+                with get_connection() as con:
+                    con.execute(
+                        """
+                        UPDATE domestic_shipments
+                        SET treat_status=?, treat_status_name=?, tracking_no=?
+                        WHERE id=?
+                        """,
+                        (item.get("treat_status"), item.get("treat_status_name"), item.get("tracking_no"), item["id"]),
+                    )
+                    con.commit()
+                checked += 1
+                if item.get("treat_status") == "배달완료":
+                    delivered += 1
+            elif status == "failed":
+                failed += 1
+    return {
+        "success": True,
+        "checked": checked,
+        "delivered": delivered,
+        "failed": failed,
+        "message": (
+            f"송장 {checked}건 조회. 배달완료 {delivered}건"
+            + (f" / 조회실패 {failed}건" if failed else "")
+        ),
+    }
 
 
 def _parse_label_ids(raw: str) -> list[int]:
@@ -781,8 +875,9 @@ def _store_shipment(
                 recipient_name, recipient_phone, recipient_zip, recipient_addr1, recipient_addr2,
                 goods_name, box_size, weight, volume, notes,
                 order_no, tracking_no, req_no, res_no, res_date, price, post_office,
-                status, is_test, created_by, created_at, v_tel_no, goods_qty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?)
+                status, is_test, created_by, created_at, v_tel_no, goods_qty,
+                treat_status, treat_status_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, '신청접수', '신청접수')
             """,
             (
                 data["vendor"]["id"], data["vendor"]["name"], data["vendor"]["office_ser"],
