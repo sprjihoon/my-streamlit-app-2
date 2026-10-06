@@ -1,21 +1,17 @@
-"""미국 우편 DDP 품목 세율.
+"""미국 우편·프리미엄 DDP 품목 세율.
 
-우체국 2026-07-20 안내문은 정액 10%를 끝내고 품목별 세율로 바꿨고,
-의류 HTSUS 6109.10.1000 예시를 13%로 적었다. 그 코드만 13%로 둔다.
-나머지 6자리는 2026-10-06 미국 HTS 기본세율(Column 1 general)이다.
-한미 FTA 면세는 쓰지 않는다. 우체국은 한국산에도 관세를 매긴다.
-종량세이거나 표에 없는 HS는 직전 정액 10%다.
+세율은 미국 HTS 일반세율(Column 1)이다. 한미 FTA 면세는 쓰지 않는다.
+우체국은 한국산에도 관세를 매긴다. 면 티셔츠 610910은 16.5%다.
+표에 없거나 종량세인 HS는 세율을 비워 둔다. 10%로 채우지 않는다.
 """
 
 from __future__ import annotations
 
 import re
 
-US_DUTY_FALLBACK = 0.10
-
 # hs 6자리 → (세율, 화면 표기)
 _RATES: dict[str, tuple[float, str]] = {
-    "610910": (0.13, "우체국 안내 13%"),
+    "610910": (0.165, "16.5%"),
     "640299": (0.06, "6%"),
     "420292": (0.07, "7%"),
     "940490": (0.053, "5.3%"),
@@ -71,7 +67,7 @@ _RATES: dict[str, tuple[float, str]] = {
 }
 
 
-def lookup_us_postal_rate(hs_code: str) -> tuple[float, str]:
+def lookup_us_postal_rate(hs_code: str) -> tuple[float | None, str]:
     digits = re.sub(r"\D", "", hs_code or "")
     best = ""
     for key in _RATES:
@@ -79,7 +75,7 @@ def lookup_us_postal_rate(hs_code: str) -> tuple[float, str]:
             best = key
     if not best:
         if not digits:
-            return US_DUTY_FALLBACK, "HS 없음, 10%"
-        return US_DUTY_FALLBACK, "세율표에 없음, 10%"
+            return None, "HS 없음"
+        return None, "세율표에 없음"
     rate, label = _RATES[best]
     return rate, label

@@ -46,12 +46,12 @@ test('sender, recipient, HS, quote, and preview stay on the test API', async ({ 
   await expect.poll(() => calls.some((call) => call.path === '/overseas-shipping/quote' && (call.search || '').includes('customs_gubun=sample'))).toBeTruthy();
   await expect.poll(() => calls.some((call) => call.method === 'GET' && call.path === '/overseas-shipping/quote')).toBeTruthy();
   await expect(page.locator('input[value="Taro"], input[value="스프링"]').first()).toBeVisible();
-  await expect(page.getByText('USD 150.00 × 17%')).toBeVisible();
-  await expect(page.getByText('USD 31.9990 × 1,400원 × 1.02')).toBeVisible();
-  await expect(page.getByText('46,000원').first()).toBeVisible();
+  await expect(page.getByText('USD 150.00 × 16.5%')).toBeVisible();
+  await expect(page.getByText('USD 28.6165 × 1,400원')).toBeVisible();
+  await expect(page.getByText('40,063원').first()).toBeVisible();
   const finalRow = page.locator('.fee-line.is-ddp-final');
-  await expect(finalRow).toContainText('1,000원 올림');
-  await expect(finalRow).toContainText('46,000원');
+  await expect(finalRow).toContainText('청구액');
+  await expect(finalRow).toContainText('40,063원');
   const colors = await page.evaluate(() => {
     const finalAmount = document.querySelector('.fee-line.is-ddp-final strong');
     const step = document.querySelector('.fee-line.is-sub:not(.is-ddp-final)');

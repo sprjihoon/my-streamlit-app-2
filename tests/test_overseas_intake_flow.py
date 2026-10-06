@@ -384,8 +384,10 @@ def test_gb_heathrow_intake_quote_create_and_cancel(isolated_runtime):
     assert quoted["countrycd"] == "GB"
     assert quoted["parcel"]["totalFee"] > 0
     assert quoted["document"]["ok"] is True
-    assert quoted["duty"]["dutyPrepaid"] is True
-    assert quoted["payableTotal"] == quoted["totalFee"] + quoted["duty"]["depositKrw"]
+    assert quoted["duty"]["depositKrw"] == 0
+    assert quoted["duty"]["showsLocalEstimate"] is True
+    assert quoted["duty"]["localEstimateKrw"] > 0
+    assert quoted["payableTotal"] == quoted["totalFee"]
 
     payload = _payload(
         **address,

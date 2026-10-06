@@ -601,41 +601,59 @@ def test_us_ddp_quote_and_infront_formula(isolated_runtime):
     )
     assert postal["dutyPrepaid"] is True
     assert postal["ddpPath"] == "postal"
-    assert postal["depositKrw"] == 33_000
-    assert postal["bufferKrw"] == 0
-    assert "13%" in postal["formula"][1]["expr"]
+    assert postal["depositKrw"] == 40_063
+    assert postal["reserveKrw"] == 937
+    assert "16.5%" in postal["formula"][1]["expr"]
     assert "610910" in postal["formula"][1]["expr"]
+    assert postal["formula"][-2]["label"] == "청구액"
+    assert postal["formula"][-2]["value"] == "40,063원"
+    assert "× 1,400원" in postal["formula"][-2]["expr"]
+    assert "× 1.02" not in postal["formula"][-2]["expr"]
+    assert postal["formula"][-1]["label"] == "환율 여유"
     gift_small = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=80,
         shipping_method="EMS",
         usd_krw=1400,
         is_gift=True,
+        sender_name="Hong Gildong",
     )
     assert gift_small["breakdown"]["dutyUsd"] == 0
-    assert gift_small["breakdown"]["serviceFeeUsd"] == 1.04
-    assert gift_small["depositKrw"] == 2_000
+    assert gift_small["breakdown"]["serviceFeeUsd"] == 1.144
+    assert gift_small["depositKrw"] == 1_602
     assert "면세" in gift_small["formula"][1]["expr"]
+    company_gift = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=80,
+        shipping_method="EMS",
+        usd_krw=1400,
+        is_gift=True,
+        sender_name="스프링풀필먼트",
+        duty_lines=[{"hs_code": "610910", "value_usd": 80}],
+    )
+    assert company_gift["breakdown"]["dutyUsd"] == 80 * 0.165
+    assert "회사 발송" in company_gift["formula"][1]["expr"]
     gift_over = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=150,
         shipping_method="EMS",
         usd_krw=1400,
         is_gift=True,
+        sender_name="Hong Gildong",
+        duty_lines=[{"hs_code": "610910", "value_usd": 150}],
     )
-    assert gift_over["breakdown"]["dutyUsd"] == 150 * 0.10
+    assert gift_over["breakdown"]["dutyUsd"] == 150 * 0.165
     assert "100 초과" in gift_over["formula"][1]["expr"]
-    assert postal["formula"][-1]["value"] == "33,000원"
-    assert postal["formula"][-2]["label"] == "버퍼 2%"
-    assert "× 1,400원 × 1.02" in postal["formula"][-2]["expr"]
     assert postal["breakdown"]["bufferUsd"] == 0
-    small = calculate_duty_deposit(
+    unknown = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=1,
         shipping_method="EMS",
         usd_krw=1400,
     )
-    assert small["depositKrw"] == 2_000
+    assert unknown["depositKrw"] == 0
+    assert unknown["rateConfirmed"] is False
+    assert "선납액을 비웠습니다" in (unknown["ineligibleReason"] or "")
     over = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=2501,
@@ -650,17 +668,18 @@ def test_us_ddp_quote_and_infront_formula(isolated_runtime):
         customs_value_usd=2600,
         shipping_method="EMS_PREMIUM",
         usd_krw=1400,
+        duty_lines=[{"hs_code": "851830", "value_usd": 2600}],
     )
     assert premium["ddpPath"] == "premium"
-    assert premium["depositKrw"] == 805_000
-    assert "× 20%" in premium["formula"][1]["expr"]
-    assert "USD 15.00" in premium["formula"][2]["expr"]
+    assert premium["depositKrw"] == 527_912
+    assert "12.5%" in premium["formula"][1]["expr"]
+    assert "USD 34.58" in premium["formula"][2]["expr"]
     assert premium["breakdown"]["bufferUsd"] == 0
     gb = calculate_duty_deposit(country_code="GB", customs_value_usd=100, usd_krw=1400)
-    assert gb["dutyPrepaid"] is True
-    assert gb["depositKrw"] == 32_000
-    assert gb["bufferKrw"] == 2_856
-    assert abs(gb["breakdown"]["bufferUsd"] - gb["breakdown"]["serviceFeeUsd"] * 0.1) < 1e-9
+    assert gb["dutyPrepaid"] is False
+    assert gb["depositKrw"] == 0
+    assert gb["localEstimateKrw"] == 28_000
+    assert gb["showsLocalEstimate"] is True
 
     token = _seed_user(isolated_runtime["db"])
     quoted = overseas_quote(
@@ -1574,7 +1593,7 @@ def test_list_shows_ddp_and_only_admin_can_delete(isolated_runtime):
     created = create_overseas(
         _req(
             confirm=True,
-            countrycd="GB",
+            countrycd="US",
             receivename="Alex Morgan",
             receivetelno="+442087594321",
             receivezipcode="UB7 0HJ",

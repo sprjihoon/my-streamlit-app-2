@@ -126,6 +126,11 @@ export interface OverseasDutyQuote {
   estimateUsd: number;
   depositKrw: number;
   bufferKrw?: number;
+  reserveKrw?: number;
+  localEstimateKrw?: number | null;
+  showsLocalEstimate?: boolean;
+  rateConfirmed?: boolean;
+  collectionNote?: string | null;
   formula?: Array<{ label: string; expr: string; value: string }>;
   breakdown: {
     dutyUsd: number;
@@ -184,6 +189,7 @@ export async function quoteOverseasShipping(
     boxwidth: number;
     boxheight: number;
     customs_value_usd?: number;
+    sender_name?: string;
     duty_items?: Array<{ hs_code?: string; unit_price_usd?: number; quantity?: number; value_usd?: number }>;
   }
 ) {
@@ -191,6 +197,7 @@ export async function quoteOverseasShipping(
     `&shipping_method=${encodeURIComponent(payload.shipping_method)}` +
     `&contents_type=${encodeURIComponent(payload.contents_type || 'parcel')}` +
     `&customs_gubun=${encodeURIComponent(payload.customs_gubun || 'merchandise')}` +
+    `&sender_name=${encodeURIComponent(payload.sender_name || '')}` +
     `&countrycd=${encodeURIComponent(payload.countrycd)}` +
     `&totweight=${encodeURIComponent(String(payload.totweight))}` +
     `&boxlength=${encodeURIComponent(String(payload.boxlength || 0))}` +

@@ -767,6 +767,9 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
             shipping_method=method["code"],
             is_gift=validated.get("customs_gubun") == "gift",
             duty_lines=_duty_lines(list(validated.get("items") or [])),
+            sender_name=str(sender.get("name") or ""),
+            freight_krw=fee or 0,
+            is_document=validated.get("contents_type") == "document",
         ),
         "is_test": is_test,
         "notes": validated.get("notes") or "",
@@ -871,6 +874,8 @@ def _ddp_krw_for(
     items: list[dict[str, Any]],
     *,
     is_gift: bool = False,
+    sender_name: str = "",
+    is_document: bool = False,
 ) -> int:
     duty = calculate_duty_deposit(
         country_code=countrycd,
@@ -879,6 +884,8 @@ def _ddp_krw_for(
         shipping_method=shipping_method,
         is_gift=is_gift,
         duty_lines=_duty_lines(items),
+        sender_name=sender_name,
+        is_document=is_document,
     )
     if not duty.get("dutyPrepaid"):
         return 0
@@ -893,6 +900,8 @@ def _attach_spend(data: dict[str, Any]) -> None:
             str(data.get("shipping_method") or ""),
             list(data.get("items") or []),
             is_gift=data.get("customs_gubun") == "gift",
+            sender_name=str(data.get("sender_name") or ""),
+            is_document=data.get("contents_type") == "document",
         )
     else:
         ddp = int(stored or 0)
@@ -963,6 +972,7 @@ def overseas_quote(
     shipping_method: str = "EMS",
     contents_type: str = "parcel",
     customs_gubun: str = "merchandise",
+    sender_name: str = "",
     countrycd: str = "JP",
     totweight: int = 0,
     boxlength: int = 0,
@@ -984,14 +994,6 @@ def overseas_quote(
     if totweight < 1:
         raise HTTPException(status_code=400, detail="중량(g)을 입력해주세요.")
     live = has_ems_credentials()
-    duty = calculate_duty_deposit(
-        country_code=country,
-        customs_value_usd=customs_value_usd,
-        duty_prepaid_requested=True,
-        shipping_method=selected_method["code"],
-        is_gift=purpose == "gift",
-        duty_lines=_parse_duty_items(duty_items),
-    )
     parcel = _quote_shipping(
         parcel_method["premiumcd"],
         parcel_method["em_ee"],
@@ -1013,6 +1015,17 @@ def overseas_quote(
         )
     selected = document if kind == "document" and document is not None else parcel
     shipping = int(selected.get("totalFee") or 0) if selected.get("ok") else 0
+    duty = calculate_duty_deposit(
+        country_code=country,
+        customs_value_usd=customs_value_usd,
+        duty_prepaid_requested=True,
+        shipping_method=selected_method["code"],
+        is_gift=purpose == "gift",
+        duty_lines=_parse_duty_items(duty_items),
+        sender_name=sender_name,
+        freight_krw=shipping,
+        is_document=kind == "document",
+    )
     ddp = int(duty.get("depositKrw") or 0) if duty.get("dutyPrepaid") else 0
     return {
         "ok": bool(selected.get("ok")),
@@ -1482,6 +1495,8 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         validated["method"]["code"],
         list(validated.get("items") or []),
         is_gift=validated.get("customs_gubun") == "gift",
+        sender_name=str((validated.get("sender") or {}).get("name") or ""),
+        is_document=validated.get("contents_type") == "document",
     )
     created_at = datetime.now(KST).isoformat(timespec="seconds")
     with get_connection() as con:

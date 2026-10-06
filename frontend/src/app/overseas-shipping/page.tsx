@@ -390,6 +390,7 @@ export default function OverseasShippingPage() {
           boxwidth: form.boxwidth,
           boxheight: form.boxheight,
           customs_value_usd: customsValue,
+          sender_name: form.sender_name,
           duty_items: form.items.map((item) => ({
             hs_code: item.hs_code || '',
             unit_price_usd: Number(item.unit_price_usd || 0),
@@ -430,7 +431,7 @@ export default function OverseasShippingPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [token, loading, form.shipping_method, form.contents_type, form.customs_gubun, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight, form.items]);
+  }, [token, loading, form.shipping_method, form.contents_type, form.customs_gubun, form.sender_name, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight, form.items]);
 
   const triggerAddressValidation = useCallback(async (override?: {
     addr3?: string;
@@ -952,9 +953,14 @@ export default function OverseasShippingPage() {
           (duty.estimateUsd ? ` (USD ${duty.estimateUsd.toFixed(2)})` : '') +
           (duty.ddpPath === 'premium' ? ' · FedEx DDP' : '') +
           formulaText
-        : duty?.ineligibleReason
-          ? `\n관세 선납: ${duty.ineligibleReason}`
-          : '';
+        : duty?.showsLocalEstimate
+          ? `\n현지 세금 예비(합계 제외): ${(duty.localEstimateKrw || 0).toLocaleString()}원` +
+            (duty.collectionNote ? `\n${duty.collectionNote}` : '')
+          : duty?.ineligibleReason
+            ? `\n관세 선납: ${duty.ineligibleReason}`
+            : duty?.collectionNote
+              ? `\n${duty.collectionNote}`
+              : '';
       const totalLine = p.expected_fee != null && duty?.dutyPrepaid
         ? `\n합계: ${(p.expected_fee + duty.depositKrw).toLocaleString()}원`
         : '';
@@ -1395,7 +1401,7 @@ export default function OverseasShippingPage() {
                   })}
                 </div>
                 <span className="text-muted tw-text-[0.78rem]">
-                  우체국 접수 값 EM_gubun은 상품 Merchandise, 선물 Gift, 상품견본 Sample입니다. 미국 선물 100달러 이하는 관세 없이 신고수수료만 선납합니다.
+                  우체국 접수 값 EM_gubun은 상품 Merchandise, 선물 Gift, 상품견본 Sample입니다. 미국 100달러 선물 면세는 개인 발송인만 쓰고, 회사 발송은 상품 세율입니다.
                 </span>
               </div>
             )}
@@ -1665,7 +1671,7 @@ export default function OverseasShippingPage() {
                 </div>
                 {quoteDuty.formula?.length ? (
                   quoteDuty.formula.map((row) => (
-                    <div className={`fee-line is-sub${row.label === '1,000원 올림' ? ' is-ddp-final' : ''}`} key={row.label}>
+                    <div className={`fee-line is-sub${row.label === '청구액' ? ' is-ddp-final' : ''}`} key={row.label}>
                       <span>
                         {row.label}
                         {row.expr ? <span className="fee-choice-note">{row.expr}</span> : null}
@@ -1673,20 +1679,38 @@ export default function OverseasShippingPage() {
                       <strong>{row.value}</strong>
                     </div>
                   ))
-                ) : quoteDuty.bufferKrw ? (
-                  <div className="fee-line is-sub">
-                    <span>버퍼 10% (포함)</span>
-                    <strong>{quoteDuty.bufferKrw.toLocaleString()}원</strong>
-                  </div>
                 ) : null}
               </>
+            )}
+            {quoteDuty?.showsLocalEstimate && (
+              <>
+                <div className="fee-line">
+                  <span>
+                    현지 세금 예비
+                    <span className="fee-choice-note">합계 제외</span>
+                  </span>
+                  <strong>{(quoteDuty.localEstimateKrw || 0).toLocaleString()}원</strong>
+                </div>
+                {quoteDuty.formula?.map((row) => (
+                  <div className="fee-line is-sub" key={row.label}>
+                    <span>
+                      {row.label}
+                      {row.expr ? <span className="fee-choice-note">{row.expr}</span> : null}
+                    </span>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
+              </>
+            )}
+            {quoteDuty?.collectionNote && (
+              <div className="text-muted tw-text-[0.8rem]">{quoteDuty.collectionNote}</div>
             )}
             {quoteDuty?.ineligibleReason && (
               <div className="tw-text-[#b45309] tw-text-[0.8rem] tw-font-semibold">
                 {quoteDuty.ineligibleReason}
               </div>
             )}
-            {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason) && (
+            {quoteDuty && ['US', 'GB'].includes(form.countrycd) && !(quoteDuty.dutyPrepaid || quoteDuty.ineligibleReason || quoteDuty.showsLocalEstimate || quoteDuty.collectionNote) && (
               <div className="text-muted tw-text-[0.8rem]">
                 신고가액을 입력하면 관세 선납이 나옵니다.
               </div>
