@@ -1318,35 +1318,34 @@ tbody tr:hover { background: #f6f7fb; }
   max-width: 100%;
 }
 .intake-form {
-  max-width: 42rem;
+  max-width: 64rem;
   width: 100%;
 }
 .intake-form .domestic-address-line .w-addr,
 .intake-form .domestic-row .w-notes {
-  flex: 0 1 22rem;
+  flex: 1 1 28rem;
 }
 .intake-form .domestic-address-line .w-addr input,
 .intake-form .domestic-field.w-detail input,
 .intake-form .domestic-field.w-notes input {
-  width: 22rem;
+  width: 100%;
   max-width: 100%;
 }
 .pickup-grid {
   display: grid;
-  grid-template-columns: minmax(0, 16rem) minmax(0, 16rem);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   justify-content: start;
   gap: 0.75rem;
 }
 .pickup-grid > .pickup-span {
   grid-column: 1 / -1;
-  max-width: 34rem;
 }
 .pickup-grid > label.pickup-span .ui-control {
-  max-width: 22rem;
+  max-width: 100%;
 }
 .pickup-saved {
-  flex: 0 1 16rem;
-  max-width: 16rem;
+  flex: 1 1 20rem;
+  max-width: 28rem;
 }
 .pickup-address {
   display: flex;
@@ -1355,8 +1354,8 @@ tbody tr:hover { background: #f6f7fb; }
   flex-wrap: wrap;
 }
 .pickup-address .pickup-road {
-  flex: 1 1 16rem;
-  max-width: 22rem;
+  flex: 1 1 20rem;
+  max-width: none;
 }
 @media (max-width: 768px) {
   .intake-form .domestic-address-line .w-addr,
