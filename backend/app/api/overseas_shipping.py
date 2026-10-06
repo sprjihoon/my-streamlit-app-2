@@ -35,6 +35,7 @@ from backend.app.services.ems.fields import (
     fallback_nations,
     format_sender_tel,
     normalize_contents_type,
+    normalize_customs_gubun,
     resolve_method,
     resolve_sender,
     sort_nations,
@@ -98,6 +99,7 @@ class InvoiceItem(BaseModel):
 class OverseasSubmitRequest(BaseModel):
     shipping_method: str = "EMS"
     contents_type: str = "parcel"
+    customs_gubun: str = "merchandise"
     countrycd: str
     sender_name: str = ""
     sender_zipcode: str = ""
@@ -219,6 +221,12 @@ def ensure_overseas_tables() -> None:
             con.execute("SELECT ddp_krw FROM overseas_shipping_requests LIMIT 1")
         except Exception:
             con.execute("ALTER TABLE overseas_shipping_requests ADD COLUMN ddp_krw INTEGER")
+        try:
+            con.execute("SELECT customs_gubun FROM overseas_shipping_requests LIMIT 1")
+        except Exception:
+            con.execute(
+                "ALTER TABLE overseas_shipping_requests ADD COLUMN customs_gubun TEXT DEFAULT 'merchandise'"
+            )
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS overseas_saved_addresses (
@@ -299,6 +307,7 @@ def _req_dict(req: OverseasSubmitRequest) -> dict[str, Any]:
     return {
         "shipping_method": req.shipping_method,
         "contents_type": req.contents_type,
+        "customs_gubun": req.customs_gubun,
         "countrycd": req.countrycd,
         "sender_name": req.sender_name,
         "sender_zipcode": req.sender_zipcode,
@@ -720,8 +729,10 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
         "shipping_method": method["code"],
         "shipping_method_name": method["name"],
         "contents_type": validated.get("contents_type") or "parcel",
+        "customs_gubun": validated.get("customs_gubun") or "merchandise",
         "contents_label": validated.get("contents_label") or contents_label(
-            validated.get("contents_type") or "parcel"
+            validated.get("contents_type") or "parcel",
+            validated.get("customs_gubun") or "merchandise",
         ),
         "em_ee": method["em_ee"],
         "countrycd": validated["countrycd"],
@@ -754,6 +765,8 @@ def _preview_payload(validated: dict[str, Any], *, is_test: bool, fee: int | Non
             ),
             duty_prepaid_requested=True,
             shipping_method=method["code"],
+            is_gift=validated.get("customs_gubun") == "gift",
+            duty_lines=_duty_lines(list(validated.get("items") or [])),
         ),
         "is_test": is_test,
         "notes": validated.get("notes") or "",
@@ -795,11 +808,15 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         "canceled_at",
         "canceled_by",
         "ddp_krw",
+        "customs_gubun",
     ]
     data = dict(zip(keys, row))
     data["is_test"] = bool(data["is_test"])
     data["contents_type"] = data.get("contents_type") or "parcel"
-    data["contents_label"] = contents_label(str(data["contents_type"]))
+    data["customs_gubun"] = normalize_customs_gubun(
+        data.get("customs_gubun"), data["contents_type"]
+    )
+    data["contents_label"] = contents_label(str(data["contents_type"]), str(data["customs_gubun"]))
     try:
         data["items"] = json.loads(data.pop("item_list") or "[]")
     except json.JSONDecodeError:
@@ -820,12 +837,48 @@ def _customs_value_usd(items: list[dict[str, Any]]) -> float:
     return total
 
 
-def _ddp_krw_for(countrycd: str, shipping_method: str, items: list[dict[str, Any]]) -> int:
+def _duty_lines(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lines: list[dict[str, Any]] = []
+    for item in items or []:
+        try:
+            value = float(item.get("unit_price_usd") or item.get("value_usd") or 0) * int(
+                item.get("quantity") or 1
+            )
+        except (TypeError, ValueError):
+            continue
+        if value <= 0:
+            continue
+        lines.append({"hs_code": str(item.get("hs_code") or ""), "value_usd": value})
+    return lines
+
+
+def _parse_duty_items(raw: str) -> list[dict[str, Any]] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+    return _duty_lines(data)
+
+
+def _ddp_krw_for(
+    countrycd: str,
+    shipping_method: str,
+    items: list[dict[str, Any]],
+    *,
+    is_gift: bool = False,
+) -> int:
     duty = calculate_duty_deposit(
         country_code=countrycd,
         customs_value_usd=_customs_value_usd(items),
         duty_prepaid_requested=True,
         shipping_method=shipping_method,
+        is_gift=is_gift,
+        duty_lines=_duty_lines(items),
     )
     if not duty.get("dutyPrepaid"):
         return 0
@@ -839,6 +892,7 @@ def _attach_spend(data: dict[str, Any]) -> None:
             str(data.get("countrycd") or ""),
             str(data.get("shipping_method") or ""),
             list(data.get("items") or []),
+            is_gift=data.get("customs_gubun") == "gift",
         )
     else:
         ddp = int(stored or 0)
@@ -908,16 +962,19 @@ def overseas_quote(
     token: str,
     shipping_method: str = "EMS",
     contents_type: str = "parcel",
+    customs_gubun: str = "merchandise",
     countrycd: str = "JP",
     totweight: int = 0,
     boxlength: int = 0,
     boxwidth: int = 0,
     boxheight: int = 0,
     customs_value_usd: float = 0,
+    duty_items: str = "",
 ):
     """우체국 예상요금 + 미국/영국 DDP. 결제가 아니라 후납 참고 금액."""
     _get_user(token)
     kind = normalize_contents_type(contents_type)
+    purpose = normalize_customs_gubun(customs_gubun, kind)
     try:
         parcel_method = resolve_method(shipping_method, "parcel")
         country = validate_countrycd(countrycd)
@@ -932,6 +989,8 @@ def overseas_quote(
         customs_value_usd=customs_value_usd,
         duty_prepaid_requested=True,
         shipping_method=selected_method["code"],
+        is_gift=purpose == "gift",
+        duty_lines=_parse_duty_items(duty_items),
     )
     parcel = _quote_shipping(
         parcel_method["premiumcd"],
@@ -1272,7 +1331,7 @@ def list_overseas(token: str, limit: int = 500):
                    totweight, boxlength, boxwidth, boxheight, item_list,
                    tracking_no, req_no, receive_seq, ems_fee, post_office,
                    status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
-                   ddp_krw
+                   ddp_krw, customs_gubun
             FROM overseas_shipping_requests
             ORDER BY id DESC
             LIMIT ?
@@ -1293,7 +1352,7 @@ def _load_shipment(shipment_id: int) -> tuple[dict[str, Any], dict[str, Any] | N
                    totweight, boxlength, boxwidth, boxheight, item_list,
                    tracking_no, req_no, receive_seq, ems_fee, post_office,
                    status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
-                   ddp_krw, apply_snapshot
+                   ddp_krw, customs_gubun, apply_snapshot
             FROM overseas_shipping_requests
             WHERE id = ?
             """,
@@ -1422,6 +1481,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         validated["countrycd"],
         validated["method"]["code"],
         list(validated.get("items") or []),
+        is_gift=validated.get("customs_gubun") == "gift",
     )
     created_at = datetime.now(KST).isoformat(timespec="seconds")
     with get_connection() as con:
@@ -1433,8 +1493,8 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
                 recipient_addr1, recipient_addr2, recipient_addr3,
                 totweight, boxlength, boxwidth, boxheight, item_list,
                 tracking_no, req_no, receive_seq, ems_fee, post_office,
-                status, is_test, apply_snapshot, notes, created_by, created_at, ddp_krw
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                status, is_test, apply_snapshot, notes, created_by, created_at, ddp_krw, customs_gubun
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 order_no,
@@ -1473,6 +1533,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
                 user["nickname"],
                 created_at,
                 ddp_krw,
+                validated.get("customs_gubun") or "merchandise",
             ),
         )
         row_id = cur.lastrowid

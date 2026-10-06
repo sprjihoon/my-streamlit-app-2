@@ -10,8 +10,15 @@ test('sender, recipient, HS, quote, and preview stay on the test API', async ({ 
   const calls = await installApi(page, STAFF);
   await page.goto('/overseas-shipping');
   await expect(page.getByRole('heading', { name: '해외배송 접수' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '상품' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '선물' })).toBeVisible();
+  await page.getByRole('button', { name: '선물' }).click();
+  await expect.poll(() => calls.some((call) => call.path === '/overseas-shipping/quote' && (call.search || '').includes('customs_gubun=gift'))).toBeTruthy();
   await expect.poll(() => calls.some((call) => call.method === 'GET' && call.path === '/overseas-shipping/quote')).toBeTruthy();
   await expect(page.locator('input[value="Taro"], input[value="스프링"]').first()).toBeVisible();
+  await expect(page.getByText('USD 150.00 × 17%')).toBeVisible();
+  await expect(page.getByText('USD 31.9990 × 1,400원 × 1.02')).toBeVisible();
+  await expect(page.getByText('46,000원').first()).toBeVisible();
 });
 
 test('create failure and success do not leave the browser', async ({ page }) => {

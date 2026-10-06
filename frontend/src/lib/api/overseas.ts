@@ -16,6 +16,7 @@ export interface OverseasInvoiceItem {
 export interface OverseasShippingPayload {
   shipping_method: 'EMS' | 'EMS_PREMIUM' | 'KPACKET';
   contents_type?: 'parcel' | 'document';
+  customs_gubun?: 'merchandise' | 'gift';
   countrycd: string;
   sender_name?: string;
   sender_zipcode?: string;
@@ -52,6 +53,7 @@ export interface OverseasShippingItem {
   shipping_method: string;
   premiumcd: string;
   contents_type?: string;
+  customs_gubun?: string;
   contents_label?: string;
   countrycd: string;
   sender_name?: string;
@@ -92,6 +94,7 @@ export interface OverseasShippingPreview {
   shipping_method: string;
   shipping_method_name: string;
   contents_type?: string;
+  customs_gubun?: string;
   contents_label?: string;
   em_ee?: string;
   countrycd: string;
@@ -123,6 +126,7 @@ export interface OverseasDutyQuote {
   estimateUsd: number;
   depositKrw: number;
   bufferKrw?: number;
+  formula?: Array<{ label: string; expr: string; value: string }>;
   breakdown: {
     dutyUsd: number;
     serviceFeeUsd: number;
@@ -173,23 +177,27 @@ export async function quoteOverseasShipping(
   payload: {
     shipping_method: OverseasShippingPayload['shipping_method'];
     contents_type?: 'parcel' | 'document';
+    customs_gubun?: 'merchandise' | 'gift';
     countrycd: string;
     totweight: number;
     boxlength: number;
     boxwidth: number;
     boxheight: number;
     customs_value_usd?: number;
+    duty_items?: Array<{ hs_code?: string; unit_price_usd?: number; quantity?: number; value_usd?: number }>;
   }
 ) {
   const extra =
     `&shipping_method=${encodeURIComponent(payload.shipping_method)}` +
     `&contents_type=${encodeURIComponent(payload.contents_type || 'parcel')}` +
+    `&customs_gubun=${encodeURIComponent(payload.customs_gubun || 'merchandise')}` +
     `&countrycd=${encodeURIComponent(payload.countrycd)}` +
     `&totweight=${encodeURIComponent(String(payload.totweight))}` +
     `&boxlength=${encodeURIComponent(String(payload.boxlength || 0))}` +
     `&boxwidth=${encodeURIComponent(String(payload.boxwidth || 0))}` +
     `&boxheight=${encodeURIComponent(String(payload.boxheight || 0))}` +
-    `&customs_value_usd=${encodeURIComponent(String(payload.customs_value_usd || 0))}`;
+    `&customs_value_usd=${encodeURIComponent(String(payload.customs_value_usd || 0))}` +
+    `&duty_items=${encodeURIComponent(JSON.stringify(payload.duty_items || []))}`;
   return fetchApi<{
     ok: boolean;
     totalFee: number | null;

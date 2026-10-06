@@ -143,7 +143,7 @@ export default function OverseasShippingDetailPage() {
               <button type="button" className="btn btn-secondary" onClick={handleDelete}>삭제</button>
             )}
           </div>
-          <Card title={`${METHOD_LABEL[item.shipping_method] || item.shipping_method} · ${item.contents_label || '화물'} · ${status}`}>
+          <Card title={`${METHOD_LABEL[item.shipping_method] || item.shipping_method} · ${item.contents_label || '화물'} · ${item.customs_gubun === 'gift' ? 'Gift' : item.contents_type === 'document' ? 'Document' : 'Merchandise'} · ${status}`}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
               <Field label="등기번호" value={item.tracking_no || '-'} />
               <Field label="요금" value={won(item.ems_fee)} />
@@ -175,6 +175,7 @@ export default function OverseasShippingDetailPage() {
           </Card>
           <Card title="화물">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
+              <Field label="내용품" value={item.customs_gubun === 'gift' ? '선물 (Gift)' : item.contents_type === 'document' ? '서류 (Document)' : '상품 (Merchandise)'} />
               <Field label="총중량 (g)" value={String(item.totweight || '')} />
               <Field label="가로 (cm)" value={item.contents_type === 'document' ? '' : String(item.boxlength || '')} />
               <Field label="세로 (cm)" value={item.contents_type === 'document' ? '' : String(item.boxwidth || '')} />

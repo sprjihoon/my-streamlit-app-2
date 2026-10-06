@@ -130,6 +130,7 @@ function emptyForm(senderName = '스프링풀필먼트'): OverseasShippingPayloa
   return {
     shipping_method: 'EMS',
     contents_type: 'parcel',
+    customs_gubun: 'merchandise',
     countrycd: 'JP',
     sender_name: senderName,
     sender_zipcode: '',
@@ -382,12 +383,18 @@ export default function OverseasShippingPage() {
         const res = await quoteOverseasShipping(token, {
           shipping_method: form.shipping_method,
           contents_type: form.contents_type || 'parcel',
+          customs_gubun: form.customs_gubun || 'merchandise',
           countrycd: form.countrycd,
           totweight: form.totweight,
           boxlength: form.boxlength,
           boxwidth: form.boxwidth,
           boxheight: form.boxheight,
           customs_value_usd: customsValue,
+          duty_items: form.items.map((item) => ({
+            hs_code: item.hs_code || '',
+            unit_price_usd: Number(item.unit_price_usd || 0),
+            quantity: Number(item.quantity || 0),
+          })),
         });
         if (cancelled) return;
         setQuoteLive(!!res.live);
@@ -423,7 +430,7 @@ export default function OverseasShippingPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [token, loading, form.shipping_method, form.contents_type, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight, form.items]);
+  }, [token, loading, form.shipping_method, form.contents_type, form.customs_gubun, form.countrycd, form.totweight, form.boxlength, form.boxwidth, form.boxheight, form.items]);
 
   const triggerAddressValidation = useCallback(async (override?: {
     addr3?: string;
@@ -937,11 +944,14 @@ export default function OverseasShippingPage() {
       setFieldNotes(notes);
       const feeText = p.expected_fee != null ? `${p.expected_fee.toLocaleString()}원` : '조회 실패(접수는 가능)';
       const duty = p.duty;
+      const formulaText = duty?.formula?.length
+        ? `\n${duty.formula.map((row) => `${row.label}: ${row.value}${row.expr ? ` (${row.expr})` : ''}`).join('\n')}`
+        : '';
       const dutyLine = duty?.dutyPrepaid && duty.depositKrw
         ? `\n관세 선납(DDP): ${duty.depositKrw.toLocaleString()}원` +
           (duty.estimateUsd ? ` (USD ${duty.estimateUsd.toFixed(2)})` : '') +
           (duty.ddpPath === 'premium' ? ' · FedEx DDP' : '') +
-          (duty.bufferKrw ? `\n버퍼 10%: ${duty.bufferKrw.toLocaleString()}원 (DDP에 포함)` : '')
+          formulaText
         : duty?.ineligibleReason
           ? `\n관세 선납: ${duty.ineligibleReason}`
           : '';
@@ -1355,6 +1365,44 @@ export default function OverseasShippingPage() {
                 ? '화물·서류 요금이 다릅니다. 선택한 유형으로 접수됩니다.'
                 : 'K-Packet은 화물만 가능합니다.'}
             </span>
+            {!isDocument && (
+              <div className="tw-mt-[10px]">
+                <div className="tw-text-[0.85rem] tw-font-semibold tw-mb-[6px]">내용품 구분</div>
+                <div className="tw-flex tw-gap-[8px]">
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setForm((prev) => ({ ...prev, customs_gubun: 'merchandise' }))}
+                    style={{
+                      flex: 1,
+                      border: form.customs_gubun !== 'gift' ? '2px solid #0f172a' : '1px solid var(--border)',
+                      background: form.customs_gubun !== 'gift' ? '#0f172a' : '#fff',
+                      color: form.customs_gubun !== 'gift' ? '#fff' : 'inherit',
+                      fontWeight: 700,
+                    }}
+                  >
+                    상품
+                  </button>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setForm((prev) => ({ ...prev, customs_gubun: 'gift' }))}
+                    style={{
+                      flex: 1,
+                      border: form.customs_gubun === 'gift' ? '2px solid #0f172a' : '1px solid var(--border)',
+                      background: form.customs_gubun === 'gift' ? '#0f172a' : '#fff',
+                      color: form.customs_gubun === 'gift' ? '#fff' : 'inherit',
+                      fontWeight: 700,
+                    }}
+                  >
+                    선물
+                  </button>
+                </div>
+                <span className="text-muted tw-text-[0.78rem]">
+                  우체국 접수 값 EM_gubun은 상품 Merchandise, 선물 Gift입니다. 미국 선물 100달러 이하는 관세 없이 신고수수료만 선납합니다.
+                </span>
+              </div>
+            )}
           </div>
           <label>
             수취인 이름 (영문)
@@ -1619,7 +1667,17 @@ export default function OverseasShippingPage() {
                   </span>
                   <strong>{quoteDuty.depositKrw.toLocaleString()}원</strong>
                 </div>
-                {quoteDuty.bufferKrw ? (
+                {quoteDuty.formula?.length ? (
+                  quoteDuty.formula.map((row) => (
+                    <div className="fee-line is-sub" key={row.label}>
+                      <span>
+                        {row.label}
+                        {row.expr ? <span className="fee-choice-note">{row.expr}</span> : null}
+                      </span>
+                      <strong>{row.value}</strong>
+                    </div>
+                  ))
+                ) : quoteDuty.bufferKrw ? (
                   <div className="fee-line is-sub">
                     <span>버퍼 10% (포함)</span>
                     <strong>{quoteDuty.bufferKrw.toLocaleString()}원</strong>

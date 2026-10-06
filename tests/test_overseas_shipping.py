@@ -138,6 +138,19 @@ def test_invoice_semicolon_and_english_name():
     assert packed["number"] == "1"
     assert packed["weight"] == "800"
     assert packed["EM_gubun"] == "Merchandise"
+    gift = serialize_invoice_items(
+        [{"name_en": "Shoes", "quantity": 1, "unit_price_usd": 40, "hs_code": "6403", "origin_country": "KR"}],
+        800,
+        customs_gubun="gift",
+    )
+    assert gift["EM_gubun"] == "Gift"
+    forced = serialize_invoice_items(
+        [{"name_en": "Documents", "quantity": 1, "unit_price_usd": 1, "hs_code": "", "origin_country": "KR"}],
+        400,
+        contents_type="document",
+        customs_gubun="gift",
+    )
+    assert forced["EM_gubun"] == "Document"
     docs = serialize_invoice_items(
         [{"name_en": "Documents", "quantity": 1, "unit_price_usd": 1, "hs_code": "", "origin_country": "KR"}],
         400,
@@ -162,6 +175,20 @@ def test_invoice_semicolon_and_english_name():
         raise AssertionError("email recipient should fail")
     except ValueError as exc:
         assert "영문" in str(exc) or "이메일" in str(exc)
+
+
+def test_gift_selection_is_sent_as_em_gubun():
+    validated = validate_apply_input(_req(customs_gubun="gift").model_dump())
+    assert validated["customs_gubun"] == "gift"
+    assert validated["contents_label"] == "선물"
+    params = build_apply_params(validated, order_no="TIL-GIFT", custno="1", apprno="1")
+    assert params["EM_gubun"] == "Gift"
+    assert "EM_gubun=Gift" in build_ems_params(params)
+    document = validate_apply_input(
+        _req(contents_type="document", customs_gubun="gift", totweight=400).model_dump()
+    )
+    assert document["customs_gubun"] == "document"
+    assert document["invoice"]["EM_gubun"] == "Document"
 
 
 def test_build_ems_params_skips_empty_and_keeps_order():
@@ -309,9 +336,21 @@ def test_create_requires_confirm_then_saves_mock(isolated_runtime):
     assert again.get("duplicate_guard") is True
     assert len(list_overseas(token)["items"]) == 1
 
+    assert items[0]["customs_gubun"] == "merchandise"
+    assert items[0]["contents_label"] == "화물"
+
     canceled = cancel_overseas(items[0]["id"], token, confirm=True)
     assert canceled["success"] is True
     assert list_overseas(token)["items"][0]["status"] == "canceled"
+
+    gift = create_overseas(
+        _req(confirm=True, customs_gubun="gift", receivetelno="+819088800001", countrycd="US"),
+        token,
+    )
+    gift_row = get_overseas(gift["id"], token)
+    assert gift_row["customs_gubun"] == "gift"
+    assert gift_row["contents_label"] == "선물"
+    assert overseas_label(gift["id"], token)["label"]["contents_gubun"] == "Gift"
 
 
 def test_kpacket_reject_overweight_on_preview(isolated_runtime):
@@ -514,20 +553,46 @@ def test_document_and_parcel_quotes_and_apply(isolated_runtime):
 def test_us_ddp_quote_and_infront_formula(isolated_runtime):
     from backend.app.services.ems.duty_deposit import calculate_duty_deposit, requires_us_ems_premium
 
-    assert requires_us_ems_premium("US", 801) is True
-    assert requires_us_ems_premium("US", 800) is False
+    assert requires_us_ems_premium("US", 2501) is True
+    assert requires_us_ems_premium("US", 2500) is False
+    assert requires_us_ems_premium("US", 801) is False
     postal = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=150,
         shipping_method="EMS",
         usd_krw=1400,
+        duty_lines=[{"hs_code": "610910", "value_usd": 150}],
     )
     assert postal["dutyPrepaid"] is True
     assert postal["ddpPath"] == "postal"
-    assert postal["depositKrw"] == 46_000
-    assert postal["bufferKrw"] == 4_154
-    subtotal = postal["breakdown"]["dutyUsd"] + postal["breakdown"]["serviceFeeUsd"]
-    assert abs(postal["breakdown"]["bufferUsd"] - subtotal * 0.1) < 1e-9
+    assert postal["depositKrw"] == 33_000
+    assert postal["bufferKrw"] == 0
+    assert "13%" in postal["formula"][1]["expr"]
+    assert "610910" in postal["formula"][1]["expr"]
+    gift_small = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=80,
+        shipping_method="EMS",
+        usd_krw=1400,
+        is_gift=True,
+    )
+    assert gift_small["breakdown"]["dutyUsd"] == 0
+    assert gift_small["breakdown"]["serviceFeeUsd"] == 1.04
+    assert gift_small["depositKrw"] == 2_000
+    assert "면세" in gift_small["formula"][1]["expr"]
+    gift_over = calculate_duty_deposit(
+        country_code="US",
+        customs_value_usd=150,
+        shipping_method="EMS",
+        usd_krw=1400,
+        is_gift=True,
+    )
+    assert gift_over["breakdown"]["dutyUsd"] == 150 * 0.10
+    assert "100 초과" in gift_over["formula"][1]["expr"]
+    assert postal["formula"][-1]["value"] == "33,000원"
+    assert postal["formula"][-2]["label"] == "버퍼 2%"
+    assert "× 1,400원 × 1.02" in postal["formula"][-2]["expr"]
+    assert postal["breakdown"]["bufferUsd"] == 0
     small = calculate_duty_deposit(
         country_code="US",
         customs_value_usd=1,
@@ -537,22 +602,24 @@ def test_us_ddp_quote_and_infront_formula(isolated_runtime):
     assert small["depositKrw"] == 2_000
     over = calculate_duty_deposit(
         country_code="US",
-        customs_value_usd=850,
+        customs_value_usd=2501,
         shipping_method="EMS",
         usd_krw=1400,
     )
     assert over["eligible"] is False
     assert "EMS 프리미엄" in (over["ineligibleReason"] or "")
+    assert "2,500" in (over["ineligibleReason"] or "")
     premium = calculate_duty_deposit(
         country_code="US",
-        customs_value_usd=850,
+        customs_value_usd=2600,
         shipping_method="EMS_PREMIUM",
         usd_krw=1400,
     )
     assert premium["ddpPath"] == "premium"
-    assert premium["depositKrw"] == 309_000
-    premium_sub = premium["breakdown"]["dutyUsd"] + premium["breakdown"]["serviceFeeUsd"]
-    assert abs(premium["breakdown"]["bufferUsd"] - premium_sub * 0.1) < 1e-9
+    assert premium["depositKrw"] == 805_000
+    assert "× 20%" in premium["formula"][1]["expr"]
+    assert "USD 15.00" in premium["formula"][2]["expr"]
+    assert premium["breakdown"]["bufferUsd"] == 0
     gb = calculate_duty_deposit(country_code="GB", customs_value_usd=100, usd_krw=1400)
     assert gb["dutyPrepaid"] is True
     assert gb["depositKrw"] == 32_000

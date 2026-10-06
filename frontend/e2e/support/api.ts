@@ -24,7 +24,7 @@ export const STAFF: SessionUser = {
   department: '물류팀',
 };
 
-export type ApiCall = { method: string; path: string; body: string | null };
+export type ApiCall = { method: string; path: string; body: string | null; search?: string };
 
 const PARTY = {
   name: '스프링',
@@ -113,7 +113,7 @@ export async function installApi(page: Page, user: SessionUser) {
   const calls: ApiCall[] = [];
   const record = (request: Request) => {
     const url = new URL(request.url());
-    calls.push({ method: request.method(), path: url.pathname, body: request.postData() });
+    calls.push({ method: request.method(), path: url.pathname, body: request.postData(), search: url.search });
   };
 
   await page.route('https://t1.daumcdn.net/**', (route) => route.abort());
@@ -245,7 +245,36 @@ export async function installApi(page: Page, user: SessionUser) {
       return json(route, { items: [{ id: 1, label: '의류', name_ko: '의류', name_en: 'T-shirt', hs_code: '6109', group_name: '의류', origin_country: 'KR' }] });
     }
     if (path === '/overseas-shipping/quote') {
-      return json(route, { ok: true, totalFee: 18000, live: false, source: 'test', shipping_method: 'EMS', shipping_method_name: 'EMS', parcel: { ok: true, totalFee: 18000, totweight: 500, em_ee: 'em', error: null }, document: { ok: true, totalFee: 12000, totweight: 200, em_ee: 'ee', error: null } });
+      return json(route, {
+        ok: true,
+        totalFee: 18000,
+        live: false,
+        source: 'test',
+        shipping_method: 'EMS',
+        shipping_method_name: 'EMS',
+        payableTotal: 64000,
+        parcel: { ok: true, totalFee: 18000, totweight: 500, em_ee: 'em', error: null },
+        document: { ok: true, totalFee: 12000, totweight: 200, em_ee: 'ee', error: null },
+        duty: {
+          eligible: true,
+          dutyPrepaid: true,
+          ddpPath: 'postal',
+          estimateUsd: 32,
+          depositKrw: 46000,
+          bufferKrw: 4154,
+          usdKrwRate: 1400,
+          customsValueUsd: 150,
+          ineligibleReason: null,
+          breakdown: { dutyUsd: 25.5, serviceFeeUsd: 3.59, bufferUsd: 2.909, totalUsd: 31.999 },
+          formula: [
+            { label: '관세', expr: 'USD 150.00 × 17%', value: 'USD 25.50' },
+            { label: '운송사 수수료', expr: 'USD 1.04 + 관세 USD 25.50 × 10%', value: 'USD 3.59' },
+            { label: '버퍼 10%', expr: '추정액 USD 29.0900 × 10%', value: 'USD 2.9090' },
+            { label: '원화 환산', expr: 'USD 31.9990 × 1,400원 × 1.02', value: '45,694.57원' },
+            { label: '1,000원 올림', expr: '선납 예상금액', value: '46,000원' },
+          ],
+        },
+      });
     }
     if (path === '/overseas-shipping/preview' && method === 'POST') {
       return json(route, { ok: true, preview: { sender_name: '스프링', recipient_name: 'Taro', expected_fee: 18000, countrycd: 'JP', contents_label: '의류' } });

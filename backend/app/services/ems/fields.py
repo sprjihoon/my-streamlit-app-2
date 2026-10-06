@@ -224,8 +224,26 @@ def normalize_contents_type(raw: Any) -> str:
     return "parcel"
 
 
-def contents_label(contents_type: str) -> str:
-    return "서류" if contents_type == "document" else "화물"
+def contents_label(contents_type: str, customs_gubun: str = "merchandise") -> str:
+    if normalize_contents_type(contents_type) == "document":
+        return "서류"
+    if normalize_customs_gubun(customs_gubun, contents_type) == "gift":
+        return "선물"
+    return "화물"
+
+
+def normalize_customs_gubun(raw: Any, contents_type: Any = "parcel") -> str:
+    """우체국 EM_gubun. 서류는 Document, 화물은 상품(Merchandise) 또는 선물(Gift)."""
+    if normalize_contents_type(contents_type) == "document":
+        return "document"
+    text = str(raw or "merchandise").strip().lower()
+    if text in {"gift", "선물"}:
+        return "gift"
+    return "merchandise"
+
+
+def em_gubun_api_value(customs_gubun: str) -> str:
+    return {"gift": "Gift", "document": "Document"}.get(customs_gubun, "Merchandise")
 
 
 def resolve_method(shipping_method: str, contents_type: Any = None) -> dict[str, str]:
@@ -243,6 +261,7 @@ def serialize_invoice_items(
     totweight_g: int,
     *,
     contents_type: str = "parcel",
+    customs_gubun: str = "merchandise",
 ) -> dict[str, str]:
     if not items:
         raise ValueError("인보이스 물품을 1개 이상 입력해주세요.")
@@ -280,7 +299,8 @@ def serialize_invoice_items(
         for i in range(len(cleaned))
     ]
     weights = [max(1, w) for w in weights]
-    gubun = "Document" if normalize_contents_type(contents_type) == "document" else "Merchandise"
+    purpose = normalize_customs_gubun(customs_gubun, contents_type)
+    gubun = em_gubun_api_value(purpose)
     return {
         "EM_gubun": ";".join([gubun] * len(cleaned)),
         "contents": ";".join(it["name_en"] for it in cleaned),
@@ -658,6 +678,7 @@ def validate_countrycd(code: str) -> str:
 
 def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
     kind = normalize_contents_type(data.get("contents_type"))
+    customs_gubun = normalize_customs_gubun(data.get("customs_gubun"), kind)
     method = resolve_method(str(data.get("shipping_method") or "EMS"), kind)
     countrycd = validate_countrycd(str(data.get("countrycd") or ""))
     totweight = int(data.get("totweight") or 0)
@@ -721,7 +742,9 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
             str(item.get("name_en") or "").strip(),
         )
         raw_items.append(item)
-    invoice = serialize_invoice_items(raw_items, chargeable_weight, contents_type=kind)
+    invoice = serialize_invoice_items(
+        raw_items, chargeable_weight, contents_type=kind, customs_gubun=customs_gubun
+    )
     notes = _fit_epost_text(corrections, problems, "메모", "notes", str(data.get("notes") or "").strip())
     mail = str(data.get("receivemail") or "").strip()
     if mail and not _euc_kr_ok(mail):
@@ -755,7 +778,8 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "method": method,
         "contents_type": kind,
-        "contents_label": contents_label(kind),
+        "customs_gubun": customs_gubun,
+        "contents_label": contents_label(kind, customs_gubun),
         "countrycd": countrycd,
         "totweight": totweight,
         "volume_weight": volume_weight,

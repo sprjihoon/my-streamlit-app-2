@@ -103,8 +103,19 @@ def build_shipment_label(
         "document" if (em_gubun.lower() == "document" or snap.get("em_ee") == "ee") else "parcel"
     )
     if not em_gubun:
-        em_gubun = "Document" if contents_type == "document" else "Merchandise"
-    contents_label = "서류" if contents_type == "document" else "화물"
+        stored = str(row.get("customs_gubun") or "").strip().lower()
+        if contents_type == "document" or stored == "document":
+            em_gubun = "Document"
+        elif stored == "gift":
+            em_gubun = "Gift"
+        else:
+            em_gubun = "Merchandise"
+    if em_gubun.lower() == "gift":
+        contents_label = "선물"
+    elif contents_type == "document" or em_gubun.lower() == "document":
+        contents_label = "서류"
+    else:
+        contents_label = "화물"
     try:
         fee = int(float(fee_raw)) if fee_raw else None
     except ValueError:
@@ -236,7 +247,9 @@ def _waybill(data: dict[str, Any], *, copy_title: str, with_guide: bool) -> str:
         dims = f"{int(data['boxlength'])} * {int(data['boxwidth'])} * {int(data['boxheight'])}"
     country = str(recipient.get("country") or "")
     code_boxes = "".join(f"<b class='cc'>{_esc(ch)}</b>" for ch in country[:2])
-    goods = "v" if data.get("contents_type") != "document" else ""
+    gubun = str(data.get("contents_gubun") or "").lower()
+    gift = "v" if gubun == "gift" else ""
+    goods = "v" if gubun == "merchandise" or (not gift and data.get("contents_type") != "document" and gubun != "document") else ""
     guide = ""
     if with_guide:
         guide = """
@@ -320,7 +333,7 @@ def _waybill(data: dict[str, Any], *, copy_title: str, with_guide: bool) -> str:
     </div>
     <table class="checks">
       <tr>
-        <td>Sample 상품견본 ☐ &nbsp; Gift 선물 ☐ &nbsp; Merchandise 상품 {'☑' if goods else '☐'} &nbsp; 수출면장건 ☐</td>
+        <td>Sample 상품견본 ☐ &nbsp; Gift 선물 {'☑' if gift else '☐'} &nbsp; Merchandise 상품 {'☑' if goods else '☐'} &nbsp; 수출면장건 ☐</td>
         <td>요금납부방법 및 기타<br>현금수납 ☐ &nbsp; 요금후납 ☑</td>
         <td>Signature 담당자서명<br><b>{_esc(data.get('post_office') or '')}</b></td>
       </tr>
