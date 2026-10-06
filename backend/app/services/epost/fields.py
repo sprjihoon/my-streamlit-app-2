@@ -97,6 +97,33 @@ def treat_status_code(code_or_text: str | None) -> str:
     return raw or "신청접수"
 
 
+def _dated_event_rows(blob: str) -> list[str]:
+    """날짜 칸이 있는 배송 이력 행. 진행 단계 그림은 포함하지 않는다."""
+    date_cell = re.compile(r"^\d{4}[.\-]\d{2}[.\-]\d{2}$")
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", blob, re.IGNORECASE | re.DOTALL)
+    event_rows: list[str] = []
+    for row in rows:
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.IGNORECASE | re.DOTALL)
+        texts = [re.sub(r"<[^>]+>", "", cell).strip() for cell in cells]
+        if any(date_cell.match(text) for text in texts):
+            event_rows.append(row)
+    return event_rows
+
+
+def empty_tracking_page(text: str | None) -> bool:
+    """배달 이력이 없는 조회 화면.
+
+    우체국 등기조회는 결과가 없어도 STEP4 배달완료 글자를 그려 둔다.
+    그 글자만으로 완료 처리하면 안 된다.
+    """
+    blob = text or ""
+    if not blob or _dated_event_rows(blob):
+        return False
+    if "배달정보를 찾지 못했습니다" in blob:
+        return True
+    return "STEP1" in blob and "STEP4" in blob
+
+
 def treat_status_from_tracking_text(text: str | None) -> str | None:
     """우체국 공개 종적조회 HTML에서 현재 처리상태 Korean text를 추출한다.
 
@@ -158,14 +185,9 @@ def treat_status_from_tracking_text(text: str | None) -> str | None:
         return raw.split('\n')[0].strip()
 
     # ── 1단계: 날짜 TD 포함 이력 <tr> — 역순(최신 행 먼저), 셀도 역순 ───────
-    _DATE_TD_RE = re.compile(r'^\d{4}[.\-]\d{2}[.\-]\d{2}$')
-    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', blob, re.IGNORECASE | re.DOTALL)
-    event_rows: list[str] = []
-    for row in rows:
-        cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)
-        texts = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
-        if any(_DATE_TD_RE.match(t) for t in texts):
-            event_rows.append(row)
+    event_rows = _dated_event_rows(blob)
+    if empty_tracking_page(blob):
+        return None
 
     for row in reversed(event_rows):
         cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.IGNORECASE | re.DOTALL)

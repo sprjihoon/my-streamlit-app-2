@@ -414,11 +414,42 @@ def test_refresh_status_skips_delivered_test_and_does_not_go_backward(isolated_r
     monkeypatch.setattr("backend.app.api.domestic_shipping.get_res_info", fake_res)
     monkeypatch.setattr("backend.app.api.domestic_shipping.track_regi_no", fake_track)
     result = refresh_domestic_statuses(token)
-    assert result["checked"] == 1
+    assert result["checked"] == 2
     assert result["delivered"] == 0
-    assert calls == {"res": 1, "track": 1}
+    assert calls == {"res": 2, "track": 2}
     items = {row["id"]: row for row in list_domestic(token)["items"]}
     assert items[moving["id"]]["treat_status"] == "배달중"
     assert items[done["id"]]["treat_status"] == "배달완료"
     assert items[untouched["id"]]["is_test"] is True
     assert items[untouched["id"]]["treat_status"] == "신청접수"
+
+
+def test_refresh_status_clears_delivered_when_trace_has_no_history(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    vendor_id = create_vendor(_vendor(), token)["id"]
+    created = create_domestic(_submit(vendor_id), token)
+    _live_row(
+        isolated_runtime["db"],
+        created["id"],
+        tracking_no="6890180546318",
+        treat_status="배달완료",
+        treat_status_name="배달완료",
+    )
+    monkeypatch.setattr(
+        "backend.app.api.domestic_shipping.get_res_info",
+        lambda order_no, req_ymd, req_type="2", cust_no=None, **kwargs: {
+            "treatStusCd": "신청접수",
+            "treatStusNm": "신청접수",
+            "regiNo": "6890180546318",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.app.api.domestic_shipping.track_regi_no",
+        lambda regi_no: {"treatStusCd": "", "treatStusNm": "", "regiNo": regi_no, "noRecord": "1"},
+    )
+    result = refresh_domestic_statuses(token)
+    assert result["checked"] == 1
+    assert result["delivered"] == 0
+    item = list_domestic(token)["items"][0]
+    assert item["treat_status"] == "신청접수"
+    assert item["treat_status_name"] == "신청접수"

@@ -17,7 +17,6 @@ from backend.app.services.epost.client import (
     track_regi_no,
 )
 from backend.app.services.epost.fields import (
-    FINAL_TREAT_STATUSES,
     TREAT_STATUS_ORDER,
     resolve_cancel_req_ymd,
     treat_status_code,
@@ -39,6 +38,15 @@ def _apply_tracking_info(item: dict[str, Any], info: dict[str, str]) -> dict[str
     상태는 앞으로만 진행한다(no-downgrade).
     GetResInfo가 수거완료(01)를 반환해도 이미 배달준비(06)인 항목을 덮어쓰지 않는다.
     """
+    if info.get("noRecord"):
+        # 조회 화면에 이력이 없는데 목록만 배달완료인 경우. 단계 글자를 완료로 읽은 값이다.
+        if treat_status_code(item.get("treat_status")) == "배달완료":
+            restored = info.get("restoreStatus") or "신청접수"
+            if restored == "배달완료":
+                restored = "신청접수"
+            item["treat_status"] = restored
+            item["treat_status_name"] = restored
+        return item
     # treat_status_code()로 숫자코드·Korean text 모두 Korean text로 정규화
     new_name = treat_status_code(info.get("treatStusCd") or "")
     if new_name and new_name != "신청접수":
@@ -55,21 +63,26 @@ def _apply_tracking_info(item: dict[str, Any], info: dict[str, str]) -> dict[str
 
 def _sync_pickup_like_infront(item: dict[str, Any]) -> dict[str, Any]:
     """Infront inbound-sync: GetResInfo 먼저, 송장이 있으면 종적조회로 보완."""
+    api_name = ""
     if item.get("order_no"):
         ymds = lookup_req_ymds(item.get("res_date"), item.get("created_at"), item.get("pickup_date"))
         try:
             info = get_res_info_with_dates(item["order_no"], ymds)
+            api_name = treat_status_code(info.get("treatStusCd") or "")
             _apply_tracking_info(item, info)
         except Exception:
             pass
-    # '배달완료'만 최종 상태 — 수거완료 이후에도 이동중·배달중·배달완료 추적을 계속한다.
+    # 배달완료로 저장된 건도 다시 본다. 조회 화면에 이력이 없으면 그 완료를 되돌린다.
     # track_regi_no 실패는 조용히 무시: GetResInfo 결과만으로도 DB를 갱신해야 하기 때문.
-    if item.get("treat_status") not in FINAL_TREAT_STATUSES and item.get("tracking_no"):
+    if item.get("treat_status") != "신청취소" and item.get("tracking_no"):
         try:
             tracked = track_regi_no(item["tracking_no"])
+            if tracked.get("noRecord"):
+                restored = api_name if api_name and api_name != "배달완료" else "신청접수"
+                tracked = {**tracked, "restoreStatus": restored}
             _apply_tracking_info(item, tracked)
         except Exception:
-            pass  # 공개 종적조회 실패 시 GetResInfo 결과 그대로 유지
+            pass
     return item
 
 
@@ -86,7 +99,7 @@ def refresh_pickup_statuses(token: str):
                    created_by, created_at, canceled_at, canceled_by
             FROM kpost_pickup_requests
             WHERE status = 'requested' AND is_test = 0
-              AND (treat_status IS NULL OR treat_status NOT IN ('배달완료'))
+              AND (treat_status IS NULL OR treat_status != '신청취소')
               AND (
                 (order_no IS NOT NULL AND order_no != '')
                 OR (tracking_no IS NOT NULL AND tracking_no != '')
@@ -108,7 +121,7 @@ def refresh_pickup_statuses(token: str):
             if item.get("treat_status") == "수거완료":
                 return "reset", item
             return "skip", item
-        if item.get("treat_status") in FINAL_TREAT_STATUSES:
+        if item.get("treat_status") == "신청취소":
             return "skip", item
         try:
             _sync_pickup_like_infront(item)

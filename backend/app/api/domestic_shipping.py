@@ -35,7 +35,6 @@ from backend.app.services.epost.domestic_label import (
 )
 from backend.app.services.epost.fields import (
     EPOST_CONTRACT_COMP_NM,
-    FINAL_TREAT_STATUSES,
     PICKUP_BOX_SIZES,
     normalize_addr1,
     normalize_phone,
@@ -46,6 +45,7 @@ from backend.app.services.epost.fields import (
     resolve_infront_center,
     resolve_office_ser,
     sanitize_plain_field,
+    treat_status_code,
     truncate_utf8_bytes,
 )
 from logic.db import get_connection
@@ -566,17 +566,23 @@ def list_domestic(token: str):
 
 def _sync_domestic_tracking(item: dict[str, Any]) -> dict[str, Any]:
     """출고는 일반 계약소포(reqType 1)다. 접수조회 다음 종적조회로 배송상태를 받는다."""
+    api_name = ""
     if item.get("order_no"):
         for req_ymd in lookup_req_ymds(item.get("res_date"), item.get("created_at")):
             try:
                 info = get_res_info(item["order_no"], req_ymd, "1")
             except Exception:
                 continue
+            api_name = treat_status_code(info.get("treatStusCd") or "")
             _apply_tracking_info(item, info)
             break
-    if item.get("treat_status") not in FINAL_TREAT_STATUSES and item.get("tracking_no"):
+    if item.get("treat_status") != "신청취소" and item.get("tracking_no"):
         try:
-            _apply_tracking_info(item, track_regi_no(item["tracking_no"]))
+            tracked = track_regi_no(item["tracking_no"])
+            if tracked.get("noRecord"):
+                restored = api_name if api_name and api_name != "배달완료" else "신청접수"
+                tracked = {**tracked, "restoreStatus": restored}
+            _apply_tracking_info(item, tracked)
         except Exception:
             pass
     return item
@@ -592,7 +598,7 @@ def refresh_domestic_statuses(token: str):
             """
             SELECT * FROM domestic_shipments
             WHERE status = 'requested' AND is_test = 0
-              AND (treat_status IS NULL OR treat_status NOT IN ('배달완료'))
+              AND (treat_status IS NULL OR treat_status != '신청취소')
               AND (
                 (order_no IS NOT NULL AND order_no != '')
                 OR (tracking_no IS NOT NULL AND tracking_no != '')
@@ -607,8 +613,9 @@ def refresh_domestic_statuses(token: str):
     failed = 0
 
     def _process(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        if item.get("treat_status") in FINAL_TREAT_STATUSES:
+        if item.get("treat_status") == "신청취소":
             return "skip", item
+        item["_before_status"] = item.get("treat_status")
         try:
             _sync_domestic_tracking(item)
             return "checked", item
@@ -631,7 +638,7 @@ def refresh_domestic_statuses(token: str):
                     )
                     con.commit()
                 checked += 1
-                if item.get("treat_status") == "배달완료":
+                if item.get("treat_status") == "배달완료" and item.get("_before_status") != "배달완료":
                     delivered += 1
             elif status == "failed":
                 failed += 1

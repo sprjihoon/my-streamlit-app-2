@@ -21,6 +21,7 @@ from backend.app.services.epost.fields import (
     resolve_cancel_req_ymd,
     resolve_office_ser,
     sanitize_insert_order_body,
+    empty_tracking_page,
     treat_status_from_tracking_text,
     treat_status_label,
 )
@@ -455,10 +456,7 @@ def _track_via_vercel_relay(regi_no: str) -> dict[str, str] | None:
                 html = raw.decode("euc-kr")
             except (UnicodeDecodeError, LookupError):
                 html = raw.decode("utf-8", errors="replace")
-        treat = treat_status_from_tracking_text(html)
-        if not treat:
-            return None
-        return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
+        return _status_from_trace_html(html, regi_no)
     except Exception:
         return None
 
@@ -491,21 +489,31 @@ def _track_via_epost_trace(regi_no: str) -> dict[str, str] | None:
         except (UnicodeDecodeError, LookupError):
             html = raw.decode("utf-8", errors="replace")
 
+    return _status_from_trace_html(html, regi_no)
+
+
+def _status_from_trace_html(html: str, regi_no: str) -> dict[str, str] | None:
     treat = treat_status_from_tracking_text(html)
-    if not treat:
-        return None
-    return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
+    if treat:
+        return {"treatStusCd": treat, "treatStusNm": treat_status_label(treat), "regiNo": regi_no}
+    if empty_tracking_page(html):
+        return {"treatStusCd": "", "treatStusNm": "", "regiNo": regi_no, "noRecord": "1"}
+    return None
 
 
 def track_regi_no(regi_no: str) -> dict[str, str]:
     tracking_no = re.sub(r"\D", "", regi_no or "")
     if len(tracking_no) < 10:
         raise EpostError("송장번호가 없어 종적조회를 할 수 없습니다.")
-    tracked = (
-        _track_via_tracker_delivery(tracking_no)   # tracker.delivery GraphQL (자격증명 필요)
-        or _track_via_vercel_relay(tracking_no)    # Vercel Seoul ICN 릴레이 (VERCEL_APP_URL 필요)
-        or _track_via_epost_trace(tracking_no)     # 직접 호출 (Railway에서 차단됨, fallback)
-    )
+    tracked = _track_via_tracker_delivery(tracking_no)
+    # tracker가 배달완료로 줘도, 우체국 화면에 이력이 없으면 그 완료는 단계 글자다.
+    need_page = (not tracked) or tracked.get("treatStusCd") == "배달완료"
+    page = None
+    if need_page:
+        page = _track_via_vercel_relay(tracking_no) or _track_via_epost_trace(tracking_no)
+    if page and page.get("noRecord"):
+        return page
+    tracked = tracked or page
     if not tracked:
         raise EpostError(f"송장 {tracking_no} 조회 결과가 없습니다.")
     return tracked

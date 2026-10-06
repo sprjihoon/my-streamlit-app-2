@@ -137,6 +137,12 @@ def test_treat_status_from_tracking_text_returns_korean_status():
     assert treat_status_from_tracking_text("집하완료 이동중") == "수거완료"
     assert treat_status_from_tracking_text("알 수 없음") is None
     assert treat_status_from_tracking_text(None) is None
+    empty_page = """
+    <p>현재 고객님이 신청하신 접수번호에 대하여 배달정보를 찾지 못했습니다.
+    정보가 아직 입력되지 않았거나 처리 중입니다.</p>
+    <div>STEP1 접수</div><div>STEP2 발송</div><div>STEP3 배달준비</div><div>STEP4 배달완료</div>
+    """
+    assert treat_status_from_tracking_text(empty_page) is None
 
 
 def test_resolve_center_ignores_legacy_infront_name():
@@ -315,9 +321,9 @@ def test_refresh_status_uses_public_tracking_when_getresinfo_stays_requested(iso
     assert list_pickups(token)["items"][0]["treat_status_name"] == "수거완료"
 
 
-def test_refresh_status_skips_only_delivered(isolated_runtime, monkeypatch):
-    """저장된 상태가 '배달완료'인 건만 송장조회에서 제외한다.
-    '수거완료'는 배달완료까지 계속 추적한다."""
+def test_refresh_status_rechecks_delivered_without_downgrade(isolated_runtime, monkeypatch):
+    """배달완료로 저장된 건도 다시 조회한다.
+    우체국이 더 이전 단계만 주면 완료 상태는 유지한다."""
     token = _seed_user(isolated_runtime["db"])
 
     # 수거완료 건 — 아직 배달중이므로 계속 조회해야 함
@@ -351,9 +357,8 @@ def test_refresh_status_skips_only_delivered(isolated_runtime, monkeypatch):
     )
 
     result = refresh_pickup_statuses(token)
-    # 수거완료 건은 계속 조회 → checked=1, 배달완료 건은 제외
-    assert result["checked"] == 1, f"수거완료 건은 계속 조회해야 합니다. checked={result['checked']}"
-    assert api_call_count == 1, f"수거완료 건 1건만 API 호출해야 합니다. called {api_call_count} times"
+    assert result["checked"] == 2, f"배달완료 건도 다시 조회해야 합니다. checked={result['checked']}"
+    assert api_call_count == 2, f"두 건 모두 API 호출해야 합니다. called {api_call_count} times"
 
     items = list_pickups(token)["items"]
     delivered = next(i for i in items if i["id"] == c2["id"])
