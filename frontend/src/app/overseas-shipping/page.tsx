@@ -1665,7 +1665,7 @@ export default function OverseasShippingPage() {
                 </div>
                 {quoteDuty.formula?.length ? (
                   quoteDuty.formula.map((row) => (
-                    <div className="fee-line is-sub" key={row.label}>
+                    <div className={`fee-line is-sub${row.label === '1,000원 올림' ? ' is-ddp-final' : ''}`} key={row.label}>
                       <span>
                         {row.label}
                         {row.expr ? <span className="fee-choice-note">{row.expr}</span> : null}
@@ -1748,6 +1748,16 @@ export default function OverseasShippingPage() {
         </p>
         <div className="overseas-invoice-scroll">
           <table className="overseas-invoice-table">
+            <colgroup>
+              <col style={{ width: '2.4rem' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '14%' }} />
+            </colgroup>
             <thead>
               <tr>
                 <th>

@@ -939,6 +939,14 @@ tbody tr:hover { background: #f6f7fb; }
   font-size: 0.8rem;
   color: #047857;
 }
+.fee-line.is-ddp-final {
+  color: var(--color-brand-dark);
+  font-weight: 700;
+}
+.fee-line.is-ddp-final strong {
+  color: var(--color-brand);
+  font-size: 1.05rem;
+}
 .fee-line.is-total {
   margin-top: 0.25rem;
   padding-top: 0.55rem;
@@ -969,14 +977,18 @@ tbody tr:hover { background: #f6f7fb; }
   padding-right: 0.35rem;
 }
 .overseas-invoice-scroll {
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: visible;
 }
 .overseas-invoice-table {
   width: 100%;
-  min-width: 1080px;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
+}
+.overseas-invoice-table input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 .overseas-invoice-table th,
 .overseas-invoice-table td {
@@ -1001,13 +1013,20 @@ tbody tr:hover { background: #f6f7fb; }
 }
 .overseas-bulk-cell {
   display: flex;
-  gap: 0.3rem;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: stretch;
 }
-.overseas-bulk-cell .btn {
-  flex: 0 0 auto;
-  padding: 0.35rem 0.45rem;
+.overseas-bulk-cell .btn,
+.overseas-row-actions .btn {
+  width: 100%;
+  padding: 0.3rem 0.35rem;
   font-size: 0.75rem;
+}
+.overseas-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 .overseas-invoice-table td {
   position: relative;
@@ -1016,9 +1035,10 @@ tbody tr:hover { background: #f6f7fb; }
   position: absolute;
   z-index: 40;
   top: calc(100% - 2px);
-  left: 0.35rem;
-  min-width: 280px;
+  left: 0;
+  right: 0;
   max-height: 220px;
+  overflow-x: hidden;
   overflow-y: auto;
   background: #fff;
   border: 1px solid var(--border);
@@ -1029,6 +1049,9 @@ tbody tr:hover { background: #f6f7fb; }
   display: block;
   width: 100%;
   text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
   padding: 0.45rem 0.7rem;
   border: 0;
   background: #fff;

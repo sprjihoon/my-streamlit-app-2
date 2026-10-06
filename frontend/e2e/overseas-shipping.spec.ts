@@ -10,6 +10,33 @@ test('sender, recipient, HS, quote, and preview stay on the test API', async ({ 
   const calls = await installApi(page, STAFF);
   await page.goto('/overseas-shipping');
   await expect(page.getByRole('heading', { name: '해외배송 접수' })).toBeVisible();
+  const pane = page.locator('.overseas-invoice-scroll');
+  const paneMetrics = await pane.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      overflowX: style.overflowX,
+      overflowY: style.overflowY,
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    };
+  });
+  expect(paneMetrics.overflowX).toBe('visible');
+  expect(paneMetrics.overflowY).toBe('visible');
+  expect(paneMetrics.scrollWidth).toBeLessThanOrEqual(paneMetrics.clientWidth + 1);
+  expect(paneMetrics.scrollHeight).toBeLessThanOrEqual(paneMetrics.clientHeight + 1);
+  await page.getByRole('textbox', { name: '1행 HS코드' }).fill('610910');
+  await page.getByRole('textbox', { name: '1행 품목' }).focus();
+  const menu = page.locator('.overseas-hs-menu');
+  await expect(menu).toBeVisible();
+  const menuMetrics = await menu.evaluate((el) => ({
+    overflowX: getComputedStyle(el).overflowX,
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  }));
+  expect(menuMetrics.overflowX).toBe('hidden');
+  expect(menuMetrics.scrollWidth).toBeLessThanOrEqual(menuMetrics.clientWidth + 1);
   await expect(page.getByRole('button', { name: '상품', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '선물' })).toBeVisible();
   await expect(page.getByRole('button', { name: '상품견본' })).toBeVisible();
@@ -22,6 +49,19 @@ test('sender, recipient, HS, quote, and preview stay on the test API', async ({ 
   await expect(page.getByText('USD 150.00 × 17%')).toBeVisible();
   await expect(page.getByText('USD 31.9990 × 1,400원 × 1.02')).toBeVisible();
   await expect(page.getByText('46,000원').first()).toBeVisible();
+  const finalRow = page.locator('.fee-line.is-ddp-final');
+  await expect(finalRow).toContainText('1,000원 올림');
+  await expect(finalRow).toContainText('46,000원');
+  const colors = await page.evaluate(() => {
+    const finalAmount = document.querySelector('.fee-line.is-ddp-final strong');
+    const step = document.querySelector('.fee-line.is-sub:not(.is-ddp-final)');
+    return {
+      final: finalAmount ? getComputedStyle(finalAmount).color : '',
+      step: step ? getComputedStyle(step).color : '',
+    };
+  });
+  expect(colors.final).not.toBe(colors.step);
+  expect(colors.final).toBe('rgb(67, 97, 238)');
 });
 
 test('create failure and success do not leave the browser', async ({ page }) => {
