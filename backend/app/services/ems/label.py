@@ -108,10 +108,14 @@ def build_shipment_label(
             em_gubun = "Document"
         elif stored == "gift":
             em_gubun = "Gift"
+        elif stored == "sample":
+            em_gubun = "Sample"
         else:
             em_gubun = "Merchandise"
     if em_gubun.lower() == "gift":
         contents_label = "선물"
+    elif em_gubun.lower() == "sample":
+        contents_label = "상품견본"
     elif contents_type == "document" or em_gubun.lower() == "document":
         contents_label = "서류"
     else:
@@ -248,8 +252,11 @@ def _waybill(data: dict[str, Any], *, copy_title: str, with_guide: bool) -> str:
     country = str(recipient.get("country") or "")
     code_boxes = "".join(f"<b class='cc'>{_esc(ch)}</b>" for ch in country[:2])
     gubun = str(data.get("contents_gubun") or "").lower()
+    sample = "v" if gubun == "sample" else ""
     gift = "v" if gubun == "gift" else ""
-    goods = "v" if gubun == "merchandise" or (not gift and data.get("contents_type") != "document" and gubun != "document") else ""
+    goods = "v" if gubun == "merchandise" or (
+        not sample and not gift and data.get("contents_type") != "document" and gubun != "document"
+    ) else ""
     guide = ""
     if with_guide:
         guide = """
@@ -333,7 +340,7 @@ def _waybill(data: dict[str, Any], *, copy_title: str, with_guide: bool) -> str:
     </div>
     <table class="checks">
       <tr>
-        <td>Sample 상품견본 ☐ &nbsp; Gift 선물 {'☑' if gift else '☐'} &nbsp; Merchandise 상품 {'☑' if goods else '☐'} &nbsp; 수출면장건 ☐</td>
+        <td>Sample 상품견본 {'☑' if sample else '☐'} &nbsp; Gift 선물 {'☑' if gift else '☐'} &nbsp; Merchandise 상품 {'☑' if goods else '☐'} &nbsp; 수출면장건 ☐</td>
         <td>요금납부방법 및 기타<br>현금수납 ☐ &nbsp; 요금후납 ☑</td>
         <td>Signature 담당자서명<br><b>{_esc(data.get('post_office') or '')}</b></td>
       </tr>

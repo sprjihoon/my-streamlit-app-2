@@ -16,7 +16,7 @@ export interface OverseasInvoiceItem {
 export interface OverseasShippingPayload {
   shipping_method: 'EMS' | 'EMS_PREMIUM' | 'KPACKET';
   contents_type?: 'parcel' | 'document';
-  customs_gubun?: 'merchandise' | 'gift';
+  customs_gubun?: 'merchandise' | 'gift' | 'sample';
   countrycd: string;
   sender_name?: string;
   sender_zipcode?: string;
@@ -177,7 +177,7 @@ export async function quoteOverseasShipping(
   payload: {
     shipping_method: OverseasShippingPayload['shipping_method'];
     contents_type?: 'parcel' | 'document';
-    customs_gubun?: 'merchandise' | 'gift';
+    customs_gubun?: 'merchandise' | 'gift' | 'sample';
     countrycd: string;
     totweight: number;
     boxlength: number;

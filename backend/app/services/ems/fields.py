@@ -227,23 +227,30 @@ def normalize_contents_type(raw: Any) -> str:
 def contents_label(contents_type: str, customs_gubun: str = "merchandise") -> str:
     if normalize_contents_type(contents_type) == "document":
         return "서류"
-    if normalize_customs_gubun(customs_gubun, contents_type) == "gift":
+    purpose = normalize_customs_gubun(customs_gubun, contents_type)
+    if purpose == "gift":
         return "선물"
+    if purpose == "sample":
+        return "상품견본"
     return "화물"
 
 
 def normalize_customs_gubun(raw: Any, contents_type: Any = "parcel") -> str:
-    """우체국 EM_gubun. 서류는 Document, 화물은 상품(Merchandise) 또는 선물(Gift)."""
+    """우체국 EM_gubun. 서류는 Document, 화물은 Merchandise·Gift·Sample."""
     if normalize_contents_type(contents_type) == "document":
         return "document"
     text = str(raw or "merchandise").strip().lower()
     if text in {"gift", "선물"}:
         return "gift"
+    if text in {"sample", "상품견본", "견본", "샘플"}:
+        return "sample"
     return "merchandise"
 
 
 def em_gubun_api_value(customs_gubun: str) -> str:
-    return {"gift": "Gift", "document": "Document"}.get(customs_gubun, "Merchandise")
+    return {"gift": "Gift", "sample": "Sample", "document": "Document"}.get(
+        customs_gubun, "Merchandise"
+    )
 
 
 def resolve_method(shipping_method: str, contents_type: Any = None) -> dict[str, str]:

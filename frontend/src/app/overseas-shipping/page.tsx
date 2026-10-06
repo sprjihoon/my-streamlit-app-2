@@ -1369,37 +1369,33 @@ export default function OverseasShippingPage() {
               <div className="tw-mt-[10px]">
                 <div className="tw-text-[0.85rem] tw-font-semibold tw-mb-[6px]">내용품 구분</div>
                 <div className="tw-flex tw-gap-[8px]">
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setForm((prev) => ({ ...prev, customs_gubun: 'merchandise' }))}
-                    style={{
-                      flex: 1,
-                      border: form.customs_gubun !== 'gift' ? '2px solid #0f172a' : '1px solid var(--border)',
-                      background: form.customs_gubun !== 'gift' ? '#0f172a' : '#fff',
-                      color: form.customs_gubun !== 'gift' ? '#fff' : 'inherit',
-                      fontWeight: 700,
-                    }}
-                  >
-                    상품
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => setForm((prev) => ({ ...prev, customs_gubun: 'gift' }))}
-                    style={{
-                      flex: 1,
-                      border: form.customs_gubun === 'gift' ? '2px solid #0f172a' : '1px solid var(--border)',
-                      background: form.customs_gubun === 'gift' ? '#0f172a' : '#fff',
-                      color: form.customs_gubun === 'gift' ? '#fff' : 'inherit',
-                      fontWeight: 700,
-                    }}
-                  >
-                    선물
-                  </button>
+                  {([
+                    ['merchandise', '상품'],
+                    ['gift', '선물'],
+                    ['sample', '상품견본'],
+                  ] as const).map(([code, label]) => {
+                    const active = (form.customs_gubun || 'merchandise') === code;
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        className="btn"
+                        onClick={() => setForm((prev) => ({ ...prev, customs_gubun: code }))}
+                        style={{
+                          flex: 1,
+                          border: active ? '2px solid #0f172a' : '1px solid var(--border)',
+                          background: active ? '#0f172a' : '#fff',
+                          color: active ? '#fff' : 'inherit',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
                 <span className="text-muted tw-text-[0.78rem]">
-                  우체국 접수 값 EM_gubun은 상품 Merchandise, 선물 Gift입니다. 미국 선물 100달러 이하는 관세 없이 신고수수료만 선납합니다.
+                  우체국 접수 값 EM_gubun은 상품 Merchandise, 선물 Gift, 상품견본 Sample입니다. 미국 선물 100달러 이하는 관세 없이 신고수수료만 선납합니다.
                 </span>
               </div>
             )}

@@ -1022,7 +1022,7 @@ def overseas_quote(
         "shipping_method": selected_method["code"],
         "shipping_method_name": selected_method["name"],
         "contents_type": kind,
-        "contents_label": contents_label(kind),
+        "contents_label": contents_label(kind, purpose),
         "em_ee": selected_method["em_ee"],
         "countrycd": country,
         "totweight": selected.get("totweight") or totweight,

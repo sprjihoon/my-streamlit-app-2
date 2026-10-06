@@ -144,6 +144,12 @@ def test_invoice_semicolon_and_english_name():
         customs_gubun="gift",
     )
     assert gift["EM_gubun"] == "Gift"
+    sample = serialize_invoice_items(
+        [{"name_en": "Shoes", "quantity": 1, "unit_price_usd": 40, "hs_code": "6403", "origin_country": "KR"}],
+        800,
+        customs_gubun="sample",
+    )
+    assert sample["EM_gubun"] == "Sample"
     forced = serialize_invoice_items(
         [{"name_en": "Documents", "quantity": 1, "unit_price_usd": 1, "hs_code": "", "origin_country": "KR"}],
         400,
@@ -189,6 +195,36 @@ def test_gift_selection_is_sent_as_em_gubun():
     )
     assert document["customs_gubun"] == "document"
     assert document["invoice"]["EM_gubun"] == "Document"
+    sampled = validate_apply_input(_req(customs_gubun="상품견본").model_dump())
+    assert sampled["customs_gubun"] == "sample"
+    assert sampled["contents_label"] == "상품견본"
+    sample_params = build_apply_params(sampled, order_no="TIL-SAMPLE", custno="1", apprno="1")
+    assert sample_params["EM_gubun"] == "Sample"
+    assert "EM_gubun=Sample" in build_ems_params(sample_params)
+    forced_doc = validate_apply_input(
+        _req(contents_type="document", customs_gubun="sample", totweight=400).model_dump()
+    )
+    assert forced_doc["customs_gubun"] == "document"
+    assert forced_doc["invoice"]["EM_gubun"] == "Document"
+    from backend.app.services.ems.label import build_shipment_label, render_label_html
+
+    html = render_label_html(
+        build_shipment_label(
+            {
+                "order_no": "TIL-SAMPLE",
+                "shipping_method": "EMS",
+                "contents_type": "parcel",
+                "customs_gubun": "sample",
+                "countrycd": "JP",
+                "recipient_name": "Hong",
+                "totweight": 500,
+                "items": [{"name_en": "Shoes", "quantity": 1, "unit_price_usd": 10}],
+            }
+        )
+    )
+    assert "Sample 상품견본 ☑" in html
+    assert "Gift 선물 ☐" in html
+    assert "Merchandise 상품 ☐" in html
 
 
 def test_build_ems_params_skips_empty_and_keeps_order():
