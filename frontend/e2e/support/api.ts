@@ -150,7 +150,13 @@ export async function installApi(page: Page, user: SessionUser) {
       });
     }
     if (path === '/domestic-shipping/meta') {
-      return json(route, { live_ready: false, box_sizes: [{ code: 'SMALL', label: '소형', desc: '소', weight: 2, volume: 80 }] });
+      return json(route, {
+        live_ready: false,
+        box_sizes: [
+          { code: 'MICRO', label: '극소', desc: '1kg · 45cm', weight: 1, volume: 45 },
+          { code: 'SMALL', label: '소형', desc: '소', weight: 2, volume: 80 },
+        ],
+      });
     }
     if (path === '/domestic-shipping/saved-recipients' && method === 'GET') {
       return json(route, {

@@ -9,6 +9,7 @@ test.beforeEach(async ({ page }) => {
 async function fillDomestic(page: import('@playwright/test').Page) {
   await page.goto('/domestic-shipping');
   await expect(page.getByText('우체국 연결이 없어 테스트로 저장됩니다.')).toBeVisible();
+  await expect(page.locator('#box_size')).toHaveValue('MICRO');
   await page.locator('#vendor_id').selectOption('1');
   await page.locator('#print_sender_name').fill('보내는사람');
   await page.locator('#print_sender_phone').fill('01011112222');

@@ -1317,6 +1317,68 @@ tbody tr:hover { background: #f6f7fb; }
 .domestic-page {
   max-width: 100%;
 }
+.intake-form {
+  max-width: 42rem;
+  width: 100%;
+}
+.intake-form .domestic-address-line .w-addr,
+.intake-form .domestic-row .w-notes {
+  flex: 0 1 22rem;
+}
+.intake-form .domestic-address-line .w-addr input,
+.intake-form .domestic-field.w-detail input,
+.intake-form .domestic-field.w-notes input {
+  width: 22rem;
+  max-width: 100%;
+}
+.pickup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 16rem) minmax(0, 16rem);
+  justify-content: start;
+  gap: 0.75rem;
+}
+.pickup-grid > .pickup-span {
+  grid-column: 1 / -1;
+  max-width: 34rem;
+}
+.pickup-grid > label.pickup-span .ui-control {
+  max-width: 22rem;
+}
+.pickup-saved {
+  flex: 0 1 16rem;
+  max-width: 16rem;
+}
+.pickup-address {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.pickup-address .pickup-road {
+  flex: 1 1 16rem;
+  max-width: 22rem;
+}
+@media (max-width: 768px) {
+  .intake-form .domestic-address-line .w-addr,
+  .intake-form .domestic-row .w-notes,
+  .pickup-address .pickup-road,
+  .pickup-saved {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+  .intake-form .domestic-address-line .w-addr input,
+  .intake-form .domestic-field.w-detail input,
+  .intake-form .domestic-field.w-notes input {
+    width: 100%;
+  }
+  .pickup-grid {
+    grid-template-columns: 1fr;
+  }
+  .pickup-grid > .pickup-span,
+  .pickup-grid > label.pickup-span .ui-control {
+    max-width: 100%;
+  }
+}
 
 /* ─────────────────────────────────────────
    견적 페이지 다크 테마 (기존 유지)

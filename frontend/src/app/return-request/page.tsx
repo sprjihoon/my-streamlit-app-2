@@ -205,7 +205,7 @@ export default function ReturnRequestPage() {
   if (loading) return <Loading text="회수신청 로딩 중..." />;
 
   return (
-    <div>
+    <div className="intake-form">
       <PageHeader
         title="회수신청"
         subtitle="고객 수거지로 우체국 방문수거를 접수합니다. 도착지는 동대구우체국, 공급지는 스프링풀필먼트입니다."
@@ -222,7 +222,7 @@ export default function ReturnRequestPage() {
         </p>
         <div style={{ marginBottom: '1rem' }}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <label style={{ flex: '1 1 240px' }}>
+            <label className="pickup-saved">
               저장된 주소지 별칭
               <select
                 className="ui-control"
@@ -247,7 +247,7 @@ export default function ReturnRequestPage() {
             </a>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+        <div className="pickup-grid">
           <label>
             수취인 이름
             <input
@@ -265,13 +265,13 @@ export default function ReturnRequestPage() {
               onChange={(e) => updateForm('recipient_phone', e.target.value)}
             />
           </label>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-              <label style={{ flex: '0 0 120px' }}>
+          <div className="pickup-span">
+            <div className="pickup-address">
+              <label style={{ flex: '0 0 7.5rem' }}>
                 우편번호
                 <input className="ui-control" value={form.zipcode} readOnly />
               </label>
-              <label style={{ flex: 1 }}>
+              <label className="pickup-road">
                 도로명 주소
                 <input className="ui-control" value={form.addr1} readOnly />
               </label>
@@ -280,7 +280,7 @@ export default function ReturnRequestPage() {
               </button>
             </div>
           </div>
-          <label style={{ gridColumn: '1 / -1' }}>
+          <label className="pickup-span">
             상세주소 (동·호·층)
             <input
               className="ui-control"
@@ -351,7 +351,7 @@ export default function ReturnRequestPage() {
               }}
             />
           </label>
-          <label style={{ gridColumn: '1 / -1' }}>
+          <label className="pickup-span">
             수거 메모
             <input
               className="ui-control"

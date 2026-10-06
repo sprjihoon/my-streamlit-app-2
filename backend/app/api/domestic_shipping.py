@@ -77,7 +77,7 @@ class DomesticSubmitRequest(BaseModel):
     recipient_addr2: str = ""
     goods_name: str
     goods_qty: int = 1
-    box_size: str = "DEFAULT"
+    box_size: str = "MICRO"
     label_count: int = 1
     notes: str = ""
     confirm: bool = False

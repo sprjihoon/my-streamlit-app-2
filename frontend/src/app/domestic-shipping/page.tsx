@@ -45,7 +45,7 @@ function emptyForm(): DomesticSubmitPayload {
     recipient_addr2: '',
     goods_name: '의류',
     goods_qty: 1,
-    box_size: 'SMALL',
+    box_size: 'MICRO',
     label_count: 1,
     notes: '',
     test_mode: false,
@@ -362,7 +362,7 @@ export default function DomesticShippingPage() {
     : '';
 
   return (
-    <div className="domestic-page domestic-form">
+    <div className="domestic-page domestic-form intake-form">
       <PageHeader
         title="국내 출고"
         subtitle="업체를 고르고 받는 사람과 상품을 입력한 뒤 접수합니다."
