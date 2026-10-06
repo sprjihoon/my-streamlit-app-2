@@ -359,6 +359,10 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 - 출고 접수(`/domestic-shipping`)에서 업체를 고르면 저장된 보내는 사람이 채워지고, 그 칸은 고칠 수 있다. 고친 값은 송장에만 찍히고, 우체국에는 그 업체에 저장된 보내는 사람과 공급지번호가 간다. 나중에 업체 정보를 고쳐도 이미 접수한 송장은 바뀌지 않는다.
 - 같은 받는 사람에게 같은 날 박스를 더 보내는 것은 막지 않는다. 약 20초 안의 같은 클릭만 한 건으로 묶는다.
 - 상품명은 우체국 `goodsNm`으로 가고, 상품수량은 각 접수의 `qty`와 송장 `수량`에 들어간다. 송장 갯수만큼 접수를 따로 하며, 장마다 등기번호가 하나씩 나온다. 여러 장이면 `/domestic-print/batch`에서 한 PDF로 뽑는다.
+- 박스 기본값은 극소(`MICRO`)다. 화면을 열면 소형이 아니라 극소가 선택되고, 크기를 비워 접수해도 서버는 극소를 쓴다.
+- 받는 사람 주소 저장은 회수신청 주소록과 따로다. 출고 접수는 `/domestic-shipping/saved-recipients` 만 읽고, 관리는 `/domestic-saved-recipients` 다. 회수신청은 기존 `/kpost-pickup/saved-recipients` 와 `/saved-recipients` 를 그대로 쓴다.
+- 서버가 켜질 때 업체명이 스프링풀필먼트인 출고 업체가 없으면 회수접수 센터 정보로 한 건 넣는다. 공급지번호 `260940699`, 주소는 대구광역시 동구 동촌로 1, 동대구우체국 2층 소포실이다. 같은 이름이 있으면 다시 넣지 않는다.
+- 회수신청과 출고 접수 입력칸은 화면 가로를 채우지 않는다. 폼은 42rem 안에 두고, 좁은 화면에서만 가로를 다시 채운다.
 - 확인 전 미리보기는 기록하지 않는다. 우체국 키가 없거나 테스트 접수면 우체국을 부르지 않고 테스트 등기번호로 저장한다.
 - 접수목록(`/domestic-shipping-list`)에서 송장, 접수 취소, 관리자 삭제를 한다. 실접수 취소는 계약소포 `GetResCancelCmd`다. 우체국이 거절하면 상태는 접수 그대로이고 사유를 보여 준다. 취소된 건도 송장은 남고, 종이 위에 취소된 접수라고 표시한다.
 - 우체국 API는 송장 PDF를 주지 않는다. 송장은 신형 C형(111×171mm)을 가로로 둔 171×111mm 종이에, 답안지에서 잰 칸에 받는 사람·등기번호·바코드를 찍는다. 보내는 사람 칸에는 접수 화면에서 고친 값이 들어간다. 집배코드는 modo 와 같이 받는 사람 우편번호로 찾아 A1, 135, 동서울, 서울강남, 10 30 자리에 찍고, 바코드 옆 숫자는 그 우편번호의 구분코스다. 우체국이 돌려준 가상번호가 있으면 받는 사람 전화 칸과 오른쪽 번호에 찍고, 등기번호 QR을 답안지 자리에 넣는다. 가상번호가 없으면 입력한 전화를 찍는다. 화면은 `/domestic-print/{id}` 다.
@@ -368,6 +372,7 @@ python -m pytest tests/test_overseas_shipping.py tests/test_overseas_intake_flow
 |---|---|---|
 | `GET` | `/domestic-shipping/meta` | 실접수 가능 여부, 박스 규격 |
 | `GET/POST/PUT/DELETE` | `/domestic-shipping/vendors` | 업체와 공급지번호 |
+| `GET/POST/PUT/DELETE` | `/domestic-shipping/saved-recipients` | 출고 전용 받는 사람 주소. 회수신청 주소록과 분리 |
 | `POST` | `/domestic-shipping/preview` | 확인용 미리보기 (미기록) |
 | `GET` | `/domestic-shipping` | 접수 목록 |
 | `GET` | `/domestic-shipping/{id}` | 상세. API로 보낸 보내는 사람과 송장에 찍을 보내는 사람을 같이 보여 준다 |
@@ -405,6 +410,14 @@ cd frontend && npm run dev
 ---
 
 ## 변경 이력
+
+### 2026-10-06
+- **feat(domestic-shipping): 출고 접수 박스 기본값을 극소로 둔다**
+  - 상품 박스 선택 기본값은 소형이 아니라 극소(`MICRO`)다
+  - 회수신청과 출고 접수 입력 폼은 42rem 너비로 둔다
+- **feat(domestic-shipping): 출고 주소록을 분리하고 스프링풀필먼트 업체를 등록한다**
+  - 출고 받는 사람 주소는 회수신청 저장 주소와 다른 테이블을 쓴다
+  - 기동 시 스프링풀필먼트 출고 업체가 없으면 회수 센터 정보로 한 건 넣는다
 
 ### 2026-10-03
 - **feat(domestic-shipping): 상품수량과 송장 장수를 접수한다**
