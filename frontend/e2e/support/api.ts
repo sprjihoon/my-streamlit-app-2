@@ -267,6 +267,8 @@ export async function installApi(page: Page, user: SessionUser) {
         shipping_method: 'EMS',
         shipping_method_name: 'EMS',
         payableTotal: 58063,
+        volume_weight: 1200,
+        chargeable_weight: 1200,
         parcel: { ok: true, totalFee: 18000, totweight: 500, em_ee: 'em', error: null },
         document: { ok: true, totalFee: 12000, totweight: 200, em_ee: 'ee', error: null },
         duty: {

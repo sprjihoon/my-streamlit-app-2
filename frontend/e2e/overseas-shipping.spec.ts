@@ -52,6 +52,9 @@ test('sender, recipient, HS, quote, and preview stay on the test API', async ({ 
   const finalRow = page.locator('.fee-line.is-ddp-final');
   await expect(finalRow).toContainText('청구액');
   await expect(finalRow).toContainText('40,063원');
+  const applied = page.locator('.fee-meta-volume');
+  await expect(applied).toContainText('적용 부피');
+  await expect(applied).toHaveCSS('color', 'rgb(180, 83, 9)');
   const colors = await page.evaluate(() => {
     const finalAmount = document.querySelector('.fee-line.is-ddp-final strong');
     const step = document.querySelector('.fee-line.is-sub:not(.is-ddp-final)');

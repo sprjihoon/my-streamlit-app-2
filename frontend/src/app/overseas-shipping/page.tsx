@@ -996,7 +996,9 @@ export default function OverseasShippingPage() {
             ? `무게: ${p.totweight}g (서류)\n`
             : `실중량: ${p.totweight}g` +
               (p.volume_weight
-                ? ` · 부피중량 ${p.volume_weight.toLocaleString()}g · 적용 ${((p.chargeable_weight ?? p.totweight)).toLocaleString()}g`
+                ? ` · 부피중량 ${p.volume_weight.toLocaleString()}g · 적용 ${
+                    p.volume_weight > p.totweight ? '부피' : '실중량'
+                  } ${((p.chargeable_weight ?? p.totweight)).toLocaleString()}g`
                 : '') +
               ` · ${p.boxlength}×${p.boxwidth}×${p.boxheight}cm\n`) +
           `예상요금: ${feeText}${dutyLine}${totalLine}${fixBlock}\n\n결제 없이 우체국에 바로 접수됩니다.`,
@@ -1724,7 +1726,10 @@ export default function OverseasShippingPage() {
               {!isDocument && quoteVolume ? (
                 <>
                   <br />
-                  부피중량 {quoteVolume.toLocaleString()}g · 적용 {(quoteChargeable ?? form.totweight).toLocaleString()}g
+                  부피중량 {quoteVolume.toLocaleString()}g ·{' '}
+                  <span className={(quoteChargeable ?? form.totweight) > form.totweight ? 'fee-meta-volume' : 'fee-meta-actual'}>
+                    적용 {(quoteChargeable ?? form.totweight) > form.totweight ? '부피' : '실중량'} {(quoteChargeable ?? form.totweight).toLocaleString()}g
+                  </span>
                 </>
               ) : null}
               <br />

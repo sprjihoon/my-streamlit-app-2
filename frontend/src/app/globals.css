@@ -966,6 +966,16 @@ tbody tr:hover { background: #f6f7fb; }
   color: #64748b;
   line-height: 1.45;
 }
+.fee-meta-actual,
+.fee-meta-volume {
+  font-weight: 700;
+}
+.fee-meta-actual {
+  color: var(--color-brand-dark);
+}
+.fee-meta-volume {
+  color: #b45309;
+}
 .fee-links {
   display: flex;
   gap: 0.4rem;
