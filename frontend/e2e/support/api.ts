@@ -152,6 +152,14 @@ export async function installApi(page: Page, user: SessionUser) {
     if (path === '/domestic-shipping/meta') {
       return json(route, { live_ready: false, box_sizes: [{ code: 'SMALL', label: '소형', desc: '소', weight: 2, volume: 80 }] });
     }
+    if (path === '/domestic-shipping/saved-recipients' && method === 'GET') {
+      return json(route, {
+        items: [{
+          id: 3, label: '출고본사', recipient_name: '홍길동', recipient_phone: '01012345678',
+          zipcode: '06236', addr1: '서울 강남구 테헤란로 1', addr2: '101호', created_at: '2026-10-01',
+        }],
+      });
+    }
     if (path === '/domestic-shipping/vendors' && method === 'GET') {
       return json(route, {
         items: [{

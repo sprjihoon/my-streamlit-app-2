@@ -51,6 +51,7 @@ const PAGES: Array<[string, string]> = [
   ['/saved-recipients', '저장된 주소지'],
   ['/domestic-shipping', '국내 출고'],
   ['/domestic-shipping-list', '출고 목록'],
+  ['/domestic-saved-recipients', '출고 주소지'],
   ['/overseas-shipping', '해외배송 접수'],
   ['/overseas-shipping-list', '해외배송 접수목록'],
   ['/invoice', '인보이스 계산'],

@@ -32,10 +32,13 @@ from backend.app.services.epost.fields import (
     EPOST_CONTRACT_COMP_NM,
     PICKUP_BOX_SIZES,
     normalize_addr1,
+    normalize_phone,
     normalize_zip,
     require_phone,
     resolve_box_spec,
     resolve_cancel_req_ymd,
+    resolve_infront_center,
+    resolve_office_ser,
     sanitize_plain_field,
     truncate_utf8_bytes,
 )
@@ -145,13 +148,68 @@ def ensure_domestic_tables() -> None:
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_domestic_shipments_created ON domestic_shipments(created_at DESC)"
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS domestic_saved_recipients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                recipient_name TEXT NOT NULL,
+                recipient_phone TEXT NOT NULL,
+                zipcode TEXT NOT NULL,
+                addr1 TEXT NOT NULL,
+                addr2 TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, label)
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_domestic_saved_recipients_user "
+            "ON domestic_saved_recipients(user_id, created_at DESC)"
+        )
         columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
         if "v_tel_no" not in columns:
             con.execute("ALTER TABLE domestic_shipments ADD COLUMN v_tel_no TEXT NOT NULL DEFAULT ''")
         columns = {row[1] for row in con.execute("PRAGMA table_info(domestic_shipments)")}
         if "goods_qty" not in columns:
             con.execute("ALTER TABLE domestic_shipments ADD COLUMN goods_qty INTEGER NOT NULL DEFAULT 1")
+        _seed_spring_vendor(con)
         con.commit()
+
+
+def _seed_spring_vendor(con) -> None:
+    """회수접수 센터 정보로 스프링풀필먼트 출고 업체를 한 번만 넣는다."""
+    name = EPOST_CONTRACT_COMP_NM
+    exists = con.execute("SELECT 1 FROM domestic_vendors WHERE name=?", (name,)).fetchone()
+    if exists:
+        return
+    from backend.app.api.kpost_pickup.pickup import _env
+    from backend.app.config import settings
+
+    env = _env()
+    center = resolve_infront_center(env)
+    phone = center.get("phone") or f"0{settings.EMS_SENDER_TEL2}{settings.EMS_SENDER_TEL3}{settings.EMS_SENDER_TEL4}"
+    now = datetime.now(KST).isoformat(timespec="seconds")
+    con.execute(
+        """
+        INSERT INTO domestic_vendors (
+            name, office_ser, sender_name, sender_phone, sender_zip,
+            sender_addr1, sender_addr2, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            name,
+            resolve_office_ser(env),
+            name,
+            phone,
+            center["zip"],
+            center["addr1"],
+            center["addr2"],
+            "시스템",
+            now,
+        ),
+    )
 
 
 def _clean(value: Any, *, max_bytes: int = 100) -> str:
@@ -505,6 +563,177 @@ def _parse_label_ids(raw: str) -> list[int]:
             raise HTTPException(status_code=400, detail="송장 번호가 올바르지 않습니다.")
         ids.append(int(part))
     return ids
+
+
+class DomesticSavedRecipientRequest(BaseModel):
+    label: str
+    recipient_name: str
+    recipient_phone: str
+    zipcode: str
+    addr1: str
+    addr2: str = ""
+
+
+def _saved_recipient_fields(req: DomesticSavedRecipientRequest) -> dict[str, str]:
+    label = (req.label or "").strip()
+    if len(label) < 1:
+        raise HTTPException(status_code=400, detail="라벨을 입력해주세요.")
+    if len(label) > 50:
+        raise HTTPException(status_code=400, detail="라벨은 50자 이하여야 합니다.")
+    name = (req.recipient_name or "").strip()
+    if len(name) < 1:
+        raise HTTPException(status_code=400, detail="받는 사람 이름을 입력해주세요.")
+    phone = normalize_phone(req.recipient_phone)
+    if len(phone) < 9:
+        raise HTTPException(status_code=400, detail="전화번호를 입력해주세요.")
+    zipcode = normalize_zip(req.zipcode)
+    if len(zipcode) != 5:
+        raise HTTPException(status_code=400, detail="우편번호 5자리가 필요합니다.")
+    addr1 = (req.addr1 or "").strip()
+    if len(addr1) < 2:
+        raise HTTPException(status_code=400, detail="주소를 입력해주세요.")
+    return {
+        "label": label,
+        "recipient_name": name,
+        "recipient_phone": phone,
+        "zipcode": zipcode,
+        "addr1": addr1,
+        "addr2": (req.addr2 or "").strip(),
+    }
+
+
+def _saved_recipient_item(row: tuple) -> dict[str, Any]:
+    return {
+        "id": row[0],
+        "label": row[1],
+        "recipient_name": row[2],
+        "recipient_phone": row[3],
+        "zipcode": row[4],
+        "addr1": row[5],
+        "addr2": row[6] or "",
+        "created_at": row[7],
+    }
+
+
+@router.get("/saved-recipients")
+def list_domestic_saved_recipients(token: str):
+    user = _get_user(token)
+    ensure_domestic_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT id, label, recipient_name, recipient_phone, zipcode, addr1, addr2, created_at
+            FROM domestic_saved_recipients
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user["user_id"],),
+        ).fetchall()
+    return {"items": [_saved_recipient_item(row) for row in rows]}
+
+
+@router.post("/saved-recipients")
+def save_domestic_recipient(req: DomesticSavedRecipientRequest, token: str):
+    user = _get_user(token)
+    ensure_domestic_tables()
+    fields = _saved_recipient_fields(req)
+    created_at = datetime.now(KST).isoformat(timespec="seconds")
+    with get_connection() as con:
+        existing = con.execute(
+            "SELECT id, label, recipient_name, recipient_phone, zipcode, addr1, addr2, created_at "
+            "FROM domestic_saved_recipients WHERE user_id=? AND label=?",
+            (user["user_id"], fields["label"]),
+        ).fetchone()
+        if existing:
+            item = _saved_recipient_item(existing)
+            return {"success": True, **item}
+        try:
+            cur = con.execute(
+                """
+                INSERT INTO domestic_saved_recipients (
+                    user_id, label, recipient_name, recipient_phone, zipcode, addr1, addr2, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user["user_id"], fields["label"], fields["recipient_name"], fields["recipient_phone"],
+                    fields["zipcode"], fields["addr1"], fields["addr2"], created_at,
+                ),
+            )
+            con.commit()
+            recipient_id = int(cur.lastrowid)
+        except Exception as exc:
+            if "UNIQUE constraint" not in str(exc):
+                raise
+            row = con.execute(
+                "SELECT id, label, recipient_name, recipient_phone, zipcode, addr1, addr2, created_at "
+                "FROM domestic_saved_recipients WHERE user_id=? AND label=?",
+                (user["user_id"], fields["label"]),
+            ).fetchone()
+            if not row:
+                raise
+            return {"success": True, **_saved_recipient_item(row)}
+    return {"success": True, "id": recipient_id, "created_at": created_at, **fields}
+
+
+@router.put("/saved-recipients/{recipient_id}")
+def update_domestic_saved_recipient(recipient_id: int, req: DomesticSavedRecipientRequest, token: str):
+    user = _get_user(token)
+    ensure_domestic_tables()
+    fields = _saved_recipient_fields(req)
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT id, user_id FROM domestic_saved_recipients WHERE id=?",
+            (recipient_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="저장된 주소지를 찾을 수 없습니다.")
+        if row[1] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="다른 사용자의 주소지는 수정할 수 없습니다.")
+        conflict = con.execute(
+            "SELECT id FROM domestic_saved_recipients WHERE user_id=? AND label=? AND id!=?",
+            (user["user_id"], fields["label"], recipient_id),
+        ).fetchone()
+        if conflict:
+            raise HTTPException(status_code=400, detail=f"'{fields['label']}' 라벨은 이미 사용 중입니다.")
+        con.execute(
+            """
+            UPDATE domestic_saved_recipients
+            SET label=?, recipient_name=?, recipient_phone=?, zipcode=?, addr1=?, addr2=?
+            WHERE id=?
+            """,
+            (
+                fields["label"], fields["recipient_name"], fields["recipient_phone"],
+                fields["zipcode"], fields["addr1"], fields["addr2"], recipient_id,
+            ),
+        )
+        con.commit()
+    add_log(
+        action_type="국내출고주소지수정",
+        target_type="domestic_saved_recipient",
+        target_id=str(recipient_id),
+        target_name=fields["label"],
+        user_nickname=user["nickname"],
+        details=f"{fields['recipient_name']} / {fields['zipcode']}",
+    )
+    return {"success": True, "id": recipient_id, "label": fields["label"]}
+
+
+@router.delete("/saved-recipients/{recipient_id}")
+def delete_domestic_saved_recipient(recipient_id: int, token: str):
+    user = _get_user(token)
+    ensure_domestic_tables()
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT id, user_id, label FROM domestic_saved_recipients WHERE id=?",
+            (recipient_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="저장된 주소지를 찾을 수 없습니다.")
+        if row[1] != user["user_id"]:
+            raise HTTPException(status_code=403, detail="다른 사용자의 주소지는 삭제할 수 없습니다.")
+        con.execute("DELETE FROM domestic_saved_recipients WHERE id=?", (recipient_id,))
+        con.commit()
+    return {"success": True, "id": recipient_id}
 
 
 @router.get("/labels")

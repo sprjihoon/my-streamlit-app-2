@@ -37,7 +37,13 @@ test('address search fallback keeps manual entry', async ({ page }) => {
 });
 
 test('saved address, success, and failed submit keep the form', async ({ page }) => {
+  const paths: string[] = [];
+  page.on('request', (request) => {
+    paths.push(new URL(request.url()).pathname);
+  });
   await fillDomestic(page);
+  expect(paths).toContain('/domestic-shipping/saved-recipients');
+  expect(paths).not.toContain('/kpost-pickup/saved-recipients');
   await page.getByRole('button', { name: '접수', exact: true }).click();
   await expect(page.getByRole('heading', { name: '테스트 접수' })).toBeVisible();
   await page.getByRole('button', { name: '취소' }).click();

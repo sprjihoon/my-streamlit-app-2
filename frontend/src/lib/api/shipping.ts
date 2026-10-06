@@ -200,3 +200,54 @@ export function domesticLabelPdfUrl(token: string, id: number) {
 export function domesticLabelsPdfUrl(token: string, ids: number[]) {
   return `${API_BASE}/domestic-shipping/labels${domesticQuery(token, `&ids=${ids.join(',')}&format=pdf`)}`;
 }
+
+export interface DomesticSavedRecipient {
+  id: number;
+  label: string;
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+  created_at: string;
+}
+
+export interface DomesticSavedRecipientPayload {
+  label: string;
+  recipient_name: string;
+  recipient_phone: string;
+  zipcode: string;
+  addr1: string;
+  addr2: string;
+}
+
+export async function listDomesticSavedRecipients(token: string) {
+  return fetchApi<{ items: DomesticSavedRecipient[] }>(
+    `/domestic-shipping/saved-recipients${domesticQuery(token)}`
+  );
+}
+
+export async function saveDomesticRecipient(token: string, payload: DomesticSavedRecipientPayload) {
+  return fetchApi<DomesticSavedRecipient & { success: boolean }>(
+    `/domestic-shipping/saved-recipients${domesticQuery(token)}`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function updateDomesticSavedRecipient(
+  token: string,
+  id: number,
+  payload: DomesticSavedRecipientPayload,
+) {
+  return fetchApi<{ success: boolean; id: number; label: string }>(
+    `/domestic-shipping/saved-recipients/${id}${domesticQuery(token)}`,
+    { method: 'PUT', body: JSON.stringify(payload) }
+  );
+}
+
+export async function deleteDomesticSavedRecipient(token: string, id: number) {
+  return fetchApi<{ success: boolean; id: number }>(
+    `/domestic-shipping/saved-recipients/${id}${domesticQuery(token)}`,
+    { method: 'DELETE' }
+  );
+}

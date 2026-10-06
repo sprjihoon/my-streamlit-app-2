@@ -10,14 +10,15 @@ import { ConfirmDialog } from '@/components/domestic/ConfirmDialog';
 import {
   createDomesticShipping,
   getDomesticMeta,
+  listDomesticSavedRecipients,
   listDomesticVendors,
-  listSavedRecipients,
   previewDomesticShipping,
+  saveDomesticRecipient,
   type DomesticBoxSize,
   type DomesticPreview,
+  type DomesticSavedRecipient,
   type DomesticSubmitPayload,
   type DomesticVendor,
-  type SavedRecipient,
 } from '@/lib/api';
 import {
   classifyDomesticError,
@@ -70,8 +71,11 @@ export default function DomesticShippingPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [liveReady, setLiveReady] = useState(false);
   const [vendors, setVendors] = useState<DomesticVendor[]>([]);
-  const [savedRecipients, setSavedRecipients] = useState<SavedRecipient[]>([]);
+  const [savedRecipients, setSavedRecipients] = useState<DomesticSavedRecipient[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState('');
+  const [saveAddress, setSaveAddress] = useState(false);
+  const [addressAlias, setAddressAlias] = useState('');
+  const [saveNote, setSaveNote] = useState('');
   const [boxSizes, setBoxSizes] = useState<DomesticBoxSize[]>([]);
   const [form, setForm] = useState<DomesticSubmitPayload>(emptyForm());
   const [preview, setPreview] = useState<DomesticPreview | null>(null);
@@ -103,7 +107,7 @@ export default function DomesticShippingPage() {
         const [meta, vendorRes, savedRes] = await Promise.all([
           getDomesticMeta(stored),
           listDomesticVendors(stored),
-          listSavedRecipients(stored).catch(() => ({ items: [] as SavedRecipient[] })),
+          listDomesticSavedRecipients(stored).catch(() => ({ items: [] as DomesticSavedRecipient[] })),
         ]);
         setLiveReady(meta.live_ready);
         setBoxSizes(meta.box_sizes || []);
@@ -231,8 +235,21 @@ export default function DomesticShippingPage() {
     }
   }
 
+  function saveAliasError() {
+    if (!saveAddress) return '';
+    const label = addressAlias.trim();
+    if (!label) return '주소지를 저장하려면 별칭을 입력해주세요.';
+    if (label.length > 50) return '별칭은 50자 이하여야 합니다.';
+    return '';
+  }
+
   async function handleSubmit() {
     if (busyRef.current) return;
+    const aliasError = saveAliasError();
+    if (aliasError) {
+      setBanner({ kind: 'validation', message: aliasError });
+      return;
+    }
     const errors = validateShipment(form, vendors, boxSizes);
     if (Object.keys(errors).length) {
       revealErrors(errors);
@@ -270,6 +287,29 @@ export default function DomesticShippingPage() {
     setBusy('submit');
     try {
       const created = await createDomesticShipping(token, form);
+      let note = '';
+      if (saveAddress) {
+        const label = addressAlias.trim();
+        try {
+          await saveDomesticRecipient(token, {
+            label,
+            recipient_name: form.recipient_name,
+            recipient_phone: form.recipient_phone,
+            zipcode: form.recipient_zip,
+            addr1: form.recipient_addr1,
+            addr2: form.recipient_addr2,
+          });
+          note = `주소지 '${label}'을 저장했습니다.`;
+          const refreshed = await listDomesticSavedRecipients(token);
+          setSavedRecipients(refreshed.items || []);
+          setSaveAddress(false);
+          setAddressAlias('');
+        } catch (err) {
+          const parsed = classifyDomesticError(err, 'shipment');
+          note = `접수는 완료됐지만 주소 저장에 실패했습니다. ${parsed.message}`;
+        }
+      }
+      setSaveNote(note);
       setResult(created);
       setConfirmPreview(null);
       setFieldErrors({});
@@ -290,6 +330,9 @@ export default function DomesticShippingPage() {
     setPreview(null);
     setConfirmPreview(null);
     setSelectedSavedId('');
+    setSaveAddress(false);
+    setAddressAlias('');
+    setSaveNote('');
     setBanner(null);
     setFieldErrors({});
     setForm((prev) => ({
@@ -336,7 +379,7 @@ export default function DomesticShippingPage() {
       {!banner && !liveReady ? <p className="text-muted">우체국 연결이 없어 테스트로 저장됩니다.</p> : null}
 
       {result ? (
-        <CreatedResult result={result} onAgain={startAnother} />
+        <CreatedResult result={result} note={saveNote} onAgain={startAnother} />
       ) : (
         <Card>
           <section className="domestic-block">
@@ -410,7 +453,7 @@ export default function DomesticShippingPage() {
                   ))}
                 </select>
               </label>
-              <a className="btn btn-secondary" href="/saved-recipients">주소지 관리</a>
+              <a className="btn btn-secondary" href="/domestic-saved-recipients">주소지 관리</a>
             </div>
             <div className="domestic-row">
               <label className={`domestic-field w-name${fieldErrors.recipient_name ? ' is-invalid' : ''}`} htmlFor="recipient_name">
@@ -440,6 +483,32 @@ export default function DomesticShippingPage() {
               onPick={(picked) => pickAddress('recipient', picked)}
               onError={(message) => setBanner({ kind: 'network', message })}
             />
+            <label className="domestic-check" htmlFor="save_address">
+              <input
+                id="save_address"
+                type="checkbox"
+                checked={saveAddress}
+                disabled={locked}
+                onChange={(event) => {
+                  setSaveAddress(event.target.checked);
+                  if (!event.target.checked) setAddressAlias('');
+                }}
+              />
+              받는 사람 주소 저장
+            </label>
+            {saveAddress ? (
+              <label className={`domestic-field w-name${fieldErrors.address_alias ? ' is-invalid' : ''}`} htmlFor="address_alias">
+                주소지 별칭
+                <input
+                  id="address_alias"
+                  value={addressAlias}
+                  maxLength={50}
+                  placeholder="예: 본사, 경기창고"
+                  disabled={locked}
+                  onChange={(event) => setAddressAlias(event.target.value)}
+                />
+              </label>
+            ) : null}
             <div className="domestic-row">
               <label className="domestic-field w-notes" htmlFor="notes">
                 배송메시지
@@ -536,7 +605,7 @@ function PreviewFacts({ preview, notes }: { preview: DomesticPreview; notes: str
   );
 }
 
-function CreatedResult({ result, onAgain }: { result: Created; onAgain: () => void }) {
+function CreatedResult({ result, note, onAgain }: { result: Created; note: string; onAgain: () => void }) {
   const ids = result.ids?.length ? result.ids : (result.id ? [result.id] : []);
   const trackings = result.tracking_nos?.length
     ? result.tracking_nos
@@ -550,6 +619,7 @@ function CreatedResult({ result, onAgain }: { result: Created; onAgain: () => vo
   return (
     <Card>
       <p className="domestic-section">접수 결과</p>
+      {note ? <p>{note}</p> : null}
       {result.duplicate_guard ? <p>이미 접수된 건을 그대로 보여줍니다.</p> : null}
       {result.partial ? <p>요청한 장수 중 일부만 접수되었습니다.</p> : null}
       <dl className="domestic-facts">

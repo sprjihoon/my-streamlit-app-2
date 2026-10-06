@@ -7,15 +7,21 @@ import pytest
 from fastapi import HTTPException
 
 from backend.app.api.domestic_shipping import (
+    DomesticSavedRecipientRequest,
     DomesticSubmitRequest,
     DomesticVendorRequest,
     cancel_domestic,
     create_domestic,
     create_vendor,
     delete_domestic,
+    delete_domestic_saved_recipient,
     domestic_label,
+    ensure_domestic_tables,
     domestic_labels,
+    list_domestic_saved_recipients,
     preview_domestic,
+    save_domestic_recipient,
+    update_domestic_saved_recipient,
 )
 
 
@@ -241,6 +247,90 @@ def test_cancel_requires_confirm_then_marks_label(isolated_runtime, monkeypatch)
     assert called["req_type"] == "1"
     text = fitz.open(stream=domestic_label(created["id"], token, format="pdf").body, filetype="pdf")[0].get_text()
     assert "취소된 접수" in text
+
+
+def _saved(**overrides) -> DomesticSavedRecipientRequest:
+    data = {
+        "label": "본사",
+        "recipient_name": "홍길동",
+        "recipient_phone": "010-1234-5678",
+        "zipcode": "06236",
+        "addr1": "서울특별시 강남구 테헤란로 123",
+        "addr2": "201호",
+    }
+    data.update(overrides)
+    return DomesticSavedRecipientRequest(**data)
+
+
+def test_spring_vendor_is_seeded_once_from_pickup_center(isolated_runtime):
+    ensure_domestic_tables()
+    ensure_domestic_tables()
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        rows = con.execute(
+            "SELECT name, office_ser, sender_name, sender_phone, sender_zip, sender_addr1, sender_addr2 FROM domestic_vendors"
+        ).fetchall()
+    assert rows == [(
+        "스프링풀필먼트",
+        "260940699",
+        "스프링풀필먼트",
+        "01027239490",
+        "41142",
+        "대구광역시 동구 동촌로 1",
+        "동대구우체국 2층 소포실",
+    )]
+
+
+def test_domestic_saved_addresses_stay_separate_from_pickup(isolated_runtime):
+    from backend.app.api.kpost_pickup.saved_recipients import list_saved_recipients, save_recipient
+    from backend.app.api.kpost_pickup.saved_recipients import SavedRecipientRequest
+
+    token = _seed_user(isolated_runtime["db"])
+    save_recipient(SavedRecipientRequest(**{
+        "label": "회수창고",
+        "recipient_name": "회수고객",
+        "recipient_phone": "01011112222",
+        "zipcode": "04524",
+        "addr1": "서울특별시 중구 세종대로 110",
+        "addr2": "1층",
+    }), token)
+
+    assert list_domestic_saved_recipients(token)["items"] == []
+    saved = save_domestic_recipient(_saved(), token)
+    assert saved["recipient_phone"] == "01012345678"
+    assert [row["label"] for row in list_domestic_saved_recipients(token)["items"]] == ["본사"]
+    assert [row["label"] for row in list_saved_recipients(token)["items"]] == ["회수창고"]
+
+    again = save_domestic_recipient(_saved(recipient_name="다른사람"), token)
+    assert again["id"] == saved["id"]
+    assert list_domestic_saved_recipients(token)["items"][0]["recipient_name"] == "홍길동"
+
+    other = save_domestic_recipient(_saved(label="창고2"), token)
+    with pytest.raises(HTTPException) as exc:
+        update_domestic_saved_recipient(saved["id"], _saved(label="창고2"), token)
+    assert exc.value.status_code == 400
+    updated = update_domestic_saved_recipient(saved["id"], _saved(label="경기창고"), token)
+    assert updated["label"] == "경기창고"
+    delete_domestic_saved_recipient(saved["id"], token)
+    delete_domestic_saved_recipient(other["id"], token)
+    assert list_domestic_saved_recipients(token)["items"] == []
+    assert [row["label"] for row in list_saved_recipients(token)["items"]] == ["회수창고"]
+
+
+def test_domestic_saved_addresses_isolated_by_user(isolated_runtime):
+    token_a = _seed_user(isolated_runtime["db"], token="tok-a")
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "INSERT INTO users (username, password_hash, nickname, is_admin, department) VALUES (?,?,?,?,?)",
+            ("other", "x", "다른담당", 0, "물류팀"),
+        )
+        con.execute("INSERT INTO sessions (token, user_id) VALUES (?, 2)", ("tok-b",))
+        con.commit()
+    save_domestic_recipient(_saved(label="A창고"), token_a)
+    assert list_domestic_saved_recipients("tok-b")["items"] == []
+    other = save_domestic_recipient(_saved(label="B창고"), "tok-b")
+    with pytest.raises(HTTPException) as exc:
+        delete_domestic_saved_recipient(other["id"], token_a)
+    assert exc.value.status_code == 403
 
 
 def test_admin_delete_rejects_staff(isolated_runtime):

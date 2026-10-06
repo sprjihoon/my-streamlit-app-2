@@ -73,6 +73,7 @@ export const NAV_GROUPS: {
       { href: '/domestic-shipping', label: '출고 접수', icon: <Truck {...IC} /> },
       { href: '/domestic-shipping-list', label: '접수목록', icon: <List {...IC} /> },
       { href: '/domestic-vendors', label: '업체 등록', icon: <List {...IC} /> },
+      { href: '/domestic-saved-recipients', label: '저장된 주소지', icon: <Truck {...IC} /> },
     ],
   },
   {
