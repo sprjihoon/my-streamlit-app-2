@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -54,6 +55,7 @@ from backend.app.services.ems.item_categories import ITEM_CATEGORIES
 from backend.app.services.ems.form_pdf import render_label_pdf
 from backend.app.services.ems.label import build_shipment_label, render_label_html
 from backend.app.services.ems.order_excel import parse_order_workbook
+from backend.app.services.ems.tracking import track_ems_regino
 from logic.db import get_connection
 
 router = APIRouter(prefix="/overseas-shipping", tags=["overseas-shipping"])
@@ -227,6 +229,11 @@ def ensure_overseas_tables() -> None:
             con.execute(
                 "ALTER TABLE overseas_shipping_requests ADD COLUMN customs_gubun TEXT DEFAULT 'merchandise'"
             )
+        for column in ("treat_status", "treat_status_name", "treat_event_at", "treat_office"):
+            try:
+                con.execute(f"SELECT {column} FROM overseas_shipping_requests LIMIT 1")
+            except Exception:
+                con.execute(f"ALTER TABLE overseas_shipping_requests ADD COLUMN {column} TEXT")
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS overseas_saved_addresses (
@@ -812,6 +819,10 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         "canceled_by",
         "ddp_krw",
         "customs_gubun",
+        "treat_status",
+        "treat_status_name",
+        "treat_event_at",
+        "treat_office",
     ]
     data = dict(zip(keys, row))
     data["is_test"] = bool(data["is_test"])
@@ -1344,7 +1355,8 @@ def list_overseas(token: str, limit: int = 500):
                    totweight, boxlength, boxwidth, boxheight, item_list,
                    tracking_no, req_no, receive_seq, ems_fee, post_office,
                    status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
-                   ddp_krw, customs_gubun
+                   ddp_krw, customs_gubun, treat_status, treat_status_name,
+                   treat_event_at, treat_office
             FROM overseas_shipping_requests
             ORDER BY id DESC
             LIMIT ?
@@ -1352,6 +1364,100 @@ def list_overseas(token: str, limit: int = 500):
             (max(1, min(limit, 2000)),),
         ).fetchall()
     return {"items": [_row_to_dict(row) for row in rows]}
+
+
+_TERMINAL_TRACKING = {"배달완료", "반송"}
+
+
+def _apply_ems_tracking(item: dict[str, Any]) -> dict[str, Any]:
+    tracked = track_ems_regino(str(item.get("tracking_no") or ""))
+    if tracked.get("noRecord") or not tracked.get("treatStusCd"):
+        item["_tracked"] = False
+        return item
+    item["treat_status"] = tracked["treatStusCd"]
+    item["treat_status_name"] = tracked.get("treatStusNm") or tracked["treatStusCd"]
+    item["treat_event_at"] = tracked.get("eventAt") or ""
+    item["treat_office"] = tracked.get("office") or ""
+    item["_tracked"] = True
+    return item
+
+
+@router.post("/refresh-status")
+def refresh_overseas_statuses(token: str):
+    """접수 목록의 실접수 등기번호를 우체국 국제우편 조회에 물어 배송상태를 저장한다."""
+    _get_user(token)
+    ensure_overseas_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT id, order_no, shipping_method, contents_type, premiumcd, countrycd, sender_name,
+                   recipient_name, recipient_phone, recipient_email, recipient_zip,
+                   recipient_addr1, recipient_addr2, recipient_addr3,
+                   totweight, boxlength, boxwidth, boxheight, item_list,
+                   tracking_no, req_no, receive_seq, ems_fee, post_office,
+                   status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
+                   ddp_krw, customs_gubun, treat_status, treat_status_name,
+                   treat_event_at, treat_office
+            FROM overseas_shipping_requests
+            WHERE status = 'requested' AND is_test = 0
+              AND tracking_no IS NOT NULL AND tracking_no != ''
+              AND (treat_status IS NULL OR treat_status NOT IN ('배달완료', '반송'))
+            ORDER BY id DESC
+            LIMIT 200
+            """
+        ).fetchall()
+    items = [_row_to_dict(row) for row in rows]
+    checked = 0
+    delivered = 0
+    failed = 0
+
+    def _process(item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        if item.get("treat_status") in _TERMINAL_TRACKING or item.get("status") == "canceled":
+            return "skip", item
+        item["_before_status"] = item.get("treat_status")
+        try:
+            _apply_ems_tracking(item)
+            return "checked", item
+        except Exception:
+            return "failed", item
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(_process, item) for item in items]
+        for future in as_completed(futures):
+            status, item = future.result()
+            if status == "checked":
+                if item.get("_tracked"):
+                    with get_connection() as con:
+                        con.execute(
+                            """
+                            UPDATE overseas_shipping_requests
+                            SET treat_status=?, treat_status_name=?, treat_event_at=?, treat_office=?
+                            WHERE id=?
+                            """,
+                            (
+                                item.get("treat_status"),
+                                item.get("treat_status_name"),
+                                item.get("treat_event_at"),
+                                item.get("treat_office"),
+                                item["id"],
+                            ),
+                        )
+                        con.commit()
+                checked += 1
+                if item.get("treat_status") == "배달완료" and item.get("_before_status") != "배달완료":
+                    delivered += 1
+            elif status == "failed":
+                failed += 1
+    return {
+        "success": True,
+        "checked": checked,
+        "delivered": delivered,
+        "failed": failed,
+        "message": (
+            f"등기 {checked}건 조회. 배달완료 {delivered}건"
+            + (f" / 조회실패 {failed}건" if failed else "")
+        ),
+    }
 
 
 def _load_shipment(shipment_id: int) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -1365,7 +1471,8 @@ def _load_shipment(shipment_id: int) -> tuple[dict[str, Any], dict[str, Any] | N
                    totweight, boxlength, boxwidth, boxheight, item_list,
                    tracking_no, req_no, receive_seq, ems_fee, post_office,
                    status, is_test, notes, created_by, created_at, canceled_at, canceled_by,
-                   ddp_krw, customs_gubun, apply_snapshot
+                   ddp_krw, customs_gubun, treat_status, treat_status_name,
+                   treat_event_at, treat_office, apply_snapshot
             FROM overseas_shipping_requests
             WHERE id = ?
             """,

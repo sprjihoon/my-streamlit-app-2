@@ -92,8 +92,15 @@ test('list, detail, cancel dismissal, and print link', async ({ page }) => {
   const calls = await installApi(page, STAFF);
   await page.goto('/overseas-shipping-list');
   await expect(page.getByRole('heading', { name: '해외배송 접수목록' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '테스트' })).toBeVisible();
+  await page.getByRole('button', { name: '송장조회' }).click();
+  await expect(page.getByText('등기 1건 조회. 배달완료 0건')).toBeVisible();
+  await expect(page.getByRole('cell', { name: '운송중' })).toBeVisible();
+  expect(calls.filter((call) => call.method === 'POST' && call.path === '/overseas-shipping/refresh-status')).toHaveLength(1);
   await page.goto('/overseas-shipping-list/9');
   await expect(page.getByRole('heading', { name: '해외배송 접수 상세' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '배송상태' })).toHaveValue('운송중');
+  await expect(page.getByRole('textbox', { name: '최근 처리' })).toHaveValue('교환국 도착 · 국제우편물류센터 · 2026.10.08 09:10');
   const print = page.getByRole('link', { name: /출력|인쇄/ });
   if (await print.count()) {
     await expect(print.first()).toHaveAttribute('href', /overseas-print|label/);

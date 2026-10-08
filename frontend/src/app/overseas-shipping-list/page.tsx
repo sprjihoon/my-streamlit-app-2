@@ -9,6 +9,8 @@ import {
   cancelOverseasShipping,
   deleteOverseasShipping,
   listOverseasShipments,
+  overseasStatusLabel,
+  refreshOverseasShippingStatuses,
   type OverseasShippingItem,
 } from '@/lib/api';
 
@@ -46,6 +48,7 @@ export default function OverseasShippingListPage() {
   const [items, setItems] = useState<OverseasShippingItem[]>([]);
   const [query, setQuery] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   async function loadList(tok: string) {
     const res = await listOverseasShipments(tok);
@@ -71,6 +74,22 @@ export default function OverseasShippingListPage() {
       }
     })();
   }, []);
+
+  async function handleRefreshStatus() {
+    if (!token || refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await refreshOverseasShippingStatuses(token);
+      await loadList(token);
+      setSuccess(result.message || `등기조회 완료. 배달완료 ${result.delivered}건`);
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleDelete(item: OverseasShippingItem) {
     const live = item.status !== 'canceled' && !item.is_test;
@@ -107,7 +126,7 @@ export default function OverseasShippingListPage() {
   const q = query.trim().toLowerCase().replace(/\s+/g, '');
   const visible = q
     ? items.filter((it) => (
-      `${it.order_no} ${it.tracking_no} ${it.recipient_name} ${it.countrycd} ${it.shipping_method} ${it.contents_label || ''} ${it.created_by}`
+      `${it.order_no} ${it.tracking_no} ${it.recipient_name} ${it.countrycd} ${it.shipping_method} ${it.contents_label || ''} ${it.created_by} ${overseasStatusLabel(it)}`
         .toLowerCase()
         .replace(/\s+/g, '')
         .includes(q)
@@ -118,7 +137,7 @@ export default function OverseasShippingListPage() {
     <div className="overseas-page">
       <PageHeader
         title="해외배송 접수목록"
-        subtitle="행을 누르면 입력값을 그대로 봅니다. 지출은 요금, DDP, 합계입니다."
+        subtitle="송장조회로 국제우편 배송상태를 받습니다. 지출은 요금, DDP, 합계입니다."
       />
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
@@ -129,10 +148,18 @@ export default function OverseasShippingListPage() {
           <a href="/overseas-senders" className="btn btn-secondary">발송인</a>
           <a href="/overseas-recipients" className="btn btn-secondary">수취인</a>
           <a href="/overseas-hs-codes" className="btn btn-secondary">HS코드</a>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void handleRefreshStatus()}
+            disabled={!token || refreshing}
+          >
+            {refreshing ? '송장조회 중...' : '송장조회'}
+          </button>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="등기번호, 수취인, 국가 검색"
+            placeholder="등기번호, 수취인, 국가, 상태 검색"
             style={{
               marginLeft: 'auto',
               minWidth: 220,
@@ -180,7 +207,7 @@ export default function OverseasShippingListPage() {
                       <div>DDP {won(it.ddp_krw)}</div>
                       <div><strong>합계 {won(it.spent_total)}</strong></div>
                     </td>
-                    <td>{it.status === 'canceled' ? '취소' : it.is_test ? '테스트' : '접수'}</td>
+                    <td>{overseasStatusLabel(it)}</td>
                     <td>{it.created_by}</td>
                     <td className="overseas-list-actions" onClick={(e) => e.stopPropagation()}>
                       <a href={`/overseas-print/${it.id}`} className="btn btn-secondary" target="_blank" rel="noreferrer">

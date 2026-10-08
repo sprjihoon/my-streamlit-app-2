@@ -10,6 +10,7 @@ import {
   cancelOverseasShipping,
   deleteOverseasShipping,
   getOverseasShipment,
+  overseasStatusLabel,
   type OverseasShippingItem,
 } from '@/lib/api';
 
@@ -125,7 +126,8 @@ export default function OverseasShippingDetailPage() {
 
   if (loading) return <Loading text="접수 상세 로딩 중..." />;
 
-  const status = item?.status === 'canceled' ? '취소' : item?.is_test ? '테스트' : '접수';
+  const status = item ? overseasStatusLabel(item) : '';
+  const latestEvent = [item?.treat_status_name, item?.treat_office, item?.treat_event_at].filter(Boolean).join(' · ');
   const senderAddr = [item?.sender_addr1, item?.sender_addr2, item?.sender_addr3].filter(Boolean).join(', ');
 
   return (
@@ -155,6 +157,8 @@ export default function OverseasShippingDetailPage() {
           <Card title={`${METHOD_LABEL[item.shipping_method] || item.shipping_method} · ${item.contents_label || '화물'} · ${contentsPurpose(item).en} · ${status}`}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
               <Field label="등기번호" value={item.tracking_no || '-'} />
+              <Field label="배송상태" value={status || '-'} />
+              <Field label="최근 처리" value={latestEvent || '-'} />
               <Field label="요금" value={won(item.ems_fee)} />
               <Field label="DDP" value={won(item.ddp_krw)} />
               <Field label="합계" value={won(item.spent_total)} />

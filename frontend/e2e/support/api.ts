@@ -122,6 +122,7 @@ export async function installApi(page: Page, user: SessionUser) {
   await page.route('**://*.fedex.com/**', (route) => route.abort());
 
   let domesticTreat = '';
+  let overseasTreat = '';
   await page.route('http://localhost:8000/**', async (route) => {
     const request = route.request();
     record(request);
@@ -298,10 +299,38 @@ export async function installApi(page: Page, user: SessionUser) {
     if (path === '/overseas-shipping' && method === 'POST') {
       return json(route, { success: true, id: 9, tracking_no: 'EG123456789KR', ems_fee: '18000', is_test: true });
     }
-    if (path === '/overseas-shipping' && method === 'GET') {
-      return json(route, { items: [{ id: 9, tracking_no: 'EG123456789KR', recipient_name: 'Taro', countrycd: 'JP', status: 'requested', is_test: true }] });
+    if (path === '/overseas-shipping/refresh-status' && method === 'POST') {
+      overseasTreat = '운송중';
+      return json(route, {
+        success: true,
+        checked: 1,
+        delivered: 0,
+        failed: 0,
+        message: '등기 1건 조회. 배달완료 0건',
+      });
     }
-    if (path === '/overseas-shipping/9') return json(route, { id: 9, tracking_no: 'EG123456789KR', recipient_name: 'Taro', countrycd: 'JP', status: 'requested', is_test: true, items: [] });
+    const overseasItem = {
+      id: 9,
+      order_no: 'TIL-9',
+      tracking_no: 'EG123456789KR',
+      recipient_name: 'Taro',
+      countrycd: 'JP',
+      shipping_method: 'EMS',
+      status: 'requested',
+      is_test: !overseasTreat,
+      treat_status: overseasTreat,
+      treat_status_name: overseasTreat ? '교환국 도착' : '',
+      treat_office: overseasTreat ? '국제우편물류센터' : '',
+      treat_event_at: overseasTreat ? '2026.10.08 09:10' : '',
+      created_at: '2026-10-08T09:00:00',
+      created_by: '물류담당',
+      ems_fee: '18000',
+      items: [],
+    };
+    if (path === '/overseas-shipping' && method === 'GET') {
+      return json(route, { items: [overseasItem] });
+    }
+    if (path === '/overseas-shipping/9') return json(route, overseasItem);
     if (path === '/insights/summary' || path === '/insights/invoice-summary') {
       return json(route, {
         total_orders: 3,

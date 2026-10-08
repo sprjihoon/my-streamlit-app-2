@@ -88,6 +88,20 @@ export interface OverseasShippingItem {
   created_at: string;
   canceled_at: string | null;
   canceled_by: string | null;
+  treat_status?: string | null;
+  treat_status_name?: string | null;
+  treat_event_at?: string | null;
+  treat_office?: string | null;
+}
+
+export function overseasStatusLabel(item: {
+  status: string;
+  is_test: boolean;
+  treat_status?: string | null;
+}) {
+  if (item.status === 'canceled') return '취소';
+  if (item.is_test) return '테스트';
+  return (item.treat_status || '').trim() || '접수';
 }
 
 export interface OverseasShippingPreview {
@@ -285,6 +299,16 @@ export async function previewOverseasShipping(token: string, payload: OverseasSh
 
 export async function listOverseasShipments(token: string) {
   return fetchApi<{ items: OverseasShippingItem[] }>(`/overseas-shipping${overseasQuery(token)}`);
+}
+
+export async function refreshOverseasShippingStatuses(token: string) {
+  return fetchApi<{
+    success: boolean;
+    checked: number;
+    delivered: number;
+    failed: number;
+    message?: string;
+  }>(`/overseas-shipping/refresh-status${overseasQuery(token)}`, { method: 'POST' });
 }
 
 export async function getOverseasShipment(token: string, id: number) {
