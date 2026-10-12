@@ -93,6 +93,10 @@ test('list, detail, cancel dismissal, and print link', async ({ page }) => {
   await page.goto('/overseas-shipping-list');
   await expect(page.getByRole('heading', { name: '해외배송 접수목록' })).toBeVisible();
   await expect(page.getByRole('cell', { name: '테스트' })).toBeVisible();
+  await page.getByRole('button', { name: '복사' }).click();
+  await expect(page.getByText('복사했습니다.')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('EG123456789KR');
+  await expect(page).toHaveURL(/\/overseas-shipping-list$/);
   await page.getByRole('button', { name: '송장조회' }).click();
   await expect(page.getByText('등기 1건 조회. 배달완료 0건')).toBeVisible();
   await expect(page.getByRole('cell', { name: '운송중' })).toBeVisible();

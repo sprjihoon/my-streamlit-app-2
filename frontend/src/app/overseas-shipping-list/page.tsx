@@ -5,6 +5,7 @@ import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
+import { CopyButton } from '@/components/domestic/CopyButton';
 import {
   cancelOverseasShipping,
   deleteOverseasShipping,
@@ -201,7 +202,7 @@ export default function OverseasShippingListPage() {
                     <td>{METHOD_LABEL[it.shipping_method] || it.shipping_method}{it.contents_label ? ` · ${it.contents_label}` : ''}</td>
                     <td>{it.countrycd}</td>
                     <td>{it.recipient_name}</td>
-                    <td style={{ fontFamily: 'monospace' }}>{it.tracking_no || '-'}</td>
+                    <td><CopyButton value={it.tracking_no || ''} /></td>
                     <td style={{ whiteSpace: 'nowrap', lineHeight: 1.45, fontSize: '0.85rem' }}>
                       <div>요금 {won(it.ems_fee)}</div>
                       <div>DDP {won(it.ddp_krw)}</div>
