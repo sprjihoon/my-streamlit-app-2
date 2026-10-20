@@ -17,6 +17,7 @@ import json
 import re
 import uuid
 from datetime import datetime, date
+from urllib.parse import quote
 from pathlib import Path
 from typing import Optional, List
 
@@ -803,7 +804,7 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
         return StreamingResponse(
             buf,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
         )
     except ImportError:
         raise HTTPException(status_code=500, detail="openpyxl이 설치되지 않았습니다.")
@@ -881,7 +882,7 @@ def download_excel(receipt_id: str, token: str):
         return StreamingResponse(
             buf,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
         )
     except ImportError:
         raise HTTPException(status_code=500, detail="openpyxl이 설치되지 않았습니다.")
@@ -897,3 +898,21 @@ def get_image(filename: str, token: str):
 
     from fastapi.responses import FileResponse
     return FileResponse(img_path)
+
+
+def _promote_static_routes() -> None:
+    """고정 경로는 /{receipt_id}보다 먼저 맞춘다. 그렇지 않으면 bulk-excel이 영수증 번호가 된다."""
+    static = [route for route in router.routes if getattr(route, "path", "") == "/receipt/bulk-excel"]
+    if not static:
+        return
+    rest = [route for route in router.routes if route not in static]
+    insert_at = 0
+    for index, route in enumerate(rest):
+        methods = getattr(route, "methods", set()) or set()
+        if getattr(route, "path", "") == "/receipt/{receipt_id}" and "GET" in methods:
+            insert_at = index
+            break
+    router.routes[:] = rest[:insert_at] + static + rest[insert_at:]
+
+
+_promote_static_routes()

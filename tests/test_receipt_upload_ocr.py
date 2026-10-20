@@ -264,6 +264,35 @@ def test_owner_and_admin_can_delete_receipt():
     assert not con_image.exists()
 
 
+def test_bulk_excel_uses_year_filter_not_receipt_id():
+    """목록 엑셀은 연도 필터로 받고, bulk-excel을 영수증 번호로 보지 않는다."""
+    _seed_user()
+    from backend.app.api.receipt import ensure_receipt_tables
+    from backend.app.main import app
+
+    ensure_receipt_tables()
+    with get_connection() as con:
+        con.execute(
+            """
+            INSERT INTO receipts (id, user_id, store_name, created_at) VALUES
+            ('this-year', 1, '올해', '2026-03-01 00:00:00'),
+            ('other-year', 1, '작년', '2025-03-01 00:00:00')
+            """
+        )
+        con.commit()
+
+    client = TestClient(app, raise_server_exceptions=False)
+    res = client.get("/receipt/bulk-excel", params={"token": "receipt-token", "year": 2026})
+    assert res.status_code == 200, res.text
+    assert "spreadsheet" in res.headers.get("content-type", "")
+    import io
+    import openpyxl
+    book = openpyxl.load_workbook(io.BytesIO(res.content))
+    names = [row[3] for row in book.active.iter_rows(min_row=2, values_only=True)]
+    assert "올해" in names
+    assert "작년" not in names
+
+
 def test_checked_receipts_delete_only_the_selection():
     """체크한 영수증만 지운다. 직원은 남의 영수증을 고르면 자기 것만 지워진다."""
     _seed_user()
