@@ -10,6 +10,21 @@ test('leave summary, calendar, and holiday screen render', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '연차 달력' })).toBeVisible();
 });
 
+test('leave without approvers records the selected date immediately', async ({ page }) => {
+  await seedSession(page, STAFF);
+  const calls = await installApi(page, STAFF);
+  await page.goto('/leave');
+  await page.getByRole('button', { name: '연차 신청' }).click();
+  await expect(page.getByText('결재자 없음. 신청하면 선택한 날짜가 바로 반영됩니다.')).toBeVisible();
+  await page.locator('input[type="date"]').nth(0).fill('2026-10-21');
+  await page.locator('input[type="date"]').nth(1).fill('2026-10-21');
+  await page.getByRole('button', { name: '바로 반영' }).click();
+  await expect(page.getByText('날짜가 바로 반영되었습니다. 1일 (7시간)')).toBeVisible();
+  const posted = calls.find((call) => call.method === 'POST' && call.path === '/leave/requests');
+  expect(posted?.body).toContain('"start_date":"2026-10-21"');
+  expect(posted?.body).toContain('"end_date":"2026-10-21"');
+});
+
 test('leave request and cancel stay on the local API', async ({ page }) => {
   await seedSession(page, STAFF);
   const calls = await installApi(page, STAFF);

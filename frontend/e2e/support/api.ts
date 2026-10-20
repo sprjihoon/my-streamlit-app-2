@@ -375,6 +375,17 @@ export async function installApi(page: Page, user: SessionUser) {
     if (path === '/leave/calendar') {
       return json(route, { year: 2026, month: 10, days: {}, holidays: {} });
     }
+    if (path === '/leave/requests' && method === 'POST') {
+      return json(route, {
+        success: true,
+        request_id: 11,
+        hours_requested: 7,
+        days_requested: 1,
+        status: 'approved',
+        auto_approved: true,
+        message: '결재 없이 바로 반영되었습니다.',
+      });
+    }
     if (path === '/leave/requests' || path === '/leave/pending-approvals' || path === '/leave/approval-history' || path === '/leave/admin/all' || path === '/leave/admin/requests' || path === '/leave/approval-chain' || path === '/leave/approver-candidates') {
       return json(route, []);
     }

@@ -282,6 +282,26 @@ def get_approval_chain(user_id: int, con) -> list:
     return chain
 
 
+def resolve_request_approvers(user_id: int, custom_approvers, con) -> list:
+    """신청에 쓸 결재자 목록.
+
+    custom_approvers가 None이면 기본 결재라인.
+    빈 목록을 넘기면 결재자를 두지 않는다. 이 경우 날짜는 승인 없이 바로 반영된다.
+    """
+    if custom_approvers is None:
+        return get_approval_chain(user_id, con)
+
+    chain = []
+    for uid in custom_approvers:
+        row = con.execute(
+            "SELECT user_id FROM users WHERE user_id = ? AND leave_exempt = 0",
+            (int(uid),)
+        ).fetchone()
+        if row and row[0] != user_id and row[0] not in chain:
+            chain.append(row[0])
+    return chain
+
+
 def get_used_hours(user_id: int, con, year: int = None, join_date_str: str = None) -> float:
     """
     승인된 연차 사용 시간 합계.
@@ -389,7 +409,7 @@ class LeaveRequestCreate(BaseModel):
     start_date: str
     end_date: str
     reason: Optional[str] = None
-    custom_approvers: Optional[list] = None  # [user_id, ...] 지정 시 기본 체인 대신 사용
+    custom_approvers: Optional[list] = None  # None=기본 체인, []=결재자 없이 즉시 반영
 
 
 class ApprovalAction(BaseModel):
@@ -604,27 +624,16 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         if hours <= 0:
             raise HTTPException(status_code=400, detail="신청 기간에 근무일이 없습니다. (주말/공휴일 확인)")
 
-        # 연차 신청 저장
+        # 결재자가 없으면 승인 절차 없이 해당 날짜를 바로 사용 연차로 넣는다.
+        chain = resolve_request_approvers(user_id, data.custom_approvers, con)
+        status = "approved" if not chain else "pending"
+
         cur = con.execute(
             """INSERT INTO leave_requests (user_id, leave_type, start_date, end_date, hours_requested, reason, status)
-               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
-            (user_id, data.leave_type, data.start_date, data.end_date, hours, data.reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, data.leave_type, data.start_date, data.end_date, hours, data.reason, status)
         )
         request_id = cur.lastrowid
-
-        # 결재 라인 생성 — custom_approvers 지정 시 우선 사용, 없으면 기본 체인
-        if data.custom_approvers is not None and len(data.custom_approvers) > 0:
-            # 유효한 user_id인지 검증
-            chain = []
-            for uid in data.custom_approvers:
-                row = con.execute(
-                    "SELECT user_id FROM users WHERE user_id = ? AND leave_exempt = 0",
-                    (int(uid),)
-                ).fetchone()
-                if row and row[0] != user_id:
-                    chain.append(row[0])
-        else:
-            chain = get_approval_chain(user_id, con)
 
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
@@ -651,7 +660,11 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         target_id=str(request_id),
         target_name=nickname,
         user_nickname=nickname,
-        details=f"{data.leave_type} {data.start_date}~{data.end_date} ({round(hours/HOURS_PER_DAY,1)}일/{hours}시간)"
+        details=(
+            f"{data.leave_type} {data.start_date}~{data.end_date} "
+            f"({round(hours/HOURS_PER_DAY,1)}일/{hours}시간)"
+            + (" / 결재자없음 즉시반영" if not chain else "")
+        )
     )
 
     # 네이버웍스 알림
@@ -672,12 +685,19 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         import asyncio
         asyncio.create_task(send_nw_dm(approver_nw_id, msg))
 
+    if not chain:
+        message = f"결재 없이 바로 반영되었습니다. ({days_str}일 / {hours}시간)"
+    else:
+        message = f"연차 신청이 완료되었습니다. ({len(chain)}단계 결재 진행 중)"
+
     return {
         "success": True,
         "request_id": request_id,
         "hours_requested": hours,
         "days_requested": days_str,
-        "message": f"연차 신청이 완료되었습니다. ({len(chain)}단계 결재 진행 중)"
+        "status": status,
+        "auto_approved": not chain,
+        "message": message,
     }
 
 
@@ -1572,14 +1592,15 @@ def bot_apply_leave(naver_works_id: str, leave_type: str, start_date: str, end_d
         if hours <= 0:
             return {"error": "신청 기간에 근무일이 없습니다. (주말/공휴일 확인)"}
 
+        chain = get_approval_chain(user_id, con)
+        status = "approved" if not chain else "pending"
         cur = con.execute(
             """INSERT INTO leave_requests (user_id, leave_type, start_date, end_date, hours_requested, reason, status)
-               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
-            (user_id, leave_type, start_date, end_date, hours, reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, leave_type, start_date, end_date, hours, reason, status)
         )
         request_id = cur.lastrowid
 
-        chain = get_approval_chain(user_id, con)
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
                 """INSERT INTO leave_approvals (request_id, approver_id, step, status)
@@ -1609,18 +1630,24 @@ def bot_apply_leave(naver_works_id: str, leave_type: str, start_date: str, end_d
                 )
                 import asyncio
                 try:
-                    asyncio.create_task(send_nw_dm(approver[1], msg))
-                except Exception:
+                    asyncio.get_running_loop().create_task(send_nw_dm(approver[1], msg))
+                except RuntimeError:
                     pass
 
     days_str = round(hours / HOURS_PER_DAY, 1)
+    if not chain:
+        message = f"#{request_id} 연차가 승인 없이 바로 반영되었습니다 ({days_str}일/{hours}시간)"
+    else:
+        message = f"#{request_id} 연차 신청 완료 ({days_str}일/{hours}시간, {len(chain)}단계 결재)"
     return {
         "success": True,
         "request_id": request_id,
         "hours_requested": hours,
         "days_requested": days_str,
         "approvers": len(chain),
-        "message": f"#{request_id} 연차 신청 완료 ({days_str}일/{hours}시간, {len(chain)}단계 결재)"
+        "status": status,
+        "auto_approved": not chain,
+        "message": message,
     }
 
 

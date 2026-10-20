@@ -391,7 +391,11 @@ export default function LeavePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || '신청 실패');
-      showMsg(`연차 신청 완료! ${data.days_requested}일 (${data.hours_requested}시간)`);
+      showMsg(
+        data.auto_approved
+          ? `날짜가 바로 반영되었습니다. ${data.days_requested}일 (${data.hours_requested}시간)`
+          : `연차 신청 완료! ${data.days_requested}일 (${data.hours_requested}시간)`
+      );
       setShowForm(false);
       setFormStartDate(''); setFormEndDate(''); setFormReason(''); setFormLeaveType('연차');
       setFormApprovers([]); setApproverModified(false);
@@ -653,7 +657,9 @@ export default function LeavePage() {
 
                   {/* 결재자 목록 */}
                   {formApprovers.length === 0 ? (
-                    <p style={{ fontSize: '0.82rem', color: '#adb5bd', marginBottom: '0.5rem' }}>결재자 없음 (즉시 처리)</p>
+                    <p style={{ fontSize: '0.82rem', color: '#198754', marginBottom: '0.5rem' }}>
+                      결재자 없음. 신청하면 선택한 날짜가 바로 반영됩니다.
+                    </p>
                   ) : (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
                       {formApprovers.map((a, idx) => (
@@ -704,7 +710,7 @@ export default function LeavePage() {
 
                 <div className="tw-flex tw-gap-2">
                   <Button type="submit" disabled={submitting || !canSubmit}>
-                    {submitting ? '신청 중...' : '신청'}
+                    {submitting ? '신청 중...' : formApprovers.length === 0 ? '바로 반영' : '신청'}
                   </Button>
                   <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>닫기</Button>
                 </div>
