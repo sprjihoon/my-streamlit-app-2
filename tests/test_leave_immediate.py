@@ -4,11 +4,16 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 
+import pytest
+from fastapi import HTTPException
+
 from backend.app.api.leave import (
     LeaveRequestCreate,
     bot_apply_leave,
+    confirm_leave_on_calendar,
     create_leave_request,
     ensure_leave_tables,
+    get_leave_calendar,
     get_leave_summary_data,
 )
 
@@ -151,3 +156,51 @@ def test_clearing_approvers_records_the_date_immediately(isolated_runtime, monke
     summary = get_leave_summary_data(ids["staff_id"])
     assert summary["used_hours"] == 7
     assert summary["pending_hours"] == 3.5
+
+
+def test_existing_pending_request_stays_pending_until_admin_confirms(isolated_runtime):
+    ids = _seed(isolated_runtime["db"])
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        cur = con.execute(
+            """INSERT INTO leave_requests
+               (user_id, leave_type, start_date, end_date, hours_requested, reason, status)
+               VALUES (?, '반차(오후)', '2026-10-27', '2026-10-27', 3.5, '기존', 'pending')""",
+            (ids["staff_id"],),
+        )
+        request_id = cur.lastrowid
+        con.execute(
+            """INSERT INTO leave_approvals (request_id, approver_id, step, status)
+               VALUES (?, ?, 1, 'waiting')""",
+            (request_id, ids["boss_id"]),
+        )
+        con.execute("UPDATE users SET is_admin=1 WHERE user_id=?", (ids["boss_id"],))
+        con.execute("INSERT INTO sessions (token, user_id) VALUES ('tok-admin', ?)", (ids["boss_id"],))
+        con.commit()
+
+    ensure_leave_tables()
+    status, _approvals = _status(isolated_runtime["db"], request_id)
+    assert status == "pending"
+
+    calendar = asyncio.run(get_leave_calendar("tok-admin", 2026, 10))
+    day = calendar["days"]["2026-10-27"]
+    assert calendar["is_admin"] is True
+    assert day[0]["request_id"] == request_id
+    assert day[0]["status"] == "pending"
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(confirm_leave_on_calendar(request_id, "tok-staff"))
+    assert denied.value.status_code == 403
+
+    result = asyncio.run(confirm_leave_on_calendar(request_id, "tok-admin"))
+    assert result["status"] == "approved"
+    status, _approvals = _status(isolated_runtime["db"], request_id)
+    assert status == "approved"
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        approval_status = con.execute(
+            "SELECT status, comment FROM leave_approvals WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+    assert approval_status == ("skipped", "관리자 달력 확정")
+    summary = get_leave_summary_data(ids["staff_id"])
+    assert summary["used_hours"] == 3.5
+    assert summary["pending_hours"] == 0

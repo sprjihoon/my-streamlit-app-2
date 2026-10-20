@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/select';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface CalendarLeaver {
+  request_id: number;
   nickname: string;
   department: string;
   position: string;
@@ -19,6 +20,7 @@ interface CalendarLeaver {
 interface CalendarData {
   year: number;
   month: number;
+  is_admin?: boolean;
   days: Record<string, CalendarLeaver[]>;
   holidays: Record<string, string>;
 }
@@ -29,8 +31,16 @@ const DEPT_COLORS: Record<string, string> = {
   '인사': '#198754',
 };
 
-function LeaveCalendar({ year, month, calendarData }: { year: number; month: number; calendarData: CalendarData | null }) {
-  const [tooltip, setTooltip] = useState<{ date: string; x: number; y: number } | null>(null);
+function LeaveCalendar({
+  year, month, calendarData, isAdmin, confirmingId, onConfirm,
+}: {
+  year: number;
+  month: number;
+  calendarData: CalendarData | null;
+  isAdmin: boolean;
+  confirmingId: number | null;
+  onConfirm: (requestId: number) => void;
+}) {
 
   if (!calendarData) return <div style={{ padding: '2rem', textAlign: 'center', color: '#6c757d' }}>달력 데이터를 불러오는 중...</div>;
 
@@ -95,10 +105,13 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
             const isToday = isCurrentMonth && day === today.getDate();
             const isWeekend = col === 0 || col === 6;
 
+            const pendingLeavers = leavers.filter((leaver) => leaver.status === 'pending');
+            const otherLeavers = leavers.filter((leaver) => leaver.status !== 'pending');
+            const visibleOthers = otherLeavers.slice(0, 3);
+            const hiddenCount = otherLeavers.length - visibleOthers.length;
+
             return (
               <div key={idx}
-                onMouseEnter={leavers.length > 0 ? (e) => setTooltip({ date: dateStr, x: e.clientX, y: e.clientY }) : undefined}
-                onMouseLeave={() => setTooltip(null)}
                 style={{
                   minHeight: '90px',
                   padding: '0.4rem',
@@ -106,7 +119,6 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
                   borderBottom: idx < cells.length - 7 ? '1px solid #dee2e6' : 'none',
                   backgroundColor: !day ? '#fafafa' : holidayName ? '#fff9e6' : isWeekend ? '#fafafa' : 'white',
                   position: 'relative',
-                  cursor: leavers.length > 0 ? 'pointer' : 'default',
                 }}>
                 {day && (
                   <>
@@ -140,31 +152,80 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
                       </div>
                     )}
 
-                    {leavers.slice(0, 3).map((leaver, i) => {
+                    {pendingLeavers.map((leaver) => {
+                      const isHalf = leaver.leave_type.includes('반차');
+                      const label = `${leaver.nickname}${isHalf ? '(반)' : ''}`;
+                      if (!isAdmin) {
+                        return (
+                          <div key={leaver.request_id} style={{
+                            fontSize: '0.68rem',
+                            padding: '1px 5px',
+                            marginBottom: '2px',
+                            borderRadius: '3px',
+                            backgroundColor: '#f8f9fa',
+                            color: '#6c757d',
+                            borderLeft: '3px dashed #adb5bd',
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}>
+                            {label}?
+                          </div>
+                        );
+                      }
+                      return (
+                        <button
+                          key={leaver.request_id}
+                          type="button"
+                          disabled={confirmingId === leaver.request_id}
+                          onClick={() => onConfirm(leaver.request_id)}
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            fontSize: '0.68rem',
+                            padding: '2px 5px',
+                            marginBottom: '2px',
+                            borderRadius: '3px',
+                            backgroundColor: '#fff3e0',
+                            color: '#9a3412',
+                            border: '1px solid #fd7e14',
+                            fontWeight: 600,
+                            cursor: confirmingId === leaver.request_id ? 'wait' : 'pointer',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {confirmingId === leaver.request_id ? '확정 중' : `${label} 확정`}
+                        </button>
+                      );
+                    })}
+                    {visibleOthers.map((leaver, i) => {
                       const color = DEPT_COLORS[leaver.department] || '#fd7e14';
                       const isHalf = leaver.leave_type.includes('반차');
-                      const isPending = leaver.status === 'pending';
                       return (
-                        <div key={i} style={{
+                        <div key={`${leaver.request_id}-${i}`} style={{
                           fontSize: '0.68rem',
                           padding: '1px 5px',
                           marginBottom: '2px',
                           borderRadius: '3px',
-                          backgroundColor: isPending ? '#f8f9fa' : color + '20',
-                          color: isPending ? '#6c757d' : color,
-                          borderLeft: isPending ? '3px dashed #adb5bd' : `3px solid ${color}`,
+                          backgroundColor: color + '20',
+                          color,
+                          borderLeft: `3px solid ${color}`,
                           fontWeight: 500,
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           opacity: isHalf ? 0.7 : 1,
                         }}>
-                          {leaver.nickname}{isHalf ? '(반)' : ''}{isPending ? '?' : ''}
+                          {leaver.nickname}{isHalf ? '(반)' : ''}
                         </div>
                       );
                     })}
-                    {leavers.length > 3 && (
-                      <div style={{ fontSize: '0.65rem', color: '#6c757d' }}>+{leavers.length - 3}명 더</div>
+                    {hiddenCount > 0 && (
+                      <div style={{ fontSize: '0.65rem', color: '#6c757d' }}>+{hiddenCount}명 더</div>
                     )}
                   </>
                 )}
@@ -174,37 +235,6 @@ function LeaveCalendar({ year, month, calendarData }: { year: number; month: num
         </div>
       </div>
 
-      {/* 툴팁 */}
-      {tooltip && calendarData.days[tooltip.date] && (
-        <div style={{
-          position: 'fixed', top: tooltip.y + 12, left: Math.min(tooltip.x, window.innerWidth - 220),
-          backgroundColor: 'white', border: '1px solid #dee2e6', borderRadius: '8px',
-          padding: '0.75rem', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          zIndex: 1000, minWidth: '200px', maxWidth: '280px',
-          pointerEvents: 'none',
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: '0.5rem', fontSize: '0.875rem' }}>
-            {tooltip.date} 휴가자 {calendarData.days[tooltip.date].length}명
-          </div>
-          {calendarData.days[tooltip.date].map((l, i) => (
-            <div key={i} style={{ fontSize: '0.8rem', padding: '3px 0', borderBottom: i < calendarData.days[tooltip.date].length - 1 ? '1px solid #f0f0f0' : 'none' }}>
-              <span style={{ fontWeight: 500 }}>{l.nickname}</span>
-              <span style={{ color: '#6c757d', marginLeft: '0.5rem' }}>{l.department}</span>
-              <span style={{
-                marginLeft: '0.5rem', fontSize: '0.7rem', padding: '1px 5px',
-                backgroundColor: (DEPT_COLORS[l.department] || '#fd7e14') + '20',
-                color: DEPT_COLORS[l.department] || '#fd7e14',
-                borderRadius: '3px',
-              }}>
-                {l.leave_type}
-              </span>
-              {l.status === 'pending' && (
-                <span style={{ marginLeft: '0.4rem', fontSize: '0.65rem', color: '#fd7e14', backgroundColor: '#fff3e0', padding: '1px 4px', borderRadius: '3px' }}>결재중</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -214,6 +244,9 @@ export default function LeaveCalendarPage() {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [calendarData, setCalendarData] = useState<CalendarData | null>(null);
   const [token, setToken] = useState('');
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [notice, setNotice] = useState('');
+  const [noticeError, setNoticeError] = useState(false);
 
   useEffect(() => {
     const t = localStorage.getItem('token') || '';
@@ -232,6 +265,24 @@ export default function LeaveCalendarPage() {
     if (token) fetchCalendarData();
   }, [token, fetchCalendarData]);
 
+  async function confirmRequest(requestId: number) {
+    setNotice('');
+    setNoticeError(false);
+    setConfirmingId(requestId);
+    try {
+      const res = await fetch(`${API_URL}/leave/calendar/${requestId}/confirm?token=${token}`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || '확정 실패');
+      setNotice(data.message || '연차 신청을 확정했습니다.');
+      await fetchCalendarData();
+    } catch (err) {
+      setNoticeError(true);
+      setNotice(err instanceof Error ? err.message : '확정 실패');
+    } finally {
+      setConfirmingId(null);
+    }
+  }
+
   const card: React.CSSProperties = {
     backgroundColor: 'white', borderRadius: '8px', padding: '1.5rem',
     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
@@ -239,7 +290,8 @@ export default function LeaveCalendarPage() {
 
   return (
     <div>
-      <PageHeader title="연차 달력" subtitle="승인된 연차를 달력으로 확인합니다." />
+      <PageHeader title="연차 달력" subtitle="결재중 이름은 달력 칸에서 바로 확정할 수 있습니다." />
+      {notice && <div style={{ marginBottom: '0.75rem', color: noticeError ? '#dc3545' : '#198754' }}>{notice}</div>}
 
       <div style={card}>
         {/* 헤더: 월 이동 */}
@@ -260,7 +312,14 @@ export default function LeaveCalendarPage() {
           </div>
         </div>
 
-        <LeaveCalendar year={year} month={month} calendarData={calendarData} />
+        <LeaveCalendar
+          year={year}
+          month={month}
+          calendarData={calendarData}
+          isAdmin={!!calendarData?.is_admin}
+          confirmingId={confirmingId}
+          onConfirm={confirmRequest}
+        />
 
         {/* 이번달 휴가자 요약 */}
         {calendarData && Object.keys(calendarData.days).length > 0 && (
@@ -268,29 +327,33 @@ export default function LeaveCalendarPage() {
             <h5 style={{ margin: '0 0 0.75rem 0', color: '#495057' }}>{month}월 연차 신청자</h5>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
               {(() => {
-                const personMap: Record<string, { days: string[]; dept: string; type: string; status: string }> = {};
+                const personMap: Record<number, { name: string; days: string[]; dept: string; status: string }> = {};
                 Object.entries(calendarData.days).forEach(([date, leavers]) => {
                   leavers.forEach(l => {
-                    if (!personMap[l.nickname]) personMap[l.nickname] = { days: [], dept: l.department, type: l.leave_type, status: l.status };
-                    if (!personMap[l.nickname].days.includes(date)) personMap[l.nickname].days.push(date);
-                    // approved가 하나라도 있으면 approved로
-                    if (l.status === 'approved') personMap[l.nickname].status = 'approved';
+                    if (!personMap[l.request_id]) personMap[l.request_id] = { name: l.nickname, days: [], dept: l.department, status: l.status };
+                    if (!personMap[l.request_id].days.includes(date)) personMap[l.request_id].days.push(date);
                   });
                 });
-                return Object.entries(personMap).map(([name, info]) => {
+                return Object.entries(personMap).map(([requestId, info]) => {
                   const color = DEPT_COLORS[info.dept] || '#fd7e14';
                   const isPending = info.status === 'pending';
                   return (
-                    <div key={name} style={{
+                    <div key={requestId} style={{
                       padding: '0.4rem 0.75rem', borderRadius: '6px',
                       backgroundColor: color + '15', border: `1px solid ${isPending ? '#adb5bd' : color}40`,
                       fontSize: '0.8rem',
                       opacity: isPending ? 0.8 : 1,
+                      display: 'flex', alignItems: 'center', gap: '0.35rem',
                     }}>
-                      <span style={{ fontWeight: 600, color }}>{name}</span>
-                      <span style={{ color: '#6c757d', marginLeft: '0.4rem' }}>{info.dept}</span>
-                      <span style={{ color: '#495057', marginLeft: '0.4rem' }}>{info.days.length}일</span>
-                      {isPending && <span style={{ marginLeft: '0.3rem', fontSize: '0.7rem', color: '#fd7e14' }}>결재중</span>}
+                      <span style={{ fontWeight: 600, color }}>{info.name}</span>
+                      <span style={{ color: '#6c757d' }}>{info.dept}</span>
+                      <span style={{ color: '#495057' }}>{info.days.length}일</span>
+                      {isPending && <span style={{ fontSize: '0.7rem', color: '#fd7e14' }}>결재중</span>}
+                      {calendarData.is_admin && isPending && (
+                        <Button type="button" variant="primary" disabled={confirmingId === Number(requestId)} onClick={() => confirmRequest(Number(requestId))}>
+                          {confirmingId === Number(requestId) ? '확정 중' : '확정'}
+                        </Button>
+                      )}
                     </div>
                   );
                 });

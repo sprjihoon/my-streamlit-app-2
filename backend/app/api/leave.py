@@ -1490,8 +1490,14 @@ async def get_leave_calendar(token: str, year: int, month: int):
         last_day = cal.monthrange(year, month)[1]
         month_end = f"{year}-{month:02d}-{last_day:02d}"
 
+        admin_row = con.execute(
+            "SELECT u.is_admin FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,),
+        ).fetchone()
+        is_admin = bool(admin_row and admin_row[0])
+
         rows = con.execute(
-            """SELECT r.start_date, r.end_date, r.leave_type, r.hours_requested,
+            """SELECT r.id, r.start_date, r.end_date, r.leave_type, r.hours_requested,
                       u.nickname, u.department, u.position, r.status
                FROM leave_requests r
                JOIN users u ON r.user_id = u.user_id
@@ -1509,7 +1515,7 @@ async def get_leave_calendar(token: str, year: int, month: int):
 
     # 날짜별로 그룹화
     day_map: dict = {}
-    for start_str, end_str, leave_type, hours, nickname, dept, pos, status in rows:
+    for request_id, start_str, end_str, leave_type, hours, nickname, dept, pos, status in rows:
         start = date.fromisoformat(start_str)
         end = date.fromisoformat(end_str)
         cur = start
@@ -1519,6 +1525,7 @@ async def get_leave_calendar(token: str, year: int, month: int):
                 if day_key not in day_map:
                     day_map[day_key] = []
                 day_map[day_key].append({
+                    "request_id": request_id,
                     "nickname": nickname,
                     "department": dept,
                     "position": pos,
@@ -1531,9 +1538,48 @@ async def get_leave_calendar(token: str, year: int, month: int):
     return {
         "year": year,
         "month": month,
+        "is_admin": is_admin,
         "days": day_map,
         "holidays": {h[0]: h[1] for h in holidays},
     }
+
+
+@router.post("/calendar/{request_id}/confirm")
+async def confirm_leave_on_calendar(request_id: int, token: str):
+    """달력에 보이는 결재중 연차를 관리자가 확정한다."""
+    ensure_leave_tables()
+    now = datetime.now().isoformat()
+
+    with get_connection() as con:
+        session = con.execute(
+            "SELECT u.is_admin FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
+            (token,),
+        ).fetchone()
+        if not session or not session[0]:
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+        row = con.execute(
+            "SELECT status FROM leave_requests WHERE id = ?",
+            (request_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="연차 신청을 찾을 수 없습니다.")
+        if row[0] != "pending":
+            raise HTTPException(status_code=400, detail="결재중인 신청만 확정할 수 있습니다.")
+
+        con.execute(
+            """UPDATE leave_approvals
+               SET status='skipped', comment='관리자 달력 확정', acted_at=?
+               WHERE request_id=? AND status='waiting'""",
+            (now, request_id),
+        )
+        con.execute(
+            "UPDATE leave_requests SET status='approved', updated_at=? WHERE id=? AND status='pending'",
+            (now, request_id),
+        )
+        con.commit()
+
+    return {"success": True, "request_id": request_id, "status": "approved", "message": "연차 신청을 확정했습니다."}
 
 
 # ─────────────────────────────────────

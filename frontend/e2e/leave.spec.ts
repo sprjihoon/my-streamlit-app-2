@@ -37,6 +37,50 @@ test('leave request and cancel stay on the local API', async ({ page }) => {
   expect(calls.filter((call) => call.path.includes('/cancel') && call.method !== 'GET')).toHaveLength(0);
 });
 
+test('admin confirms a pending leave from the calendar cell', async ({ page }) => {
+  await seedSession(page, ADMIN);
+  await installApi(page, ADMIN);
+  await page.route('http://localhost:8000/leave/calendar**', async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'POST') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, message: '연차 신청을 확정했습니다.', status: 'approved' }),
+      });
+      return;
+    }
+    const year = url.searchParams.get('year');
+    const month = String(url.searchParams.get('month') || '1').padStart(2, '0');
+    const day = `${year}-${month}-15`;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        year: Number(year),
+        month: Number(month),
+        is_admin: true,
+        holidays: {},
+        days: {
+          [day]: [{
+            request_id: 42,
+            nickname: '직원',
+            department: '패션팀',
+            position: '',
+            leave_type: '연차',
+            hours: 7,
+            status: 'pending',
+          }],
+        },
+      }),
+    });
+  });
+
+  await page.goto('/leave/calendar');
+  await page.getByRole('button', { name: '직원 확정' }).click();
+  await expect(page.getByText('연차 신청을 확정했습니다.')).toBeVisible();
+});
+
 test('admin leave screen is available to an admin', async ({ page }) => {
   await seedSession(page, ADMIN);
   await installApi(page, ADMIN);
