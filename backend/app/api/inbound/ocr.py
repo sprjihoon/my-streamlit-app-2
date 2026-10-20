@@ -139,9 +139,17 @@ def _normalize_image(raw: bytes) -> tuple:
         raise ValueError(_ERR)
 
 
-async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
+async def _run_ocr(
+    image_bytes: bytes,
+    mime: str,
+    *,
+    schema: Optional[dict] = None,
+    system_prompt: Optional[str] = None,
+    schema_name: str = "janggi_ocr",
+) -> dict:
     """GPT Vision Structured Outputs로 장끼 분석.
 
+    schema와 system_prompt를 생략하면 입고 장끼 판독 기본값을 쓴다.
     성공 시 OCR 결과 dict 반환.
     실패 시 OcrError 발생.
     API 키·Authorization·base64·장끼 전문·개인정보는 절대 로그에 남기지 않는다.
@@ -158,7 +166,7 @@ async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
     request_payload = {
         "model": OCR_MODEL,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": [
                 {
                     "type": "image_url",
@@ -170,9 +178,9 @@ async def _run_ocr(image_bytes: bytes, mime: str) -> dict:
         "response_format": {
             "type": "json_schema",
             "json_schema": {
-                "name": "janggi_ocr",
+                "name": schema_name,
                 "strict": True,
-                "schema": JANGGI_SCHEMA,
+                "schema": schema or JANGGI_SCHEMA,
             },
         },
     }

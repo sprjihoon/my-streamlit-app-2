@@ -12,7 +12,9 @@ backend/app/api/receipt.py - 동대문 장끼/영수증 AI 분석 API
 - 엑셀 다운로드 (거래일/거래처명/품명/옵션/단가/수량/금액 등)
 """
 
+import copy
 import json
+import re
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -24,7 +26,9 @@ from pydantic import BaseModel
 
 from logic.db import get_connection
 from backend.app.api.inbound.ocr import (
+    JANGGI_SCHEMA,
     OcrError,
+    SYSTEM_PROMPT,
     _normalize_image,
     _ocr_error_to_http,
     _run_ocr,
@@ -68,9 +72,15 @@ def ensure_receipt_tables():
                 confidence REAL DEFAULT 1.0,
                 needs_review INTEGER DEFAULT 0,
                 warnings TEXT,
+                address TEXT,
+                business_number TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        existing = {row[1] for row in con.execute("PRAGMA table_info(receipts)")}
+        for column in ("address", "business_number"):
+            if column not in existing:
+                con.execute(f"ALTER TABLE receipts ADD COLUMN {column} TEXT")
         con.execute("""
             CREATE TABLE IF NOT EXISTS receipt_items (
                 id TEXT PRIMARY KEY,
@@ -114,6 +124,64 @@ def get_user_from_token(token: str) -> dict:
 # ─────────────────────────────────────
 # 장끼 판독 (업무봇 OCR 재사용)
 # ─────────────────────────────────────
+
+def _receipt_ocr_schema() -> dict:
+    """입고 장끼 스키마에 주소·사업자등록번호만 더한다. 원본 스키마는 바꾸지 않는다."""
+    schema = copy.deepcopy(JANGGI_SCHEMA)
+    receipt = schema["properties"]["receipt"]
+    receipt["properties"]["address"] = {"type": ["string", "null"]}
+    receipt["properties"]["businessNumber"] = {"type": ["string", "null"]}
+    receipt["required"] = [*receipt["required"], "address", "businessNumber"]
+    return schema
+
+
+RECEIPT_OCR_SCHEMA = _receipt_ocr_schema()
+RECEIPT_OCR_PROMPT = SYSTEM_PROMPT.replace(
+    "반드시 위 JSON Schema를 정확히 따른다.",
+    "8. 판매처 주소가 보이면 address에 적는다. 없으면 null이다. 추측하지 않는다.\n"
+    "9. 사업자등록번호가 보이면 businessNumber에 적는다. 숫자 10자리면 000-00-00000으로 적는다. "
+    "없거나 불명확하면 null이다. 추측하지 않는다.\n"
+    "반드시 위 JSON Schema를 정확히 따른다.",
+    1,
+)
+
+
+def _clean_optional_text(value) -> Optional[str]:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    return text or None
+
+
+def _normalize_business_number(value, receipt: dict) -> Optional[str]:
+    """10자리 사업자등록번호는 000-00-00000으로 맞춘다. 다른 값은 확인 필요로 남긴다."""
+    text = _clean_optional_text(value)
+    if not text:
+        return None
+    digits = re.sub(r"\D", "", text)
+    if len(digits) == 10:
+        return f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
+    receipt["needsReview"] = True
+    receipt.setdefault("warnings", [])
+    if "사업자등록번호 형식 확인" not in receipt["warnings"]:
+        receipt["warnings"].append("사업자등록번호 형식 확인")
+    return text
+
+
+def _receipt_column_names(con) -> list[str]:
+    names = [row[1] for row in con.execute("PRAGMA table_info(receipts)")]
+    return names + ["processor_name"]
+
+
+def _as_receipt(row, names: list[str]) -> dict:
+    receipt = dict(zip(names, row))
+    receipt["is_handwritten"] = bool(receipt.get("is_handwritten"))
+    receipt["needs_review"] = bool(receipt.get("needs_review"))
+    try:
+        receipt["warnings"] = json.loads(receipt.get("warnings") or "[]")
+    except Exception:
+        receipt["warnings"] = []
+    return receipt
 
 def _validate_amounts(receipt: dict, items: list) -> None:
     """단가×수량=금액 검산, 품목합계=영수증합계 검산"""
@@ -163,12 +231,20 @@ async def _analyze_janggi(image_bytes: bytes) -> tuple[bytes, dict]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        parsed = await _run_ocr(norm_bytes, mime)
+        parsed = await _run_ocr(
+            norm_bytes,
+            mime,
+            schema=RECEIPT_OCR_SCHEMA,
+            system_prompt=RECEIPT_OCR_PROMPT,
+            schema_name="receipt_ocr",
+        )
     except OcrError as exc:
         raise _ocr_error_to_http(exc) from exc
 
     receipt = parsed.setdefault("receipt", {})
     items = parsed.get("items") or []
+    receipt["address"] = _clean_optional_text(receipt.get("address"))
+    receipt["businessNumber"] = _normalize_business_number(receipt.get("businessNumber"), receipt)
     receipt.setdefault("receiptType", "장끼")
     receipt.setdefault(
         "imageQuality",
@@ -203,6 +279,8 @@ class ReceiptUpdate(BaseModel):
     total_amount: Optional[float] = None
     bank_info: Optional[str] = None
     memo: Optional[str] = None
+    address: Optional[str] = None
+    business_number: Optional[str] = None
 
 
 # ─────────────────────────────────────
@@ -236,8 +314,8 @@ async def upload_and_analyze(
             (id, user_id, image_filename, store_name, receipt_type, receipt_no,
              order_date, phone, total_amount, paid_amount, balance_amount,
              bank_info, memo, raw_text, image_quality, is_handwritten,
-             confidence, needs_review, warnings)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             confidence, needs_review, warnings, address, business_number)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             receipt_id,
             user["user_id"],
@@ -258,6 +336,8 @@ async def upload_and_analyze(
             receipt_data.get("confidence", 1.0),
             1 if receipt_data.get("needsReview") else 0,
             json.dumps(receipt_data.get("warnings", []), ensure_ascii=False),
+            receipt_data.get("address"),
+            receipt_data.get("businessNumber"),
         ))
 
         for item in items_data:
@@ -329,24 +409,9 @@ def list_receipts(token: str, year: Optional[int] = None, month: Optional[int] =
         query += " ORDER BY r.created_at DESC"
 
         rows = con.execute(query, params).fetchall()
-        cols = [
-            "id", "user_id", "image_filename", "store_name", "receipt_type", "receipt_no",
-            "order_date", "phone", "total_amount", "paid_amount", "balance_amount",
-            "bank_info", "memo", "raw_text", "image_quality", "is_handwritten",
-            "confidence", "needs_review", "warnings", "created_at", "processor_name"
-        ]
+        cols = _receipt_column_names(con)
 
-    result = []
-    for row in rows:
-        d = dict(zip(cols, row))
-        d["is_handwritten"] = bool(d["is_handwritten"])
-        d["needs_review"] = bool(d["needs_review"])
-        try:
-            d["warnings"] = json.loads(d["warnings"] or "[]")
-        except Exception:
-            d["warnings"] = []
-        result.append(d)
-    return result
+    return [_as_receipt(row, cols) for row in rows]
 
 
 @router.get("/{receipt_id}")
@@ -374,19 +439,7 @@ def get_receipt(receipt_id: str, token: str):
         if not row:
             raise HTTPException(status_code=404, detail="영수증을 찾을 수 없습니다.")
 
-        cols = [
-            "id", "user_id", "image_filename", "store_name", "receipt_type", "receipt_no",
-            "order_date", "phone", "total_amount", "paid_amount", "balance_amount",
-            "bank_info", "memo", "raw_text", "image_quality", "is_handwritten",
-            "confidence", "needs_review", "warnings", "created_at", "processor_name"
-        ]
-        receipt = dict(zip(cols, row))
-        receipt["is_handwritten"] = bool(receipt["is_handwritten"])
-        receipt["needs_review"] = bool(receipt["needs_review"])
-        try:
-            receipt["warnings"] = json.loads(receipt["warnings"] or "[]")
-        except Exception:
-            receipt["warnings"] = []
+        receipt = _as_receipt(row, _receipt_column_names(con))
 
         item_rows = con.execute(
             "SELECT * FROM receipt_items WHERE receipt_id = ? ORDER BY line_no",
@@ -498,6 +551,78 @@ def update_receipt_item(item_id: str, token: str, data: ReceiptItemUpdate):
     return {"success": True}
 
 
+class ReceiptDeleteRequest(BaseModel):
+    ids: List[str]
+
+
+def _delete_receipts(con, user: dict, ids: list[str]) -> list[tuple]:
+    """권한 있는 영수증만 지운다. 반환은 (id, store_name)."""
+    unique = list(dict.fromkeys(i for i in ids if i))
+    if not unique:
+        return []
+    placeholders = ",".join("?" * len(unique))
+    if user["is_admin"]:
+        rows = con.execute(
+            f"SELECT id, image_filename, store_name FROM receipts WHERE id IN ({placeholders})",
+            unique,
+        ).fetchall()
+    else:
+        rows = con.execute(
+            f"""SELECT id, image_filename, store_name FROM receipts
+                WHERE user_id = ? AND id IN ({placeholders})""",
+            [user["user_id"], *unique],
+        ).fetchall()
+    found_ids = [row[0] for row in rows]
+    if not found_ids:
+        return []
+    for _, filename, _store in rows:
+        if not filename:
+            continue
+        img_path = _receipt_dir() / filename
+        try:
+            if img_path.is_file():
+                img_path.unlink()
+        except OSError:
+            pass
+    found_placeholders = ",".join("?" * len(found_ids))
+    con.execute(
+        f"DELETE FROM receipt_items WHERE receipt_id IN ({found_placeholders})",
+        found_ids,
+    )
+    con.execute(
+        f"DELETE FROM receipts WHERE id IN ({found_placeholders})",
+        found_ids,
+    )
+    return [(row[0], row[2]) for row in rows]
+
+
+@router.post("/delete")
+def delete_selected_receipts(token: str, data: ReceiptDeleteRequest):
+    """체크한 영수증만 삭제한다. 관리자는 고른 영수증을 누구 것이든 지운다."""
+    ensure_receipt_tables()
+    user = get_user_from_token(token)
+    if not data.ids:
+        raise HTTPException(status_code=400, detail="삭제할 영수증을 선택해 주세요.")
+    if len(data.ids) > 500:
+        raise HTTPException(status_code=400, detail="한 번에 500건까지만 삭제할 수 있습니다.")
+
+    with get_connection() as con:
+        removed = _delete_receipts(con, user, data.ids)
+        con.commit()
+    if not removed:
+        raise HTTPException(status_code=404, detail="삭제할 수 있는 영수증이 없습니다.")
+
+    add_log(
+        action_type="영수증 선택 삭제",
+        target_type="receipt",
+        target_id=removed[0][0],
+        target_name=removed[0][1] or removed[0][0],
+        user_nickname=user["nickname"],
+        details=f"영수증 {len(removed)}건 삭제",
+    )
+    return {"success": True, "deleted": len(removed)}
+
+
 @router.delete("/{receipt_id}")
 def delete_receipt(receipt_id: str, token: str):
     """영수증 삭제"""
@@ -505,21 +630,11 @@ def delete_receipt(receipt_id: str, token: str):
     user = get_user_from_token(token)
 
     with get_connection() as con:
-        row = con.execute(
-            "SELECT image_filename, store_name FROM receipts WHERE id = ? AND user_id = ?",
-            (receipt_id, user["user_id"])
-        ).fetchone()
-        if not row:
+        removed = _delete_receipts(con, user, [receipt_id])
+        if not removed:
             raise HTTPException(status_code=404, detail="영수증을 찾을 수 없습니다.")
-
-        if row[0]:
-            img_path = _receipt_dir() / row[0]
-            if img_path.exists():
-                img_path.unlink()
-
-        con.execute("DELETE FROM receipt_items WHERE receipt_id = ?", (receipt_id,))
-        con.execute("DELETE FROM receipts WHERE id = ?", (receipt_id,))
         con.commit()
+    row = removed[0]
 
     add_log(
         action_type="영수증 삭제",
@@ -549,7 +664,8 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
                 SELECT r.id, r.store_name, r.receipt_type, r.receipt_no,
                        r.order_date, r.phone, r.total_amount, r.bank_info,
                        r.is_handwritten, r.needs_review, r.created_at,
-                       u.nickname AS processor_name
+                       u.nickname AS processor_name,
+                       r.address, r.business_number
                 FROM receipts r
                 LEFT JOIN users u ON r.user_id = u.user_id
             """
@@ -598,7 +714,8 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
 
         headers = ["처리일시", "처리자", "거래일", "거래처명", "영수증번호", "종류",
                    "품명", "색상", "사이즈", "옵션", "단가", "수량", "금액",
-                   "합계", "연락처", "계좌정보", "수기여부", "확인필요"]
+                   "합계", "연락처", "계좌정보", "수기여부", "확인필요",
+                   "주소", "사업자등록번호"]
         header_fill = PatternFill("solid", fgColor="1F4E79")
         header_font = Font(color="FFFFFF", bold=True, size=10)
         for ci, h in enumerate(headers, 1):
@@ -615,7 +732,7 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
             r = receipt_map[rid]
             (r_id, store, r_type, r_no, order_date, phone,
              total_amount, bank_info, is_hw, needs_review,
-             created_at, processor) = r
+             created_at, processor, address, business_number) = r
 
             items = items_by_receipt.get(rid, [])
             if not items:
@@ -626,6 +743,7 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
                     "", "", "", "", None, None, None,
                     total_amount, phone or "", bank_info or "",
                     "O" if is_hw else "", "O" if needs_review else "",
+                    address or "", business_number or "",
                 ]
                 ws.append(row_data)
                 if needs_review:
@@ -651,6 +769,7 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
                         total_amount, phone or "", bank_info or "",
                         "O" if is_hw else "",
                         "O" if it_review else ("△" if warnings else ""),
+                        address or "", business_number or "",
                     ]
                     ws.append(row_data)
                     if it_review:
@@ -662,7 +781,7 @@ def download_bulk_excel(token: str, year: Optional[int] = None, month: Optional[
                     row_idx += 1
 
         # 컬럼 너비 설정
-        col_widths = [18, 10, 12, 20, 14, 10, 28, 10, 8, 18, 10, 8, 12, 12, 15, 30, 8, 8]
+        col_widths = [18, 10, 12, 20, 14, 10, 28, 10, 8, 18, 10, 8, 12, 12, 15, 30, 8, 8, 36, 16]
         for ci, w in enumerate(col_widths, 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
 
@@ -709,7 +828,8 @@ def download_excel(receipt_id: str, token: str):
 
         # 헤더
         headers = ["거래일", "거래처명", "영수증번호", "품명", "색상", "사이즈", "옵션",
-                   "단가", "수량", "금액", "합계", "연락처", "계좌정보", "확인필요", "비고"]
+                   "단가", "수량", "금액", "합계", "연락처", "계좌정보", "확인필요", "비고",
+                   "주소", "사업자등록번호"]
         header_fill = PatternFill("solid", fgColor="366092")
         header_font = Font(color="FFFFFF", bold=True)
         for ci, h in enumerate(headers, 1):
@@ -737,6 +857,8 @@ def download_excel(receipt_id: str, token: str):
                 receipt_full.get("bank_info", ""),
                 "O" if item.get("needs_review") else "",
                 ", ".join(item.get("warnings", [])),
+                receipt_full.get("address") or "",
+                receipt_full.get("business_number") or "",
             ]
             ws.append(row_data)
             if item.get("needs_review"):
@@ -744,7 +866,7 @@ def download_excel(receipt_id: str, token: str):
                     ws.cell(row=ws.max_row, column=ci).fill = review_fill
 
         # 컬럼 너비
-        col_widths = [12, 20, 15, 28, 10, 8, 18, 10, 8, 12, 12, 15, 30, 10, 30]
+        col_widths = [12, 20, 15, 28, 10, 8, 18, 10, 8, 12, 12, 15, 30, 10, 30, 36, 16]
         for ci, w in enumerate(col_widths, 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
 

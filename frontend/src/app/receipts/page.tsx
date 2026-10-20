@@ -37,6 +37,8 @@ interface Receipt {
   receipt_no: string | null;
   order_date: string | null;
   phone: string | null;
+  address: string | null;
+  business_number: string | null;
   total_amount: number | null;
   bank_info: string | null;
   memo: string | null;
@@ -191,13 +193,13 @@ function ReceiptDetail({
   receipt,
   token,
   onClose,
-  onDeleted,
+  onDelete,
   apiUrl,
 }: {
   receipt: Receipt;
   token: string;
   onClose: () => void;
-  onDeleted: () => void;
+  onDelete: () => void;
   apiUrl: string;
 }) {
   const [detail, setDetail] = useState<Receipt>(receipt);
@@ -224,12 +226,6 @@ function ReceiptDetail({
     }
   }
 
-  async function handleDelete() {
-    if (!confirm('이 영수증을 삭제하시겠습니까?')) return;
-    await fetch(`${apiUrl}/receipt/${receipt.id}?token=${token}`, { method: 'DELETE' });
-    onDeleted();
-  }
-
   const totalCalc = (detail.items || []).reduce((s, i) => s + (i.amount || 0), 0);
   const hasReviewItems = (detail.items || []).some(i => i.needs_review);
 
@@ -254,7 +250,11 @@ function ReceiptDetail({
             </h3>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#6c757d' }}>
             {detail.order_date || '-'} {detail.phone ? `· ${detail.phone}` : ''}
+            {detail.business_number ? ` · ${detail.business_number}` : ''}
           </p>
+          {detail.address && (
+            <p style={{ margin: '0.2rem 0 0', fontSize: '0.85rem', color: '#495057' }}>{detail.address}</p>
+          )}
           <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: '#adb5bd' }}>
             처리자: <strong style={{ color: '#495057' }}>{detail.processor_name || '-'}</strong>
             &nbsp;·&nbsp;처리시간: <strong style={{ color: '#495057' }}>{fmtDatetime(detail.created_at)}</strong>
@@ -268,7 +268,7 @@ function ReceiptDetail({
             >
               📥 엑셀
             </a>
-            <button onClick={handleDelete} style={{ padding: '0.4rem 0.9rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>삭제</button>
+            <Button type="button" variant="danger" onClick={onDelete}>삭제</Button>
             <button onClick={onClose} style={{ padding: '0.4rem 0.9rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>닫기</button>
           </div>
         </div>
@@ -305,6 +305,8 @@ function ReceiptDetail({
               {[
                 { label: '영수증 합계', value: fmt(detail.total_amount) },
                 { label: '품목 합계 (계산)', value: fmt(totalCalc), highlight: detail.total_amount != null && Math.abs(totalCalc - detail.total_amount) > 1 },
+                { label: '사업자등록번호', value: detail.business_number || '-' },
+                { label: '주소', value: detail.address || '-' },
                 { label: '계좌 정보', value: detail.bank_info || '-' },
                 { label: '메모', value: detail.memo || '-' },
               ].map(({ label, value, highlight }) => (
@@ -364,6 +366,7 @@ function ReceiptDetail({
 // ─────────────────────────────────────
 export default function ReceiptsPage() {
   const [token, setToken] = useState('');
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -391,6 +394,45 @@ export default function ReceiptsPage() {
   }, [token, filterYear, filterMonth]);
 
   useEffect(() => { if (token) loadReceipts(); }, [token, loadReceipts]);
+
+  useEffect(() => {
+    setCheckedIds(prev => prev.filter(id => receipts.some(r => r.id === id)));
+  }, [receipts]);
+
+  async function handleDelete(id: string) {
+    if (!confirm('이 영수증을 삭제하시겠습니까?')) return;
+    const res = await fetch(`${API_URL}/receipt/${id}?token=${token}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const detail = typeof data.detail === 'string' ? data.detail : '삭제에 실패했습니다.';
+      setUploadMsg({ text: detail, ok: false });
+      return;
+    }
+    setUploadMsg({ text: '영수증을 삭제했습니다.', ok: true });
+    if (selected?.id === id) setSelected(null);
+    loadReceipts();
+  }
+
+  async function handleDeleteSelected() {
+    if (checkedIds.length === 0) return;
+    if (!confirm(`선택한 영수증 ${checkedIds.length}건을 삭제하시겠습니까?`)) return;
+    const res = await fetch(`${API_URL}/receipt/delete?token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: checkedIds }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const detail = typeof data.detail === 'string' ? data.detail : '삭제에 실패했습니다.';
+      setUploadMsg({ text: detail, ok: false });
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setUploadMsg({ text: `영수증 ${data.deleted ?? checkedIds.length}건을 삭제했습니다.`, ok: true });
+    setCheckedIds([]);
+    if (selected && checkedIds.includes(selected.id)) setSelected(null);
+    loadReceipts();
+  }
 
   async function handleUpload(file: File) {
     if (!token) return;
@@ -448,13 +490,20 @@ export default function ReceiptsPage() {
 
       <FilterBar
         trailing={
-          <a
-            className="btn btn-success"
-            href={`${API_URL}/receipt/bulk-excel?token=${token}&year=${filterYear}${filterMonth ? `&month=${filterMonth}` : ''}`}
-            download
-          >
-            엑셀 다운로드 ({receipts.length}건)
-          </a>
+          <div className="tw-flex tw-gap-2">
+            {checkedIds.length > 0 && (
+              <Button type="button" variant="danger" onClick={handleDeleteSelected}>
+                선택 삭제 ({checkedIds.length})
+              </Button>
+            )}
+            <a
+              className="btn btn-success"
+              href={`${API_URL}/receipt/bulk-excel?token=${token}&year=${filterYear}${filterMonth ? `&month=${filterMonth}` : ''}`}
+              download
+            >
+              엑셀 다운로드 ({receipts.length}건)
+            </a>
+          </div>
         }
       >
         <Field label="연도">
@@ -483,6 +532,16 @@ export default function ReceiptsPage() {
           <table>
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="보이는 영수증 모두 선택"
+                    checked={receipts.length > 0 && checkedIds.length === receipts.length}
+                    onChange={() => {
+                      setCheckedIds(prev => prev.length === receipts.length ? [] : receipts.map(r => r.id));
+                    }}
+                  />
+                </th>
             {['거래처', '종류', '거래일', '금액', '처리자', '처리시간', '수기', '상태', ''].map(h => (
                     <th key={h}>{h}</th>
                   ))}
@@ -491,6 +550,16 @@ export default function ReceiptsPage() {
             <tbody>
               {receipts.map(r => (
                 <tr key={r.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`${r.store_name || '영수증'} 선택`}
+                      checked={checkedIds.includes(r.id)}
+                      onChange={() => {
+                        setCheckedIds(prev => prev.includes(r.id) ? prev.filter(id => id !== r.id) : [...prev, r.id]);
+                      }}
+                    />
+                  </td>
                   <td>
                     {r.store_name || <span style={{ color: '#aaa' }}>미추출</span>}
                   </td>
@@ -510,7 +579,10 @@ export default function ReceiptsPage() {
                     <Badge variant={r.needs_review ? 'warning' : 'success'}>{r.needs_review ? '확인필요' : '정상'}</Badge>
                   </td>
                   <td>
-                    <Button type="button" variant="secondary" onClick={() => setSelected(r)}>상세</Button>
+                    <div className="tw-flex tw-gap-2">
+                      <Button type="button" variant="secondary" onClick={() => setSelected(r)}>상세</Button>
+                      <Button type="button" variant="danger" onClick={() => handleDelete(r.id)}>삭제</Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -526,7 +598,7 @@ export default function ReceiptsPage() {
           token={token}
           apiUrl={API_URL}
           onClose={() => setSelected(null)}
-          onDeleted={() => { setSelected(null); loadReceipts(); }}
+          onDelete={() => handleDelete(selected.id)}
         />
       )}
     </div>
