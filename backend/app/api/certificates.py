@@ -1,6 +1,8 @@
 """
 backend/app/api/certificates.py - 재직/경력 증명서 정보 API
 """
+import re
+
 from fastapi import APIRouter, HTTPException
 from datetime import date, datetime
 
@@ -30,6 +32,12 @@ def _get_user_from_token(token: str) -> dict:
     }
 
 
+def certificate_company_name(name: str) -> str:
+    """증명서에는 상호 뒤의 (스프링풀필먼트)를 붙이지 않는다."""
+    cleaned = re.sub(r"\s*[（(]\s*스프링풀필먼트\s*[）)]", "", name or "")
+    return cleaned.strip()
+
+
 def _get_company() -> dict:
     """company_settings 에서 회사 정보 조회"""
     with get_connection() as con:
@@ -39,7 +47,7 @@ def _get_company() -> dict:
         ).fetchone()
     if row:
         return {
-            "company_name": row[0] or "",
+            "company_name": certificate_company_name(row[0] or ""),
             "business_number": row[1] or "",
             "address": row[2] or "",
             "representative": row[3] or "",
