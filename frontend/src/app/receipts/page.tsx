@@ -421,13 +421,13 @@ export default function ReceiptsPage() {
     <div>
       <PageHeader
         title="영수증 처리"
-        subtitle="장끼 / 영수증 사진을 업로드하면 GPT-4o Vision이 자동으로 분석합니다."
+        subtitle="장끼 / 영수증 사진을 업로드하면 업무봇과 같은 장끼 판독으로 품목을 정리합니다."
       />
 
       <Card>
         {uploading ? (
           <div className="tw-py-4 tw-text-center">
-            <p className="tw-m-0 tw-font-semibold">GPT-4o Vision 분석 중...</p>
+            <p className="tw-m-0 tw-font-semibold">장끼 판독 중...</p>
             <p className="caption tw-mt-1">잠시만 기다려주세요 (10~20초)</p>
           </div>
         ) : (

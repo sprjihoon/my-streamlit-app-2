@@ -1,20 +1,18 @@
 """
 backend/app/api/receipt.py - 동대문 장끼/영수증 AI 분석 API
 ──────────────────────────────────────────────────────────
-GPT-4o Vision으로 장끼/영수증 이미지를 분석하여 구조화된 데이터 추출.
-ddm/compfirm-mvp 프로젝트의 aiParse.service.ts 로직 Python 포팅.
+업로드 판독은 업무봇 장끼 OCR(inbound.ocr)과 같은 프롬프트·스키마·
+이미지 정규화를 사용한다. 금액 검산과 영수증 저장·엑셀은 이 모듈이 담당한다.
 
 기능:
-- 이미지 업로드 → GPT-4o Vision OCR
+- 이미지 업로드 → 업무봇과 같은 장끼 판독
 - 거래처명, 날짜, 품목(품명/옵션/단가/수량/금액) 자동 추출
 - 금액 검산 (단가×수량=금액, 품목합계=영수증합계)
 - 확인 필요 항목 자동 표시
 - 엑셀 다운로드 (거래일/거래처명/품명/옵션/단가/수량/금액 등)
 """
 
-import base64
 import json
-import os
 import uuid
 from datetime import datetime, date
 from pathlib import Path
@@ -25,13 +23,22 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from logic.db import get_connection
+from backend.app.api.inbound.ocr import (
+    OcrError,
+    _normalize_image,
+    _ocr_error_to_http,
+    _run_ocr,
+)
 from backend.app.api.logs import add_log
 from backend.app.config import settings
 
 router = APIRouter(prefix="/receipt", tags=["receipt"])
 
-UPLOAD_DIR = Path(settings.UPLOAD_DIR) / "receipts"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+def _receipt_dir() -> Path:
+    path = Path(settings.UPLOAD_DIR) / "receipts"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 # ─────────────────────────────────────
@@ -91,10 +98,13 @@ def ensure_receipt_tables():
 # ─────────────────────────────────────
 
 def get_user_from_token(token: str) -> dict:
+    """로그인 세션 토큰으로 사용자를 확인한다. 다른 API와 같은 sessions 테이블을 본다."""
     with get_connection() as con:
         row = con.execute(
-            "SELECT user_id, nickname, is_admin FROM users WHERE session_token = ?",
-            (token,)
+            """SELECT u.user_id, u.nickname, u.is_admin
+               FROM sessions s JOIN users u ON s.user_id = u.user_id
+               WHERE s.token = ?""",
+            (token,),
         ).fetchone()
     if not row:
         raise HTTPException(status_code=401, detail="인증이 필요합니다.")
@@ -102,82 +112,8 @@ def get_user_from_token(token: str) -> dict:
 
 
 # ─────────────────────────────────────
-# GPT-4o Vision OCR
+# 장끼 판독 (업무봇 OCR 재사용)
 # ─────────────────────────────────────
-
-SYSTEM_PROMPT = """너는 동대문 장끼/영수증을 엑셀로 정리하는 검수 보조 AI다.
-이미지 안의 내용을 단순히 OCR하지 말고,
-거래처 정보와 품목 행을 분리해서 구조화된 JSON으로 반환해야 한다.
-
-반드시 아래 JSON 형식만 반환하고, 다른 설명 문장은 반환하지 않는다.
-
-{
-  "receipt": {
-    "storeName": "거래처명 또는 null",
-    "receiptType": "영수증 | 장끼 | 거래명세서",
-    "receiptNo": "영수증번호 또는 null",
-    "orderDate": "YYYY-MM-DD 형식 또는 null",
-    "phone": "연락처 또는 null",
-    "totalAmount": 숫자 또는 null,
-    "paidAmount": 숫자 또는 null,
-    "balanceAmount": 숫자 또는 null,
-    "bankInfo": "계좌정보 또는 null",
-    "memo": "안내문/메모 또는 null",
-    "imageQuality": "good | blurry | dark | tilted | handwritten | mixed",
-    "isHandwritten": true | false,
-    "confidence": 0.0~1.0,
-    "needsReview": true | false,
-    "warnings": ["경고 메시지"]
-  },
-  "items": [
-    {
-      "lineNo": 1,
-      "rawText": "원본 텍스트",
-      "itemName": "품명 (색상/사이즈/옵션 제외)",
-      "color": "색상 또는 null",
-      "size": "사이즈 또는 null",
-      "optionText": "기타 옵션 또는 null",
-      "unitPrice": 단가 숫자 또는 null,
-      "quantity": 수량 숫자 또는 null,
-      "amount": 금액 숫자 또는 null,
-      "confidence": 0.0~1.0,
-      "needsReview": true | false,
-      "warnings": ["경고 메시지"]
-    }
-  ],
-  "rawText": "전체 OCR 텍스트",
-  "overallWarnings": ["전체 경고"]
-}
-
-규칙:
-1. 품명과 옵션을 가능하면 분리한다.
-   - 품명: 프랑 체크 반셔츠
-   - 옵션: 블랙, L
-2. 거래처명은 "XX 귀하"가 아니라 발송인/공급자를 찾는다.
-3. 수기로 작성된 글씨도 최대한 읽되, 확실하지 않으면 needsReview=true로 표시한다.
-4. 잘 안 보이는 글자는 추정값을 넣되 warnings에 "글자 일부 불명확"이라고 남긴다.
-5. 전혀 모르겠으면 null로 둔다.
-6. 금액은 숫자만 반환한다. 예: "26,000원" → 26000
-7. 날짜는 가능하면 YYYY-MM-DD로 정규화한다.
-8. 단가 × 수량 = 금액인지 확인한다. 맞지 않으면 warnings에 "금액 불일치"를 남긴다.
-9. 품목 금액 합계와 영수증 합계가 맞는지 확인한다.
-10. 수기 영수증은 isHandwritten=true, needsReview=true로 표시한다.
-11. confidence < 0.8이면 needsReview=true
-12. itemName이나 quantity나 amount가 없으면 needsReview=true
-13. QR코드, 바코드는 필수로 해석하지 않아도 된다.
-14. 하단 안내문, 계좌정보는 memo 또는 bankInfo에 저장한다.
-
-수기 영수증 특별 규칙:
-- 수기 글씨에서 숫자는 특히 중요하므로 단가/수량/금액은 별도 검산한다.
-- 수기 영수증은 자동 확정하지 않고 반드시 검수 필요 상태로 둔다.
-- 불확실한 글자는 물음표와 함께 표시한다. 예: itemName="프랑체크?", warnings=["품명 불확실"]"""
-
-
-def _get_mime(filename: str) -> str:
-    ext = Path(filename).suffix.lower()
-    return {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-            "webp": "image/webp", "gif": "image/gif"}.get(ext.lstrip("."), "image/jpeg")
-
 
 def _validate_amounts(receipt: dict, items: list) -> None:
     """단가×수량=금액 검산, 품목합계=영수증합계 검산"""
@@ -215,49 +151,35 @@ def _validate_amounts(receipt: dict, items: list) -> None:
         receipt["needsReview"] = True
 
 
-async def _analyze_image(image_path: Path) -> Optional[dict]:
-    """GPT-4o Vision으로 장끼/영수증 분석"""
-    api_key = settings.OPENAI_API_KEY
-    if not api_key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY가 설정되지 않았습니다.")
+async def _analyze_janggi(image_bytes: bytes) -> tuple[bytes, dict]:
+    """업무봇 장끼 판독으로 이미지를 읽고, 영수증 저장용 필드를 채운다.
+
+    반환: (정규화된 JPEG bytes, 판독 dict)
+    판독 실패 시 영수증 행을 만들지 않도록 호출 전에 예외를 던진다.
+    """
+    try:
+        norm_bytes, mime = _normalize_image(image_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=api_key)
+        parsed = await _run_ocr(norm_bytes, mime)
+    except OcrError as exc:
+        raise _ocr_error_to_http(exc) from exc
 
-        with open(image_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        mime = _get_mime(image_path.name)
-
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:{mime};base64,{b64}",
-                        "detail": "high"
-                    }},
-                ],
-            }],
-            temperature=0.1,
-            max_tokens=4096,
+    receipt = parsed.setdefault("receipt", {})
+    items = parsed.get("items") or []
+    receipt.setdefault("receiptType", "장끼")
+    receipt.setdefault(
+        "imageQuality",
+        "handwritten" if receipt.get("isHandwritten") else "good",
+    )
+    if not parsed.get("rawText"):
+        parsed["rawText"] = "\n".join(
+            str(item.get("rawText")) for item in items if item.get("rawText")
         )
-
-        raw = response.choices[0].message.content or ""
-        cleaned = raw.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(cleaned)
-
-        receipt = parsed.get("receipt", {})
-        items = parsed.get("items", [])
-        _validate_amounts(receipt, items)
-
-        return parsed
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=422, detail=f"AI 응답 파싱 실패: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI 분석 오류: {e}")
+    _validate_amounts(receipt, items)
+    return norm_bytes, parsed
 
 
 # ─────────────────────────────────────
@@ -292,21 +214,16 @@ async def upload_and_analyze(
     token: str,
     file: UploadFile = File(...),
 ):
-    """장끼/영수증 이미지 업로드 → GPT-4o 분석 → DB 저장"""
+    """장끼/영수증 이미지 업로드 → 업무봇과 같은 판독 → DB 저장"""
     ensure_receipt_tables()
     user = get_user_from_token(token)
 
-    # 파일 저장
-    ext = Path(file.filename or "receipt.jpg").suffix.lower() or ".jpg"
-    filename = f"{uuid.uuid4()}{ext}"
-    file_path = UPLOAD_DIR / filename
-
     content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
+    norm_bytes, analysis = await _analyze_janggi(content)
 
-    # AI 분석
-    analysis = await _analyze_image(file_path)
+    filename = f"{uuid.uuid4()}.jpg"
+    file_path = _receipt_dir() / filename
+    file_path.write_bytes(norm_bytes)
 
     receipt_data = analysis.get("receipt", {})
     items_data = analysis.get("items", [])
@@ -596,7 +513,7 @@ def delete_receipt(receipt_id: str, token: str):
             raise HTTPException(status_code=404, detail="영수증을 찾을 수 없습니다.")
 
         if row[0]:
-            img_path = UPLOAD_DIR / row[0]
+            img_path = _receipt_dir() / row[0]
             if img_path.exists():
                 img_path.unlink()
 
@@ -852,7 +769,7 @@ def download_excel(receipt_id: str, token: str):
 def get_image(filename: str, token: str):
     """영수증 이미지 반환"""
     get_user_from_token(token)
-    img_path = UPLOAD_DIR / filename
+    img_path = _receipt_dir() / filename
     if not img_path.exists():
         raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
 
