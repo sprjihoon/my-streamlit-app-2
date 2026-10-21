@@ -1005,10 +1005,15 @@ export default function OverseasShippingPage() {
       );
       if (!ok) return;
       const result = await createOverseasShipping(token, form);
-      if (result.id) setPrintId(result.id);
       if (result.duplicate_guard) {
-        setSuccess(`오늘 같은 수취인으로 이미 접수된 건이 있습니다. 등기번호 ${result.tracking_no}`);
+        if (result.id) setPrintId(result.id);
+        setError(
+          result.is_test
+            ? `오늘 같은 수취인 테스트 접수가 있어 이번 접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`
+            : `오늘 같은 수취인으로 이미 접수된 건이 있어 이번 내용은 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`,
+        );
       } else {
+        if (result.id) setPrintId(result.id);
         const label = result.is_test ? '테스트 접수' : '우체국 접수';
         setSuccess(`${label} 완료. 등기번호 ${result.tracking_no}${result.ems_fee ? ` · 요금 ${Number(result.ems_fee).toLocaleString()}원` : ''}. 출력서류는 아래 버튼 또는 접수목록에서 다시 인쇄할 수 있습니다.`);
         const senderName = form.sender_name || defaultSender;

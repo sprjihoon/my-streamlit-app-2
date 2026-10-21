@@ -313,6 +313,7 @@ export async function installApi(page: Page, user: SessionUser) {
       id: 9,
       order_no: 'TIL-9',
       tracking_no: 'EG123456789KR',
+      sender_name: 'reindeer',
       recipient_name: 'Taro',
       countrycd: 'JP',
       shipping_method: 'EMS',

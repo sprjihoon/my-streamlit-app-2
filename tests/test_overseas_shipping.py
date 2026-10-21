@@ -370,6 +370,7 @@ def test_create_requires_confirm_then_saves_mock(isolated_runtime):
 
     again = create_overseas(_req(confirm=True), token)
     assert again.get("duplicate_guard") is True
+    assert again.get("is_test") is True
     assert len(list_overseas(token)["items"]) == 1
 
     assert items[0]["customs_gubun"] == "merchandise"
@@ -387,6 +388,39 @@ def test_create_requires_confirm_then_saves_mock(isolated_runtime):
     assert gift_row["customs_gubun"] == "gift"
     assert gift_row["contents_label"] == "선물"
     assert overseas_label(gift["id"], token)["label"]["contents_gubun"] == "Gift"
+
+
+def test_live_submit_ignores_same_day_test_receipt(isolated_runtime, monkeypatch):
+    """테스트 등기번호가 있어도 같은 수취인 실접수는 우체국으로 나간다."""
+    token = _seed_user(isolated_runtime["db"])
+    tested = create_overseas(_req(confirm=True, test_mode=True), token)
+    assert tested["is_test"] is True
+
+    def fake_apply(params):
+        return {
+            "receiveseq": "LIVE1",
+            "prerecevprc": "35100",
+            "regino": "EG000111222KR",
+            "reqno": "REQ-LIVE",
+            "treatporegipocd": "10186",
+            "treatporegipoengnm": "SEOUL",
+            "orderno": params.get("orderno") or "",
+        }
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
+    monkeypatch.setattr("backend.app.api.overseas_shipping.apply_ems", fake_apply)
+
+    live = create_overseas(_req(confirm=True, test_mode=False), token)
+    assert live.get("duplicate_guard") is not True
+    assert live["is_test"] is False
+    assert live["tracking_no"] == "EG000111222KR"
+    assert len(list_overseas(token)["items"]) == 2
+
+    blocked = create_overseas(_req(confirm=True, test_mode=False), token)
+    assert blocked.get("duplicate_guard") is True
+    assert blocked.get("is_test") is False
+    assert blocked["tracking_no"] == "EG000111222KR"
+    assert len(list_overseas(token)["items"]) == 2
 
 
 def test_kpacket_reject_overweight_on_preview(isolated_runtime):

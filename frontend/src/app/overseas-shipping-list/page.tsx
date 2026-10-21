@@ -127,7 +127,7 @@ export default function OverseasShippingListPage() {
   const q = query.trim().toLowerCase().replace(/\s+/g, '');
   const visible = q
     ? items.filter((it) => (
-      `${it.order_no} ${it.tracking_no} ${it.recipient_name} ${it.countrycd} ${it.shipping_method} ${it.contents_label || ''} ${it.created_by} ${overseasStatusLabel(it)}`
+      `${it.order_no} ${it.tracking_no} ${it.sender_name || ''} ${it.recipient_name} ${it.countrycd} ${it.shipping_method} ${it.contents_label || ''} ${it.created_by} ${overseasStatusLabel(it)}`
         .toLowerCase()
         .replace(/\s+/g, '')
         .includes(q)
@@ -160,7 +160,7 @@ export default function OverseasShippingListPage() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="등기번호, 수취인, 국가, 상태 검색"
+            placeholder="등기번호, 발송인, 수취인, 국가, 상태 검색"
             style={{
               marginLeft: 'auto',
               minWidth: 220,
@@ -183,6 +183,7 @@ export default function OverseasShippingListPage() {
                   <th>접수일</th>
                   <th>배송</th>
                   <th>국가</th>
+                  <th>발송인</th>
                   <th>수취인</th>
                   <th>등기번호</th>
                   <th>지출</th>
@@ -201,6 +202,7 @@ export default function OverseasShippingListPage() {
                     <td>{(it.created_at || '').replace('T', ' ').slice(0, 16)}</td>
                     <td>{METHOD_LABEL[it.shipping_method] || it.shipping_method}{it.contents_label ? ` · ${it.contents_label}` : ''}</td>
                     <td>{it.countrycd}</td>
+                    <td>{it.sender_name || '-'}</td>
                     <td>{it.recipient_name}</td>
                     <td><CopyButton value={it.tracking_no || ''} /></td>
                     <td style={{ whiteSpace: 'nowrap', lineHeight: 1.45, fontSize: '0.85rem' }}>

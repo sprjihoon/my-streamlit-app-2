@@ -1546,14 +1546,18 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
         raise _http_error(exc) from exc
 
     today = datetime.now(KST).date().isoformat()
+    # 테스트 등기번호는 우체국 접수가 아니다. 실접수는 테스트 건에 막히지 않는다.
+    duplicate_sql = """
+        SELECT id, tracking_no, is_test FROM overseas_shipping_requests
+        WHERE created_by=? AND recipient_phone=? AND countrycd=? AND shipping_method=?
+          AND status='requested' AND created_at LIKE ?
+    """
+    if live:
+        duplicate_sql += " AND is_test=0"
+    duplicate_sql += " ORDER BY id DESC LIMIT 1"
     with get_connection() as con:
         existing = con.execute(
-            """
-            SELECT id, tracking_no FROM overseas_shipping_requests
-            WHERE created_by=? AND recipient_phone=? AND countrycd=? AND shipping_method=?
-              AND status='requested' AND created_at LIKE ?
-            ORDER BY id DESC LIMIT 1
-            """,
+            duplicate_sql,
             (
                 user["nickname"],
                 validated["receivetelno"],
@@ -1568,6 +1572,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
             "success": True,
             "id": existing[0],
             "tracking_no": existing[1],
+            "is_test": bool(existing[2]),
         }
 
     order_no = f"TIL-{int(time.time() * 1000)}"
