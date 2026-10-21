@@ -1,5 +1,21 @@
-import { expect, test } from '@playwright/test';
-import { countCalls, installApi, seedSession, STAFF } from './support/api';
+import { expect, test, type Page } from '@playwright/test';
+import { countCalls, installApi, seedSession, ADMIN, STAFF } from './support/api';
+
+async function liveOverseasMeta(page: Page) {
+  await page.route('http://localhost:8000/overseas-shipping/meta**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        live_ready: true,
+        methods: [{ code: 'EMS', name: 'EMS', desc: 'EMS', premiumcd: '31', em_ee: 'em' }],
+        sender: { name: '스프링', addr: '대구', zip: '41940', addr1: 'Daegu', addr2: 'Jung', addr3: '394', tel: '01012345678' },
+        item_categories: [],
+        saved_hs: [],
+      }),
+    });
+  });
+}
 
 test.beforeEach(async ({ page }) => {
   await seedSession(page, STAFF);
@@ -86,6 +102,33 @@ test('create failure and success do not leave the browser', async ({ page }) => 
   await expect(page.getByText('EG123456789KR')).toBeVisible();
   expect(countCalls(calls, 'POST', '/overseas-shipping')).toBeGreaterThan(0);
   expect(calls.some((call) => /fedex|epost\.go\.kr/i.test(call.path))).toBe(false);
+});
+
+test('staff live intake has no test checkbox and posts a real receipt', async ({ page }) => {
+  const calls = await installApi(page, STAFF);
+  await liveOverseasMeta(page);
+  await page.goto('/overseas-shipping');
+  await expect(page.getByRole('heading', { name: '해외배송 접수' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /테스트 접수/ })).toHaveCount(0);
+  page.on('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '해외배송 접수' }).click();
+  await expect(page.getByText('EG123456789KR')).toBeVisible();
+  const post = calls.find((call) => call.method === 'POST' && call.path === '/overseas-shipping');
+  expect(post?.body && JSON.parse(post.body).test_mode).toBe(false);
+});
+
+test('admin can still choose a test receipt', async ({ page }) => {
+  await seedSession(page, ADMIN);
+  const calls = await installApi(page, ADMIN);
+  await liveOverseasMeta(page);
+  await page.goto('/overseas-shipping');
+  await expect(page.getByRole('checkbox', { name: /테스트 접수/ })).toBeVisible();
+  await page.getByRole('checkbox', { name: /테스트 접수/ }).check();
+  page.on('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '테스트 접수' }).click();
+  await expect(page.getByText('EG123456789KR')).toBeVisible();
+  const post = calls.find((call) => call.method === 'POST' && call.path === '/overseas-shipping');
+  expect(post?.body && JSON.parse(post.body).test_mode).toBe(true);
 });
 
 test('list, detail, cancel dismissal, and print link', async ({ page }) => {

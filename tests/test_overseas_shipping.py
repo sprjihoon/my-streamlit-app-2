@@ -55,7 +55,7 @@ from backend.app.services.ems.fields import (
 from backend.app.services.ems.item_categories import suggest_item_categories
 
 
-def _seed_user(db_path, token="tok-overseas"):
+def _seed_user(db_path, token="tok-overseas", is_admin=0):
     with sqlite3.connect(db_path) as con:
         con.execute(
             """
@@ -80,7 +80,7 @@ def _seed_user(db_path, token="tok-overseas"):
         )
         con.execute(
             "INSERT INTO users (username, password_hash, nickname, is_admin, department) VALUES (?,?,?,?,?)",
-            ("staff", "x", "물류담당", 0, "물류팀"),
+            ("staff", "x", "물류담당", is_admin, "물류팀"),
         )
         con.execute("INSERT INTO sessions (token, user_id) VALUES (?, 1)", (token,))
         con.commit()
@@ -421,6 +421,56 @@ def test_live_submit_ignores_same_day_test_receipt(isolated_runtime, monkeypatch
     assert blocked.get("is_test") is False
     assert blocked["tracking_no"] == "EG000111222KR"
     assert len(list_overseas(token)["items"]) == 2
+
+
+def _fake_live_apply(regino):
+    def fake_apply(params):
+        return {
+            "receiveseq": "LIVE1",
+            "prerecevprc": "35100",
+            "regino": regino,
+            "reqno": "REQ-LIVE",
+            "treatporegipocd": "10186",
+            "treatporegipoengnm": "SEOUL",
+            "orderno": params.get("orderno") or "",
+        }
+
+    return fake_apply
+
+
+def test_staff_test_mode_still_submits_live(isolated_runtime, monkeypatch):
+    """일반 사용자가 테스트 접수를 보내도 우체국 키가 있으면 실접수다."""
+    token = _seed_user(isolated_runtime["db"])
+    monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
+    monkeypatch.setattr(
+        "backend.app.api.overseas_shipping.apply_ems",
+        _fake_live_apply("EGSTAFF0001KR"),
+    )
+    preview = preview_overseas(_req(test_mode=True), token)
+    assert preview["preview"]["is_test"] is False
+    created = create_overseas(
+        _req(confirm=True, test_mode=True, receivetelno="+819011100001"),
+        token,
+    )
+    assert created.get("duplicate_guard") is not True
+    assert created["is_test"] is False
+    assert created["tracking_no"] == "EGSTAFF0001KR"
+
+
+def test_admin_test_mode_stays_off_epost(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"], token="tok-admin", is_admin=1)
+    monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
+
+    def reject_live(_params):
+        raise AssertionError("관리자 테스트 접수는 우체국으로 나가지 않는다")
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.apply_ems", reject_live)
+    created = create_overseas(
+        _req(confirm=True, test_mode=True, receivetelno="+819011100002"),
+        token,
+    )
+    assert created["is_test"] is True
+    assert created["tracking_no"].startswith("EG")
 
 
 def test_kpacket_reject_overweight_on_preview(isolated_runtime):

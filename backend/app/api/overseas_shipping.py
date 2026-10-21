@@ -68,6 +68,12 @@ def clear_nation_cache() -> None:
     _NATION_CACHE.clear()
 
 
+def _is_live_submit(user: dict[str, Any], req: OverseasSubmitRequest) -> bool:
+    """테스트 접수는 관리자만 고른다. 일반 사용자는 키가 있으면 실접수다."""
+    test_mode = bool(req.test_mode) and bool(user.get("is_admin"))
+    return has_ems_credentials() and not test_mode
+
+
 def _nations_payload(premiumcd: str) -> dict[str, Any]:
     code = (premiumcd or "31").strip()
     now = time.time()
@@ -1332,8 +1338,8 @@ async def import_overseas_excel(token: str, file: UploadFile = File(...)):
 
 @router.post("/preview")
 def preview_overseas(req: OverseasSubmitRequest, token: str):
-    _get_user(token)
-    live = has_ems_credentials() and not req.test_mode
+    user = _get_user(token)
+    live = _is_live_submit(user, req)
     try:
         validated = validate_apply_input(_req_dict(req))
     except ValueError as exc:
@@ -1539,7 +1545,7 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
     if not req.confirm:
         raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
 
-    live = has_ems_credentials() and not req.test_mode
+    live = _is_live_submit(user, req)
     try:
         validated = validate_apply_input(_req_dict(req))
     except ValueError as exc:

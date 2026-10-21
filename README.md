@@ -240,6 +240,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 
 - 확인(`confirm=true`) 전에는 접수·취소를 쓰지 않는다.
 - 같은 직원 + 같은 전화번호 + 같은 국가 + 같은 배송방법 + 당일 접수는 중복 가드다. 테스트 접수는 실접수를 막지 않는다. 겹치면 새 내용은 우체국으로 나가지 않고, 화면은 오류로 보여 준다.
+- 테스트 접수 체크는 관리자만 본다. 일반 사용자는 우체국 키가 있으면 항상 실접수다. 서버도 그 사용자의 `test_mode`를 무시한다.
 - EMS 키가 없으면 `live_ready=false` 이고 테스트 접수(등기번호 `EG`/`FX`/`LK` 접두어)만 저장한다.
 - 실접수는 Railway `EMS_*` + `EPOST_RELAY_URL` 이 있을 때만 `eship.epost.go.kr` 로 나간다. 접수 `regData`는 SEED128, EUC-KR이다.
 - 요금은 우체국 후납. 접수 화면에서 `GET /overseas-shipping/quote` 로 화물·서류 예상요금을 나눠 보여 준다.
@@ -451,6 +452,9 @@ cd frontend && npm run dev
 - **feat(overseas-shipping): 접수목록에 발송인 이름을 보여 준다**
   - 수취인만으로는 건을 구분하기 어려워 발송인을 수취인 앞에 둔다
   - 목록 검색에 발송인 이름이 포함된다
+- **fix(overseas-shipping): 테스트 접수는 관리자만 고른다**
+  - 일반 사용자 화면에는 테스트 접수 체크가 없고, 우체국 키가 있으면 실접수로 나간다
+  - 일반 사용자가 `test_mode`를 보내도 서버는 실접수로 처리한다
 
 ### 2026-10-20
 - **feat(receipt): 체크한 영수증을 함께 삭제한다**

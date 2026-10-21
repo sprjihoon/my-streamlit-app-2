@@ -180,6 +180,7 @@ export default function OverseasShippingPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [printId, setPrintId] = useState<number | null>(null);
   const [liveReady, setLiveReady] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [defaultSender, setDefaultSender] = useState('스프링풀필먼트');
   const [senderAddr, setSenderAddr] = useState('');
   const [methods, setMethods] = useState<Array<{ code: string; name: string; desc: string }>>([]);
@@ -272,6 +273,12 @@ export default function OverseasShippingPage() {
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
     setToken(stored);
+    try {
+      const raw = localStorage.getItem('user');
+      setIsAdmin(raw ? Boolean(JSON.parse(raw).is_admin) : localStorage.getItem('isAdmin') === 'true');
+    } catch {
+      setIsAdmin(localStorage.getItem('isAdmin') === 'true');
+    }
     if (!stored) {
       setError('로그인이 필요합니다.');
       setLoading(false);
@@ -932,7 +939,8 @@ export default function OverseasShippingPage() {
     setSuccess(null);
     setPrintId(null);
     try {
-      const previewRes = await previewOverseasShipping(token, form);
+      const payload = { ...form, test_mode: Boolean(isAdmin && form.test_mode) };
+      const previewRes = await previewOverseasShipping(token, payload);
       const p = previewRes.preview;
       const notes: Record<string, string> = {};
       for (const row of p.text_corrections || []) {
@@ -964,7 +972,7 @@ export default function OverseasShippingPage() {
       const totalLine = p.expected_fee != null && duty?.dutyPrepaid
         ? `\n합계: ${(p.expected_fee + duty.depositKrw).toLocaleString()}원`
         : '';
-      const mode = liveReady && !form.test_mode ? '실접수' : '테스트 접수';
+      const mode = liveReady && !payload.test_mode ? '실접수' : '테스트 접수';
       const seen = new Set<string>();
       const fixRows = [
         ...(p.text_corrections || []).map((c) => ({ label: c.label, before: c.before, after: c.after })),
@@ -1004,7 +1012,7 @@ export default function OverseasShippingPage() {
           `예상요금: ${feeText}${dutyLine}${totalLine}${fixBlock}\n\n결제 없이 우체국에 바로 접수됩니다.`,
       );
       if (!ok) return;
-      const result = await createOverseasShipping(token, form);
+      const result = await createOverseasShipping(token, payload);
       if (result.duplicate_guard) {
         if (result.id) setPrintId(result.id);
         setError(
@@ -1747,7 +1755,7 @@ export default function OverseasShippingPage() {
       </Card>
 
       <Card title="접수">
-        {liveReady && (
+        {liveReady && isAdmin && (
           <label className="tw-items-center tw-flex tw-gap-[0.5rem] tw-mb-[0.75rem]">
             <input
               type="checkbox"
@@ -1759,7 +1767,7 @@ export default function OverseasShippingPage() {
         )}
         <div className="tw-flex tw-flex-col tw-gap-[0.55rem]">
           <button type="button" className="btn btn-primary tw-w-full" onClick={handleSubmit} disabled={saving}>
-            {saving ? '접수 중...' : liveReady && !form.test_mode ? '해외배송 접수' : '테스트 접수'}
+            {saving ? '접수 중...' : liveReady && !(isAdmin && form.test_mode) ? '해외배송 접수' : '테스트 접수'}
           </button>
           <div className="fee-links">
             <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
