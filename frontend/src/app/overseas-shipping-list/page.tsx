@@ -10,6 +10,7 @@ import {
   cancelOverseasShipping,
   deleteOverseasShipping,
   listOverseasShipments,
+  canCancelOverseas,
   overseasStatusLabel,
   refreshOverseasShippingStatuses,
   type OverseasShippingItem,
@@ -93,7 +94,7 @@ export default function OverseasShippingListPage() {
   }
 
   async function handleDelete(item: OverseasShippingItem) {
-    const live = item.status !== 'canceled' && !item.is_test;
+    const live = item.status !== 'canceled' && !item.is_test && canCancelOverseas(item);
     const ask = live
       ? `등기번호 ${item.tracking_no || item.order_no} 접수를 우체국에서 취소한 뒤 목록에서 삭제할까요?`
       : `등기번호 ${item.tracking_no || item.order_no} 접수를 목록에서 삭제할까요?`;
@@ -216,7 +217,7 @@ export default function OverseasShippingListPage() {
                       <a href={`/overseas-print/${it.id}`} className="btn btn-secondary" target="_blank" rel="noreferrer">
                         출력서류
                       </a>
-                      {it.status !== 'canceled' && (
+                      {canCancelOverseas(it) && (
                         <button
                           type="button"
                           className="btn btn-primary"

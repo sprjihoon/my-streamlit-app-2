@@ -7,6 +7,7 @@ import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import {
+  canCancelOverseas,
   cancelOverseasShipping,
   deleteOverseasShipping,
   getOverseasShipment,
@@ -95,7 +96,7 @@ export default function OverseasShippingDetailPage() {
 
   async function handleDelete() {
     if (!item || !token) return;
-    const live = item.status !== 'canceled' && !item.is_test;
+    const live = item.status !== 'canceled' && !item.is_test && canCancelOverseas(item);
     const ask = live
       ? `등기번호 ${item.tracking_no || item.order_no} 접수를 우체국에서 취소한 뒤 목록에서 삭제할까요?`
       : `등기번호 ${item.tracking_no || item.order_no} 접수를 목록에서 삭제할까요?`;
@@ -147,7 +148,7 @@ export default function OverseasShippingDetailPage() {
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
             <a href={`/overseas-print/${item.id}`} className="btn btn-primary" target="_blank" rel="noreferrer">출력서류</a>
-            {item.status !== 'canceled' && (
+            {canCancelOverseas(item) && (
               <button type="button" className="btn btn-primary" onClick={handleCancel}>접수 취소</button>
             )}
             {isAdmin && (

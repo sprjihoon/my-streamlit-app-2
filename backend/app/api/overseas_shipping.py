@@ -1738,7 +1738,7 @@ def cancel_overseas(shipment_id: int, token: str, confirm: bool = False):
     with get_connection() as con:
         row = con.execute(
             """
-            SELECT id, status, is_test, req_no, tracking_no, premiumcd
+            SELECT id, status, is_test, req_no, tracking_no, premiumcd, treat_status, treat_status_name
             FROM overseas_shipping_requests WHERE id = ?
             """,
             (shipment_id,),
@@ -1747,6 +1747,8 @@ def cancel_overseas(shipment_id: int, token: str, confirm: bool = False):
         raise HTTPException(status_code=404, detail="접수 내역을 찾을 수 없습니다.")
     if row[1] == "canceled":
         return {"success": True, "already": True, "message": "이미 취소된 접수입니다."}
+    if (row[6] or "").strip() == "배달완료" or (row[7] or "").strip() == "배달완료":
+        raise HTTPException(status_code=400, detail="배달완료된 접수는 취소할 수 없습니다.")
 
     if not row[2]:
         req_no = row[3] or ""
@@ -1789,7 +1791,8 @@ def delete_overseas(shipment_id: int, token: str):
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="관리자만 접수 내역을 삭제할 수 있습니다.")
     data, _snapshot = _load_shipment(shipment_id)
-    if data["status"] != "canceled" and not data["is_test"]:
+    delivered = (data.get("treat_status") or "").strip() == "배달완료" or (data.get("treat_status_name") or "").strip() == "배달완료"
+    if data["status"] != "canceled" and not data["is_test"] and not delivered:
         cancel_overseas(shipment_id, token, confirm=True)
     with get_connection() as con:
         con.execute("DELETE FROM overseas_shipping_requests WHERE id=?", (shipment_id,))

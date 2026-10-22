@@ -131,6 +131,46 @@ test('admin can still choose a test receipt', async ({ page }) => {
   expect(post?.body && JSON.parse(post.body).test_mode).toBe(true);
 });
 
+test('delivered list row has no cancel button', async ({ page }) => {
+  await installApi(page, STAFF);
+  await page.route('http://localhost:8000/overseas-shipping**', async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'GET' && (url.pathname === '/overseas-shipping' || url.pathname === '/overseas-shipping/11')) {
+      const item = {
+        id: 11,
+        order_no: 'TIL-11',
+        tracking_no: 'EG999000111KR',
+        sender_name: 'reindeer',
+        recipient_name: 'Done',
+        countrycd: 'JP',
+        shipping_method: 'EMS',
+        status: 'requested',
+        is_test: false,
+        treat_status: '배달완료',
+        treat_status_name: '배달완료',
+        created_by: '물류담당',
+        ems_fee: '18000',
+        created_at: '2026-10-08T09:00:00',
+        items: [],
+      };
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(url.pathname === '/overseas-shipping' ? { items: [item] } : item),
+      });
+    }
+    return route.fallback();
+  });
+  await page.goto('/overseas-shipping-list');
+  await expect(page.getByRole('cell', { name: '배달완료' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '접수 취소' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '출력서류' })).toBeVisible();
+  await page.goto('/overseas-shipping-list/11');
+  await expect(page.getByRole('heading', { name: '해외배송 접수 상세' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '접수 취소' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '출력서류' })).toBeVisible();
+});
+
 test('list, detail, cancel dismissal, and print link', async ({ page }) => {
   const calls = await installApi(page, STAFF);
   await page.goto('/overseas-shipping-list');

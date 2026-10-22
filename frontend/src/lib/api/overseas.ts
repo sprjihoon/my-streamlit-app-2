@@ -104,6 +104,17 @@ export function overseasStatusLabel(item: {
   return (item.treat_status || '').trim() || '접수';
 }
 
+export function canCancelOverseas(item: {
+  status: string;
+  treat_status?: string | null;
+  treat_status_name?: string | null;
+}) {
+  if (item.status === 'canceled') return false;
+  const status = (item.treat_status || '').trim();
+  const name = (item.treat_status_name || '').trim();
+  return status !== '배달완료' && name !== '배달완료';
+}
+
 export interface OverseasShippingPreview {
   shipping_method: string;
   shipping_method_name: string;

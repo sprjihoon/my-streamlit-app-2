@@ -1672,6 +1672,41 @@ def test_shipment_detail_keeps_product_name_apart_from_hs_item(isolated_runtime)
     assert "PDRN" not in params["contents"]
 
 
+def test_delivered_shipment_cannot_be_canceled(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"], is_admin=1)
+    monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
+    monkeypatch.setattr(
+        "backend.app.api.overseas_shipping.apply_ems",
+        _fake_live_apply("EGDELIVER01KR"),
+    )
+    created = create_overseas(
+        _req(confirm=True, test_mode=False, receivetelno="+819044455566"),
+        token,
+    )
+    assert created["is_test"] is False
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE overseas_shipping_requests SET treat_status=?, treat_status_name=? WHERE id=?",
+            ("배달완료", "배달완료", created["id"]),
+        )
+        con.commit()
+    try:
+        cancel_overseas(created["id"], token, confirm=True)
+        raise AssertionError("delivered cancel should fail")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "배달완료" in str(exc.detail)
+    assert get_overseas(created["id"], token)["status"] == "requested"
+
+    def reject_cancel(*_args, **_kwargs):
+        raise AssertionError("배달완료 삭제는 우체국 취소를 부르지 않는다")
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.cancel_ems", reject_cancel)
+    deleted = delete_overseas(created["id"], token)
+    assert deleted["success"] is True
+    assert list_overseas(token)["items"] == []
+
+
 def test_list_shows_ddp_and_only_admin_can_delete(isolated_runtime):
     token = _seed_user(isolated_runtime["db"])
     created = create_overseas(
