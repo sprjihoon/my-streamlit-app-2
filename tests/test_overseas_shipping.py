@@ -11,7 +11,6 @@ from backend.app.api.overseas_shipping import (
     SavedOverseasHsRequest,
     SavedOverseasSenderRequest,
     cancel_overseas,
-    resubmit_overseas,
     clear_nation_cache,
     create_overseas,
     delete_saved_overseas_address,
@@ -1673,35 +1672,37 @@ def test_shipment_detail_keeps_product_name_apart_from_hs_item(isolated_runtime)
     assert "PDRN" not in params["contents"]
 
 
-def test_resubmit_copies_saved_receipt_as_a_new_shipment(isolated_runtime, monkeypatch):
+def test_saved_receipt_can_be_posted_again_through_create(isolated_runtime, monkeypatch):
+    """재접수는 저장본을 기존 접수 API로 다시 보낸다. 당일 실접수가 있으면 중복 가드가 막는다."""
     token = _seed_user(isolated_runtime["db"])
     created = create_overseas(_req(confirm=True, receivetelno="+819011100009"), token)
-    blocked = create_overseas(_req(confirm=True, receivetelno="+819011100009"), token)
-    assert blocked.get("duplicate_guard") is True
-
+    saved = get_overseas(created["id"], token)
     monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
     monkeypatch.setattr(
         "backend.app.api.overseas_shipping.apply_ems",
         _fake_live_apply("EGRESUBMIT1KR"),
     )
-    try:
-        resubmit_overseas(created["id"], token, confirm=False)
-        raise AssertionError("confirm required")
-    except HTTPException as exc:
-        assert exc.status_code == 400
+    again = create_overseas(
+        _req(
+            confirm=True,
+            test_mode=False,
+            receivename=saved["recipient_name"],
+            receivetelno=saved["recipient_phone"],
+            countrycd=saved["countrycd"],
+            shipping_method=saved["shipping_method"],
+        ),
+        token,
+    )
+    assert again.get("duplicate_guard") is not True
+    assert again["is_test"] is False
+    assert again["tracking_no"] == "EGRESUBMIT1KR"
 
-    copied = resubmit_overseas(created["id"], token, confirm=True)
-    assert copied.get("duplicate_guard") is not True
-    assert copied["id"] != created["id"]
-    assert copied["is_test"] is False
-    assert copied["tracking_no"] == "EGRESUBMIT1KR"
-    detail = get_overseas(copied["id"], token)
-    assert detail["recipient_name"] == "Hong Gildong"
-    assert detail["countrycd"] == "JP"
-    assert detail["items"][0]["name_en"] == "Clothing"
-    assert detail["tracking_no"] == "EGRESUBMIT1KR"
-    assert get_overseas(created["id"], token)["tracking_no"] != "EGRESUBMIT1KR"
-    assert len(list_overseas(token)["items"]) == 2
+    blocked = create_overseas(
+        _req(confirm=True, test_mode=False, receivetelno=saved["recipient_phone"]),
+        token,
+    )
+    assert blocked.get("duplicate_guard") is True
+    assert blocked["tracking_no"] == "EGRESUBMIT1KR"
 
 
 def test_delivered_shipment_cannot_be_canceled(isolated_runtime, monkeypatch):

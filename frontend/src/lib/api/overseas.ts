@@ -342,16 +342,44 @@ export async function createOverseasShipping(token: string, payload: OverseasShi
   });
 }
 
+export function overseasShipmentPayload(item: OverseasShippingItem): OverseasShippingPayload {
+  const method = item.shipping_method === 'EMS_PREMIUM' || item.shipping_method === 'KPACKET'
+    ? item.shipping_method
+    : 'EMS';
+  const customs = item.customs_gubun === 'gift' || item.customs_gubun === 'sample'
+    ? item.customs_gubun
+    : 'merchandise';
+  return {
+    shipping_method: method,
+    contents_type: item.contents_type === 'document' ? 'document' : 'parcel',
+    customs_gubun: customs,
+    countrycd: item.countrycd,
+    sender_name: item.sender_name || '',
+    sender_zipcode: item.sender_zipcode || '',
+    sender_addr1: item.sender_addr1 || '',
+    sender_addr2: item.sender_addr2 || '',
+    sender_addr3: item.sender_addr3 || '',
+    sender_tel: item.sender_tel || '',
+    receivename: item.recipient_name,
+    receivetelno: item.recipient_phone || '',
+    receivemail: item.recipient_email || '',
+    receivezipcode: item.recipient_zip || '',
+    receiveaddr1: item.recipient_addr1 || '',
+    receiveaddr2: item.recipient_addr2 || '',
+    receiveaddr3: item.recipient_addr3 || '',
+    totweight: item.totweight,
+    boxlength: item.boxlength,
+    boxwidth: item.boxwidth,
+    boxheight: item.boxheight,
+    items: item.items || [],
+    notes: item.notes || '',
+    test_mode: false,
+  };
+}
+
 export async function resubmitOverseasShipping(token: string, id: number) {
-  return fetchApi<{
-    success: boolean;
-    id: number;
-    order_no: string;
-    tracking_no: string;
-    ems_fee: string;
-    is_test: boolean;
-    duplicate_guard?: boolean;
-  }>(`/overseas-shipping/${id}/resubmit${overseasQuery(token, '&confirm=true')}`, { method: 'POST' });
+  const saved = await getOverseasShipment(token, id);
+  return createOverseasShipping(token, overseasShipmentPayload(saved));
 }
 
 export async function cancelOverseasShipping(token: string, id: number) {
