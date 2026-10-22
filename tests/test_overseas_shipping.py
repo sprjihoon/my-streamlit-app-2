@@ -422,6 +422,26 @@ def test_live_submit_ignores_same_day_test_receipt(isolated_runtime, monkeypatch
     assert blocked["tracking_no"] == "EG000111222KR"
     assert len(list_overseas(token)["items"]) == 2
 
+    different = create_overseas(
+        _req(
+            confirm=True,
+            test_mode=False,
+            totweight=900,
+            items=[{
+                "name_en": "Shoes",
+                "quantity": 1,
+                "unit_price_usd": 40,
+                "hs_code": "640399",
+                "origin_country": "KR",
+            }],
+        ),
+        token,
+    )
+    assert different.get("duplicate_guard") is not True
+    assert different["is_test"] is False
+    assert different["tracking_no"] == "EG000111222KR"
+    assert len(list_overseas(token)["items"]) == 3
+
 
 def _fake_live_apply(regino):
     def fake_apply(params):

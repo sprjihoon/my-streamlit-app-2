@@ -175,7 +175,7 @@ export default function OverseasShippingListPage() {
     try {
       const result = await resubmitOverseasShipping(token, item.id);
       if (result.duplicate_guard) {
-        setError(`오늘 같은 수취인으로 이미 접수된 건이 있어 이번 재접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`);
+        setError(`오늘 같은 수취인, 같은 내용으로 이미 접수된 건이 있어 이번 재접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`);
         return;
       }
       setSuccess(`재접수 완료. 등기번호 ${result.tracking_no}${result.is_test ? ' (테스트)' : ''}`);

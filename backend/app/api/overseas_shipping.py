@@ -1543,6 +1543,64 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
     return _save_overseas(req, _get_user(token))
 
 
+def _norm_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def _item_signature(items: list[dict[str, Any]] | None) -> tuple[Any, ...]:
+    rows = []
+    for raw in items or []:
+        try:
+            price = round(float(raw.get("unit_price_usd") or 0), 2)
+            qty = int(raw.get("quantity") or 0)
+        except (TypeError, ValueError):
+            price, qty = 0.0, 0
+        rows.append((
+            _norm_text(raw.get("product_name")),
+            _norm_text(raw.get("name_en")),
+            qty,
+            price,
+            re.sub(r"\D", "", str(raw.get("hs_code") or "")),
+            _norm_text(raw.get("origin_country")),
+        ))
+    return tuple(sorted(rows))
+
+
+def _parcel_signature(
+    *,
+    method: Any,
+    country: Any,
+    contents_type: Any,
+    customs: Any,
+    weight: Any,
+    length: Any,
+    width: Any,
+    height: Any,
+    zipcode: Any,
+    addr1: Any,
+    addr2: Any,
+    addr3: Any,
+    sender_name: Any,
+    items: list[dict[str, Any]] | None,
+) -> tuple[Any, ...]:
+    return (
+        _norm_text(method),
+        _norm_text(country),
+        _norm_text(contents_type or "parcel"),
+        _norm_text(customs or "merchandise"),
+        int(weight or 0),
+        int(length or 0),
+        int(width or 0),
+        int(height or 0),
+        _norm_text(zipcode),
+        _norm_text(addr1),
+        _norm_text(addr2),
+        _norm_text(addr3),
+        _norm_text(sender_name),
+        _item_signature(items),
+    )
+
+
 def _save_overseas(req: OverseasSubmitRequest, user: dict[str, Any]):
     ensure_overseas_tables()
     if not req.confirm:
@@ -1555,27 +1613,67 @@ def _save_overseas(req: OverseasSubmitRequest, user: dict[str, Any]):
         raise _http_error(exc) from exc
 
     today = datetime.now(KST).date().isoformat()
-    # 테스트 등기번호는 우체국 접수가 아니다. 실접수는 테스트 건에 막히지 않는다.
+    # 같은 날 같은 수취인이라도 내용이 다르면 접수한다. 테스트 등기는 실접수를 막지 않는다.
+    incoming = _parcel_signature(
+        method=validated["method"]["code"],
+        country=validated["countrycd"],
+        contents_type=validated.get("contents_type"),
+        customs=validated.get("customs_gubun"),
+        weight=validated["totweight"],
+        length=validated["boxlength"],
+        width=validated["boxwidth"],
+        height=validated["boxheight"],
+        zipcode=validated["receivezipcode"],
+        addr1=validated["receiveaddr1"],
+        addr2=validated["receiveaddr2"],
+        addr3=validated["receiveaddr3"],
+        sender_name=(validated.get("sender") or {}).get("name"),
+        items=list(validated.get("items") or []),
+    )
     duplicate_sql = """
-        SELECT id, tracking_no, is_test FROM overseas_shipping_requests
-        WHERE created_by=? AND recipient_phone=? AND countrycd=? AND shipping_method=?
-          AND status='requested' AND created_at LIKE ?
+        SELECT id, tracking_no, is_test, shipping_method, countrycd, contents_type, customs_gubun,
+               totweight, boxlength, boxwidth, boxheight, recipient_zip,
+               recipient_addr1, recipient_addr2, recipient_addr3, sender_name, item_list
+        FROM overseas_shipping_requests
+        WHERE created_by=? AND recipient_phone=? AND status='requested' AND created_at LIKE ?
     """
     if live:
         duplicate_sql += " AND is_test=0"
-    duplicate_sql += " ORDER BY id DESC LIMIT 1"
-    with get_connection() as con:
-        existing = con.execute(
-            duplicate_sql,
-            (
-                user["nickname"],
-                validated["receivetelno"],
-                validated["countrycd"],
-                validated["method"]["code"],
-                f"{today}%",
-            ),
-        ).fetchone()
-    if existing and validated["receivetelno"]:
+    duplicate_sql += " ORDER BY id DESC"
+    existing = None
+    if validated["receivetelno"]:
+        with get_connection() as con:
+            candidates = con.execute(
+                duplicate_sql,
+                (user["nickname"], validated["receivetelno"], f"{today}%"),
+            ).fetchall()
+        for row in candidates:
+            try:
+                stored_items = json.loads(row[16] or "[]")
+            except json.JSONDecodeError:
+                stored_items = []
+            if not isinstance(stored_items, list):
+                stored_items = []
+            signature = _parcel_signature(
+                method=row[3],
+                country=row[4],
+                contents_type=row[5],
+                customs=row[6],
+                weight=row[7],
+                length=row[8],
+                width=row[9],
+                height=row[10],
+                zipcode=row[11],
+                addr1=row[12],
+                addr2=row[13],
+                addr3=row[14],
+                sender_name=row[15],
+                items=stored_items,
+            )
+            if signature == incoming:
+                existing = row
+                break
+    if existing:
         return {
             "duplicate_guard": True,
             "success": True,

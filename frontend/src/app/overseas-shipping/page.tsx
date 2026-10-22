@@ -1017,8 +1017,8 @@ export default function OverseasShippingPage() {
         if (result.id) setPrintId(result.id);
         setError(
           result.is_test
-            ? `오늘 같은 수취인 테스트 접수가 있어 이번 접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`
-            : `오늘 같은 수취인으로 이미 접수된 건이 있어 이번 내용은 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`,
+            ? `오늘 같은 수취인, 같은 내용의 테스트 접수가 있어 이번 접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`
+            : `오늘 같은 수취인, 같은 내용으로 이미 접수된 건이 있어 이번 접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`,
         );
       } else {
         if (result.id) setPrintId(result.id);
