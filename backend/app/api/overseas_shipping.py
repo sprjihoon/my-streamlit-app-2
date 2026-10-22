@@ -1538,9 +1538,67 @@ def overseas_label(shipment_id: int, token: str, format: str = "json"):
     return {"ok": True, "label": label}
 
 
+def _request_from_shipment(data: dict[str, Any]) -> OverseasSubmitRequest:
+    items = [
+        InvoiceItem(
+            product_name=str(raw.get("product_name") or ""),
+            name_en=str(raw.get("name_en") or ""),
+            quantity=int(raw.get("quantity") or 1),
+            unit_price_usd=float(raw.get("unit_price_usd") or raw.get("value_usd") or 0),
+            hs_code=str(raw.get("hs_code") or ""),
+            origin_country=str(raw.get("origin_country") or "KR"),
+        )
+        for raw in (data.get("items") or [])
+    ]
+    return OverseasSubmitRequest(
+        shipping_method=str(data.get("shipping_method") or "EMS"),
+        contents_type=str(data.get("contents_type") or "parcel"),
+        customs_gubun=str(data.get("customs_gubun") or "merchandise"),
+        countrycd=str(data.get("countrycd") or ""),
+        sender_name=str(data.get("sender_name") or ""),
+        sender_zipcode=str(data.get("sender_zipcode") or ""),
+        sender_addr1=str(data.get("sender_addr1") or ""),
+        sender_addr2=str(data.get("sender_addr2") or ""),
+        sender_addr3=str(data.get("sender_addr3") or ""),
+        sender_tel=str(data.get("sender_tel") or ""),
+        receivename=str(data.get("recipient_name") or ""),
+        receivetelno=str(data.get("recipient_phone") or ""),
+        receivemail=str(data.get("recipient_email") or ""),
+        receivezipcode=str(data.get("recipient_zip") or ""),
+        receiveaddr1=str(data.get("recipient_addr1") or ""),
+        receiveaddr2=str(data.get("recipient_addr2") or ""),
+        receiveaddr3=str(data.get("recipient_addr3") or ""),
+        totweight=int(data.get("totweight") or 0),
+        boxlength=int(data.get("boxlength") or 0),
+        boxwidth=int(data.get("boxwidth") or 0),
+        boxheight=int(data.get("boxheight") or 0),
+        items=items,
+        notes=str(data.get("notes") or ""),
+        confirm=True,
+        test_mode=False,
+    )
+
+
+@router.post("/{shipment_id}/resubmit")
+def resubmit_overseas(shipment_id: int, token: str, confirm: bool = False):
+    """저장된 접수 내용으로 새 등기번호를 만든다. 같은 날 중복 가드는 적용하지 않는다."""
+    user = _get_user(token)
+    if not confirm:
+        raise HTTPException(status_code=400, detail="확인 후에만 재접수할 수 있습니다.")
+    data, _snapshot = _load_shipment(shipment_id)
+    try:
+        req = _request_from_shipment(data)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="저장된 접수 내용으로 다시 접수할 수 없습니다.") from exc
+    return _save_overseas(req, user, skip_duplicate=True)
+
+
 @router.post("")
 def create_overseas(req: OverseasSubmitRequest, token: str):
-    user = _get_user(token)
+    return _save_overseas(req, _get_user(token), skip_duplicate=False)
+
+
+def _save_overseas(req: OverseasSubmitRequest, user: dict[str, Any], *, skip_duplicate: bool):
     ensure_overseas_tables()
     if not req.confirm:
         raise HTTPException(status_code=400, detail="접수 확인이 필요합니다. 다시 시도해주세요.")
@@ -1551,35 +1609,36 @@ def create_overseas(req: OverseasSubmitRequest, token: str):
     except ValueError as exc:
         raise _http_error(exc) from exc
 
-    today = datetime.now(KST).date().isoformat()
-    # 테스트 등기번호는 우체국 접수가 아니다. 실접수는 테스트 건에 막히지 않는다.
-    duplicate_sql = """
-        SELECT id, tracking_no, is_test FROM overseas_shipping_requests
-        WHERE created_by=? AND recipient_phone=? AND countrycd=? AND shipping_method=?
-          AND status='requested' AND created_at LIKE ?
-    """
-    if live:
-        duplicate_sql += " AND is_test=0"
-    duplicate_sql += " ORDER BY id DESC LIMIT 1"
-    with get_connection() as con:
-        existing = con.execute(
-            duplicate_sql,
-            (
-                user["nickname"],
-                validated["receivetelno"],
-                validated["countrycd"],
-                validated["method"]["code"],
-                f"{today}%",
-            ),
-        ).fetchone()
-    if existing and validated["receivetelno"]:
-        return {
-            "duplicate_guard": True,
-            "success": True,
-            "id": existing[0],
-            "tracking_no": existing[1],
-            "is_test": bool(existing[2]),
-        }
+    if not skip_duplicate:
+        today = datetime.now(KST).date().isoformat()
+        # 테스트 등기번호는 우체국 접수가 아니다. 실접수는 테스트 건에 막히지 않는다.
+        duplicate_sql = """
+            SELECT id, tracking_no, is_test FROM overseas_shipping_requests
+            WHERE created_by=? AND recipient_phone=? AND countrycd=? AND shipping_method=?
+              AND status='requested' AND created_at LIKE ?
+        """
+        if live:
+            duplicate_sql += " AND is_test=0"
+        duplicate_sql += " ORDER BY id DESC LIMIT 1"
+        with get_connection() as con:
+            existing = con.execute(
+                duplicate_sql,
+                (
+                    user["nickname"],
+                    validated["receivetelno"],
+                    validated["countrycd"],
+                    validated["method"]["code"],
+                    f"{today}%",
+                ),
+            ).fetchone()
+        if existing and validated["receivetelno"]:
+            return {
+                "duplicate_guard": True,
+                "success": True,
+                "id": existing[0],
+                "tracking_no": existing[1],
+                "is_test": bool(existing[2]),
+            }
 
     order_no = f"TIL-{int(time.time() * 1000)}"
     try:

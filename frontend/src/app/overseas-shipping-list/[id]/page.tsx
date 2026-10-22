@@ -12,6 +12,7 @@ import {
   deleteOverseasShipping,
   getOverseasShipment,
   overseasStatusLabel,
+  resubmitOverseasShipping,
   type OverseasShippingItem,
 } from '@/lib/api';
 
@@ -66,6 +67,7 @@ export default function OverseasShippingDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [item, setItem] = useState<OverseasShippingItem | null>(null);
+  const [resubmitting, setResubmitting] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
@@ -111,6 +113,28 @@ export default function OverseasShippingDetailPage() {
     }
   }
 
+  async function handleResubmit() {
+    if (!item || !token || resubmitting) return;
+    const ok = window.confirm(
+      `이 내용으로 새 해외배송을 접수할까요?\n\n` +
+      `발송인: ${item.sender_name || '-'}\n` +
+      `수취인: ${item.recipient_name} / ${item.countrycd}\n` +
+      `예전 등기번호 ${item.tracking_no || '-'} 는 그대로 두고, 우체국에 새 접수로 나갑니다.`,
+    );
+    if (!ok) return;
+    setResubmitting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await resubmitOverseasShipping(token, item.id);
+      setSuccess(`재접수 완료. 등기번호 ${result.tracking_no}${result.is_test ? ' (테스트)' : ''}`);
+    } catch (err) {
+      setError(parseApiError(err));
+    } finally {
+      setResubmitting(false);
+    }
+  }
+
   async function handleCancel() {
     if (!item || !token) return;
     if (!window.confirm(`등기번호 ${item.tracking_no || item.order_no} 접수를 취소할까요?\n우체국에 접수된 건은 우체국 접수도 함께 취소합니다.`)) return;
@@ -148,6 +172,9 @@ export default function OverseasShippingDetailPage() {
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <a href="/overseas-shipping-list" className="btn btn-secondary">접수목록</a>
             <a href={`/overseas-print/${item.id}`} className="btn btn-primary" target="_blank" rel="noreferrer">출력서류</a>
+            <button type="button" className="btn btn-secondary" onClick={() => void handleResubmit()} disabled={resubmitting}>
+              {resubmitting ? '재접수 중...' : '재접수'}
+            </button>
             {canCancelOverseas(item) && (
               <button type="button" className="btn btn-primary" onClick={handleCancel}>접수 취소</button>
             )}

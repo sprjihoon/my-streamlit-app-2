@@ -342,6 +342,18 @@ export async function createOverseasShipping(token: string, payload: OverseasShi
   });
 }
 
+export async function resubmitOverseasShipping(token: string, id: number) {
+  return fetchApi<{
+    success: boolean;
+    id: number;
+    order_no: string;
+    tracking_no: string;
+    ems_fee: string;
+    is_test: boolean;
+    duplicate_guard?: boolean;
+  }>(`/overseas-shipping/${id}/resubmit${overseasQuery(token, '&confirm=true')}`, { method: 'POST' });
+}
+
 export async function cancelOverseasShipping(token: string, id: number) {
   return fetchApi<{ success: boolean; already?: boolean; message?: string }>(
     `/overseas-shipping/${id}/cancel${overseasQuery(token, '&confirm=true')}`,

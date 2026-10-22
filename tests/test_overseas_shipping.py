@@ -11,6 +11,7 @@ from backend.app.api.overseas_shipping import (
     SavedOverseasHsRequest,
     SavedOverseasSenderRequest,
     cancel_overseas,
+    resubmit_overseas,
     clear_nation_cache,
     create_overseas,
     delete_saved_overseas_address,
@@ -1670,6 +1671,37 @@ def test_shipment_detail_keeps_product_name_apart_from_hs_item(isolated_runtime)
     )
     assert params["contents"] == "Lip cosmetics"
     assert "PDRN" not in params["contents"]
+
+
+def test_resubmit_copies_saved_receipt_as_a_new_shipment(isolated_runtime, monkeypatch):
+    token = _seed_user(isolated_runtime["db"])
+    created = create_overseas(_req(confirm=True, receivetelno="+819011100009"), token)
+    blocked = create_overseas(_req(confirm=True, receivetelno="+819011100009"), token)
+    assert blocked.get("duplicate_guard") is True
+
+    monkeypatch.setattr("backend.app.api.overseas_shipping.has_ems_credentials", lambda: True)
+    monkeypatch.setattr(
+        "backend.app.api.overseas_shipping.apply_ems",
+        _fake_live_apply("EGRESUBMIT1KR"),
+    )
+    try:
+        resubmit_overseas(created["id"], token, confirm=False)
+        raise AssertionError("confirm required")
+    except HTTPException as exc:
+        assert exc.status_code == 400
+
+    copied = resubmit_overseas(created["id"], token, confirm=True)
+    assert copied.get("duplicate_guard") is not True
+    assert copied["id"] != created["id"]
+    assert copied["is_test"] is False
+    assert copied["tracking_no"] == "EGRESUBMIT1KR"
+    detail = get_overseas(copied["id"], token)
+    assert detail["recipient_name"] == "Hong Gildong"
+    assert detail["countrycd"] == "JP"
+    assert detail["items"][0]["name_en"] == "Clothing"
+    assert detail["tracking_no"] == "EGRESUBMIT1KR"
+    assert get_overseas(created["id"], token)["tracking_no"] != "EGRESUBMIT1KR"
+    assert len(list_overseas(token)["items"]) == 2
 
 
 def test_delivered_shipment_cannot_be_canceled(isolated_runtime, monkeypatch):

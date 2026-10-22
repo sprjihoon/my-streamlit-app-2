@@ -1126,7 +1126,10 @@ tbody tr:hover { background: #f6f7fb; }
   .domestic-field.w-notes input,
   .domestic-filters label,
   .domestic-filters input,
-  .domestic-filters select {
+  .domestic-filters select,
+  .overseas-filters label,
+  .overseas-filters input,
+  .overseas-filters select {
     width: 100%;
     max-width: 100%;
   }
@@ -1268,14 +1271,16 @@ tbody tr:hover { background: #f6f7fb; }
 .domestic-field.w-notes input {
   width: 100%;
 }
-.domestic-filters {
+.domestic-filters,
+.overseas-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 0.7rem;
   align-items: flex-end;
   margin-bottom: 0.85rem;
 }
-.domestic-filters label {
+.domestic-filters label,
+.overseas-filters label {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -1285,7 +1290,9 @@ tbody tr:hover { background: #f6f7fb; }
   color: var(--text-secondary);
 }
 .domestic-filters input,
-.domestic-filters select {
+.domestic-filters select,
+.overseas-filters input,
+.overseas-filters select {
   width: 11rem;
   max-width: 100%;
   padding: 0.38rem 0.5rem;
@@ -1296,7 +1303,8 @@ tbody tr:hover { background: #f6f7fb; }
   color: var(--text-primary);
   background: #fff;
 }
-.domestic-filters label:first-child input {
+.domestic-filters label:first-child input,
+.overseas-filters label:first-child input {
   width: 16rem;
 }
 .domestic-list-row {

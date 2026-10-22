@@ -165,10 +165,46 @@ test('delivered list row has no cancel button', async ({ page }) => {
   await expect(page.getByRole('cell', { name: '배달완료' })).toBeVisible();
   await expect(page.getByRole('button', { name: '접수 취소' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: '출력서류' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '재접수' })).toBeVisible();
   await page.goto('/overseas-shipping-list/11');
   await expect(page.getByRole('heading', { name: '해외배송 접수 상세' })).toBeVisible();
   await expect(page.getByRole('button', { name: '접수 취소' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: '출력서류' })).toBeVisible();
+});
+
+test('list filters, paging, and resubmit from a saved row', async ({ page }) => {
+  await installApi(page, STAFF);
+  let resubmitted = false;
+  await page.route('http://localhost:8000/overseas-shipping/**', async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'POST' && url.pathname === '/overseas-shipping/9/resubmit') {
+      resubmitted = true;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          id: 12,
+          order_no: 'TIL-12',
+          tracking_no: 'EG555000111KR',
+          ems_fee: '18000',
+          is_test: false,
+        }),
+      });
+    }
+    return route.fallback();
+  });
+  await page.goto('/overseas-shipping-list');
+  await expect(page.getByRole('cell', { name: 'Taro' })).toBeVisible();
+  await page.getByLabel('상태').selectOption('canceled');
+  await expect(page.getByText('검색 결과가 없습니다.')).toBeVisible();
+  await page.getByRole('button', { name: '초기화' }).click();
+  await expect(page.getByRole('cell', { name: 'Taro' })).toBeVisible();
+  await expect(page.getByLabel('페이지당')).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '재접수' }).click();
+  await expect(page.getByText('재접수 완료. 등기번호 EG555000111KR')).toBeVisible();
+  expect(resubmitted).toBe(true);
 });
 
 test('list, detail, cancel dismissal, and print link', async ({ page }) => {
