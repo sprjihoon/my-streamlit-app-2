@@ -1724,6 +1724,21 @@ def test_saved_receipt_can_be_posted_again_through_create(isolated_runtime, monk
     assert blocked.get("duplicate_guard") is True
     assert blocked["tracking_no"] == "EGRESUBMIT1KR"
 
+    forced = create_overseas(
+        _req(
+            confirm=True,
+            test_mode=False,
+            receivetelno=saved["recipient_phone"],
+            force_duplicate=True,
+        ),
+        token,
+    )
+    assert forced.get("duplicate_guard") is not True
+    assert forced["id"] != again["id"]
+    assert forced["is_test"] is False
+    assert forced["tracking_no"] == "EGRESUBMIT1KR"
+    assert len(list_overseas(token)["items"]) == 3
+
 
 def test_delivered_shipment_cannot_be_canceled(isolated_runtime, monkeypatch):
     token = _seed_user(isolated_runtime["db"], is_admin=1)

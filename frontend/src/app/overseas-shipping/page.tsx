@@ -7,6 +7,7 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import { DataSection as FormSection } from '@/components/operational';
 import AddressSuggestionDialog from '@/components/AddressSuggestionDialog';
+import { duplicateSubmitQuestion, useYesNo } from '@/components/YesNoDialog';
 import OverseasRecipientPickerModal from '@/components/OverseasRecipientPickerModal';
 import {
   createOverseasShipping,
@@ -181,6 +182,7 @@ export default function OverseasShippingPage() {
   const [printId, setPrintId] = useState<number | null>(null);
   const [liveReady, setLiveReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const { ask, dialog: yesNoDialog } = useYesNo();
   const [defaultSender, setDefaultSender] = useState('스프링풀필먼트');
   const [senderAddr, setSenderAddr] = useState('');
   const [methods, setMethods] = useState<Array<{ code: string; name: string; desc: string }>>([]);
@@ -1012,7 +1014,16 @@ export default function OverseasShippingPage() {
           `예상요금: ${feeText}${dutyLine}${totalLine}${fixBlock}\n\n결제 없이 우체국에 바로 접수됩니다.`,
       );
       if (!ok) return;
-      const result = await createOverseasShipping(token, payload);
+      let result = await createOverseasShipping(token, payload);
+      if (result.duplicate_guard) {
+        const proceed = await ask(duplicateSubmitQuestion(result.tracking_no));
+        if (!proceed) {
+          if (result.id) setPrintId(result.id);
+          setError(`접수하지 않았습니다. 기존 등기번호 ${result.tracking_no}`);
+          return;
+        }
+        result = await createOverseasShipping(token, { ...payload, force_duplicate: true });
+      }
       if (result.duplicate_guard) {
         if (result.id) setPrintId(result.id);
         setError(
@@ -1075,6 +1086,7 @@ export default function OverseasShippingPage() {
         subtitle="창고에서 EMS / EMS 프리미엄 / K-Packet를 결제 없이 바로 접수합니다."
       />
 
+      {yesNoDialog}
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
       {printId && (

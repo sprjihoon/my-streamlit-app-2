@@ -130,6 +130,7 @@ class OverseasSubmitRequest(BaseModel):
     notes: str = ""
     confirm: bool = False
     test_mode: bool = False
+    force_duplicate: bool = False
     save_address: bool = False
     save_address_label: str = ""
     save_address_default: bool = False
@@ -1673,7 +1674,7 @@ def _save_overseas(req: OverseasSubmitRequest, user: dict[str, Any]):
             if signature == incoming:
                 existing = row
                 break
-    if existing:
+    if existing and not req.force_duplicate:
         return {
             "duplicate_guard": True,
             "success": True,

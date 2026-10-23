@@ -39,6 +39,7 @@ export interface OverseasShippingPayload {
   notes: string;
   confirm?: boolean;
   test_mode?: boolean;
+  force_duplicate?: boolean;
   save_address?: boolean;
   save_address_label?: string;
   save_address_default?: boolean;
@@ -377,9 +378,16 @@ export function overseasShipmentPayload(item: OverseasShippingItem): OverseasShi
   };
 }
 
-export async function resubmitOverseasShipping(token: string, id: number) {
+export async function resubmitOverseasShipping(
+  token: string,
+  id: number,
+  options?: { forceDuplicate?: boolean },
+) {
   const saved = await getOverseasShipment(token, id);
-  return createOverseasShipping(token, overseasShipmentPayload(saved));
+  return createOverseasShipping(token, {
+    ...overseasShipmentPayload(saved),
+    force_duplicate: Boolean(options?.forceDuplicate),
+  });
 }
 
 export async function cancelOverseasShipping(token: string, id: number) {

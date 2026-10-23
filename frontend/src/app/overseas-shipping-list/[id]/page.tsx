@@ -6,6 +6,7 @@ import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
+import { duplicateSubmitQuestion, useYesNo } from '@/components/YesNoDialog';
 import {
   canCancelOverseas,
   cancelOverseasShipping,
@@ -69,6 +70,7 @@ export default function OverseasShippingDetailPage() {
   const [item, setItem] = useState<OverseasShippingItem | null>(null);
   const [resubmitting, setResubmitting] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const { ask, dialog: yesNoDialog } = useYesNo();
 
   useEffect(() => {
     const stored = localStorage.getItem('token') || '';
@@ -126,7 +128,15 @@ export default function OverseasShippingDetailPage() {
     setError(null);
     setSuccess(null);
     try {
-      const result = await resubmitOverseasShipping(token, item.id);
+      let result = await resubmitOverseasShipping(token, item.id);
+      if (result.duplicate_guard) {
+        const proceed = await ask(duplicateSubmitQuestion(result.tracking_no));
+        if (!proceed) {
+          setError(`접수하지 않았습니다. 기존 등기번호 ${result.tracking_no}`);
+          return;
+        }
+        result = await resubmitOverseasShipping(token, item.id, { forceDuplicate: true });
+      }
       if (result.duplicate_guard) {
         setError(`오늘 같은 수취인, 같은 내용으로 이미 접수된 건이 있어 이번 재접수는 우체국으로 나가지 않았습니다. 등기번호 ${result.tracking_no}`);
         return;
@@ -165,6 +175,7 @@ export default function OverseasShippingDetailPage() {
         title="해외배송 접수 상세"
         subtitle={item ? `${item.order_no} · ${(item.created_at || '').replace('T', ' ').slice(0, 16)}` : '접수한 입력값을 그대로 봅니다.'}
       />
+      {yesNoDialog}
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
       {!item ? (
