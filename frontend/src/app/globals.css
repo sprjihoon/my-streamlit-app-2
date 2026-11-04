@@ -481,15 +481,40 @@ h1, h2, h3, h4 {
 }
 .return-filter-dates,
 .return-filter-fields {
-  display: grid;
-  gap: 0.85rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem 0.85rem;
+  padding: 0 0.85rem 0.85rem;
 }
-.return-filter-dates { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.return-filter-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.return-filter-dates .form-group,
-.return-filter-fields .form-group {
+.return-filter-dates > .form-group {
+  flex: 0 0 11.25rem;
+  width: 11.25rem;
+  max-width: 11.25rem;
   margin-bottom: 0;
   min-width: 0;
+}
+.return-filter-fields > .form-group {
+  flex: 1 1 13rem;
+  width: 13rem;
+  max-width: 16rem;
+  margin-bottom: 0;
+  min-width: 0;
+}
+.return-filter-fields > .return-filter-short {
+  flex: 0 0 8.25rem;
+  width: 8.25rem;
+  max-width: 8.25rem;
+}
+.return-filter-fields > .return-filter-choice {
+  flex: 1 1 16rem;
+  width: 16rem;
+  max-width: 20rem;
+}
+.return-filter-fields > .return-filter-wide {
+  flex: 1 1 24rem;
+  width: auto;
+  max-width: 36rem;
 }
 .return-filter-range {
   display: flex;
@@ -503,8 +528,8 @@ h1, h2, h3, h4 {
   min-width: 0;
   max-width: 100%;
 }
-.return-filter-wide { grid-column: span 2; }
-.return-filter-memo { grid-column: 1 / -1; }
+.return-filter-wide { min-width: 16rem; }
+.return-filter-memo { width: 100%; }
 .return-filter-memo textarea {
   display: block;
   width: 100%;
@@ -591,15 +616,14 @@ h1, h2, h3, h4 {
   vertical-align: top;
   line-height: 1.45;
 }
-@media (max-width: 1100px) {
-  .return-filter-dates,
-  .return-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @media (max-width: 640px) {
-  .return-filter-dates,
-  .return-filter-fields { grid-template-columns: minmax(0, 1fr); }
-  .return-filter-wide,
-  .return-filter-memo { grid-column: auto; }
+  .return-filter-dates > .form-group,
+  .return-filter-fields > .return-filter-short {
+    flex-basis: 100%;
+    width: 100%;
+    max-width: 16rem;
+  }
+  .return-filter-wide { min-width: 0; max-width: 100%; }
 }
 
 .field-required { color: var(--color-danger); margin-left: 0.15rem; }

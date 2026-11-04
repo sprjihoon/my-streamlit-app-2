@@ -86,6 +86,12 @@ test('return info page filters every header and pages the rows', async ({ page }
   expect(registeredStart && registeredEnd && inboundStart).toBeTruthy();
   expect(registeredEnd!.y).toBeGreaterThanOrEqual(registeredStart!.y + registeredStart!.height - 1);
   expect(inboundStart!.x).toBeGreaterThanOrEqual(registeredStart!.x + registeredStart!.width - 1);
+  expect(registeredStart!.width).toBeLessThan(220);
+  const statusBox = await page.getByLabel('상태').boundingBox();
+  const sellerBox = await page.getByRole('textbox', { name: '판매처', exact: true }).boundingBox();
+  expect(statusBox && sellerBox).toBeTruthy();
+  expect(statusBox!.width).toBeLessThan(160);
+  expect(sellerBox!.width).toBeGreaterThan(statusBox!.width);
   const seller = page.getByRole('textbox', { name: '판매처', exact: true });
   await expect(seller).toHaveJSProperty('tagName', 'INPUT');
   await seller.fill('봄');

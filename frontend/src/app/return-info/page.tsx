@@ -24,6 +24,7 @@ const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
 const CHOICE_COLUMNS = ['판매처', '상품명', '공급처'] as const;
 const MULTI_COLUMNS = ['판매처', '공급처'] as const;
 const WIDE_COLUMNS = new Set(['반품메모']);
+const SHORT_COLUMNS = new Set(['상태', '등록자', '관리번호', '주문번호', '수령자', '수량', '불량']);
 const PAGE_SIZES = [20, 50, 100];
 
 function emptyFilters(): ReturnInfoFilters {
@@ -109,6 +110,13 @@ export default function ReturnInfoPage() {
     ...RETURN_INFO_COLUMNS.filter((column) => !DATE_COLUMNS.has(column) && column !== 'CS이력'),
     ...extraColumns,
   ];
+  const lookupColumns = ['판매처', '공급처', '상품명', '바코드', '옵션'];
+  const orderedConditionColumns = [
+    ...[...SHORT_COLUMNS].filter((column) => conditionColumns.includes(column)),
+    ...lookupColumns.filter((column) => conditionColumns.includes(column)),
+    ...conditionColumns.filter((column) => !SHORT_COLUMNS.has(column) && !lookupColumns.includes(column) && column !== '반품메모'),
+    ...conditionColumns.filter((column) => column === '반품메모'),
+  ];
   const conditionActive = conditionColumns.some((column) => (draft[column] || '').trim());
 
   function updateDraft(key: string, value: string) {
@@ -134,6 +142,128 @@ export default function ReturnInfoPage() {
     setChoiceQuery({});
     setPage(1);
     setMessage(null);
+  }
+
+  function renderConditionField(column: string) {
+    const fieldClass = WIDE_COLUMNS.has(column)
+      ? 'return-filter-wide'
+      : SHORT_COLUMNS.has(column)
+        ? 'return-filter-short'
+        : CHOICE_COLUMNS.includes(column as typeof CHOICE_COLUMNS[number])
+          ? 'return-filter-choice'
+          : undefined;
+    if (CHOICE_COLUMNS.includes(column as typeof CHOICE_COLUMNS[number])) {
+      const options = choices[column as typeof CHOICE_COLUMNS[number]] || [];
+      const multi = MULTI_COLUMNS.includes(column as typeof MULTI_COLUMNS[number]);
+      const current = draft[column] || '';
+      const selected = multi
+        ? current.split('\n').map((part) => part.trim()).filter(Boolean)
+        : [];
+      const typed = multi ? (choiceQuery[column] || '') : current;
+      const needle = typed.trim().toLowerCase();
+      const matches = needle
+        ? options.filter((option) => option.toLowerCase().includes(needle) && !selected.includes(option))
+        : [];
+      function addValue(value: string) {
+        if (selected.includes(value)) return;
+        updateDraft(column, [...selected, value].join('\n'));
+        setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: '' }));
+      }
+      function removeValue(value: string) {
+        updateDraft(column, selected.filter((item) => item !== value).join('\n'));
+      }
+      return (
+        <Field key={column} label={column} className={fieldClass}>
+          <div className="return-choice">
+            {multi ? (
+              <div className="return-choice-field">
+                {selected.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className="return-choice-entered"
+                    aria-label={`${column} ${value} 빼기`}
+                    onClick={() => removeValue(value)}
+                  >
+                    {value}
+                  </button>
+                ))}
+                <input
+                  type="text"
+                  aria-label={column}
+                  value={typed}
+                  placeholder={selected.length ? '이어서 찾기' : '글자 입력'}
+                  onChange={(event) => setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: event.target.value }))}
+                />
+              </div>
+            ) : (
+              <input
+                type="text"
+                aria-label={column}
+                list={`return-choice-${column}`}
+                value={typed}
+                placeholder="글자 입력"
+                onChange={(event) => updateDraft(column, event.target.value)}
+              />
+            )}
+            {multi ? null : (
+              <datalist id={`return-choice-${column}`}>
+                {options.map((value) => (
+                  <option key={value} value={value} />
+                ))}
+              </datalist>
+            )}
+            {multi && matches.length > 0 ? (
+              <div className="return-choice-picked">
+                {matches.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className="return-choice-suggest"
+                    aria-label={`${column} ${value} 추가`}
+                    onClick={() => addValue(value)}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {!multi && matches.length === 1 && matches[0] !== typed.trim() ? (
+              <button
+                type="button"
+                className="return-choice-suggest"
+                onClick={() => updateDraft(column, matches[0])}
+              >
+                {matches[0]}
+              </button>
+            ) : null}
+            {!multi && matches.length > 1 ? (
+              <select
+                aria-label={`${column} 비슷한 값`}
+                value={matches.includes(typed.trim()) ? typed.trim() : ''}
+                onChange={(event) => updateDraft(column, event.target.value)}
+              >
+                <option value="">비슷한 값 선택</option>
+                {matches.map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+        </Field>
+      );
+    }
+    return (
+      <Field key={column} label={column} className={fieldClass}>
+        <input
+          type="text"
+          aria-label={column}
+          value={draft[column] || ''}
+          onChange={(event) => updateDraft(column, event.target.value)}
+          placeholder="포함 검색"
+        />
+      </Field>
+    );
   }
 
   return (
@@ -186,120 +316,10 @@ export default function ReturnInfoPage() {
             <details className="return-filter-accordion">
               <summary>조건{conditionActive ? ' · 선택됨' : ''}</summary>
               <div className="return-filter-fields">
-                {conditionColumns.map((column) => {
-                  if (CHOICE_COLUMNS.includes(column as typeof CHOICE_COLUMNS[number])) {
-                    const options = choices[column as typeof CHOICE_COLUMNS[number]] || [];
-                    const multi = MULTI_COLUMNS.includes(column as typeof MULTI_COLUMNS[number]);
-                    const current = draft[column] || '';
-                    const selected = multi
-                      ? current.split('\n').map((part) => part.trim()).filter(Boolean)
-                      : [];
-                    const typed = multi ? (choiceQuery[column] || '') : current;
-                    const needle = typed.trim().toLowerCase();
-                    const matches = needle
-                      ? options.filter((option) => option.toLowerCase().includes(needle) && !selected.includes(option))
-                      : [];
-                    function addValue(value: string) {
-                      if (selected.includes(value)) return;
-                      updateDraft(column, [...selected, value].join('\n'));
-                      setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: '' }));
-                    }
-                    function removeValue(value: string) {
-                      updateDraft(column, selected.filter((item) => item !== value).join('\n'));
-                    }
-                    return (
-                      <Field key={column} label={column}>
-                        <div className="return-choice">
-                          {multi ? (
-                            <div className="return-choice-field">
-                              {selected.map((value) => (
-                                <button
-                                  key={value}
-                                  type="button"
-                                  className="return-choice-entered"
-                                  aria-label={`${column} ${value} 빼기`}
-                                  onClick={() => removeValue(value)}
-                                >
-                                  {value}
-                                </button>
-                              ))}
-                              <input
-                                type="text"
-                                aria-label={column}
-                                value={typed}
-                                placeholder={selected.length ? '이어서 찾기' : '글자 입력'}
-                                onChange={(event) => setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: event.target.value }))}
-                              />
-                            </div>
-                          ) : (
-                            <input
-                              type="text"
-                              aria-label={column}
-                              list={`return-choice-${column}`}
-                              value={typed}
-                              placeholder="글자 입력"
-                              onChange={(event) => updateDraft(column, event.target.value)}
-                            />
-                          )}
-                          {multi ? null : (
-                            <datalist id={`return-choice-${column}`}>
-                              {options.map((value) => (
-                                <option key={value} value={value} />
-                              ))}
-                            </datalist>
-                          )}
-                          {multi && matches.length > 0 ? (
-                            <div className="return-choice-picked">
-                              {matches.map((value) => (
-                                <button
-                                  key={value}
-                                  type="button"
-                                  className="return-choice-suggest"
-                                  aria-label={`${column} ${value} 추가`}
-                                  onClick={() => addValue(value)}
-                                >
-                                  {value}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                          {!multi && matches.length === 1 && matches[0] !== typed.trim() ? (
-                            <button
-                              type="button"
-                              className="return-choice-suggest"
-                              onClick={() => updateDraft(column, matches[0])}
-                            >
-                              {matches[0]}
-                            </button>
-                          ) : null}
-                          {!multi && matches.length > 1 ? (
-                            <select
-                              aria-label={`${column} 비슷한 값`}
-                              value={matches.includes(typed.trim()) ? typed.trim() : ''}
-                              onChange={(event) => updateDraft(column, event.target.value)}
-                            >
-                              <option value="">비슷한 값 선택</option>
-                              {matches.map((value) => (
-                                <option key={value} value={value}>{value}</option>
-                              ))}
-                            </select>
-                          ) : null}
-                        </div>
-                      </Field>
-                    );
-                  }
-                  return (
-                    <Field key={column} label={column} className={WIDE_COLUMNS.has(column) ? 'return-filter-wide' : undefined}>
-                      <input
-                        type="text"
-                        aria-label={column}
-                        value={draft[column] || ''}
-                        onChange={(event) => updateDraft(column, event.target.value)}
-                        placeholder="포함 검색"
-                      />
-                    </Field>
-                  );
-                })}
+                {orderedConditionColumns.filter((column) => SHORT_COLUMNS.has(column)).map((column) => renderConditionField(column))}
+              </div>
+              <div className="return-filter-fields">
+                {orderedConditionColumns.filter((column) => !SHORT_COLUMNS.has(column)).map((column) => renderConditionField(column))}
               </div>
             </details>
             <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-2">
