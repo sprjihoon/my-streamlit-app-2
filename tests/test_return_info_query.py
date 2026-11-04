@@ -133,20 +133,23 @@ def test_return_info_report_uses_filtered_rows(isolated_runtime):
     assert report.status_code == 200
     sheet = load_workbook(io.BytesIO(report.content)).active
     assert sheet["A1"].value == "반품 보고서"
-    assert sheet["A2"].value == "공급처"
-    assert sheet["B2"].value == "헤이즐"
-    assert sheet["A3"].value == "작성일"
-    assert sheet["B3"].value
-    assert sheet["A4"].value == "등록자"
-    assert sheet["B4"].value == "관리자"
-    headers = [cell.value for cell in sheet[6]]
+    assert "A1:D1" in {str(item) for item in sheet.merged_cells.ranges}
+    assert sheet["A1"].font.size == 22
+    assert sheet["A2"].value is None
+    assert sheet["A3"].value == "공급처"
+    assert sheet["B3"].value == "헤이즐샵, 헤이즐"
+    assert sheet["A4"].value == "작성일"
+    assert sheet["B4"].value
+    assert sheet["A5"].value == "등록자"
+    assert sheet["B5"].value == "관리자"
+    headers = [cell.value for cell in sheet[7]]
     assert headers == [
         "번호", "등록일", "등록자", "관리번호", "주문번호", "판매처", "수령자",
         "상품명", "옵션", "바코드", "수량", "불량", "CS이력", "반품메모",
     ]
     assert "상태" not in headers
-    numbers = [sheet.cell(row, 1).value for row in range(7, sheet.max_row + 1)]
-    managed = [sheet.cell(row, 4).value for row in range(7, sheet.max_row + 1)]
+    numbers = [sheet.cell(row, 1).value for row in range(8, sheet.max_row + 1)]
+    managed = [sheet.cell(row, 4).value for row in range(8, sheet.max_row + 1)]
     assert numbers == [1, 2]
     assert managed == ["333", "111"]
 

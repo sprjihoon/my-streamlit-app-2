@@ -256,10 +256,7 @@ def _author_name(token: str) -> str:
     return str(row[0]).strip() if row and row[0] else ""
 
 
-def _supplier_label(query, rows: list[dict]) -> str:
-    selected = _values(query, "공급처")
-    if selected:
-        return ", ".join(selected)
+def _supplier_label(rows: list[dict]) -> str:
     names: list[str] = []
     for row in rows:
         name = str(row.get("공급처") or "").strip()
@@ -272,7 +269,7 @@ def _report_workbook(rows: list[dict], supplier: str, author: str) -> bytes:
     book = Workbook()
     sheet = book.active
     sheet.title = "반품 보고서"
-    title_font = Font(name="맑은 고딕", size=16, bold=True)
+    title_font = Font(name="맑은 고딕", size=22, bold=True)
     label_font = Font(name="맑은 고딕", size=11, bold=True)
     body_font = Font(name="맑은 고딕", size=10)
     header_fill = PatternFill("solid", fgColor="E8EEF4")
@@ -280,11 +277,14 @@ def _report_workbook(rows: list[dict], supplier: str, author: str) -> bytes:
     today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
     sheet["A1"] = "반품 보고서"
     sheet["A1"].font = title_font
+    sheet["A1"].alignment = Alignment(vertical="center")
+    sheet.merge_cells("A1:D1")
+    sheet.row_dimensions[1].height = 32
     info = (("공급처", supplier), ("작성일", today), ("등록자", author))
-    for index, (label, value) in enumerate(info, start=2):
+    for index, (label, value) in enumerate(info, start=3):
         sheet.cell(index, 1, label).font = label_font
         sheet.cell(index, 2, value).font = body_font
-    header_row = 6
+    header_row = 7
     headers = ("번호", *REPORT_HEADERS)
     for col_index, header in enumerate(headers, start=1):
         cell = sheet.cell(header_row, col_index, header)
@@ -315,7 +315,7 @@ def _report_workbook(rows: list[dict], supplier: str, author: str) -> bytes:
     }
     for col_index, header in enumerate(headers, start=1):
         sheet.column_dimensions[get_column_letter(col_index)].width = widths.get(header, 14)
-    sheet.freeze_panes = "A7"
+    sheet.freeze_panes = "A8"
     sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{header_row + max(len(rows), 1)}"
     sheet.page_setup.orientation = "landscape"
     sheet.page_setup.fitToPage = True
@@ -346,7 +346,7 @@ async def report_return_info(request: Request):
         rows, _total = _rows(con, columns, where, params, int(total), 0)
     payload = _report_workbook(
         rows,
-        _supplier_label(request.query_params, rows),
+        _supplier_label(rows),
         _author_name(request.query_params.get("token") or ""),
     )
     filename = quote("반품보고서.xlsx")
