@@ -284,6 +284,8 @@ CRITICAL_COLS = {
         ("works_user_id", "TEXT"),    # 네이버 웍스 사용자 ID
     ],
     # 작업일지 변경 이력 로그
+    # 반품정보: 엑셀 컬럼은 업로드 시 그대로 추가된다. 날짜 칸은 아직 고정하지 않는다.
+    "return_info": [],
     "work_log_history": [
         ("log_id", "INTEGER"),        # 원본 작업일지 ID
         ("action", "TEXT"),           # 'create', 'update', 'delete'
@@ -306,8 +308,13 @@ CRITICAL_COLS = {
 # 4. 테이블 & 컬럼 보강
 # ─────────────────────────────────────
 def _create_skeleton(con: sqlite3.Connection, tbl: str, col_defs: list[tuple[str, str]]):
-    cols_sql = ", ".join(f"[{c}] {t}" for c, t in col_defs)
-    con.execute(f"CREATE TABLE IF NOT EXISTS {tbl}(id INTEGER PRIMARY KEY AUTOINCREMENT, {cols_sql});")
+    if col_defs:
+        cols_sql = ", ".join(f"[{c}] {t}" for c, t in col_defs)
+        con.execute(
+            f"CREATE TABLE IF NOT EXISTS {tbl}(id INTEGER PRIMARY KEY AUTOINCREMENT, {cols_sql});"
+        )
+        return
+    con.execute(f"CREATE TABLE IF NOT EXISTS {tbl}(id INTEGER PRIMARY KEY AUTOINCREMENT);")
 
 
 def ensure_tables() -> None:

@@ -20,8 +20,23 @@ from backend.app.config import settings
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
-# 허용된 테이블 타입
-TableType = Literal["inbound_slip", "shipping_stats", "kpost_in", "kpost_ret", "work_log"]
+# 허용된 테이블 타입. return_info는 반품정보 업로드 전용이며 작업일지와 분리한다.
+ALLOWED_UPLOAD_TABLES = [
+    "inbound_slip",
+    "shipping_stats",
+    "kpost_in",
+    "kpost_ret",
+    "work_log",
+    "return_info",
+]
+TableType = Literal[
+    "inbound_slip",
+    "shipping_stats",
+    "kpost_in",
+    "kpost_ret",
+    "work_log",
+    "return_info",
+]
 
 
 def check_admin(token: Optional[str]) -> tuple:
@@ -182,8 +197,7 @@ async def reset_table_data(table_name: str, token: Optional[str] = None) -> Uplo
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
     
     # 허용된 테이블만 삭제 가능
-    allowed_tables = ["inbound_slip", "shipping_stats", "kpost_in", "kpost_ret", "work_log"]
-    if table_name not in allowed_tables:
+    if table_name not in ALLOWED_UPLOAD_TABLES:
         raise HTTPException(status_code=400, detail=f"허용되지 않은 테이블입니다: {table_name}")
     
     try:
@@ -260,14 +274,18 @@ async def reset_table_data_by_period(
     if not is_admin:
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
 
-    allowed_tables = ["inbound_slip", "shipping_stats", "kpost_in", "kpost_ret", "work_log"]
-    if table_name not in allowed_tables:
+    if table_name not in ALLOWED_UPLOAD_TABLES:
         raise HTTPException(status_code=400, detail=f"허용되지 않은 테이블입니다: {table_name}")
 
     if date_from > date_to:
         raise HTTPException(status_code=400, detail="시작일이 종료일보다 늦을 수 없습니다.")
 
-    date_col = TABLE_DATE_COL[table_name]
+    date_col = TABLE_DATE_COL.get(table_name)
+    if not date_col:
+        raise HTTPException(
+            status_code=400,
+            detail="이 데이터는 기간 삭제를 지원하지 않습니다. 데이터 초기화를 사용해 주세요.",
+        )
 
     try:
         with get_connection() as con:

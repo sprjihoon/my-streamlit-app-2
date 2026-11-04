@@ -16,6 +16,7 @@ const DATASETS = [
   { key: 'kpost_in', label: '우체국접수' },
   { key: 'kpost_ret', label: '우체국반품' },
   { key: 'work_log', label: '작업일지' },
+  { key: 'return_info', label: '반품정보' },
 ];
 
 export default function Dashboard() {
@@ -96,7 +97,7 @@ export default function Dashboard() {
             <TableBody>
               {uploads.slice(0, 5).map((u, i) => (
                 <TableRow key={i}>
-                  <TableCell>{u.table_name}</TableCell>
+                  <TableCell>{DATASETS.find((t) => t.key === u.table_name)?.label ?? u.table_name}</TableCell>
                   <TableCell truncate>{u.원본명 || '-'}</TableCell>
                   <TableCell>{u.업로드시각}</TableCell>
                 </TableRow>

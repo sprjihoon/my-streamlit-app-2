@@ -13,11 +13,12 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
  * 업로드 타겟 정의
  */
 const TARGETS = [
-  { key: 'inbound_slip', label: '입고전표' },
-  { key: 'shipping_stats', label: '배송통계' },
-  { key: 'kpost_in', label: '우체국접수' },
-  { key: 'kpost_ret', label: '우체국반품' },
-  { key: 'work_log', label: '작업일지' },
+  { key: 'inbound_slip', label: '입고전표', periodReset: true },
+  { key: 'shipping_stats', label: '배송통계', periodReset: true },
+  { key: 'kpost_in', label: '우체국접수', periodReset: true },
+  { key: 'kpost_ret', label: '우체국반품', periodReset: true },
+  { key: 'work_log', label: '작업일지', periodReset: true },
+  { key: 'return_info', label: '반품정보', periodReset: false },
 ];
 
 interface UploadRecord {
@@ -238,8 +239,8 @@ export default function UploadPage() {
 
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
-      {/* 업로드 영역 (5컬럼 그리드) */}
-      <div className="grid grid-5" style={{ marginBottom: '1rem' }}>
+      {/* 업로드 영역. 반품정보는 작업일지 바로 옆 */}
+      <div className="grid grid-6" style={{ marginBottom: '1rem' }}>
         {TARGETS.map((target) => (
           <Card key={target.key} title={target.label}>
             {/* 파일 업로드 */}
@@ -265,6 +266,12 @@ export default function UploadPage() {
                 </>
               )}
             </div>
+
+            {target.key === 'return_info' && (
+              <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                엑셀 열은 그대로 저장됩니다. 날짜 칸이 정해지기 전에는 기간 삭제를 하지 않습니다.
+              </p>
+            )}
 
             {/* 통계 */}
             <div className="metric" style={{ marginTop: '0.5rem' }}>
@@ -323,7 +330,7 @@ export default function UploadPage() {
                   fontSize: '0.875rem',
                 }}
               >
-                {TARGETS.map((t) => (
+                {TARGETS.filter((t) => t.periodReset).map((t) => (
                   <option key={t.key} value={t.key}>
                     {t.label}
                   </option>
@@ -422,7 +429,7 @@ export default function UploadPage() {
               <tbody>
                 {uploads.map((u) => (
                   <tr key={u.id}>
-                    <td>{u.table_name}</td>
+                    <td>{TARGETS.find((t) => t.key === u.table_name)?.label ?? u.table_name}</td>
                     <td>{u.원본명 || u.filename}</td>
                     <td>{u.시작일 || '-'}</td>
                     <td>{u.종료일 || '-'}</td>

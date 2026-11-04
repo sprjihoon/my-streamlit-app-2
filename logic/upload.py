@@ -148,6 +148,7 @@ UPLOAD_DIR = _get_upload_dir()
 TableName = Literal[
     "inbound_slip", "shipping_stats",
     "kpost_in", "kpost_ret", "work_log",
+    "return_info",
 ]
 
 DATE_COL = {
