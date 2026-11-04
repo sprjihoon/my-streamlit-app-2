@@ -72,7 +72,21 @@ export function getReturnInfo(filters: ReturnInfoFilters, page: number, pageSize
   );
 }
 
-async function downloadReturnInfoFile(path: string, filename: string, filters: ReturnInfoFilters, fallback: string) {
+function filenameFromDisposition(header: string | null, fallback: string) {
+  if (!header) return fallback;
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      return fallback;
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] || fallback;
+}
+
+async function downloadReturnInfoFile(path: string, filename: string | null, filters: ReturnInfoFilters, fallback: string) {
   const res = await fetch(`${API_BASE}${path}${returnInfoQuery(filters)}`);
   if (!res.ok) {
     let detail = fallback;
@@ -91,7 +105,7 @@ async function downloadReturnInfoFile(path: string, filename: string, filters: R
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = objectUrl;
-  link.download = filename;
+  link.download = filename || filenameFromDisposition(res.headers.get('Content-Disposition'), 'download.xlsx');
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -103,5 +117,5 @@ export function downloadReturnInfoExcel(filters: ReturnInfoFilters) {
 }
 
 export function downloadReturnInfoReport(filters: ReturnInfoFilters) {
-  return downloadReturnInfoFile('/return-info/report', '반품보고서.xlsx', filters, '보고서 생성 실패');
+  return downloadReturnInfoFile('/return-info/report', null, filters, '보고서 생성 실패');
 }

@@ -168,8 +168,8 @@ UNIQUE_KEY: dict[str, list[str] | None] = {
     "work_log": ["no", "날짜", "업체명"],  # no+날짜+업체명: no는 월마다·파일마다 리셋되므로 업체명 포함해야 유니크
     "kpost_in": ["등기번호"],
     "kpost_ret": ["등기번호", "배달일자"],
-    # 같은 반품의 상품 행만 구분한다. 상태 변경분은 기간 삭제 후 다시 올린다.
-    "return_info": ["관리번호", "상품명", "옵션"],
+    # 모든 헤더 값이 같은 행만 건너뛴다. ingest에서 업로드 헤더 전체로 비교한다.
+    "return_info": None,
 }
 
 # 우체국 데이터 허용 컬럼 (화이트리스트)
@@ -578,12 +578,15 @@ def ingest(
 
     # 5) 행-중복 제거 (set 기반 pandas dedup)
     # work_log: no+날짜 조합으로 중복 제거. no 컬럼이 없는 구형 파일은 건너뜀.
+    duplicate_removed = 0
     key_cols = UNIQUE_KEY.get(table)
     date_col = DATE_COL.get(table)
 
     # work_log이고 no 컬럼이 없는 구형 파일 → dedup 불가, 건너뜀
     if table == "work_log" and "no" not in df.columns:
         key_cols = None
+    if table == "return_info":
+        key_cols = [column for column in df.columns if column != "id"]
 
     if key_cols:
         try:
@@ -616,6 +619,14 @@ def ingest(
                 df_for_key[date_col] = df_for_key[date_col].dt.strftime('%Y-%m-%d')
 
         new_keys = df_for_key[key_cols].apply(_to_key_str, axis=1)
+        if table == "return_info":
+            first_seen = ~new_keys.duplicated(keep="first")
+            removed = int((~first_seen).sum())
+            duplicate_removed += removed
+            if removed:
+                print(f"[return_info] 파일 안 동일 행 {removed}건 제외")
+            df = df.loc[first_seen].reset_index(drop=True)
+            new_keys = new_keys.loc[first_seen].reset_index(drop=True)
 
         if date_col and date_col in existed.columns:
             existed[date_col] = pd.to_datetime(
@@ -624,6 +635,8 @@ def ingest(
         existed_keys = set(existed[key_cols].apply(_to_key_str, axis=1))
 
         mask = ~new_keys.isin(existed_keys)
+        if table == "return_info":
+            duplicate_removed += int((~mask).sum())
         df = df[mask].reset_index(drop=True)
 
         if date_col and date_col in df.columns:
@@ -730,7 +743,10 @@ def ingest(
         """, (fname, orig_name or getattr(file, 'name', fname), table, d_min, d_max, file_hash))
         con.commit()
 
-    return True, f"✅ {table} 테이블에 {len(df)}건 적재 완료"
+    message = f"✅ {table} 테이블에 {len(df)}건 적재 완료"
+    if table == "return_info" and duplicate_removed:
+        message += f". 모든 칸이 같은 중복 행 {duplicate_removed}건을 걸러냈습니다"
+    return True, message
 
 
 # ───────────── 이력 조회 ────────────────────────────────

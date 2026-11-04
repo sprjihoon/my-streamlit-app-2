@@ -59,15 +59,18 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
     ok, message = ingest(
         _xlsx([
             _row(),
+            _row(),
             _row(관리번호="900001", 주문번호="900001", 등록일=None, 상품명="날짜없음"),
         ]),
         "return_info",
         "return_info.xlsx",
     )
     assert ok, message
+    assert "중복 행 1건을 걸러냈습니다" in message
 
     again, again_message = ingest(
         _xlsx([
+            _row(),
             _row(상태="입고대기", 반품메모="같은 건"),
             _row(관리번호="900002", 주문번호="900002", 상품명="새상품", 반품메모="추가"),
         ]),
@@ -75,6 +78,7 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
         "return_info_next.xlsx",
     )
     assert again, again_message
+    assert "중복 행 1건을 걸러냈습니다" in again_message
 
     missing, missing_message = ingest(
         _xlsx([{"상품명": "등록일없음", "관리번호": "1"}]),
@@ -92,12 +96,13 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
 
     assert rows == [
         ("897278", "샘플상품", "입고완료", "2026-11-03", "8801234567890"),
+        ("897278", "샘플상품", "입고대기", "2026-11-03", "8801234567890"),
         ("900002", "새상품", "입고완료", "2026-11-03", "8801234567890"),
     ]
     assert work_rows == [("기존업체", "bot")]
     assert TABLE_DATE_COL["return_info"] == "등록일"
     assert DATE_COL["return_info"] == "등록일"
-    assert UNIQUE_KEY["return_info"] == ["관리번호", "상품명", "옵션"]
+    assert UNIQUE_KEY["return_info"] is None
     assert UNIQUE_KEY["work_log"] == ["no", "날짜", "업체명"]
     assert "return_info" in ALLOWED_UPLOAD_TABLES
 
@@ -112,6 +117,7 @@ def test_return_info_keeps_long_cs_history(isolated_runtime, monkeypatch):
         "long_cs.xlsx",
     )
     assert ok, message
+    assert "중복" not in message
     with get_connection() as con:
         stored = con.execute("SELECT CS이력 FROM return_info").fetchone()[0]
     assert stored == memo

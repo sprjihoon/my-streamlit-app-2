@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -256,6 +257,12 @@ def _author_name(token: str) -> str:
     return str(row[0]).strip() if row and row[0] else ""
 
 
+def _report_filename(supplier: str, today: str) -> str:
+    safe = re.sub(r'[\\/:*?"<>|,\s]+', "_", supplier).strip("._")
+    stem = f"{safe}_{today}" if safe else f"반품보고서_{today}"
+    return f"{stem}.xlsx"
+
+
 def _supplier_label(rows: list[dict]) -> str:
     names: list[str] = []
     for row in rows:
@@ -265,7 +272,7 @@ def _supplier_label(rows: list[dict]) -> str:
     return ", ".join(names)
 
 
-def _report_workbook(rows: list[dict], supplier: str, author: str) -> bytes:
+def _report_workbook(rows: list[dict], supplier: str, author: str, today: str) -> bytes:
     book = Workbook()
     sheet = book.active
     sheet.title = "반품 보고서"
@@ -274,7 +281,6 @@ def _report_workbook(rows: list[dict], supplier: str, author: str) -> bytes:
     body_font = Font(name="맑은 고딕", size=10)
     header_fill = PatternFill("solid", fgColor="E8EEF4")
     wrap = Alignment(wrap_text=True, vertical="top")
-    today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
     sheet["A1"] = "반품 보고서"
     sheet["A1"].font = title_font
     sheet["A1"].alignment = Alignment(vertical="center")
@@ -344,12 +350,15 @@ async def report_return_info(request: Request):
                 detail=f"보고서는 한 번에 {EXPORT_LIMIT}건까지입니다. 필터를 더 좁혀 주세요. (현재 {total}건)",
             )
         rows, _total = _rows(con, columns, where, params, int(total), 0)
+    supplier = _supplier_label(rows)
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
     payload = _report_workbook(
         rows,
-        _supplier_label(rows),
+        supplier,
         _author_name(request.query_params.get("token") or ""),
+        today,
     )
-    filename = quote("반품보고서.xlsx")
+    filename = quote(_report_filename(supplier, today))
     return StreamingResponse(
         io.BytesIO(payload),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

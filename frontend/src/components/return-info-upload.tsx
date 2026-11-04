@@ -12,6 +12,8 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [periodResetting, setPeriodResetting] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -54,7 +56,10 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
       const token = localStorage.getItem('token');
       const result = await uploadFile(file, 'return_info', token || undefined);
       if (result.success) {
-        setMessage({ type: 'success', text: result.message });
+        setMessage({
+          type: result.message.includes('중복') ? 'warning' : 'success',
+          text: result.message,
+        });
         onChanged();
       } else {
         setMessage({ type: 'error', text: result.message || '업로드 실패' });
@@ -72,18 +77,21 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   }
 
   async function handleReset() {
-    if (!confirm('⚠️ 반품정보 테이블의 모든 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) return;
-    if (!confirm('정말로 반품정보 데이터를 모두 삭제하시겠습니까?')) return;
+    setResetting(true);
+    setMessage(null);
     try {
       const result = await resetTableData('return_info');
       if (result.success) {
         setMessage({ type: 'success', text: result.message });
+        setConfirmReset(false);
         onChanged();
       } else {
         setMessage({ type: 'error', text: result.message });
       }
     } catch (err) {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : '초기화 실패' });
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -141,7 +149,7 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
         )}
       </div>
       <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
-        재입고 대기 엑셀입니다. 기간 삭제는 등록일 기준이고, 같은 관리번호·상품명·옵션은 다시 올리지 않습니다.
+        재입고 대기 엑셀입니다. 기간 삭제는 등록일 기준이고, 모든 칸이 같은 행은 다시 올리지 않습니다.
       </p>
       <div className="metric" style={{ marginTop: '0.5rem' }}>
         <div className="metric-value">{uploadCount}</div>
@@ -150,7 +158,7 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
       {uploadCount > 0 && (
         <button
           type="button"
-          onClick={() => void handleReset()}
+          onClick={() => setConfirmReset(true)}
           style={{
             marginTop: '0.5rem',
             padding: '0.25rem 0.5rem',
@@ -165,6 +173,48 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
         >
           데이터 초기화
         </button>
+      )}
+      {confirmReset && (
+        <div role="alertdialog" aria-label="데이터 초기화 확인" style={{ marginTop: '0.5rem' }}>
+          <Alert type="warning" message="반품정보 데이터를 모두 삭제합니다. 이 작업은 되돌릴 수 없습니다." />
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={() => setConfirmReset(false)}
+              disabled={resetting}
+              style={{
+                flex: 1,
+                padding: '0.4rem 0.5rem',
+                fontSize: '0.8rem',
+                backgroundColor: '#e5e7eb',
+                color: '#111827',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: resetting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleReset()}
+              disabled={resetting}
+              style={{
+                flex: 1,
+                padding: '0.4rem 0.5rem',
+                fontSize: '0.8rem',
+                backgroundColor: resetting ? '#ccc' : '#e53935',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: resetting ? 'not-allowed' : 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              {resetting ? '삭제 중...' : '삭제 확인'}
+            </button>
+          </div>
+        </div>
       )}
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginTop: '0.85rem' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import io
 import sqlite3
+from datetime import datetime
+from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -152,6 +155,9 @@ def test_return_info_report_uses_filtered_rows(isolated_runtime):
     managed = [sheet.cell(row, 4).value for row in range(8, sheet.max_row + 1)]
     assert numbers == [1, 2]
     assert managed == ["333", "111"]
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+    disposition = unquote(report.headers["content-disposition"])
+    assert f"헤이즐샵_헤이즐_{today}.xlsx" in disposition
 
 
 def test_return_info_choice_values_match_uploaded_text(isolated_runtime):
