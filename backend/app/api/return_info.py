@@ -32,6 +32,8 @@ RETURN_HEADERS = [
 ]
 DATE_HEADERS = ("등록일", "입고일", "발주일")
 CHOICE_HEADERS = ("판매처", "상품명", "공급처")
+MULTI_HEADERS = ("판매처", "공급처")
+FILTER_SKIP = {"CS이력"}
 OPTION_LIMIT = 2000
 EXPORT_LIMIT = 20000
 
@@ -46,6 +48,17 @@ def _columns(con) -> list[str]:
     ordered = [name for name in RETURN_HEADERS if name in existing]
     extras = [name for name in existing if name not in ordered and name != "id"]
     return ordered + extras
+
+
+def _values(query, name: str) -> list[str]:
+    raw = query.getlist(name) if hasattr(query, "getlist") else [query.get(name) or ""]
+    values: list[str] = []
+    for item in raw:
+        for part in str(item or "").split("\n"):
+            text = part.strip()
+            if text and text not in values:
+                values.append(text)
+    return values
 
 
 def _where(columns: list[str], query) -> tuple[str, list]:
@@ -75,7 +88,22 @@ def _where(columns: list[str], query) -> tuple[str, list]:
                 clauses.append(f"substr(COALESCE([{name}], ''), 1, 10) <= ?")
                 params.append(end)
             continue
-        if name not in present:
+        if name not in present or name in FILTER_SKIP:
+            continue
+        if name in MULTI_HEADERS:
+            values = _values(query, name)
+            if not values:
+                continue
+            if len(values) == 1:
+                clauses.append(f"TRIM(COALESCE([{name}], '')) LIKE ? ESCAPE '\\'")
+                params.append(_like(values[0]))
+            else:
+                clauses.append(
+                    "("
+                    + " OR ".join(f"TRIM(COALESCE([{name}], '')) = ?" for _value in values)
+                    + ")"
+                )
+                params.extend(values)
             continue
         text = (query.get(name) or "").strip()
         if not text:

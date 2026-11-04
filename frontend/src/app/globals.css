@@ -525,6 +525,23 @@ h1, h2, h3, h4 {
   font-size: 12px;
   cursor: pointer;
 }
+.return-choice-picked { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.return-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 9rem;
+  overflow: auto;
+}
+.return-choice-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.return-choice-list input { width: auto; }
 .return-filter-accordion {
   margin-bottom: 0.75rem;
   border: 1px solid var(--border);

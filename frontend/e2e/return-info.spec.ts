@@ -87,18 +87,18 @@ test('return info page filters every header and pages the rows', async ({ page }
   expect(registeredEnd!.y).toBeGreaterThanOrEqual(registeredStart!.y + registeredStart!.height - 1);
   expect(inboundStart!.x).toBeGreaterThanOrEqual(registeredStart!.x + registeredStart!.width - 1);
   await expect(page.getByLabel('판매처')).toHaveJSProperty('tagName', 'INPUT');
-  await expect(page.getByLabel('판매처 비슷한 값')).toHaveCount(0);
   await page.getByLabel('판매처').fill('봄');
-  await expect(page.getByLabel('판매처 비슷한 값').locator('option')).toHaveText(['비슷한 값 선택', '봄', '봄날']);
-  await page.getByLabel('판매처 비슷한 값').selectOption('봄날');
-  await expect(page.getByLabel('판매처')).toHaveValue('봄날');
-  await expect(page.getByLabel('판매처 비슷한 값')).toHaveCount(0);
+  await page.getByRole('checkbox', { name: '판매처 봄', exact: true }).check();
+  await page.getByRole('checkbox', { name: '판매처 봄날', exact: true }).check();
+  await expect(page.getByRole('checkbox', { name: '판매처 봄', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: '판매처 봄날', exact: true })).toBeChecked();
   await page.getByLabel('상품명').fill('셔');
   await page.getByRole('button', { name: '셔츠' }).click();
   await expect(page.getByLabel('상품명')).toHaveValue('셔츠');
   await page.getByLabel('공급처').fill('헤이즐');
-  await expect(page.getByLabel('공급처 비슷한 값').locator('option')).toHaveText(['비슷한 값 선택', '헤이즐', '헤이즐샵']);
-  await expect(page.getByLabel('CS이력')).toHaveJSProperty('tagName', 'TEXTAREA');
+  await page.getByRole('checkbox', { name: '공급처 헤이즐', exact: true }).check();
+  await page.getByRole('checkbox', { name: '공급처 헤이즐샵', exact: true }).check();
+  await expect(page.getByLabel('CS이력')).toHaveCount(0);
   const keywordSearch = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname.endsWith('/return-info') && url.searchParams.get('q') === '모자';

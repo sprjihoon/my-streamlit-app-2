@@ -160,6 +160,14 @@ def test_return_info_choice_values_match_uploaded_text(isolated_runtime):
     one_supplier = client.get("/return-info", params={"공급처": "헤이즐샵"})
     assert [row["관리번호"] for row in one_supplier.json()["rows"]] == ["222"]
 
+    both = client.get("/return-info", params=[("판매처", "가을"), ("판매처", "봄날")])
+    assert both.status_code == 200
+    assert {row["관리번호"] for row in both.json()["rows"]} == {"222", "444"}
+
+    ignored = client.get("/return-info", params={"CS이력": "없는문구"})
+    assert ignored.status_code == 200
+    assert ignored.json()["total"] == 4
+
 
 def test_return_info_keyword_matches_attached_text(isolated_runtime):
     _seed_users(isolated_runtime["db"])

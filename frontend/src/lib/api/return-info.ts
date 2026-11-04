@@ -37,10 +37,15 @@ function authToken() {
   return typeof window === 'undefined' ? null : localStorage.getItem('token');
 }
 
+const MULTI_QUERY_KEYS = new Set(['판매처', '공급처']);
+
 export function returnInfoQuery(filters: ReturnInfoFilters, extra?: Record<string, string | number>) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
-    if (value.trim()) params.set(key, value.trim());
+    const parts = MULTI_QUERY_KEYS.has(key)
+      ? value.split('\n').map((part) => part.trim()).filter(Boolean)
+      : [value.trim()].filter(Boolean);
+    parts.forEach((part) => params.append(key, part));
   });
   if (extra) {
     Object.entries(extra).forEach(([key, value]) => params.set(key, String(value)));

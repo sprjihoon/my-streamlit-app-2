@@ -22,6 +22,7 @@ import {
 
 const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
 const CHOICE_COLUMNS = ['판매처', '상품명', '공급처'] as const;
+const MULTI_COLUMNS = ['판매처', '공급처'] as const;
 const WIDE_COLUMNS = new Set(['반품메모']);
 const PAGE_SIZES = [20, 50, 100];
 
@@ -56,6 +57,7 @@ export default function ReturnInfoPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [listVersion, setListVersion] = useState(0);
   const [choices, setChoices] = useState<ReturnInfoChoices>({ 판매처: [], 상품명: [], 공급처: [] });
+  const [choiceQuery, setChoiceQuery] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -104,7 +106,7 @@ export default function ReturnInfoPage() {
   const extraColumns = columns.filter((column) => !RETURN_INFO_COLUMNS.includes(column as typeof RETURN_INFO_COLUMNS[number]));
   const dateActive = RETURN_INFO_DATE_COLUMNS.some((column) => draft[`${column}_from`] || draft[`${column}_to`]);
   const conditionColumns = [
-    ...RETURN_INFO_COLUMNS.filter((column) => !DATE_COLUMNS.has(column)),
+    ...RETURN_INFO_COLUMNS.filter((column) => !DATE_COLUMNS.has(column) && column !== 'CS이력'),
     ...extraColumns,
   ];
   const conditionActive = conditionColumns.some((column) => (draft[column] || '').trim());
@@ -114,8 +116,14 @@ export default function ReturnInfoPage() {
   }
 
   function search() {
+    const next = { ...draft };
+    MULTI_COLUMNS.forEach((column) => {
+      const picked = (next[column] || '').split('\n').map((part) => part.trim()).filter(Boolean);
+      const typed = (choiceQuery[column] || '').trim();
+      if (picked.length === 0 && typed) next[column] = typed;
+    });
     setPage(1);
-    setApplied({ ...draft });
+    setApplied(next);
     setMessage(null);
   }
 
@@ -123,6 +131,7 @@ export default function ReturnInfoPage() {
     const cleared = emptyFilters();
     setDraft(cleared);
     setApplied(cleared);
+    setChoiceQuery({});
     setPage(1);
     setMessage(null);
   }
@@ -178,43 +187,70 @@ export default function ReturnInfoPage() {
               <summary>조건{conditionActive ? ' · 선택됨' : ''}</summary>
               <div className="return-filter-fields">
                 {conditionColumns.map((column) => {
-                  if (column === 'CS이력') {
-                    return (
-                      <Field key={column} label={column} className="return-filter-memo" hint="긴 메모입니다. 적힌 글자가 들어 있는 이력을 찾습니다.">
-                        <textarea
-                          aria-label={column}
-                          rows={5}
-                          value={draft[column] || ''}
-                          onChange={(event) => updateDraft(column, event.target.value)}
-                          placeholder="메모 내용"
-                        />
-                      </Field>
-                    );
-                  }
                   if (CHOICE_COLUMNS.includes(column as typeof CHOICE_COLUMNS[number])) {
                     const options = choices[column as typeof CHOICE_COLUMNS[number]] || [];
+                    const multi = MULTI_COLUMNS.includes(column as typeof MULTI_COLUMNS[number]);
                     const current = draft[column] || '';
-                    const typed = current.trim().toLowerCase();
-                    const matches = typed
-                      ? options.filter((option) => option.toLowerCase().includes(typed))
+                    const selected = multi
+                      ? current.split('\n').map((part) => part.trim()).filter(Boolean)
                       : [];
+                    const typed = multi ? (choiceQuery[column] || '') : current;
+                    const needle = typed.trim().toLowerCase();
+                    const matches = needle
+                      ? options.filter((option) => option.toLowerCase().includes(needle))
+                      : [];
+                    function toggle(value: string) {
+                      const next = selected.includes(value)
+                        ? selected.filter((item) => item !== value)
+                        : [...selected, value];
+                      updateDraft(column, next.join('\n'));
+                    }
                     return (
-                      <Field key={column} label={column} hint="글자를 입력하면 올라간 값이 따라옵니다. 비슷한 값이 여러 개면 아래에서 고릅니다.">
+                      <Field key={column} label={column}>
                         <div className="return-choice">
                           <input
                             type="text"
                             aria-label={column}
-                            list={`return-choice-${column}`}
-                            value={current}
+                            list={multi ? undefined : `return-choice-${column}`}
+                            value={typed}
                             placeholder="글자 입력"
-                            onChange={(event) => updateDraft(column, event.target.value)}
+                            onChange={(event) => {
+                              if (multi) setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: event.target.value }));
+                              else updateDraft(column, event.target.value);
+                            }}
                           />
-                          <datalist id={`return-choice-${column}`}>
-                            {options.map((value) => (
-                              <option key={value} value={value} />
-                            ))}
-                          </datalist>
-                          {matches.length === 1 && matches[0] !== current.trim() ? (
+                          {multi ? null : (
+                            <datalist id={`return-choice-${column}`}>
+                              {options.map((value) => (
+                                <option key={value} value={value} />
+                              ))}
+                            </datalist>
+                          )}
+                          {multi && selected.length > 0 ? (
+                            <div className="return-choice-picked">
+                              {selected.map((value) => (
+                                <button key={value} type="button" className="return-choice-suggest" onClick={() => toggle(value)}>
+                                  {value}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          {multi && matches.length > 0 ? (
+                            <div className="return-choice-list">
+                              {matches.map((value) => (
+                                <label key={value}>
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`${column} ${value}`}
+                                    checked={selected.includes(value)}
+                                    onChange={() => toggle(value)}
+                                  />
+                                  {value}
+                                </label>
+                              ))}
+                            </div>
+                          ) : null}
+                          {!multi && matches.length === 1 && matches[0] !== typed.trim() ? (
                             <button
                               type="button"
                               className="return-choice-suggest"
@@ -223,10 +259,10 @@ export default function ReturnInfoPage() {
                               {matches[0]}
                             </button>
                           ) : null}
-                          {matches.length > 1 ? (
+                          {!multi && matches.length > 1 ? (
                             <select
                               aria-label={`${column} 비슷한 값`}
-                              value={matches.includes(current.trim()) ? current.trim() : ''}
+                              value={matches.includes(typed.trim()) ? typed.trim() : ''}
                               onChange={(event) => updateDraft(column, event.target.value)}
                             >
                               <option value="">비슷한 값 선택</option>
