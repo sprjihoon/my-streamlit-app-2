@@ -118,3 +118,56 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     with get_connection() as con:
         kept = con.execute("SELECT 업체명, 출처 FROM work_log").fetchone()
     assert kept == ("기존업체", "bot")
+
+
+def test_return_info_keyword_matches_attached_text(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    ensure_tables()
+    notes = ["아무개반송", "아무개입고", "아무개1", "아무개 입고", "아마개", "홍길동"]
+    with get_connection() as con:
+        con.executemany(
+            """INSERT INTO return_info
+               (상태, 등록일, 등록자, 입고일, 관리번호, 발주일, 판매처, 주문번호, 수령자, 상품명, 옵션, 수량, 불량, CS이력, 반품메모)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                ("입고완료", "2026-11-03", "staff", None, str(index), "2026-11-01", "봄", str(index), "길동", "셔츠", None, 1, "정상", "", note)
+                for index, note in enumerate(notes, start=1)
+            ],
+        )
+        con.commit()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    found = client.get("/return-info", params={"q": "아무개"})
+    assert found.status_code == 200
+    assert {row["반품메모"] for row in found.json()["rows"]} == {"아무개반송", "아무개입고", "아무개1", "아무개 입고"}
+
+
+def test_return_info_keyword_searches_every_column(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    _insert_rows()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    product = client.get("/return-info", params={"q": "모자"})
+    assert product.status_code == 200
+    assert [row["관리번호"] for row in product.json()["rows"]] == ["333"]
+
+    memo = client.get("/return-info", params={"q": "아무개", "상품명": "바지"})
+    assert memo.status_code == 200
+    assert [row["관리번호"] for row in memo.json()["rows"]] == ["222"]
+
+    escaped = client.get("/return-info", params={"q": "%"})
+    assert escaped.status_code == 200
+    assert escaped.json()["total"] == 0
+
+    too_long = client.get("/return-info", params={"q": "가" * 101})
+    assert too_long.status_code == 400
+
+    exported = client.get("/return-info/export", params={"q": "모자"})
+    assert exported.status_code == 200
+    sheet = load_workbook(io.BytesIO(exported.content)).active
+    assert sheet.max_row == 2
+    assert sheet["J2"].value == "모자"
+
+    with get_connection() as con:
+        kept = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
+    assert kept == 1

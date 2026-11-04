@@ -47,6 +47,18 @@ def _columns(con) -> list[str]:
 def _where(columns: list[str], query) -> tuple[str, list]:
     clauses = ["1=1"]
     params: list = []
+    keyword = (query.get("q") or "").strip()
+    if len(keyword) > 100:
+        raise HTTPException(status_code=400, detail="검색어는 100자까지입니다.")
+    if keyword and columns:
+        params.extend(_like(keyword) for _name in columns)
+        clauses.append(
+            "("
+            + " OR ".join(
+                f"CAST(COALESCE([{name}], '') AS TEXT) LIKE ? ESCAPE '\\'" for name in columns
+            )
+            + ")"
+        )
     present = set(columns)
     for name in columns:
         if name in DATE_HEADERS:

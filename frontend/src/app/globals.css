@@ -466,6 +466,13 @@ h1, h2, h3, h4 {
 }
 
 .return-filter-block { margin-bottom: 1rem; }
+.return-filter-block .form-group { min-width: 0; }
+.return-filter-block input[type="search"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
 .return-filter-block h2 {
   margin: 0 0 0.55rem;
   font-size: 13px;

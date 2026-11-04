@@ -22,7 +22,7 @@ const WIDE_COLUMNS = new Set(['CS이력', '반품메모']);
 const PAGE_SIZES = [20, 50, 100];
 
 function emptyFilters(): ReturnInfoFilters {
-  const filters: ReturnInfoFilters = {};
+  const filters: ReturnInfoFilters = { q: '' };
   RETURN_INFO_COLUMNS.forEach((column) => {
     if (DATE_COLUMNS.has(column)) {
       filters[`${column}_from`] = '';
@@ -104,6 +104,21 @@ export default function ReturnInfoPage() {
 
           <Card title="필터">
             <div className="return-filter-block">
+              <Field label="전체 검색" hint="아무개를 치면 아무개입고, 아무개반송, 아무개1처럼 그 글자가 들어 있는 칸을 모두 찾습니다.">
+                <input
+                  type="search"
+                  aria-label="전체 검색"
+                  value={draft.q || ''}
+                  maxLength={100}
+                  placeholder="찾을 단어"
+                  onChange={(event) => updateDraft('q', event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') search();
+                  }}
+                />
+              </Field>
+            </div>
+            <div className="return-filter-block">
               <h2>날짜</h2>
               <div className="return-filter-dates">
                 {RETURN_INFO_DATE_COLUMNS.map((column) => (
@@ -177,7 +192,7 @@ export default function ReturnInfoPage() {
               </Button>
             </div>
             <p className="caption tw-mb-0 tw-mt-2">
-              날짜는 위가 시작, 아래가 종료입니다. 나머지 칸은 글자가 포함된 행을 찾습니다. 엑셀은 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
+              전체 검색은 모든 칸을 보고, 아래 조건과 함께 쓰면 둘 다 맞는 행만 남습니다. 날짜는 위가 시작, 아래가 종료입니다. 엑셀은 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
             </p>
           </Card>
 

@@ -72,6 +72,13 @@ test('return info page filters every header and pages the rows', async ({ page }
   expect(registeredStart && registeredEnd && inboundStart).toBeTruthy();
   expect(registeredEnd!.y).toBeGreaterThanOrEqual(registeredStart!.y + registeredStart!.height - 1);
   expect(inboundStart!.x).toBeGreaterThanOrEqual(registeredStart!.x + registeredStart!.width - 1);
+  const keywordSearch = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/return-info') && url.searchParams.get('q') === '모자';
+  });
+  await page.getByLabel('전체 검색').fill('모자');
+  await page.getByRole('button', { name: '검색' }).click();
+  await keywordSearch;
   await expect(page.getByRole('cell', { name: '111' })).toBeVisible();
   await page.getByRole('button', { name: '다음' }).click();
   await expect(page.getByRole('cell', { name: '333' })).toBeVisible();
