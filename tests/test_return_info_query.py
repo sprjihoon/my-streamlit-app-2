@@ -84,7 +84,7 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     body = memo.json()
     assert body["columns"] == [
         "상태", "등록일", "등록자", "입고일", "관리번호", "발주일", "판매처",
-        "주문번호", "수령자", "상품명", "옵션", "수량", "불량", "CS이력", "반품메모", "바코드",
+        "주문번호", "수령자", "상품명", "바코드", "옵션", "수량", "불량", "CS이력", "반품메모",
     ]
     assert body["total"] == 2
     assert {row["관리번호"] for row in body["rows"]} == {"111", "333"}
@@ -118,6 +118,26 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     with get_connection() as con:
         kept = con.execute("SELECT 업체명, 출처 FROM work_log").fetchone()
     assert kept == ("기존업체", "bot")
+
+
+def test_return_info_choice_values_match_uploaded_text(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    _insert_rows()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    options = client.get("/return-info/options")
+    assert options.status_code == 200
+    body = options.json()
+    assert set(body["판매처"]) == {"봄", "가을"}
+    assert set(body["상품명"]) == {"셔츠", "바지", "모자"}
+
+    selected = client.get("/return-info", params={"판매처": "봄"})
+    assert selected.status_code == 200
+    assert {row["관리번호"] for row in selected.json()["rows"]} == {"111", "333"}
+
+    missing = client.get("/return-info", params={"판매처": "봄날"})
+    assert missing.status_code == 200
+    assert missing.json()["total"] == 0
 
 
 def test_return_info_keyword_matches_attached_text(isolated_runtime):

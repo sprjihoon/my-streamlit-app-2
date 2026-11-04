@@ -11,12 +11,12 @@ export const RETURN_INFO_COLUMNS = [
   '주문번호',
   '수령자',
   '상품명',
+  '바코드',
   '옵션',
   '수량',
   '불량',
   'CS이력',
   '반품메모',
-  '바코드',
 ] as const;
 
 export const RETURN_INFO_DATE_COLUMNS = ['등록일', '입고일', '발주일'] as const;
@@ -48,6 +48,15 @@ export function returnInfoQuery(filters: ReturnInfoFilters, extra?: Record<strin
   if (token) params.set('token', token);
   const query = params.toString();
   return query ? `?${query}` : '';
+}
+
+export interface ReturnInfoChoices {
+  판매처: string[];
+  상품명: string[];
+}
+
+export function getReturnInfoOptions() {
+  return fetchApi<ReturnInfoChoices>(`/return-info/options${returnInfoQuery({})}`);
 }
 
 export function getReturnInfo(filters: ReturnInfoFilters, page: number, pageSize: number) {

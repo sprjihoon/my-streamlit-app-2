@@ -296,12 +296,12 @@ CRITICAL_COLS = {
         ("주문번호", "TEXT"),
         ("수령자", "TEXT"),
         ("상품명", "TEXT"),
+        ("바코드", "TEXT"),
         ("옵션", "TEXT"),
         ("수량", "INTEGER"),
         ("불량", "TEXT"),
         ("CS이력", "TEXT"),
         ("반품메모", "TEXT"),
-        ("바코드", "TEXT"),
     ],
     "work_log_history": [
         ("log_id", "INTEGER"),        # 원본 작업일지 ID

@@ -9,16 +9,20 @@ import { TableSummary } from '@/components/data';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Select } from '@/components/ui/select';
+import { ReturnInfoUpload } from '@/components/return-info-upload';
 import {
   RETURN_INFO_COLUMNS,
   RETURN_INFO_DATE_COLUMNS,
   downloadReturnInfoExcel,
   getReturnInfo,
+  getReturnInfoOptions,
+  type ReturnInfoChoices,
   type ReturnInfoFilters,
 } from '@/lib/api';
 
 const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
-const WIDE_COLUMNS = new Set(['CS이력', '반품메모']);
+const CHOICE_COLUMNS = ['판매처', '상품명'] as const;
+const WIDE_COLUMNS = new Set(['반품메모']);
 const PAGE_SIZES = [20, 50, 100];
 
 function emptyFilters(): ReturnInfoFilters {
@@ -50,6 +54,8 @@ export default function ReturnInfoPage() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [listVersion, setListVersion] = useState(0);
+  const [choices, setChoices] = useState<ReturnInfoChoices>({ 판매처: [], 상품명: [] });
 
   useEffect(() => {
     let cancelled = false;
@@ -73,10 +79,34 @@ export default function ReturnInfoPage() {
     return () => {
       cancelled = true;
     };
-  }, [applied, page, pageSize]);
+  }, [applied, page, pageSize, listVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getReturnInfoOptions()
+      .then((data) => {
+        if (cancelled) return;
+        setChoices({
+          판매처: Array.isArray(data?.판매처) ? data.판매처 : [],
+          상품명: Array.isArray(data?.상품명) ? data.상품명 : [],
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setChoices({ 판매처: [], 상품명: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listVersion]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const extraColumns = columns.filter((column) => !RETURN_INFO_COLUMNS.includes(column as typeof RETURN_INFO_COLUMNS[number]));
+  const dateActive = RETURN_INFO_DATE_COLUMNS.some((column) => draft[`${column}_from`] || draft[`${column}_to`]);
+  const conditionColumns = [
+    ...RETURN_INFO_COLUMNS.filter((column) => !DATE_COLUMNS.has(column)),
+    ...extraColumns,
+  ];
+  const conditionActive = conditionColumns.some((column) => (draft[column] || '').trim());
 
   function updateDraft(key: string, value: string) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -102,6 +132,8 @@ export default function ReturnInfoPage() {
 
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
+      <ReturnInfoUpload onChanged={() => setListVersion((current) => current + 1)} />
+
           <Card title="필터">
             <div className="return-filter-block">
               <Field label="전체 검색" hint="아무개를 치면 아무개입고, 아무개반송, 아무개1처럼 그 글자가 들어 있는 칸을 모두 찾습니다.">
@@ -118,8 +150,8 @@ export default function ReturnInfoPage() {
                 />
               </Field>
             </div>
-            <div className="return-filter-block">
-              <h2>날짜</h2>
+            <details className="return-filter-accordion">
+              <summary>날짜{dateActive ? ' · 선택됨' : ''}</summary>
               <div className="return-filter-dates">
                 {RETURN_INFO_DATE_COLUMNS.map((column) => (
                   <Field key={column} label={column}>
@@ -140,34 +172,57 @@ export default function ReturnInfoPage() {
                   </Field>
                 ))}
               </div>
-            </div>
-            <div className="return-filter-block">
-              <h2>조건</h2>
+            </details>
+            <details className="return-filter-accordion">
+              <summary>조건{conditionActive ? ' · 선택됨' : ''}</summary>
               <div className="return-filter-fields">
-                {RETURN_INFO_COLUMNS.filter((column) => !DATE_COLUMNS.has(column)).map((column) => (
-                  <Field key={column} label={column} className={WIDE_COLUMNS.has(column) ? 'return-filter-wide' : undefined}>
-                    <input
-                      type="text"
-                      aria-label={column}
-                      value={draft[column] || ''}
-                      onChange={(event) => updateDraft(column, event.target.value)}
-                      placeholder="포함 검색"
-                    />
-                  </Field>
-                ))}
-                {extraColumns.map((column) => (
-                  <Field key={column} label={column}>
-                    <input
-                      type="text"
-                      aria-label={column}
-                      value={draft[column] || ''}
-                      onChange={(event) => updateDraft(column, event.target.value)}
-                      placeholder="포함 검색"
-                    />
-                  </Field>
-                ))}
+                {conditionColumns.map((column) => {
+                  if (column === 'CS이력') {
+                    return (
+                      <Field key={column} label={column} className="return-filter-memo" hint="긴 메모입니다. 적힌 글자가 들어 있는 이력을 찾습니다.">
+                        <textarea
+                          aria-label={column}
+                          rows={5}
+                          value={draft[column] || ''}
+                          onChange={(event) => updateDraft(column, event.target.value)}
+                          placeholder="메모 내용"
+                        />
+                      </Field>
+                    );
+                  }
+                  if (CHOICE_COLUMNS.includes(column as typeof CHOICE_COLUMNS[number])) {
+                    const options = choices[column as typeof CHOICE_COLUMNS[number]] || [];
+                    const current = draft[column] || '';
+                    return (
+                      <Field key={column} label={column}>
+                        <select
+                          aria-label={column}
+                          value={current}
+                          onChange={(event) => updateDraft(column, event.target.value)}
+                        >
+                          <option value="">전체</option>
+                          {options.map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                          {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
+                        </select>
+                      </Field>
+                    );
+                  }
+                  return (
+                    <Field key={column} label={column} className={WIDE_COLUMNS.has(column) ? 'return-filter-wide' : undefined}>
+                      <input
+                        type="text"
+                        aria-label={column}
+                        value={draft[column] || ''}
+                        onChange={(event) => updateDraft(column, event.target.value)}
+                        placeholder="포함 검색"
+                      />
+                    </Field>
+                  );
+                })}
               </div>
-            </div>
+            </details>
             <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-2">
               <Button type="button" onClick={search}>검색</Button>
               <Button type="button" variant="ghost" onClick={resetFilters}>초기화</Button>
@@ -235,7 +290,11 @@ export default function ReturnInfoPage() {
                     {rows.map((row, index) => (
                       <tr key={`${row.관리번호 ?? ''}-${index}`}>
                         {columns.map((column) => (
-                          <td key={column} className={column === 'CS이력' || column === '반품메모' ? 'cell-truncate' : undefined} title={cellText(row[column])}>
+                          <td
+                            key={column}
+                            className={column === 'CS이력' ? 'cell-memo' : column === '반품메모' ? 'cell-truncate' : undefined}
+                            title={cellText(row[column])}
+                          >
                             {cellText(row[column])}
                           </td>
                         ))}

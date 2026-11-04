@@ -1,36 +1,33 @@
 import { expect, test } from '@playwright/test';
-import { ADMIN, installApi, seedSession } from './support/api';
+import { ADMIN, installApi, seedSession, STAFF } from './support/api';
 
-test.beforeEach(async ({ page }) => {
+test('return info upload card lives on the query page', async ({ page }) => {
   await seedSession(page, ADMIN);
   await installApi(page, ADMIN);
-});
-
-test('return info upload card sits beside the work log card', async ({ page }) => {
   await page.goto('/upload');
   await expect(page.getByRole('heading', { name: '원본 데이터 업로드' })).toBeVisible();
 
-  const titles = page.locator('.grid-6 .card-header span');
+  const titles = page.locator('.grid-5 .card-header span');
   await expect(titles).toHaveText([
     '입고전표',
     '배송통계',
     '우체국접수',
     '우체국반품',
     '작업일지',
-    '반품정보',
   ]);
+  await expect(page.locator('select option').filter({ hasText: '반품정보' })).toHaveCount(0);
+  await expect(page.getByText('재입고 대기 엑셀입니다.')).toHaveCount(0);
 
-  const workLog = titles.filter({ hasText: /^작업일지$/ });
-  const returnInfo = titles.filter({ hasText: /^반품정보$/ });
-  const workBox = await workLog.boundingBox();
-  const returnBox = await returnInfo.boundingBox();
-  expect(workBox).not.toBeNull();
-  expect(returnBox).not.toBeNull();
-  expect(returnBox!.x).toBeGreaterThan(workBox!.x + workBox!.width - 8);
-  expect(Math.abs(returnBox!.y - workBox!.y)).toBeLessThan(12);
-
-  const periodOptions = page.locator('select option');
-  await expect(periodOptions.filter({ hasText: '반품정보' })).toHaveCount(1);
+  await page.goto('/return-info');
+  await expect(page.getByText('반품정보 업로드', { exact: true })).toBeVisible();
   await expect(page.getByText('재입고 대기 엑셀입니다.')).toBeVisible();
-  await expect(page.getByRole('cell', { name: '작업일지' })).toBeVisible();
+  await expect(page.getByLabel('반품정보 엑셀')).toBeAttached();
+});
+
+test('staff cannot see the return info upload card', async ({ page }) => {
+  await seedSession(page, STAFF);
+  await installApi(page, STAFF);
+  await page.goto('/return-info');
+  await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
+  await expect(page.getByText('반품정보 업로드', { exact: true })).toHaveCount(0);
 });

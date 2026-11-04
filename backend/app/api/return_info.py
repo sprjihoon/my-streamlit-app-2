@@ -22,14 +22,16 @@ RETURN_HEADERS = [
     "주문번호",
     "수령자",
     "상품명",
+    "바코드",
     "옵션",
     "수량",
     "불량",
     "CS이력",
     "반품메모",
-    "바코드",
 ]
 DATE_HEADERS = ("등록일", "입고일", "발주일")
+CHOICE_HEADERS = ("판매처", "상품명")
+OPTION_LIMIT = 2000
 EXPORT_LIMIT = 20000
 
 
@@ -75,9 +77,14 @@ def _where(columns: list[str], query) -> tuple[str, list]:
         if name not in present:
             continue
         text = (query.get(name) or "").strip()
-        if text:
-            clauses.append(f"[{name}] LIKE ? ESCAPE '\\'")
-            params.append(_like(text))
+        if not text:
+            continue
+        if name in CHOICE_HEADERS:
+            clauses.append(f"TRIM(COALESCE([{name}], '')) = ?")
+            params.append(text)
+            continue
+        clauses.append(f"[{name}] LIKE ? ESCAPE '\\'")
+        params.append(_like(text))
     return "WHERE " + " AND ".join(clauses), params
 
 
@@ -109,6 +116,28 @@ def _rows(con, columns: list[str], where: str, params: list, limit: int, offset:
         for index in range(len(fetched))
     ]
     return rows, int(total)
+
+
+@router.get("/options")
+async def return_info_options():
+    """판매처와 상품명의 올라간 값을 중복 없이 돌려준다."""
+    ensure_tables()
+    result = {name: [] for name in CHOICE_HEADERS}
+    with get_connection() as con:
+        present = set(_columns(con))
+        for name in CHOICE_HEADERS:
+            if name not in present:
+                continue
+            fetched = con.execute(
+                f"""SELECT DISTINCT TRIM([{name}]) AS value
+                    FROM return_info
+                    WHERE TRIM(COALESCE([{name}], '')) != ''
+                    ORDER BY value
+                    LIMIT ?""",
+                (OPTION_LIMIT,),
+            ).fetchall()
+            result[name] = [row[0] for row in fetched]
+    return result
 
 
 @router.get("")

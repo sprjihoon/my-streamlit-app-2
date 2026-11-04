@@ -504,6 +504,47 @@ h1, h2, h3, h4 {
   max-width: 100%;
 }
 .return-filter-wide { grid-column: span 2; }
+.return-filter-memo { grid-column: 1 / -1; }
+.return-filter-memo textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 7.5rem;
+  resize: vertical;
+  line-height: 1.45;
+}
+.return-filter-accordion {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface, #fff);
+}
+.return-filter-accordion summary {
+  cursor: pointer;
+  padding: 0.7rem 0.85rem;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.return-filter-accordion summary::-webkit-details-marker { display: none; }
+.return-filter-accordion summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 0.9rem;
+}
+.return-filter-accordion[open] summary::before { content: '▾'; }
+.return-filter-accordion .return-filter-dates,
+.return-filter-accordion .return-filter-fields {
+  padding: 0 0.85rem 0.85rem;
+}
+.cell-memo {
+  min-width: 18rem;
+  max-width: 32rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+  line-height: 1.45;
+}
 @media (max-width: 1100px) {
   .return-filter-dates,
   .return-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -511,7 +552,8 @@ h1, h2, h3, h4 {
 @media (max-width: 640px) {
   .return-filter-dates,
   .return-filter-fields { grid-template-columns: minmax(0, 1fr); }
-  .return-filter-wide { grid-column: auto; }
+  .return-filter-wide,
+  .return-filter-memo { grid-column: auto; }
 }
 
 .field-required { color: var(--color-danger); margin-left: 0.15rem; }

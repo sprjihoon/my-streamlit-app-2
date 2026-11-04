@@ -102,6 +102,22 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
     assert "return_info" in ALLOWED_UPLOAD_TABLES
 
 
+def test_return_info_keeps_long_cs_history(isolated_runtime, monkeypatch):
+    monkeypatch.setattr("logic.upload.UPLOAD_DIR", isolated_runtime["uploads"])
+    ensure_tables()
+    memo = "상담 " + ("상세내역 " * 800)
+    ok, message = ingest(
+        _xlsx([_row(관리번호="900010", 주문번호="900010", CS이력=memo)]),
+        "return_info",
+        "long_cs.xlsx",
+    )
+    assert ok, message
+    with get_connection() as con:
+        stored = con.execute("SELECT CS이력 FROM return_info").fetchone()[0]
+    assert stored == memo
+    assert len(stored) > 4000
+
+
 @pytest.mark.skipif(not SAMPLE_XLS.exists(), reason="로컬 양식 파일이 없습니다")
 def test_real_restockin_wait_form(isolated_runtime, monkeypatch):
     monkeypatch.setattr("logic.upload.UPLOAD_DIR", isolated_runtime["uploads"])

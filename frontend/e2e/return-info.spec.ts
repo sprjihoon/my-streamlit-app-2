@@ -3,7 +3,7 @@ import { ADMIN, installApi, seedSession, STAFF } from './support/api';
 
 const COLUMNS = [
   '상태', '등록일', '등록자', '입고일', '관리번호', '발주일', '판매처',
-  '주문번호', '수령자', '상품명', '옵션', '수량', '불량', 'CS이력', '반품메모', '바코드',
+  '주문번호', '수령자', '상품명', '바코드', '옵션', '수량', '불량', 'CS이력', '반품메모',
 ];
 
 test('return info menu sits below marketing outside a category', async ({ page }) => {
@@ -43,6 +43,13 @@ test('return info page filters every header and pages the rows', async ({ page }
         body: Buffer.from('xlsx'),
       });
     }
+    if (url.pathname.endsWith('/options')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ 판매처: ['봄', '가을'], 상품명: ['셔츠', '바지'] }),
+      });
+    }
     const pageNo = Number(url.searchParams.get('page') || '1');
     const pageSize = Number(url.searchParams.get('page_size') || '50');
     const row = pageNo === 1
@@ -63,6 +70,12 @@ test('return info page filters every header and pages the rows', async ({ page }
 
   await page.goto('/return-info');
   await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
+  const accordions = page.locator('details.return-filter-accordion');
+  await expect(accordions).toHaveCount(2);
+  await expect(accordions.nth(0)).not.toHaveAttribute('open', '');
+  await expect(accordions.nth(1)).not.toHaveAttribute('open', '');
+  await page.locator('summary', { hasText: '날짜' }).click();
+  await page.locator('summary', { hasText: '조건' }).click();
   for (const column of COLUMNS) {
     await expect(page.getByText(column, { exact: true }).first()).toBeVisible();
   }
@@ -72,6 +85,9 @@ test('return info page filters every header and pages the rows', async ({ page }
   expect(registeredStart && registeredEnd && inboundStart).toBeTruthy();
   expect(registeredEnd!.y).toBeGreaterThanOrEqual(registeredStart!.y + registeredStart!.height - 1);
   expect(inboundStart!.x).toBeGreaterThanOrEqual(registeredStart!.x + registeredStart!.width - 1);
+  await expect(page.getByLabel('판매처').locator('option')).toHaveText(['전체', '봄', '가을']);
+  await expect(page.getByLabel('상품명').locator('option')).toHaveText(['전체', '셔츠', '바지']);
+  await expect(page.getByLabel('CS이력')).toHaveJSProperty('tagName', 'TEXTAREA');
   const keywordSearch = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname.endsWith('/return-info') && url.searchParams.get('q') === '모자';
