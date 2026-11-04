@@ -36,7 +36,7 @@ test('return info page filters every header and pages the rows', async ({ page }
   await installApi(page, ADMIN);
   await page.route('http://localhost:8000/return-info**', async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/export')) {
+    if (url.pathname.endsWith('/export') || url.pathname.endsWith('/report')) {
       return route.fulfill({
         status: 200,
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -122,4 +122,10 @@ test('return info page filters every header and pages the rows', async ({ page }
   await page.getByRole('button', { name: '다음' }).click();
   await expect(page.getByRole('cell', { name: '333' })).toBeVisible();
   await expect(page.getByText('2 / 2')).toBeVisible();
+  const reportDownload = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/return-info/report') && url.searchParams.get('q') === '모자';
+  });
+  await page.getByRole('button', { name: '보고서 다운로드' }).click();
+  await reportDownload;
 });

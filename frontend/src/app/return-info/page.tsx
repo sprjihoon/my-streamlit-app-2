@@ -14,6 +14,7 @@ import {
   RETURN_INFO_COLUMNS,
   RETURN_INFO_DATE_COLUMNS,
   downloadReturnInfoExcel,
+  downloadReturnInfoReport,
   getReturnInfo,
   getReturnInfoOptions,
   type ReturnInfoChoices,
@@ -55,6 +56,7 @@ export default function ReturnInfoPage() {
   const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [listVersion, setListVersion] = useState(0);
   const [choices, setChoices] = useState<ReturnInfoChoices>({ 판매처: [], 상품명: [], 공급처: [] });
@@ -344,9 +346,28 @@ export default function ReturnInfoPage() {
               >
                 {exporting ? '엑셀 만드는 중...' : '엑셀 다운로드'}
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={reporting}
+                onClick={async () => {
+                  setReporting(true);
+                  setMessage(null);
+                  try {
+                    await downloadReturnInfoReport(applied);
+                    setMessage({ type: 'success', text: '보고서를 저장했습니다.' });
+                  } catch (err) {
+                    setMessage({ type: 'error', text: err instanceof Error ? err.message : '보고서 생성 실패' });
+                  } finally {
+                    setReporting(false);
+                  }
+                }}
+              >
+                {reporting ? '보고서 만드는 중...' : '보고서 다운로드'}
+              </Button>
             </div>
             <p className="caption tw-mb-0 tw-mt-2">
-              전체 검색은 모든 칸을 보고, 아래 조건과 함께 쓰면 둘 다 맞는 행만 남습니다. 날짜는 위가 시작, 아래가 종료입니다. 엑셀은 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
+              전체 검색은 모든 칸을 보고, 아래 조건과 함께 쓰면 둘 다 맞는 행만 남습니다. 날짜는 위가 시작, 아래가 종료입니다. 엑셀과 보고서는 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
             </p>
           </Card>
 

@@ -72,10 +72,10 @@ export function getReturnInfo(filters: ReturnInfoFilters, page: number, pageSize
   );
 }
 
-export async function downloadReturnInfoExcel(filters: ReturnInfoFilters) {
-  const res = await fetch(`${API_BASE}/return-info/export${returnInfoQuery(filters)}`);
+async function downloadReturnInfoFile(path: string, filename: string, filters: ReturnInfoFilters, fallback: string) {
+  const res = await fetch(`${API_BASE}${path}${returnInfoQuery(filters)}`);
   if (!res.ok) {
-    let detail = '엑셀 생성 실패';
+    let detail = fallback;
     try {
       const body = await res.json();
       if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : detail;
@@ -91,9 +91,17 @@ export async function downloadReturnInfoExcel(filters: ReturnInfoFilters) {
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = objectUrl;
-  link.download = 'return_info.xlsx';
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(objectUrl);
+}
+
+export function downloadReturnInfoExcel(filters: ReturnInfoFilters) {
+  return downloadReturnInfoFile('/return-info/export', 'return_info.xlsx', filters, '엑셀 생성 실패');
+}
+
+export function downloadReturnInfoReport(filters: ReturnInfoFilters) {
+  return downloadReturnInfoFile('/return-info/report', '반품보고서.xlsx', filters, '보고서 생성 실패');
 }

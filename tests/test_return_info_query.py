@@ -120,6 +120,37 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     assert kept == ("기존업체", "bot")
 
 
+def test_return_info_report_uses_filtered_rows(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    _insert_rows()
+    with get_connection() as con:
+        con.execute("UPDATE return_info SET 공급처=? WHERE 관리번호=?", ("헤이즐", "111"))
+        con.execute("UPDATE return_info SET 공급처=? WHERE 관리번호=?", ("헤이즐샵", "333"))
+        con.commit()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    report = client.get("/return-info/report", params={"token": "admin-tok", "반품메모": "입고", "공급처": "헤이즐"})
+    assert report.status_code == 200
+    sheet = load_workbook(io.BytesIO(report.content)).active
+    assert sheet["A1"].value == "반품 보고서"
+    assert sheet["A2"].value == "공급처"
+    assert sheet["B2"].value == "헤이즐"
+    assert sheet["A3"].value == "작성일"
+    assert sheet["B3"].value
+    assert sheet["A4"].value == "등록자"
+    assert sheet["B4"].value == "관리자"
+    headers = [cell.value for cell in sheet[6]]
+    assert headers == [
+        "번호", "등록일", "등록자", "관리번호", "주문번호", "판매처", "수령자",
+        "상품명", "옵션", "바코드", "수량", "불량", "CS이력", "반품메모",
+    ]
+    assert "상태" not in headers
+    numbers = [sheet.cell(row, 1).value for row in range(7, sheet.max_row + 1)]
+    managed = [sheet.cell(row, 4).value for row in range(7, sheet.max_row + 1)]
+    assert numbers == [1, 2]
+    assert managed == ["333", "111"]
+
+
 def test_return_info_choice_values_match_uploaded_text(isolated_runtime):
     _seed_users(isolated_runtime["db"])
     _insert_rows()
