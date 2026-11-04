@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Card } from '@/components/Card';
 import { Alert } from '@/components/Alert';
 import { getUploadList, resetTableData, resetTableDataByPeriod, uploadFile } from '@/lib/api';
 
@@ -117,7 +116,9 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   }
 
   return (
-    <Card title="반품정보 업로드" style={{ marginBottom: '1rem' }}>
+    <details className="return-filter-accordion">
+      <summary>반품정보 업로드</summary>
+      <div className="return-upload-body">
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
       <div className="file-upload" onClick={() => fileRef.current?.click()}>
         <input
@@ -195,6 +196,7 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
       <p style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.78rem', color: '#666' }}>
         * 반품정보는 등록일 기준으로 삭제됩니다.
       </p>
-    </Card>
+      </div>
+    </details>
   );
 }

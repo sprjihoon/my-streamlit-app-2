@@ -21,7 +21,7 @@ import {
 } from '@/lib/api';
 
 const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
-const CHOICE_COLUMNS = ['판매처', '상품명'] as const;
+const CHOICE_COLUMNS = ['판매처', '상품명', '공급처'] as const;
 const WIDE_COLUMNS = new Set(['반품메모']);
 const PAGE_SIZES = [20, 50, 100];
 
@@ -55,7 +55,7 @@ export default function ReturnInfoPage() {
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [listVersion, setListVersion] = useState(0);
-  const [choices, setChoices] = useState<ReturnInfoChoices>({ 판매처: [], 상품명: [] });
+  const [choices, setChoices] = useState<ReturnInfoChoices>({ 판매처: [], 상품명: [], 공급처: [] });
 
   useEffect(() => {
     let cancelled = false;
@@ -89,10 +89,11 @@ export default function ReturnInfoPage() {
         setChoices({
           판매처: Array.isArray(data?.판매처) ? data.판매처 : [],
           상품명: Array.isArray(data?.상품명) ? data.상품명 : [],
+          공급처: Array.isArray(data?.공급처) ? data.공급처 : [],
         });
       })
       .catch(() => {
-        if (!cancelled) setChoices({ 판매처: [], 상품명: [] });
+        if (!cancelled) setChoices({ 판매처: [], 상품명: [], 공급처: [] });
       });
     return () => {
       cancelled = true;
@@ -193,19 +194,48 @@ export default function ReturnInfoPage() {
                   if (CHOICE_COLUMNS.includes(column as typeof CHOICE_COLUMNS[number])) {
                     const options = choices[column as typeof CHOICE_COLUMNS[number]] || [];
                     const current = draft[column] || '';
+                    const typed = current.trim().toLowerCase();
+                    const matches = typed
+                      ? options.filter((option) => option.toLowerCase().includes(typed))
+                      : [];
                     return (
-                      <Field key={column} label={column}>
-                        <select
-                          aria-label={column}
-                          value={current}
-                          onChange={(event) => updateDraft(column, event.target.value)}
-                        >
-                          <option value="">전체</option>
-                          {options.map((value) => (
-                            <option key={value} value={value}>{value}</option>
-                          ))}
-                          {current && !options.includes(current) ? <option value={current}>{current}</option> : null}
-                        </select>
+                      <Field key={column} label={column} hint="글자를 입력하면 올라간 값이 따라옵니다. 비슷한 값이 여러 개면 아래에서 고릅니다.">
+                        <div className="return-choice">
+                          <input
+                            type="text"
+                            aria-label={column}
+                            list={`return-choice-${column}`}
+                            value={current}
+                            placeholder="글자 입력"
+                            onChange={(event) => updateDraft(column, event.target.value)}
+                          />
+                          <datalist id={`return-choice-${column}`}>
+                            {options.map((value) => (
+                              <option key={value} value={value} />
+                            ))}
+                          </datalist>
+                          {matches.length === 1 && matches[0] !== current.trim() ? (
+                            <button
+                              type="button"
+                              className="return-choice-suggest"
+                              onClick={() => updateDraft(column, matches[0])}
+                            >
+                              {matches[0]}
+                            </button>
+                          ) : null}
+                          {matches.length > 1 ? (
+                            <select
+                              aria-label={`${column} 비슷한 값`}
+                              value={matches.includes(current.trim()) ? current.trim() : ''}
+                              onChange={(event) => updateDraft(column, event.target.value)}
+                            >
+                              <option value="">비슷한 값 선택</option>
+                              {matches.map((value) => (
+                                <option key={value} value={value}>{value}</option>
+                              ))}
+                            </select>
+                          ) : null}
+                        </div>
                       </Field>
                     );
                   }

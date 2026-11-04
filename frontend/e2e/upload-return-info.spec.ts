@@ -19,7 +19,11 @@ test('return info upload card lives on the query page', async ({ page }) => {
   await expect(page.getByText('재입고 대기 엑셀입니다.')).toHaveCount(0);
 
   await page.goto('/return-info');
-  await expect(page.getByText('반품정보 업로드', { exact: true })).toBeVisible();
+  const upload = page.locator('details.return-filter-accordion', { hasText: '반품정보 업로드' });
+  await expect(upload).toBeVisible();
+  await expect(upload).not.toHaveAttribute('open', '');
+  await expect(page.getByText('재입고 대기 엑셀입니다.')).toBeHidden();
+  await upload.locator('summary').click();
   await expect(page.getByText('재입고 대기 엑셀입니다.')).toBeVisible();
   await expect(page.getByLabel('반품정보 엑셀')).toBeAttached();
 });

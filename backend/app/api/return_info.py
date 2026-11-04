@@ -28,9 +28,10 @@ RETURN_HEADERS = [
     "불량",
     "CS이력",
     "반품메모",
+    "공급처",
 ]
 DATE_HEADERS = ("등록일", "입고일", "발주일")
-CHOICE_HEADERS = ("판매처", "상품명")
+CHOICE_HEADERS = ("판매처", "상품명", "공급처")
 OPTION_LIMIT = 2000
 EXPORT_LIMIT = 20000
 
@@ -80,8 +81,8 @@ def _where(columns: list[str], query) -> tuple[str, list]:
         if not text:
             continue
         if name in CHOICE_HEADERS:
-            clauses.append(f"TRIM(COALESCE([{name}], '')) = ?")
-            params.append(text)
+            clauses.append(f"TRIM(COALESCE([{name}], '')) LIKE ? ESCAPE '\\'")
+            params.append(_like(text))
             continue
         clauses.append(f"[{name}] LIKE ? ESCAPE '\\'")
         params.append(_like(text))
@@ -120,7 +121,7 @@ def _rows(con, columns: list[str], where: str, params: list, limit: int, offset:
 
 @router.get("/options")
 async def return_info_options():
-    """판매처와 상품명의 올라간 값을 중복 없이 돌려준다."""
+    """판매처, 상품명, 공급처의 올라간 값을 중복 없이 돌려준다."""
     ensure_tables()
     result = {name: [] for name in CHOICE_HEADERS}
     with get_connection() as con:

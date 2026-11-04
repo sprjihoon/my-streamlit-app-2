@@ -513,6 +513,18 @@ h1, h2, h3, h4 {
   resize: vertical;
   line-height: 1.45;
 }
+.return-choice { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.return-choice-suggest {
+  align-self: flex-start;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-muted);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 12px;
+  cursor: pointer;
+}
 .return-filter-accordion {
   margin-bottom: 0.75rem;
   border: 1px solid var(--border);
@@ -533,8 +545,7 @@ h1, h2, h3, h4 {
   width: 0.9rem;
 }
 .return-filter-accordion[open] summary::before { content: '▾'; }
-.return-filter-accordion .return-filter-dates,
-.return-filter-accordion .return-filter-fields {
+.return-filter-accordion .return-upload-body {
   padding: 0 0.85rem 0.85rem;
 }
 .cell-memo {

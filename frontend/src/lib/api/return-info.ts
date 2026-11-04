@@ -17,6 +17,7 @@ export const RETURN_INFO_COLUMNS = [
   '불량',
   'CS이력',
   '반품메모',
+  '공급처',
 ] as const;
 
 export const RETURN_INFO_DATE_COLUMNS = ['등록일', '입고일', '발주일'] as const;
@@ -53,6 +54,7 @@ export function returnInfoQuery(filters: ReturnInfoFilters, extra?: Record<strin
 export interface ReturnInfoChoices {
   판매처: string[];
   상품명: string[];
+  공급처: string[];
 }
 
 export function getReturnInfoOptions() {

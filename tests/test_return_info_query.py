@@ -84,7 +84,7 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     body = memo.json()
     assert body["columns"] == [
         "상태", "등록일", "등록자", "입고일", "관리번호", "발주일", "판매처",
-        "주문번호", "수령자", "상품명", "바코드", "옵션", "수량", "불량", "CS이력", "반품메모",
+        "주문번호", "수령자", "상품명", "바코드", "옵션", "수량", "불량", "CS이력", "반품메모", "공급처",
     ]
     assert body["total"] == 2
     assert {row["관리번호"] for row in body["rows"]} == {"111", "333"}
@@ -131,13 +131,34 @@ def test_return_info_choice_values_match_uploaded_text(isolated_runtime):
     assert set(body["판매처"]) == {"봄", "가을"}
     assert set(body["상품명"]) == {"셔츠", "바지", "모자"}
 
-    selected = client.get("/return-info", params={"판매처": "봄"})
-    assert selected.status_code == 200
-    assert {row["관리번호"] for row in selected.json()["rows"]} == {"111", "333"}
+    with get_connection() as con:
+        con.execute(
+            """INSERT INTO return_info
+               (상태, 등록일, 등록자, 입고일, 관리번호, 발주일, 판매처, 주문번호, 수령자, 상품명, 옵션, 수량, 불량, CS이력, 반품메모)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("입고완료", "2026-11-04", "staff", None, "444", "2026-11-01", "봄날", "A4", "길동", "셔츠", None, 1, "정상", "", "메모"),
+        )
+        con.commit()
 
-    missing = client.get("/return-info", params={"판매처": "봄날"})
-    assert missing.status_code == 200
-    assert missing.json()["total"] == 0
+    broad = client.get("/return-info", params={"판매처": "봄"})
+    assert broad.status_code == 200
+    assert {row["관리번호"] for row in broad.json()["rows"]} == {"111", "333", "444"}
+
+    narrow = client.get("/return-info", params={"판매처": "봄날"})
+    assert narrow.status_code == 200
+    assert [row["관리번호"] for row in narrow.json()["rows"]] == ["444"]
+
+    with get_connection() as con:
+        con.execute("UPDATE return_info SET 공급처=? WHERE 관리번호=?", ("헤이즐", "111"))
+        con.execute("UPDATE return_info SET 공급처=? WHERE 관리번호=?", ("헤이즐샵", "222"))
+        con.commit()
+
+    suppliers = client.get("/return-info/options")
+    assert set(suppliers.json()["공급처"]) == {"헤이즐", "헤이즐샵"}
+    supplier_rows = client.get("/return-info", params={"공급처": "헤이즐"})
+    assert {row["관리번호"] for row in supplier_rows.json()["rows"]} == {"111", "222"}
+    one_supplier = client.get("/return-info", params={"공급처": "헤이즐샵"})
+    assert [row["관리번호"] for row in one_supplier.json()["rows"]] == ["222"]
 
 
 def test_return_info_keyword_matches_attached_text(isolated_runtime):
