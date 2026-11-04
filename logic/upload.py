@@ -157,6 +157,7 @@ DATE_COL = {
     "kpost_in": "접수일자",
     "kpost_ret": "배달일자",
     "work_log": "날짜",
+    "return_info": "등록일",
 }
 
 TIME_TABLES = {"shipping_stats", "inbound_slip"}
@@ -167,6 +168,8 @@ UNIQUE_KEY: dict[str, list[str] | None] = {
     "work_log": ["no", "날짜", "업체명"],  # no+날짜+업체명: no는 월마다·파일마다 리셋되므로 업체명 포함해야 유니크
     "kpost_in": ["등기번호"],
     "kpost_ret": ["등기번호", "배달일자"],
+    # 같은 반품의 상품 행만 구분한다. 상태 변경분은 기간 삭제 후 다시 올린다.
+    "return_info": ["관리번호", "상품명", "옵션"],
 }
 
 # 우체국 데이터 허용 컬럼 (화이트리스트)
@@ -503,6 +506,8 @@ def ingest(
 
     # 송장/등기번호 컬럼을 문자열로 읽기 (모든 테이블 공통)
     read_kwargs = {"dtype": {col: "string" for col in TRACK_COLS}}
+    if table == "return_info":
+        read_kwargs["dtype"].update({"관리번호": "string", "주문번호": "string"})
 
     # HTML 형식 XLS 파일 감지 및 처리
     # work_log: 연간 파일(월별 시트)이면 모든 시트를 합쳐서 읽기

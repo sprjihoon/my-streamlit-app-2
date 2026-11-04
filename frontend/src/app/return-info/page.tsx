@@ -1,0 +1,245 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import PageHeader from '@/components/ui/page-header';
+import { Card } from '@/components/Card';
+import { Loading } from '@/components/Loading';
+import { Alert } from '@/components/Alert';
+import { TableSummary } from '@/components/data';
+import { Button } from '@/components/ui/button';
+import { Field } from '@/components/ui/field';
+import { Select } from '@/components/ui/select';
+import {
+  RETURN_INFO_COLUMNS,
+  RETURN_INFO_DATE_COLUMNS,
+  downloadReturnInfoExcel,
+  getReturnInfo,
+  type ReturnInfoFilters,
+} from '@/lib/api';
+
+const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
+const PAGE_SIZES = [20, 50, 100];
+
+function emptyFilters(): ReturnInfoFilters {
+  const filters: ReturnInfoFilters = {};
+  RETURN_INFO_COLUMNS.forEach((column) => {
+    if (DATE_COLUMNS.has(column)) {
+      filters[`${column}_from`] = '';
+      filters[`${column}_to`] = '';
+    } else {
+      filters[column] = '';
+    }
+  });
+  return filters;
+}
+
+function cellText(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value);
+}
+
+export default function ReturnInfoPage() {
+  const [draft, setDraft] = useState<ReturnInfoFilters>(emptyFilters);
+  const [applied, setApplied] = useState<ReturnInfoFilters>(emptyFilters);
+  const [columns, setColumns] = useState<string[]>([...RETURN_INFO_COLUMNS]);
+  const [rows, setRows] = useState<Array<Record<string, string | number | null>>>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getReturnInfo(applied, page, pageSize)
+      .then((data) => {
+        if (cancelled) return;
+        setColumns(data.columns?.length ? data.columns : [...RETURN_INFO_COLUMNS]);
+        setRows(data.rows || []);
+        setTotal(data.total || 0);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setRows([]);
+        setTotal(0);
+        setMessage({ type: 'error', text: err instanceof Error ? err.message : '조회 실패' });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applied, page, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const extraColumns = columns.filter((column) => !RETURN_INFO_COLUMNS.includes(column as typeof RETURN_INFO_COLUMNS[number]));
+
+  function updateDraft(key: string, value: string) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function search() {
+    setPage(1);
+    setApplied({ ...draft });
+    setMessage(null);
+  }
+
+  function resetFilters() {
+    const cleared = emptyFilters();
+    setDraft(cleared);
+    setApplied(cleared);
+    setPage(1);
+    setMessage(null);
+  }
+
+  return (
+    <div>
+      <PageHeader title="반품정보 조회" subtitle="재입고 대기 엑셀의 헤더 그대로 찾고 내려받습니다." />
+
+      {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
+
+          <Card title="필터">
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                gap: '0.75rem',
+              }}
+            >
+              {RETURN_INFO_COLUMNS.map((column) =>
+                DATE_COLUMNS.has(column) ? (
+                  <Field key={column} label={column} className="tw-mb-0">
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <input
+                        type="date"
+                        aria-label={`${column} 시작`}
+                        value={draft[`${column}_from`] || ''}
+                        onChange={(event) => updateDraft(`${column}_from`, event.target.value)}
+                        style={{ width: '100%' }}
+                      />
+                      <input
+                        type="date"
+                        aria-label={`${column} 종료`}
+                        value={draft[`${column}_to`] || ''}
+                        onChange={(event) => updateDraft(`${column}_to`, event.target.value)}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </Field>
+                ) : (
+                  <Field key={column} label={column} className="tw-mb-0">
+                    <input
+                      type="text"
+                      aria-label={column}
+                      value={draft[column] || ''}
+                      onChange={(event) => updateDraft(column, event.target.value)}
+                      placeholder="포함 검색"
+                      style={{ width: '100%' }}
+                    />
+                  </Field>
+                ),
+              )}
+              {extraColumns.map((column) => (
+                <Field key={column} label={column} className="tw-mb-0">
+                  <input
+                    type="text"
+                    aria-label={column}
+                    value={draft[column] || ''}
+                    onChange={(event) => updateDraft(column, event.target.value)}
+                    placeholder="포함 검색"
+                    style={{ width: '100%' }}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="tw-mt-3 tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+              <Button type="button" onClick={search}>검색</Button>
+              <Button type="button" variant="ghost" onClick={resetFilters}>초기화</Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={exporting}
+                onClick={async () => {
+                  setExporting(true);
+                  setMessage(null);
+                  try {
+                    await downloadReturnInfoExcel(applied);
+                    setMessage({ type: 'success', text: '엑셀을 저장했습니다.' });
+                  } catch (err) {
+                    setMessage({ type: 'error', text: err instanceof Error ? err.message : '엑셀 생성 실패' });
+                  } finally {
+                    setExporting(false);
+                  }
+                }}
+              >
+                {exporting ? '엑셀 만드는 중...' : '엑셀 다운로드'}
+              </Button>
+              <Field label="페이지당" className="tw-mb-0 tw-ml-auto">
+                <Select
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setPage(1);
+                  }}
+                >
+                  {PAGE_SIZES.map((size) => (
+                    <option key={size} value={size}>{size}개</option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <p className="caption tw-mb-0 tw-mt-2">
+              날짜 헤더는 시작일부터 종료일까지, 나머지 헤더는 글자가 포함된 행을 찾습니다. 엑셀은 화면의 페이지와 관계없이 이 필터의 전체 건을 담습니다.
+            </p>
+          </Card>
+
+          <div className="tw-mb-2 tw-mt-3">
+            <TableSummary>
+              반품정보 {rows.length}/{total}건 · {page}/{totalPages}페이지
+            </TableSummary>
+          </div>
+
+          <Card title="">
+            {loading ? (
+              <Loading />
+            ) : rows.length === 0 ? (
+              <p className="caption">조건에 맞는 반품정보가 없습니다.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      {columns.map((column) => (
+                        <th key={column}>{column}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, index) => (
+                      <tr key={`${row.관리번호 ?? ''}-${index}`}>
+                        {columns.map((column) => (
+                          <td key={column} className={column === 'CS이력' || column === '반품메모' ? 'cell-truncate' : undefined} title={cellText(row[column])}>
+                            {cellText(row[column])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem' }}>
+              <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage(1)}>처음</Button>
+              <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>이전</Button>
+              <span className="caption" style={{ alignSelf: 'center' }}>{page} / {totalPages}</span>
+              <Button type="button" variant="ghost" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>다음</Button>
+              <Button type="button" variant="ghost" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>마지막</Button>
+            </div>
+          </Card>
+    </div>
+  );
+}

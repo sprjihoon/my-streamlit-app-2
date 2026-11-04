@@ -284,8 +284,24 @@ CRITICAL_COLS = {
         ("works_user_id", "TEXT"),    # 네이버 웍스 사용자 ID
     ],
     # 작업일지 변경 이력 로그
-    # 반품정보: 엑셀 컬럼은 업로드 시 그대로 추가된다. 날짜 칸은 아직 고정하지 않는다.
-    "return_info": [],
+    # 반품정보(재입고 대기 엑셀). 기간 삭제는 등록일, 중복 키는 관리번호+상품명+옵션.
+    "return_info": [
+        ("상태", "TEXT"),
+        ("등록일", "TEXT"),
+        ("등록자", "TEXT"),
+        ("입고일", "TEXT"),
+        ("관리번호", "TEXT"),
+        ("발주일", "TEXT"),
+        ("판매처", "TEXT"),
+        ("주문번호", "TEXT"),
+        ("수령자", "TEXT"),
+        ("상품명", "TEXT"),
+        ("옵션", "TEXT"),
+        ("수량", "INTEGER"),
+        ("불량", "TEXT"),
+        ("CS이력", "TEXT"),
+        ("반품메모", "TEXT"),
+    ],
     "work_log_history": [
         ("log_id", "INTEGER"),        # 원본 작업일지 ID
         ("action", "TEXT"),           # 'create', 'update', 'delete'

@@ -253,6 +253,7 @@ TABLE_DATE_COL = {
     "kpost_in": "접수일자",
     "kpost_ret": "배달일자",
     "work_log": "날짜",
+    "return_info": "등록일",
 }
 
 

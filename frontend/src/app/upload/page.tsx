@@ -18,7 +18,7 @@ const TARGETS = [
   { key: 'kpost_in', label: '우체국접수', periodReset: true },
   { key: 'kpost_ret', label: '우체국반품', periodReset: true },
   { key: 'work_log', label: '작업일지', periodReset: true },
-  { key: 'return_info', label: '반품정보', periodReset: false },
+  { key: 'return_info', label: '반품정보', periodReset: true },
 ];
 
 interface UploadRecord {
@@ -269,7 +269,7 @@ export default function UploadPage() {
 
             {target.key === 'return_info' && (
               <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
-                엑셀 열은 그대로 저장됩니다. 날짜 칸이 정해지기 전에는 기간 삭제를 하지 않습니다.
+                재입고 대기 엑셀입니다. 기간 삭제는 등록일 기준이고, 같은 관리번호·상품명·옵션은 다시 올리지 않습니다.
               </p>
             )}
 
@@ -395,6 +395,17 @@ export default function UploadPage() {
             </button>
           </div>
 
+          {periodReset.table === 'return_info' && (
+            <p
+              style={{
+                marginTop: '0.5rem',
+                fontSize: '0.78rem',
+                color: '#666',
+              }}
+            >
+              * 반품정보는 등록일 기준으로 삭제됩니다.
+            </p>
+          )}
           {periodReset.table === 'work_log' && (
             <p
               style={{

@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, ClipboardList, Scissors, Upload, Link2, List, DollarSign,
+  LayoutDashboard, ClipboardList, Scissors, Upload, Link2, List, DollarSign, Search,
   BarChart2, FileText, FileSpreadsheet, TrendingUp, CalendarDays,
   Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package, Truck,
   PlusCircle, Users, ScrollText, Settings, AlertTriangle,
@@ -133,6 +133,12 @@ export const BILLING_INVOICE_NAV_ITEMS: NavItem[] = [
   { href: '/billing-invoice', label: '실 인보이스 관리', icon: <CreditCard {...IC} /> },
   { href: '/billing-invoice/analytics', label: '청구금액 분석', icon: <BarChart2 {...IC} /> },
 ];
+
+export const RETURN_INFO_NAV_ITEM: NavItem = {
+  href: '/return-info',
+  label: '반품정보 조회',
+  icon: <Search {...IC} />,
+};
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: '/storage', label: '보관료 관리', icon: <Package {...IC} /> },

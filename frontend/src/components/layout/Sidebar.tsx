@@ -1,9 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { CreditCard, Settings, ShieldCheck } from 'lucide-react';
 import { NavGroup } from './NavGroup';
 import { UserPanel } from './UserPanel';
-import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, NAV_GROUPS, canSeeNavItem } from './navigation';
+import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, NAV_GROUPS, RETURN_INFO_NAV_ITEM, canSeeNavItem } from './navigation';
 import type { User } from './types';
 
 export function Sidebar({
@@ -50,6 +51,15 @@ export function Sidebar({
             />
           );
         })}
+
+        <Link
+          href={RETURN_INFO_NAV_ITEM.href}
+          className={pathname === RETURN_INFO_NAV_ITEM.href ? 'active' : ''}
+          style={{ marginTop: '0.35rem' }}
+        >
+          <span className="tw-flex tw-shrink-0 tw-items-center">{RETURN_INFO_NAV_ITEM.icon}</span>
+          <span>{RETURN_INFO_NAV_ITEM.label}</span>
+        </Link>
 
         {user?.is_admin && (
           <NavGroup

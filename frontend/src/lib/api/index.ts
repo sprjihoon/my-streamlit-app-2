@@ -13,4 +13,5 @@ export * from './invoice';
 export * from './kpost';
 export * from './overseas';
 export * from './inbound';
+export * from './return-info';
 export * from './shipping';

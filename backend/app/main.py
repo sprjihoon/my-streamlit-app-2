@@ -33,6 +33,7 @@ from backend.app.api.kpost_pickup import router as kpost_pickup_router, ensure_p
 from backend.app.api.overseas_shipping import router as overseas_shipping_router, ensure_overseas_tables
 from backend.app.api.domestic_shipping import router as domestic_shipping_router, ensure_domestic_tables
 from backend.app.api.inbound import router as inbound_router, ensure_inbound_tables
+from backend.app.api.return_info import router as return_info_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -84,6 +85,7 @@ app.include_router(kpost_pickup_router)
 app.include_router(overseas_shipping_router)
 app.include_router(domestic_shipping_router)
 app.include_router(inbound_router)
+app.include_router(return_info_router)
 
 
 # 루트 엔드포인트

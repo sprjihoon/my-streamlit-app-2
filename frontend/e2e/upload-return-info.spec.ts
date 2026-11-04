@@ -30,7 +30,7 @@ test('return info upload card sits beside the work log card', async ({ page }) =
   expect(Math.abs(returnBox!.y - workBox!.y)).toBeLessThan(12);
 
   const periodOptions = page.locator('select option');
-  await expect(periodOptions.filter({ hasText: '반품정보' })).toHaveCount(0);
-  await expect(page.getByText('엑셀 열은 그대로 저장됩니다.')).toBeVisible();
+  await expect(periodOptions.filter({ hasText: '반품정보' })).toHaveCount(1);
+  await expect(page.getByText('재입고 대기 엑셀입니다.')).toBeVisible();
   await expect(page.getByRole('cell', { name: '작업일지' })).toBeVisible();
 });
