@@ -66,6 +66,12 @@ test('return info page filters every header and pages the rows', async ({ page }
   for (const column of COLUMNS) {
     await expect(page.getByText(column, { exact: true }).first()).toBeVisible();
   }
+  const registeredStart = await page.getByLabel('등록일 시작').boundingBox();
+  const registeredEnd = await page.getByLabel('등록일 종료').boundingBox();
+  const inboundStart = await page.getByLabel('입고일 시작').boundingBox();
+  expect(registeredStart && registeredEnd && inboundStart).toBeTruthy();
+  expect(registeredEnd!.y).toBeGreaterThanOrEqual(registeredStart!.y + registeredStart!.height - 1);
+  expect(inboundStart!.x).toBeGreaterThanOrEqual(registeredStart!.x + registeredStart!.width - 1);
   await expect(page.getByRole('cell', { name: '111' })).toBeVisible();
   await page.getByRole('button', { name: '다음' }).click();
   await expect(page.getByRole('cell', { name: '333' })).toBeVisible();

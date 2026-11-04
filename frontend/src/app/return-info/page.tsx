@@ -18,6 +18,7 @@ import {
 } from '@/lib/api';
 
 const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
+const WIDE_COLUMNS = new Set(['CS이력', '반품메모']);
 const PAGE_SIZES = [20, 50, 100];
 
 function emptyFilters(): ReturnInfoFilters {
@@ -102,60 +103,57 @@ export default function ReturnInfoPage() {
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
 
           <Card title="필터">
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                gap: '0.75rem',
-              }}
-            >
-              {RETURN_INFO_COLUMNS.map((column) =>
-                DATE_COLUMNS.has(column) ? (
-                  <Field key={column} label={column} className="tw-mb-0">
-                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+            <div className="return-filter-block">
+              <h2>날짜</h2>
+              <div className="return-filter-dates">
+                {RETURN_INFO_DATE_COLUMNS.map((column) => (
+                  <Field key={column} label={column}>
+                    <div className="return-filter-range">
                       <input
                         type="date"
                         aria-label={`${column} 시작`}
                         value={draft[`${column}_from`] || ''}
                         onChange={(event) => updateDraft(`${column}_from`, event.target.value)}
-                        style={{ width: '100%' }}
                       />
                       <input
                         type="date"
                         aria-label={`${column} 종료`}
                         value={draft[`${column}_to`] || ''}
                         onChange={(event) => updateDraft(`${column}_to`, event.target.value)}
-                        style={{ width: '100%' }}
                       />
                     </div>
                   </Field>
-                ) : (
-                  <Field key={column} label={column} className="tw-mb-0">
+                ))}
+              </div>
+            </div>
+            <div className="return-filter-block">
+              <h2>조건</h2>
+              <div className="return-filter-fields">
+                {RETURN_INFO_COLUMNS.filter((column) => !DATE_COLUMNS.has(column)).map((column) => (
+                  <Field key={column} label={column} className={WIDE_COLUMNS.has(column) ? 'return-filter-wide' : undefined}>
                     <input
                       type="text"
                       aria-label={column}
                       value={draft[column] || ''}
                       onChange={(event) => updateDraft(column, event.target.value)}
                       placeholder="포함 검색"
-                      style={{ width: '100%' }}
                     />
                   </Field>
-                ),
-              )}
-              {extraColumns.map((column) => (
-                <Field key={column} label={column} className="tw-mb-0">
-                  <input
-                    type="text"
-                    aria-label={column}
-                    value={draft[column] || ''}
-                    onChange={(event) => updateDraft(column, event.target.value)}
-                    placeholder="포함 검색"
-                    style={{ width: '100%' }}
-                  />
-                </Field>
-              ))}
+                ))}
+                {extraColumns.map((column) => (
+                  <Field key={column} label={column}>
+                    <input
+                      type="text"
+                      aria-label={column}
+                      value={draft[column] || ''}
+                      onChange={(event) => updateDraft(column, event.target.value)}
+                      placeholder="포함 검색"
+                    />
+                  </Field>
+                ))}
+              </div>
             </div>
-            <div className="tw-mt-3 tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+            <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-2">
               <Button type="button" onClick={search}>검색</Button>
               <Button type="button" variant="ghost" onClick={resetFilters}>초기화</Button>
               <Button
@@ -177,29 +175,30 @@ export default function ReturnInfoPage() {
               >
                 {exporting ? '엑셀 만드는 중...' : '엑셀 다운로드'}
               </Button>
-              <Field label="페이지당" className="tw-mb-0 tw-ml-auto">
-                <Select
-                  value={pageSize}
-                  onChange={(event) => {
-                    setPageSize(Number(event.target.value));
-                    setPage(1);
-                  }}
-                >
-                  {PAGE_SIZES.map((size) => (
-                    <option key={size} value={size}>{size}개</option>
-                  ))}
-                </Select>
-              </Field>
             </div>
             <p className="caption tw-mb-0 tw-mt-2">
-              날짜 헤더는 시작일부터 종료일까지, 나머지 헤더는 글자가 포함된 행을 찾습니다. 엑셀은 화면의 페이지와 관계없이 이 필터의 전체 건을 담습니다.
+              날짜는 위가 시작, 아래가 종료입니다. 나머지 칸은 글자가 포함된 행을 찾습니다. 엑셀은 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
             </p>
           </Card>
 
-          <div className="tw-mb-2 tw-mt-3">
+          <div className="tw-mb-2 tw-mt-3 tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2">
             <TableSummary>
               반품정보 {rows.length}/{total}건 · {page}/{totalPages}페이지
             </TableSummary>
+            <Field label="페이지당" className="tw-mb-0">
+              <Select
+                aria-label="페이지당"
+                value={pageSize}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value));
+                  setPage(1);
+                }}
+              >
+                {PAGE_SIZES.map((size) => (
+                  <option key={size} value={size}>{size}개</option>
+                ))}
+              </Select>
+            </Field>
           </div>
 
           <Card title="">
