@@ -197,28 +197,50 @@ export default function ReturnInfoPage() {
                     const typed = multi ? (choiceQuery[column] || '') : current;
                     const needle = typed.trim().toLowerCase();
                     const matches = needle
-                      ? options.filter((option) => option.toLowerCase().includes(needle))
+                      ? options.filter((option) => option.toLowerCase().includes(needle) && !selected.includes(option))
                       : [];
-                    function toggle(value: string) {
-                      const next = selected.includes(value)
-                        ? selected.filter((item) => item !== value)
-                        : [...selected, value];
-                      updateDraft(column, next.join('\n'));
+                    function addValue(value: string) {
+                      if (selected.includes(value)) return;
+                      updateDraft(column, [...selected, value].join('\n'));
+                      setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: '' }));
+                    }
+                    function removeValue(value: string) {
+                      updateDraft(column, selected.filter((item) => item !== value).join('\n'));
                     }
                     return (
                       <Field key={column} label={column}>
                         <div className="return-choice">
-                          <input
-                            type="text"
-                            aria-label={column}
-                            list={multi ? undefined : `return-choice-${column}`}
-                            value={typed}
-                            placeholder="글자 입력"
-                            onChange={(event) => {
-                              if (multi) setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: event.target.value }));
-                              else updateDraft(column, event.target.value);
-                            }}
-                          />
+                          {multi ? (
+                            <div className="return-choice-field">
+                              {selected.map((value) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  className="return-choice-entered"
+                                  aria-label={`${column} ${value} 빼기`}
+                                  onClick={() => removeValue(value)}
+                                >
+                                  {value}
+                                </button>
+                              ))}
+                              <input
+                                type="text"
+                                aria-label={column}
+                                value={typed}
+                                placeholder={selected.length ? '이어서 찾기' : '글자 입력'}
+                                onChange={(event) => setChoiceQuery((currentQuery) => ({ ...currentQuery, [column]: event.target.value }))}
+                              />
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              aria-label={column}
+                              list={`return-choice-${column}`}
+                              value={typed}
+                              placeholder="글자 입력"
+                              onChange={(event) => updateDraft(column, event.target.value)}
+                            />
+                          )}
                           {multi ? null : (
                             <datalist id={`return-choice-${column}`}>
                               {options.map((value) => (
@@ -226,27 +248,18 @@ export default function ReturnInfoPage() {
                               ))}
                             </datalist>
                           )}
-                          {multi && selected.length > 0 ? (
+                          {multi && matches.length > 0 ? (
                             <div className="return-choice-picked">
-                              {selected.map((value) => (
-                                <button key={value} type="button" className="return-choice-suggest" onClick={() => toggle(value)}>
+                              {matches.map((value) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  className="return-choice-suggest"
+                                  aria-label={`${column} ${value} 추가`}
+                                  onClick={() => addValue(value)}
+                                >
                                   {value}
                                 </button>
-                              ))}
-                            </div>
-                          ) : null}
-                          {multi && matches.length > 0 ? (
-                            <div className="return-choice-list">
-                              {matches.map((value) => (
-                                <label key={value}>
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`${column} ${value}`}
-                                    checked={selected.includes(value)}
-                                    onChange={() => toggle(value)}
-                                  />
-                                  {value}
-                                </label>
                               ))}
                             </div>
                           ) : null}

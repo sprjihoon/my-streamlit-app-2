@@ -525,23 +525,41 @@ h1, h2, h3, h4 {
   font-size: 12px;
   cursor: pointer;
 }
-.return-choice-picked { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.return-choice-list {
+.return-choice-field {
   display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  max-height: 9rem;
-  overflow: auto;
-}
-.return-choice-list label {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
-  margin: 0;
-  font-size: 13px;
-  font-weight: 500;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
 }
-.return-choice-list input { width: auto; }
+.return-choice-field:focus-within {
+  border-color: var(--color-brand, #2563eb);
+}
+.return-choice-field input {
+  flex: 1 1 5.5rem;
+  width: auto;
+  min-width: 5.5rem;
+  border: 0;
+  padding: 0.15rem 0.1rem;
+  background: transparent;
+  box-shadow: none;
+}
+.return-choice-field input:focus { outline: none; box-shadow: none; }
+.return-choice-entered {
+  border: 0;
+  background: var(--bg-muted);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 12px;
+  cursor: pointer;
+}
+.return-choice-picked { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .return-filter-accordion {
   margin-bottom: 0.75rem;
   border: 1px solid var(--border);
