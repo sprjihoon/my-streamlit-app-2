@@ -507,7 +507,7 @@ def ingest(
     # 송장/등기번호 컬럼을 문자열로 읽기 (모든 테이블 공통)
     read_kwargs = {"dtype": {col: "string" for col in TRACK_COLS}}
     if table == "return_info":
-        read_kwargs["dtype"].update({"관리번호": "string", "주문번호": "string"})
+        read_kwargs["dtype"].update({"관리번호": "string", "주문번호": "string", "바코드": "string"})
 
     # HTML 형식 XLS 파일 감지 및 처리
     # work_log: 연간 파일(월별 시트)이면 모든 시트를 합쳐서 읽기

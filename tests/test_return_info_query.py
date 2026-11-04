@@ -82,9 +82,9 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     memo = client.get("/return-info", params={"반품메모": "입고", "page_size": 50})
     assert memo.status_code == 200
     body = memo.json()
-    assert body["columns"][:15] == [
+    assert body["columns"] == [
         "상태", "등록일", "등록자", "입고일", "관리번호", "발주일", "판매처",
-        "주문번호", "수령자", "상품명", "옵션", "수량", "불량", "CS이력", "반품메모",
+        "주문번호", "수령자", "상품명", "옵션", "수량", "불량", "CS이력", "반품메모", "바코드",
     ]
     assert body["total"] == 2
     assert {row["관리번호"] for row in body["rows"]} == {"111", "333"}

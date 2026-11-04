@@ -16,6 +16,7 @@ export const RETURN_INFO_COLUMNS = [
   '불량',
   'CS이력',
   '반품메모',
+  '바코드',
 ] as const;
 
 export const RETURN_INFO_DATE_COLUMNS = ['등록일', '입고일', '발주일'] as const;

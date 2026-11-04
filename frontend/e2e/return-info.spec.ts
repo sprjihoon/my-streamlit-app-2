@@ -3,7 +3,7 @@ import { ADMIN, installApi, seedSession, STAFF } from './support/api';
 
 const COLUMNS = [
   '상태', '등록일', '등록자', '입고일', '관리번호', '발주일', '판매처',
-  '주문번호', '수령자', '상품명', '옵션', '수량', '불량', 'CS이력', '반품메모',
+  '주문번호', '수령자', '상품명', '옵션', '수량', '불량', 'CS이력', '반품메모', '바코드',
 ];
 
 test('return info menu sits below marketing outside a category', async ({ page }) => {

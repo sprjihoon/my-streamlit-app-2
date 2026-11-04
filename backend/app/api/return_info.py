@@ -27,6 +27,7 @@ RETURN_HEADERS = [
     "불량",
     "CS이력",
     "반품메모",
+    "바코드",
 ]
 DATE_HEADERS = ("등록일", "입고일", "발주일")
 EXPORT_LIMIT = 20000

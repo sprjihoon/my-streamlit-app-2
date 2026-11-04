@@ -39,6 +39,7 @@ def _row(**overrides) -> dict:
         "불량": "정상",
         "CS이력": "이력",
         "반품메모": "메모",
+        "바코드": "8801234567890",
     }
     base.update(overrides)
     return base
@@ -85,13 +86,13 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
 
     with get_connection() as con:
         rows = con.execute(
-            "SELECT 관리번호, 상품명, 상태, substr(등록일, 1, 10) FROM return_info ORDER BY id"
+            "SELECT 관리번호, 상품명, 상태, substr(등록일, 1, 10), 바코드 FROM return_info ORDER BY id"
         ).fetchall()
         work_rows = con.execute("SELECT 업체명, 출처 FROM work_log").fetchall()
 
     assert rows == [
-        ("897278", "샘플상품", "입고완료", "2026-11-03"),
-        ("900002", "새상품", "입고완료", "2026-11-03"),
+        ("897278", "샘플상품", "입고완료", "2026-11-03", "8801234567890"),
+        ("900002", "새상품", "입고완료", "2026-11-03", "8801234567890"),
     ]
     assert work_rows == [("기존업체", "bot")]
     assert TABLE_DATE_COL["return_info"] == "등록일"
