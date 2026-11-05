@@ -54,15 +54,6 @@ export const NAV_GROUPS: {
     ],
   },
   {
-    key: 'inbound',
-    label: '입고',
-    icon: <Package {...IC} />,
-    items: [
-      { href: '/inbound-log', label: '입고일지', icon: <Package {...IC} /> },
-      { href: '/inbound-overview', label: '통합현황', icon: <Package {...IC} /> },
-    ],
-  },
-  {
     key: 'return-request',
     label: '회수신청',
     icon: <Truck {...IC} />,
@@ -140,6 +131,16 @@ export const BILLING_INVOICE_NAV_ITEMS: NavItem[] = [
   { href: '/billing-invoice', label: '실 인보이스 관리', icon: <CreditCard {...IC} /> },
   { href: '/billing-invoice/analytics', label: '청구금액 분석', icon: <BarChart2 {...IC} /> },
 ];
+
+export const INBOUND_NAV_GROUP = {
+  key: 'inbound',
+  label: '입고',
+  icon: <Package {...IC} />,
+  items: [
+    { href: '/inbound-log', label: '입고일지', icon: <Package {...IC} /> },
+    { href: '/inbound-overview', label: '통합현황', icon: <Package {...IC} /> },
+  ] satisfies NavItem[],
+};
 
 export const RETURN_INFO_NAV_ITEM: NavItem = {
   href: '/return-info',

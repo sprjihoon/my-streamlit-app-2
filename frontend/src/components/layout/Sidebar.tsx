@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { CreditCard, Settings, ShieldCheck } from 'lucide-react';
 import { NavGroup } from './NavGroup';
 import { UserPanel } from './UserPanel';
-import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, NAV_GROUPS, RETURN_INFO_NAV_ITEM, canSeeNavItem } from './navigation';
+import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, INBOUND_NAV_GROUP, NAV_GROUPS, RETURN_INFO_NAV_ITEM, canSeeNavItem } from './navigation';
 import type { User } from './types';
 
 export function Sidebar({
@@ -18,6 +18,8 @@ export function Sidebar({
   onChangePassword: () => void;
   onLogout: () => void;
 }) {
+  const inboundItems = INBOUND_NAV_GROUP.items.filter((item) => canSeeNavItem(user, item));
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -51,6 +53,15 @@ export function Sidebar({
             />
           );
         })}
+
+        {inboundItems.length > 0 && (
+          <NavGroup
+            label={INBOUND_NAV_GROUP.label}
+            icon={INBOUND_NAV_GROUP.icon}
+            items={inboundItems}
+            pathname={pathname}
+          />
+        )}
 
         <Link
           href={RETURN_INFO_NAV_ITEM.href}

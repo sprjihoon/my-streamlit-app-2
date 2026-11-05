@@ -8,6 +8,16 @@ test.beforeEach(async ({ page }) => {
 
 test('sidebar accordion opens a menu route', async ({ page }) => {
   await page.goto('/');
+  const inboundAboveReturns = await page.locator('aside.sidebar nav').evaluate((nav) => {
+    const inbound = [...nav.querySelectorAll('.sidebar-group')].find((group) =>
+      group.querySelector('button')?.textContent?.includes('입고'),
+    );
+    const returns = [...nav.querySelectorAll('a')].find((link) => link.textContent?.includes('반품정보 조회'));
+    if (!inbound || !returns) return false;
+    return Boolean(inbound.compareDocumentPosition(returns) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && inbound.nextElementSibling === returns;
+  });
+  expect(inboundAboveReturns).toBe(true);
   await page.getByRole('button', { name: '일지' }).click();
   await page.getByRole('link', { name: '작업일지', exact: true }).click();
   await expect(page).toHaveURL(/\/work-log$/);
