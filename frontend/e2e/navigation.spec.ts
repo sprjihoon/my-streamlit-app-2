@@ -13,6 +13,17 @@ test('sidebar accordion opens a menu route', async ({ page }) => {
   await expect(page).toHaveURL(/\/work-log$/);
   await expect(page.getByRole('heading', { name: '작업일지' })).toBeVisible();
   await expect(page.locator('a.active', { hasText: '작업일지' })).toBeVisible();
+  const journal = page.locator('.sidebar-group', { has: page.getByRole('button', { name: '일지', exact: true }) });
+  await expect(journal.getByRole('link', { name: '입고일지', exact: true })).toHaveCount(0);
+  await expect(journal.getByRole('link', { name: '통합현황', exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: '입고', exact: true }).click();
+  await page.getByRole('link', { name: '입고일지', exact: true }).click();
+  await expect(page).toHaveURL(/\/inbound-log$/);
+  await expect(page.getByRole('heading', { name: '입고일지' })).toBeVisible();
+  await page.getByRole('link', { name: '통합현황', exact: true }).click();
+  await expect(page).toHaveURL(/\/inbound-overview$/);
+  await expect(page.getByRole('heading', { name: '통합 현황', exact: true })).toBeVisible();
 });
 
 test('public, share, print, and mobile work pages have no sidebar', async ({ page }) => {
