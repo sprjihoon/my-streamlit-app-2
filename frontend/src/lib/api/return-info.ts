@@ -72,6 +72,15 @@ export function getReturnInfo(filters: ReturnInfoFilters, page: number, pageSize
   );
 }
 
+export type ReturnInfoDraft = Record<string, string | number | null>;
+
+export function createReturnInfo(fields: ReturnInfoDraft) {
+  return fetchApi<{ id: number; row: ReturnInfoDraft }>(
+    `/return-info${returnInfoQuery({})}`,
+    { method: 'POST', body: JSON.stringify(fields) },
+  );
+}
+
 function filenameFromDisposition(header: string | null, fallback: string) {
   if (!header) return fallback;
   const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);

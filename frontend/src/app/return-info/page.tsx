@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Select } from '@/components/ui/select';
 import { ReturnInfoUpload } from '@/components/return-info-upload';
+import { ReturnInfoCreateModal } from '@/components/return-info-create-modal';
 import {
   RETURN_INFO_COLUMNS,
   RETURN_INFO_DATE_COLUMNS,
@@ -61,6 +62,7 @@ export default function ReturnInfoPage() {
   const [listVersion, setListVersion] = useState(0);
   const [choices, setChoices] = useState<ReturnInfoChoices>({ 판매처: [], 상품명: [], 공급처: [] });
   const [choiceQuery, setChoiceQuery] = useState<Record<string, string>>({});
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +108,7 @@ export default function ReturnInfoPage() {
   }, [listVersion]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const tableColumns = ['입력구분', ...columns.filter((column) => column !== '입력구분')];
   const extraColumns = columns.filter((column) => !RETURN_INFO_COLUMNS.includes(column as typeof RETURN_INFO_COLUMNS[number]));
   const dateActive = RETURN_INFO_DATE_COLUMNS.some((column) => draft[`${column}_from`] || draft[`${column}_to`]);
   const conditionColumns = [
@@ -375,7 +378,9 @@ export default function ReturnInfoPage() {
             <TableSummary>
               반품정보 {rows.length}/{total}건 · {page}/{totalPages}페이지
             </TableSummary>
-            <Field label="페이지당" className="tw-mb-0">
+            <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-2">
+              <Button type="button" onClick={() => setCreateOpen(true)}>직접 입력</Button>
+              <Field label="페이지당" className="tw-mb-0">
               <Select
                 aria-label="페이지당"
                 value={pageSize}
@@ -388,8 +393,20 @@ export default function ReturnInfoPage() {
                   <option key={size} value={size}>{size}개</option>
                 ))}
               </Select>
-            </Field>
+              </Field>
+            </div>
           </div>
+
+          {createOpen ? (
+            <ReturnInfoCreateModal
+              onClose={() => setCreateOpen(false)}
+              onSaved={() => {
+                setCreateOpen(false);
+                setMessage({ type: 'success', text: '반품정보를 추가했습니다. 목록에 수동 입력으로 표시됩니다.' });
+                setListVersion((current) => current + 1);
+              }}
+            />
+          ) : null}
 
           <Card title="">
             {loading ? (
@@ -401,7 +418,7 @@ export default function ReturnInfoPage() {
                 <table>
                   <thead>
                     <tr>
-                      {columns.map((column) => (
+                      {tableColumns.map((column) => (
                         <th key={column}>{column}</th>
                       ))}
                     </tr>
@@ -409,13 +426,21 @@ export default function ReturnInfoPage() {
                   <tbody>
                     {rows.map((row, index) => (
                       <tr key={`${row.관리번호 ?? ''}-${index}`}>
-                        {columns.map((column) => (
+                        {tableColumns.map((column) => (
                           <td
                             key={column}
                             className={column === 'CS이력' ? 'cell-memo' : column === '반품메모' ? 'cell-truncate' : undefined}
-                            title={cellText(row[column])}
+                            title={column === '입력구분' && row[column] === '수동 입력' ? '수동 입력' : cellText(row[column])}
                           >
-                            {cellText(row[column])}
+                            {column === '입력구분' ? (
+                              row[column] === '수동 입력' ? (
+                                <span className="return-source-manual">수동 입력</span>
+                              ) : (
+                                '-'
+                              )
+                            ) : (
+                              cellText(row[column])
+                            )}
                           </td>
                         ))}
                       </tr>

@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import io
 import re
-from datetime import datetime
+from datetime import date, datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -58,6 +58,25 @@ REPORT_HEADERS = (
     "CS이력",
     "반품메모",
 )
+MANUAL_TEXT_LIMITS = {
+    "상태": 50,
+    "등록자": 50,
+    "관리번호": 100,
+    "주문번호": 100,
+    "수령자": 100,
+    "판매처": 200,
+    "상품명": 300,
+    "바코드": 100,
+    "옵션": 300,
+    "불량": 100,
+    "공급처": 200,
+    "CS이력": 20000,
+    "반품메모": 4000,
+}
+MANUAL_CONTENT_HEADERS = tuple(name for name in RETURN_HEADERS if name not in {"등록일", "등록자"})
+SOURCE_HEADER = "입력구분"
+MANUAL_MARK = "수동 입력"
+QTY_MAX = 1_000_000
 
 
 def _like(value: str) -> str:
@@ -213,6 +232,162 @@ async def list_return_info(
         "page": page,
         "page_size": page_size,
     }
+
+
+def _session_nickname(token: str) -> str:
+    text = token.strip()
+    if not text:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    with get_connection() as con:
+        row = con.execute(
+            """SELECT u.nickname
+               FROM sessions s JOIN users u ON s.user_id = u.user_id
+               WHERE s.token = ?""",
+            (text,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    return str(row[0]).strip() if row[0] else ""
+
+
+def _manual_text(name: str, value) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{name} 값이 올바르지 않습니다.")
+    text = value.strip()
+    if not text:
+        return None
+    limit = MANUAL_TEXT_LIMITS.get(name, 500)
+    if len(text) > limit:
+        raise HTTPException(status_code=400, detail=f"{name}은(는) {limit}자까지입니다.")
+    return text
+
+
+def _manual_date(name: str, value, required: bool) -> str | None:
+    text = _manual_text(name, value)
+    if text is None:
+        if required:
+            raise HTTPException(status_code=400, detail="등록일을 입력해 주세요.")
+        return None
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        raise HTTPException(status_code=400, detail=f"{name}은(는) YYYY-MM-DD 형식입니다.")
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{name}은(는) YYYY-MM-DD 형식입니다.") from None
+    return text
+
+
+def _manual_qty(value) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or isinstance(value, (list, dict)):
+        raise HTTPException(status_code=400, detail="수량은 0 이상의 정수로 입력해 주세요.")
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float) and value.is_integer():
+        number = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        number = int(value.strip())
+    else:
+        raise HTTPException(status_code=400, detail="수량은 0 이상의 정수로 입력해 주세요.")
+    if number < 0 or number > QTY_MAX:
+        raise HTTPException(status_code=400, detail="수량은 0 이상의 정수로 입력해 주세요.")
+    return number
+
+
+def _normalize_manual_row(payload, nickname: str) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="입력 형식이 올바르지 않습니다.")
+    if any(key not in RETURN_HEADERS for key in payload):
+        raise HTTPException(status_code=400, detail="허용되지 않은 항목이 있습니다.")
+    values = {}
+    for name in RETURN_HEADERS:
+        raw = payload.get(name)
+        if name in DATE_HEADERS:
+            values[name] = _manual_date(name, raw, required=(name == "등록일"))
+        elif name == "수량":
+            values[name] = _manual_qty(raw)
+        else:
+            values[name] = _manual_text(name, raw)
+    if not values.get("등록자") and nickname:
+        values["등록자"] = nickname
+    if not any(values.get(name) not in (None, "") for name in MANUAL_CONTENT_HEADERS):
+        raise HTTPException(status_code=400, detail="등록일 외에 내용을 하나 이상 입력해 주세요.")
+    return values
+
+
+def _same_return_row(con, values: dict) -> bool:
+    present = set(_columns(con))
+    clauses: list[str] = []
+    params: list = []
+    for name in RETURN_HEADERS:
+        if name not in present:
+            continue
+        value = values.get(name)
+        if name == "수량":
+            if value is None:
+                clauses.append(
+                    f"([{name}] IS NULL OR TRIM(COALESCE(CAST([{name}] AS TEXT), '')) = '')"
+                )
+            else:
+                clauses.append(f"[{name}] = ?")
+                params.append(value)
+            continue
+        if name in DATE_HEADERS:
+            clauses.append(f"substr(TRIM(COALESCE(CAST([{name}] AS TEXT), '')), 1, 10) = ?")
+            params.append(value or "")
+            continue
+        clauses.append(f"TRIM(COALESCE(CAST([{name}] AS TEXT), '')) = ?")
+        params.append(value or "")
+    if not clauses:
+        return False
+    found = con.execute(
+        "SELECT 1 FROM return_info WHERE " + " AND ".join(clauses) + " LIMIT 1",
+        params,
+    ).fetchone()
+    return found is not None
+
+
+def _insert_return_row(con, values: dict) -> int:
+    present = set(_columns(con))
+    names = [name for name in RETURN_HEADERS if name in present]
+    if SOURCE_HEADER in present:
+        names.append(SOURCE_HEADER)
+    if not names:
+        raise HTTPException(status_code=500, detail="반품정보 항목을 저장할 수 없습니다.")
+    col_sql = ", ".join(f"[{name}]" for name in names)
+    marks = ", ".join("?" for _name in names)
+    cursor = con.execute(
+        f"INSERT INTO return_info ({col_sql}) VALUES ({marks})",
+        [values.get(name) for name in names],
+    )
+    return int(cursor.lastrowid)
+
+
+@router.post("")
+@router.post("/")
+async def create_return_info(request: Request, payload: dict = Body(...)):
+    """로그인한 사용자가 헤더별 값을 한 건 저장한다. 엑셀 업로드와 작업일지는 바꾸지 않는다."""
+    nickname = _session_nickname(request.query_params.get("token") or "")
+    values = _normalize_manual_row(payload, nickname)
+    values[SOURCE_HEADER] = MANUAL_MARK
+    ensure_tables()
+    with get_connection() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if _same_return_row(con, values):
+                con.rollback()
+                raise HTTPException(status_code=409, detail="같은 내용의 반품정보가 이미 있습니다.")
+            row_id = _insert_return_row(con, values)
+            con.commit()
+        except HTTPException:
+            raise
+        except Exception:
+            con.rollback()
+            raise
+    return {"id": row_id, "row": values}
 
 
 @router.get("/export")

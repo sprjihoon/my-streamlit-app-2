@@ -88,7 +88,9 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     assert body["columns"] == [
         "상태", "등록일", "등록자", "입고일", "관리번호", "발주일", "판매처",
         "주문번호", "수령자", "상품명", "바코드", "옵션", "수량", "불량", "CS이력", "반품메모", "공급처",
+        "입력구분",
     ]
+    assert all(row["입력구분"] is None for row in body["rows"])
     assert body["total"] == 2
     assert {row["관리번호"] for row in body["rows"]} == {"111", "333"}
 
@@ -115,6 +117,7 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     sheet = load_workbook(io.BytesIO(exported.content)).active
     headers = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
     assert headers[:4] == ["상태", "등록일", "등록자", "입고일"]
+    assert headers[-1] == "입력구분"
     assert "반품메모" in headers
     assert sheet.max_row == 3
 
@@ -260,3 +263,146 @@ def test_return_info_keyword_searches_every_column(isolated_runtime):
     with get_connection() as con:
         kept = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
     assert kept == 1
+
+
+def _manual_payload(**overrides):
+    payload = {
+        "상태": "입고대기",
+        "등록일": "2026-11-05",
+        "등록자": "",
+        "입고일": "",
+        "관리번호": "M-77",
+        "발주일": "2026-11-04",
+        "판매처": "봄날",
+        "주문번호": "ORD-1",
+        "수령자": "길동",
+        "상품명": " 셔츠 ",
+        "바코드": "8801",
+        "옵션": "검정",
+        "수량": 2,
+        "불량": "정상",
+        "CS이력": "전화 상담",
+        "반품메모": "수동 입력",
+        "공급처": "헤이즐",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_return_info_manual_create_keeps_work_log(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    _insert_rows()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    denied = client.post("/return-info", json=_manual_payload())
+    assert denied.status_code == 401
+    assert denied.json()["detail"] == "로그인이 필요합니다."
+
+    missing_date = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json=_manual_payload(등록일=""),
+    )
+    assert missing_date.status_code == 400
+    assert missing_date.json()["detail"] == "등록일을 입력해 주세요."
+
+    date_only = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json={"등록일": "2026-11-05", "등록자": "직원"},
+    )
+    assert date_only.status_code == 400
+    assert date_only.json()["detail"] == "등록일 외에 내용을 하나 이상 입력해 주세요."
+
+    bad_date = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json=_manual_payload(입고일="2026/11/06"),
+    )
+    assert bad_date.status_code == 400
+
+    bad_qty = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json=_manual_payload(수량="1.5"),
+    )
+    assert bad_qty.status_code == 400
+    assert bad_qty.json()["detail"] == "수량은 0 이상의 정수로 입력해 주세요."
+
+    unknown = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json=_manual_payload(id=1),
+    )
+    assert unknown.status_code == 400
+    assert unknown.json()["detail"] == "허용되지 않은 항목이 있습니다."
+
+    created = client.post("/return-info", params={"token": "staff-tok"}, json=_manual_payload())
+    assert created.status_code == 200
+    body = created.json()
+    assert body["id"]
+    assert body["row"]["등록자"] == "직원"
+    assert body["row"]["상품명"] == "셔츠"
+    assert body["row"]["수량"] == 2
+    assert body["row"]["입력구분"] == "수동 입력"
+
+    listed = client.get("/return-info", params={"token": "staff-tok", "관리번호": "M-77"})
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert listed.json()["rows"][0]["판매처"] == "봄날"
+    assert listed.json()["rows"][0]["입력구분"] == "수동 입력"
+    uploaded = client.get("/return-info", params={"관리번호": "111"})
+    assert uploaded.json()["rows"][0]["입력구분"] is None
+
+    duplicate = client.post("/return-info", params={"token": "staff-tok"}, json=_manual_payload(등록자="직원"))
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "같은 내용의 반품정보가 이미 있습니다."
+
+    with get_connection() as con:
+        con.execute(
+            """INSERT INTO return_info
+               (상태, 등록일, 등록자, 입고일, 관리번호, 발주일, 판매처, 주문번호, 수령자, 상품명, 바코드, 옵션, 수량, 불량, CS이력, 반품메모, 공급처)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "입고대기", "2026-11-06 09:00:00", "직원", None, "M-88", "2026-11-04",
+                "봄날", "ORD-2", "길동", "바지", None, "검정", None, None, None, None, None,
+            ),
+        )
+        con.commit()
+    same_day = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json=_manual_payload(
+            등록일="2026-11-06",
+            관리번호="M-88",
+            주문번호="ORD-2",
+            상품명="바지",
+            입고일="",
+            바코드="",
+            수량=None,
+            불량="",
+            CS이력="",
+            반품메모="",
+            공급처="",
+        ),
+    )
+    assert same_day.status_code == 409
+
+    with get_connection() as con:
+        kept = con.execute("SELECT 업체명, 출처 FROM work_log").fetchone()
+        saved = con.execute(
+            "SELECT COUNT(*) FROM return_info WHERE 관리번호='M-77'"
+        ).fetchone()[0]
+        dated = con.execute(
+            "SELECT COUNT(*) FROM return_info WHERE 관리번호='M-88'"
+        ).fetchone()[0]
+        uploads = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='uploads'"
+        ).fetchone()
+        upload_count = (
+            con.execute("SELECT COUNT(*) FROM uploads").fetchone()[0] if uploads else 0
+        )
+    assert kept == ("기존업체", "bot")
+    assert saved == 1
+    assert dated == 1
+    assert upload_count == 0

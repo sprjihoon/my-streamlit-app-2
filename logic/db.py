@@ -303,6 +303,7 @@ CRITICAL_COLS = {
         ("CS이력", "TEXT"),
         ("반품메모", "TEXT"),
         ("공급처", "TEXT"),
+        ("입력구분", "TEXT"),
     ],
     "work_log_history": [
         ("log_id", "INTEGER"),        # 원본 작업일지 ID

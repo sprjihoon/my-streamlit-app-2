@@ -129,3 +129,82 @@ test('return info page filters every header and pages the rows', async ({ page }
   await page.getByRole('button', { name: '보고서 다운로드' }).click();
   await reportDownload;
 });
+
+test('return info manual entry opens a field for every header', async ({ page }) => {
+  let posts = 0;
+  let created: Record<string, unknown> | null = null;
+  await seedSession(page, STAFF);
+  await installApi(page, STAFF);
+  await page.route('http://localhost:8000/return-info**', async (route) => {
+    const url = new URL(route.request().url());
+    const request = route.request();
+    if (request.method() === 'POST' && (url.pathname === '/return-info' || url.pathname === '/return-info/')) {
+      posts += 1;
+      created = { ...(request.postDataJSON() as Record<string, unknown>), 입력구분: '수동 입력' };
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 9, row: created }),
+      });
+    }
+    if (url.pathname.endsWith('/options')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ 판매처: [], 상품명: [], 공급처: [] }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        columns: [...COLUMNS, '입력구분'],
+        rows: created ? [created] : [],
+        total: created ? 1 : 0,
+        page: 1,
+        page_size: 50,
+      }),
+    });
+  });
+
+  await page.goto('/return-info');
+  await page.getByRole('button', { name: '직접 입력' }).click();
+  const dialog = page.getByRole('dialog', { name: '반품정보 직접 입력' });
+  await expect(dialog).toBeVisible();
+  for (const column of COLUMNS) {
+    await expect(dialog.locator('label', { hasText: column })).toBeVisible();
+    await expect(dialog.getByLabel(`직접입력 ${column}`)).toBeVisible();
+  }
+  await dialog.getByRole('button', { name: '저장' }).click();
+  await expect(dialog.getByText('등록일 외에 내용을 하나 이상 입력해 주세요.')).toBeVisible();
+  expect(posts).toBe(0);
+
+  await dialog.getByLabel('직접입력 등록일').fill('2026-11-05');
+  await dialog.getByLabel('직접입력 관리번호').fill('M-1');
+  await dialog.getByLabel('직접입력 상품명').fill('셔츠');
+  await dialog.getByLabel('직접입력 수량').fill('2');
+  const saved = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return request.method() === 'POST' && url.pathname === '/return-info';
+  });
+  await dialog.getByRole('button', { name: '저장' }).click();
+  const request = await saved;
+  const body = request.postDataJSON();
+  expect(body.등록일).toBe('2026-11-05');
+  expect(body.등록자).toBe('물류담당');
+  expect(body.관리번호).toBe('M-1');
+  expect(body.상품명).toBe('셔츠');
+  expect(body.수량).toBe(2);
+  expect(body.CS이력).toBeNull();
+  await expect(page.getByText('목록에 수동 입력으로 표시됩니다.')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '입력구분' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '수동 입력' })).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  expect(posts).toBe(1);
+
+  await page.getByRole('button', { name: '직접 입력' }).click();
+  await page.getByRole('dialog', { name: '반품정보 직접 입력' }).getByRole('button', { name: '취소' }).click();
+  await expect(page.getByRole('dialog', { name: '반품정보 직접 입력' })).toHaveCount(0);
+  await expect(page.getByLabel('직접입력 상태')).toHaveCount(0);
+  expect(posts).toBe(1);
+});
