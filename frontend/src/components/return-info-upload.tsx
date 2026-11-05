@@ -17,7 +17,30 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    setIsAdmin(localStorage.getItem('isAdmin') === 'true');
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setIsAdmin(false);
+      return;
+    }
+    const api = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    let cancelled = false;
+    fetch(`${api}/auth/me?token=${encodeURIComponent(token)}`)
+      .then(async (res) => {
+        if (!res.ok) return false;
+        const user = await res.json();
+        return Boolean(user?.is_admin);
+      })
+      .then((admin) => {
+        if (cancelled) return;
+        setIsAdmin(admin);
+        localStorage.setItem('isAdmin', admin ? 'true' : 'false');
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -155,7 +178,7 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
         <div className="metric-value">{uploadCount}</div>
         <div className="metric-label">업로드 수</div>
       </div>
-      {uploadCount > 0 && (
+      {isAdmin && uploadCount > 0 && (
         <button
           type="button"
           onClick={() => setConfirmReset(true)}
@@ -174,7 +197,7 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
           데이터 초기화
         </button>
       )}
-      {confirmReset && (
+      {isAdmin && confirmReset && (
         <div role="alertdialog" aria-label="데이터 초기화 확인" style={{ marginTop: '0.5rem' }}>
           <Alert type="warning" message="반품정보 데이터를 모두 삭제합니다. 이 작업은 되돌릴 수 없습니다." />
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>

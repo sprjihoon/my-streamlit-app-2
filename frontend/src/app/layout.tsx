@@ -60,6 +60,8 @@ export default function RootLayout({
 
       const userData = await res.json();
       setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('isAdmin', userData.is_admin ? 'true' : 'false');
       // must_change_password 체크
       const mcp = localStorage.getItem('must_change_password');
       if (mcp === 'true') setMustChangePw(true);
@@ -82,6 +84,7 @@ export default function RootLayout({
     }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('isAdmin');
     router.push('/login');
   }
 

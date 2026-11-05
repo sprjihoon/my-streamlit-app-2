@@ -37,6 +37,36 @@ test('staff cannot see the return info upload card', async ({ page }) => {
   await expect(page.getByRole('button', { name: '데이터 초기화' })).toHaveCount(0);
 });
 
+test('stale admin flag does not show return info reset', async ({ page }) => {
+  await seedSession(page, STAFF);
+  await page.addInitScript(() => {
+    localStorage.setItem('isAdmin', 'true');
+  });
+  await installApi(page, STAFF);
+  await page.route('http://localhost:8000/upload/list**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        uploads: [{
+          id: 9,
+          filename: 'r.xlsx',
+          원본명: '반품.xlsx',
+          table_name: 'return_info',
+          시작일: '2026-11-01',
+          종료일: '2026-11-04',
+          업로드시각: '2026-11-04 09:00',
+        }],
+      }),
+    });
+  });
+  await page.goto('/return-info');
+  await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '데이터 초기화' })).toHaveCount(0);
+  await expect(page.getByText('반품정보 업로드', { exact: true })).toHaveCount(0);
+});
+
 test('admin must confirm before resetting return info', async ({ page }) => {
   await seedSession(page, ADMIN);
   await installApi(page, ADMIN);

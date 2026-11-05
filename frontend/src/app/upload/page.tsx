@@ -58,8 +58,29 @@ export default function UploadPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   
   useEffect(() => {
-    const storedIsAdmin = localStorage.getItem('isAdmin') === 'true';
-    setIsAdmin(storedIsAdmin);
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setIsAdmin(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_URL}/auth/me?token=${encodeURIComponent(token)}`)
+      .then(async (res) => {
+        if (!res.ok) return false;
+        const user = await res.json();
+        return Boolean(user?.is_admin);
+      })
+      .then((admin) => {
+        if (cancelled) return;
+        setIsAdmin(admin);
+        localStorage.setItem('isAdmin', admin ? 'true' : 'false');
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 업로드 목록 로드
