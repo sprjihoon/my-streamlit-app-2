@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional
 from backend.app.api.repair_log import (
     _lookup_barcode,
     _resolve_vendor,
-    save_image_bytes,
     ensure_repair_tables,
 )
 from backend.app.api.defect_log import ensure_defect_tables, insert_defect_log_record
@@ -24,11 +23,12 @@ from backend.app.services.barcode_decode import looks_like_barcode
 from backend.app.services.conversation_state import get_conversation_manager
 from backend.app.services.repair_bot import (
     PHOTO_RETRY_MSG,
-    PHOTO_SET_HINT,
     BufferedPhoto,
-    _assign_saved_photos,
-    _classify_photos_safe,
-    _positional_photo_slots,
+    _claim_inbox_photos,
+    _commit_inbox_claim,
+    _inbox_count,
+    _release_inbox_claim,
+    cancel_photo_flush,
     clear_photo_inbox,
 )
 from logic.db import get_connection
@@ -36,6 +36,8 @@ from logic.db import get_connection
 logger = logging.getLogger(__name__)
 
 EXPIRED_DEFECT_MSG = "작성하던 불량이 만료됐어요. 다시 시작해주세요."
+DEFECT_ONE_PHOTO_MSG = "제품 사진 1장을 받았어요. 바코드 번호를 입력해 주세요."
+DEFECT_BARCODE_HINT = "바코드 번호를 입력해 주세요. 번호를 입력했다면 제품 사진 1장만 보내도 됩니다."
 YES_RE = re.compile(r"^(네|넵|예|응|어|맞아|맞아요|그래|그래요|ㅇㅇ|ㅇㅋ|저장|저장해|좋아|ㅇ)$")
 CANCEL_RE = re.compile(r"^(취소|그만|아니야|아니)$")
 ASCII_BARCODE_RE = re.compile(r"^[A-Za-z0-9]{6,24}$")
@@ -88,6 +90,10 @@ def _consume_expired(user_id: str, channel_id: Optional[str] = None) -> bool:
     clear_photo_inbox(user_id, channel_id)
     _clear_pending(user_id, channel_id)
     return True
+
+
+def pending_barcode(user_id: str, channel_id: Optional[str] = None) -> str:
+    return (_get_pending(user_id, channel_id).get("barcode") or "").strip()
 
 
 def pending_is_defect(user_id: str, channel_id: Optional[str] = None) -> bool:
@@ -209,9 +215,10 @@ def _continue(data: Dict[str, Any], user_id: str, channel_id: str) -> str:
         return _ask(user_id, channel_id, data, ["product"], "제품명 알려주세요.")
 
     if not data.get("defect_name"):
+        hint = "" if data.get("before_image") else " 제품 사진 1장을 같이 보내도 됩니다."
         return _ask(
             user_id, channel_id, data, ["defect_name"],
-            f"{_item_line(data)} 맞아요. 불량명 알려주세요. (예: 구멍, 열펜, 올풀림)",
+            f"{_item_line(data)} 맞아요. 불량명 알려주세요. (예: 구멍, 열펜, 올풀림){hint}",
         )
 
     # 모든 필수값 확보 → 확인 요청
@@ -223,6 +230,65 @@ def _continue(data: Dict[str, Any], user_id: str, channel_id: str) -> str:
     q = f"{item} / {defect} {qty}건{extra} 저장할까요?"
     data["awaiting_confirm"] = True
     return _ask(user_id, channel_id, data, [], q)
+
+
+async def _apply_defect_photos(
+    data: Dict[str, Any],
+    photos: List[BufferedPhoto],
+    classified: Optional[dict],
+) -> Optional[Dict[str, Any]]:
+    from backend.app.services.repair_bot import apply_labeled_photos
+
+    return await apply_labeled_photos(data, photos, classified)
+
+
+async def absorb_inbox_photos(
+    user_id: str,
+    channel_id: str,
+    user_name: Optional[str] = None,
+    force: bool = False,
+) -> bool:
+    """바코드 번호를 받은 뒤 대기 중인 제품 사진을 같은 불량 초안에 붙인다."""
+    from backend.app.services.repair_bot import photo_flush_pending
+
+    if _inbox_count(user_id, channel_id) < 1 or not pending_barcode(user_id, channel_id):
+        return False
+    if not force and photo_flush_pending(user_id, channel_id):
+        return False
+    cancel_photo_flush(user_id, channel_id)
+    claimed = _claim_inbox_photos(user_id, channel_id, 1)
+    if not claimed or not claimed.get("ready"):
+        return False
+    photos = [p for p in claimed["photos"] if p.data]
+    if not photos:
+        _release_inbox_claim(user_id, channel_id)
+        return False
+    data = _get_pending(user_id, channel_id)
+    data.setdefault("user_name", user_name or claimed.get("user_name"))
+    data["entry_type"] = "defect"
+    applied = await _apply_defect_photos(data, photos, None)
+    if applied is None:
+        _release_inbox_claim(user_id, channel_id)
+        return False
+    applied.pop("_ask_barcode", None)
+    _set_pending(user_id, channel_id, applied, [], "")
+    _commit_inbox_claim(user_id, channel_id, claimed.get("file_ids"))
+    return True
+
+
+async def _after(
+    data: Dict[str, Any],
+    user_id: str,
+    channel_id: str,
+    user_name: Optional[str],
+) -> str:
+    if (data.get("barcode") or "").strip() and _inbox_count(user_id, channel_id) >= 1:
+        _set_pending(user_id, channel_id, data, [], "")
+        if await absorb_inbox_photos(user_id, channel_id, user_name):
+            fresh = _get_pending(user_id, channel_id)
+            if fresh:
+                data = fresh
+    return _continue(data, user_id, channel_id)
 
 
 # ─────────────────────────────────────
@@ -242,6 +308,7 @@ async def handle_user_text(
         return EXPIRED_DEFECT_MSG
 
     data = _get_pending(user_id, channel_id)
+    fresh = not data
     missing = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
     data.setdefault("user_name", user_name)
 
@@ -259,6 +326,13 @@ async def handle_user_text(
             data["qty"] = qty
         if YES_RE.match(raw) or (nlu_intent and getattr(nlu_intent, "action", None) == "confirm"):
             data["qty"] = data.get("qty") or 1
+            if (data.get("barcode") or "").strip() and _inbox_count(user_id, channel_id) >= 1:
+                _set_pending(user_id, channel_id, data, [], "")
+                if await absorb_inbox_photos(user_id, channel_id, user_name, force=True):
+                    fresh = _get_pending(user_id, channel_id)
+                    if fresh:
+                        fresh["qty"] = data.get("qty") or 1
+                        data = fresh
             result = _save(data, user_name or data.get("user_name"))
             _clear_pending(user_id, channel_id)
             return f"✅ {result['message']}"
@@ -266,8 +340,8 @@ async def handle_user_text(
             _clear_pending(user_id, channel_id)
             return "🚫 불량 입력을 취소했어요."
         if qty:
-            return _continue(data, user_id, channel_id)
-        return _continue(data, user_id, channel_id)
+            return await _after(data, user_id, channel_id, user_name)
+        return await _after(data, user_id, channel_id, user_name)
 
     # 바코드 수동 입력 대기
     if "barcode" in missing and raw:
@@ -280,7 +354,7 @@ async def handle_user_text(
             found = _lookup(token)
             if found:
                 data = _attach_master(data, found)
-            return _continue(data, user_id, channel_id)
+            return await _after(data, user_id, channel_id, user_name)
         if BARCODE_RETRY_RE.search(raw) or _is_command(raw):
             return _ask(user_id, channel_id, data, ["barcode"], "바코드 숫자를 직접 입력해 주세요. 예: ON56S152917")
         return _ask(user_id, channel_id, data, ["barcode"], "바코드로 안 보여요. ON56S152917처럼 숫자·영문을 입력해 주세요.")
@@ -291,30 +365,30 @@ async def handle_user_text(
             return _ask(user_id, channel_id, data, ["vendor"], "업체명만 알려주세요. 예: 로지킴")
         with get_connection() as con:
             data["vendor"] = _resolve_vendor(con, raw.strip())
-        return _continue(data, user_id, channel_id)
+        return await _after(data, user_id, channel_id, user_name)
 
     if "vendor" in missing and data.get("vendor"):
-        return _continue(data, user_id, channel_id)
+        return await _after(data, user_id, channel_id, user_name)
 
     # 제품명 대기
     if "product" in missing and not data.get("product") and raw:
         if _is_command(raw):
             return _ask(user_id, channel_id, data, ["product"], "제품명만 알려주세요.")
         data["product"] = raw.strip()
-        return _continue(data, user_id, channel_id)
+        return await _after(data, user_id, channel_id, user_name)
 
     if "product" in missing and data.get("product"):
-        return _continue(data, user_id, channel_id)
+        return await _after(data, user_id, channel_id, user_name)
 
     # 불량명 대기
     if "defect_name" in missing and raw:
         defect = raw.strip()
         resolved = repair_catalog.resolve_defect(defect)
         data["defect_name"] = resolved["불량명"] if resolved else defect
-        return _continue(data, user_id, channel_id)
+        return await _after(data, user_id, channel_id, user_name)
 
     # 새 입력: 텍스트에서 바코드/불량명 파싱 시도
-    if not data:
+    if fresh:
         data = {"entry_type": "defect", "user_name": user_name}
         token = _extract_barcode(raw)
         if token:
@@ -326,13 +400,12 @@ async def handle_user_text(
         if resolved:
             data["defect_name"] = resolved["불량명"]
         if data.get("vendor") or data.get("barcode"):
-            return _continue(data, user_id, channel_id)
-        # 텍스트만으로 판단 불가 → 사진 요청
-        q = f"사진 2장 이상({PHOTO_SET_HINT})을 보내주세요."
+            return await _after(data, user_id, channel_id, user_name)
+        q = DEFECT_BARCODE_HINT
         _set_pending(user_id, channel_id, data, ["photos"], q)
         return q
 
-    return _continue(data, user_id, channel_id)
+    return await _after(data, user_id, channel_id, user_name)
 
 
 # ─────────────────────────────────────
@@ -348,35 +421,20 @@ async def finalize_defect_photo_set(
 ) -> str:
     ensure_defect_tables()
 
-    if classified is None:
-        classified = await _classify_photos_safe(photos)
-        if classified is None:
-            return PHOTO_RETRY_MSG
-
-    classified = _positional_photo_slots(photos, classified)
-    saved_names = [
-        save_image_bytes(p.data, p.ext) if p.data else None for p in photos
-    ]
-
     data = _get_pending(user_id, channel_id)
     data.setdefault("user_name", user_name)
     data["entry_type"] = "defect"
-    _assign_saved_photos(data, classified, saved_names)
+    applied = await _apply_defect_photos(data, photos, classified)
+    if applied is None:
+        return PHOTO_RETRY_MSG
 
-    if classified.get("ambiguous"):
-        data["barcode"] = classified.get("barcode") or data.get("barcode")
+    ask = applied.pop("_ask_barcode", None)
+    if ask == "ambiguous":
         q = "바코드가 여러 장에서 읽혔어요. 맞는 바코드를 적어주세요."
-        _set_pending(user_id, channel_id, data, ["barcode"], q)
+        _set_pending(user_id, channel_id, applied, ["barcode"], q)
         return q
-
-    if classified.get("barcode"):
-        data["barcode"] = classified["barcode"]
-        found = _lookup(data["barcode"])
-        if found:
-            data = _attach_master(data, found)
-    else:
+    if ask == "missing":
         q = "바코드를 못 읽었어요. 바코드 숫자를 직접 입력해 주세요."
-        _set_pending(user_id, channel_id, data, ["barcode"], q)
+        _set_pending(user_id, channel_id, applied, ["barcode"], q)
         return q
-
-    return _continue(data, user_id, channel_id)
+    return _continue(applied, user_id, channel_id)

@@ -438,9 +438,13 @@ def continue_after_photos_or_text(data: Dict[str, Any], user_id: str, channel_id
 
     data = _infer_work(data)
     if not data.get("work_type") and not data.get("defect"):
+        hint = ""
+        has_photo = bool(data.get("before_image") or data.get("after_image") or data.get("extra_images"))
+        if data.get("barcode") and not has_photo:
+            hint = " 제품 사진 1장을 같이 보내도 됩니다."
         return _ask(
             user_id, channel_id, data, ["work_type"],
-            f"{_item_line(data)} 맞아요. 작업이랑 금액 알려주세요.",
+            f"{_item_line(data)} 맞아요. 작업이랑 금액 알려주세요.{hint}",
         )
     if not data.get("work_type"):
         return _ask(
@@ -532,7 +536,14 @@ async def handle_user_text(
     missing = (get_conversation_manager().get_state(user_id, channel_id) or {}).get("missing") or []
     has_repair_draft = bool(data.get("entry_type") == "repair" or data.get("vendor") or data.get("work_type") or data.get("barcode"))
 
-    if nlu and getattr(nlu, "action", None) == "unknown" and not has_repair_draft and not missing and _inbox_count(user_id, channel_id) == 0:
+    if (
+        nlu
+        and getattr(nlu, "action", None) == "unknown"
+        and not has_repair_draft
+        and not missing
+        and _inbox_count(user_id, channel_id) == 0
+        and not extract_barcode_token(raw)
+    ):
         return nlu.clarification or "한 가지만 확인할게요. 수선 작업이나 수량을 알려주세요."
     data.setdefault("user_name", user_name)
 
@@ -590,6 +601,7 @@ async def handle_user_text(
             return _confirm_cost_qty(data, user_id, channel_id)
         if YES_RE.match(raw) or nlu_action == "confirm":
             data["qty"] = data.get("qty") or 1
+            data = await _take_inbox_photos(data, user_id, channel_id, user_name, force=True)
             saved = _save_repair_entry(
                 data, user_name or data.get("user_name"), bool(data.get("price_stated")),
                 user_id, channel_id,
@@ -597,6 +609,7 @@ async def handle_user_text(
             _clear_pending(user_id, channel_id)
             return f"✅ {saved['message']}"
         if data.get("qty") and data.get("unit_price"):
+            data = await _take_inbox_photos(data, user_id, channel_id, user_name, force=True)
             saved = _save_repair_entry(
                 data, user_name or data.get("user_name"), bool(data.get("price_stated")),
                 user_id, channel_id,
@@ -622,7 +635,7 @@ async def handle_user_text(
             found = _lookup(token)
             if found:
                 data = _attach_master(data, found)
-            return continue_after_photos_or_text(data, user_id, channel_id)
+            return await _with_waiting_photos(data, user_id, channel_id, user_name)
         if vendor_mention or BARCODE_RETRY_RE.search(raw) or is_conversational_command(raw):
             q = "바코드 숫자를 직접 입력해 주세요. 예: ON56S152917"
             if data.get("vendor"):
@@ -638,38 +651,40 @@ async def handle_user_text(
 
     if "vendor" in missing and not data.get("vendor") and raw:
         if remark_only and not vendor_mention:
-            return continue_after_photos_or_text(data, user_id, channel_id)
+            return await _with_waiting_photos(data, user_id, channel_id, user_name)
         if is_conversational_command(raw) and not vendor_mention:
             return _ask(user_id, channel_id, data, ["vendor"], "업체명만 알려주세요. 예: 로지킴")
         vendor_text = vendor_mention or raw.strip()
         with get_connection() as con:
             data["vendor"] = _resolve_vendor(con, vendor_text)
-        return continue_after_photos_or_text(data, user_id, channel_id)
+        return await _with_waiting_photos(data, user_id, channel_id, user_name)
 
     if "vendor" in missing and data.get("vendor"):
-        return continue_after_photos_or_text(data, user_id, channel_id)
+        return await _with_waiting_photos(data, user_id, channel_id, user_name)
 
     if "product" in missing and not data.get("product") and raw:
         if remark_only:
-            return continue_after_photos_or_text(data, user_id, channel_id)
+            return await _with_waiting_photos(data, user_id, channel_id, user_name)
         if is_conversational_command(raw):
             return _ask(user_id, channel_id, data, ["product"], "제품명만 알려주세요.")
         data["product"] = parsed.get("product") or raw.strip()
-        return continue_after_photos_or_text(data, user_id, channel_id)
+        return await _with_waiting_photos(data, user_id, channel_id, user_name)
 
     if "product" in missing and data.get("product"):
-        return continue_after_photos_or_text(data, user_id, channel_id)
+        return await _with_waiting_photos(data, user_id, channel_id, user_name)
 
     if "unit_price" in missing and parsed.get("price") is not None:
         data["unit_price"] = parsed["price"]
         data["price_stated"] = True
-        return continue_after_photos_or_text(data, user_id, channel_id)
+        return await _with_waiting_photos(data, user_id, channel_id, user_name)
 
+    barcode_only = is_manual_barcode(re.sub(r"[\s\-]", "", raw))
     if "work_type" in missing or not data.get("work_type"):
         if parsed.get("work"):
             data["work_type"] = parsed["work"]
         elif (
             raw
+            and not barcode_only
             and not remark_only
             and not parsed.get("price")
             and not parsed.get("qty")
@@ -712,7 +727,7 @@ async def handle_user_text(
             _set_pending(user_id, channel_id, data, ["photos"], q)
             return q
 
-    return continue_after_photos_or_text(data, user_id, channel_id)
+    return await _with_waiting_photos(data, user_id, channel_id, user_name)
 
 
 INBOX_STALE_SEC = 6 * 3600
@@ -878,6 +893,35 @@ def clear_photo_inbox(user_id: str, channel_id: Optional[str] = None) -> None:
     task = _flush_tasks.pop(_task_key(uid, cid), None)
     if task and not task.done():
         task.cancel()
+
+
+def cancel_photo_flush(user_id: str, channel_id: Optional[str] = None) -> None:
+    """대기 중인 사진 묶음 처리를 멈춘다. 이미 받은 파일은 남겨 둔다."""
+    uid, cid = _room_key(user_id, channel_id)
+    task = _flush_tasks.pop(_task_key(uid, cid), None)
+    if task and not task.done():
+        task.cancel()
+
+
+def photo_flush_pending(user_id: str, channel_id: Optional[str] = None) -> bool:
+    task = _flush_tasks.get(_task_key(user_id, channel_id))
+    return bool(task and not task.done())
+
+
+def photo_set_need(user_id: str, channel_id: Optional[str] = None) -> int:
+    """바코드 번호가 있으면 제품 사진 1장. 없으면 바코드 사진+제품 사진 2장."""
+    from backend.app.services.bot_mode import MODE_DEFECT, MODE_REPAIR, get_mode
+
+    mode = get_mode(user_id, channel_id)
+    if mode == MODE_DEFECT:
+        from backend.app.services.defect_bot import pending_barcode
+
+        if pending_barcode(user_id, channel_id):
+            return 1
+        return PHOTO_MIN_SIZE
+    if mode == MODE_REPAIR and (_get_pending(user_id, channel_id).get("barcode") or "").strip():
+        return 1
+    return PHOTO_MIN_SIZE
 
 
 def _try_append_inbox_photo(
@@ -1265,6 +1309,7 @@ async def receive_photo(
     logger.info("repair photo buffered user=%s channel=%s count=%s status=%s", user_id, channel_id, count, status)
     if status == "duplicate":
         return
+    # 두 장이 연달아 오면 기존처럼 한 묶음으로 둔다. 번호가 이미 있으면 마감 장수만 1장이다.
     wait = 1.0 if count >= PHOTO_MIN_SIZE else PHOTO_WAIT_SEC
     key = _task_key(user_id, channel_id)
     existing = _flush_tasks.get(key)
@@ -1313,7 +1358,8 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
         await _flush_later(uid, cid, remain, send_fn, depth + 1)
         return
 
-    if n < PHOTO_MIN_SIZE:
+    need = photo_set_need(uid, cid)
+    if n < need:
         extra = int(meta[2] or 0)
         if extra < PHOTO_MAX_EXTRA_ROUNDS:
             _bump_inbox_wait(uid, cid)
@@ -1322,14 +1368,18 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
         notified = int(meta[3] or 0)
         if send_fn and notified != n:
             _mark_inbox_notified(uid, cid, n)
-            await send_fn(
-                meta[0],
-                f"사진 {n}장 받았어요. {PHOTO_SET_HINT} 포함해서 한 장 더 보내주세요.",
-                meta[1],
-            )
+            from backend.app.services.bot_mode import MODE_DEFECT, get_mode
+
+            if get_mode(uid, cid) == MODE_DEFECT:
+                from backend.app.services.defect_bot import DEFECT_ONE_PHOTO_MSG
+
+                body = DEFECT_ONE_PHOTO_MSG
+            else:
+                body = f"사진 {n}장 받았어요. {PHOTO_SET_HINT} 포함해서 한 장 더 보내주세요."
+            await send_fn(meta[0], body, meta[1])
         return
 
-    claimed = _claim_inbox_photos(uid, cid, PHOTO_MIN_SIZE)
+    claimed = _claim_inbox_photos(uid, cid, need)
     if not claimed or not claimed.get("ready"):
         if claimed and claimed.get("read_error"):
             if send_fn:
@@ -1339,7 +1389,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
                     claimed["channel_type"],
                 )
             return
-        if claimed and claimed.get("count", 0) < PHOTO_MIN_SIZE:
+        if claimed and claimed.get("count", 0) < need:
             await _flush_later(uid, cid, PHOTO_EXTRA_WAIT_SEC, send_fn, depth + 1)
         return
 
@@ -1352,7 +1402,7 @@ async def _flush_inbox(user_id: str, channel_id: str, send_fn, depth: int = 0) -
         return
 
     photos = [p for p in claimed["photos"] if p.data]
-    if len(photos) < PHOTO_MIN_SIZE:
+    if len(photos) < need:
         _release_inbox_claim(uid, cid)
         if send_fn:
             await send_fn(claimed["channel_id"], PHOTO_RETRY_MSG, claimed["channel_type"])
@@ -1454,6 +1504,125 @@ async def _classify_photos_safe(photos: List[BufferedPhoto]) -> Optional[dict]:
         return None
 
 
+async def apply_labeled_photos(
+    data: Dict[str, Any],
+    photos: List[BufferedPhoto],
+    classified: Optional[dict],
+) -> Optional[Dict[str, Any]]:
+    """번호가 있으면 제품 사진 1장을 유지한다. 바코드 사진+제품 사진은 기존 분류를 쓴다."""
+    typed = (data.get("barcode") or "").strip()
+    if typed and len(photos) == 1:
+        classified = {
+            "barcode": None,
+            "barcode_index": None,
+            "ambiguous": False,
+            "order_fallback": True,
+        }
+    else:
+        if classified is None:
+            classified = await _classify_photos_safe(photos)
+            if classified is None:
+                return None
+        classified = _positional_photo_slots(photos, classified)
+
+    saved_names: List[Optional[str]] = [
+        save_image_bytes(p.data, p.ext) if p.data else None for p in photos
+    ]
+    _assign_saved_photos(data, classified, saved_names)
+    if typed and len(photos) == 1:
+        data["barcode"] = typed
+        return data
+    if classified.get("ambiguous") and not typed:
+        data["barcode"] = classified.get("barcode") or data.get("barcode")
+        data["_ask_barcode"] = "ambiguous"
+        return data
+    if classified.get("barcode") and not classified.get("ambiguous"):
+        data["barcode"] = classified["barcode"]
+        found = _lookup(data["barcode"])
+        if found:
+            data = _attach_master(data, found)
+        return data
+    if typed:
+        data["barcode"] = typed
+        return data
+    data["_ask_barcode"] = "missing"
+    return data
+
+
+def _reply_for_photo_barcode(data: Dict[str, Any], user_id: str, channel_id: str) -> str:
+    ask = data.pop("_ask_barcode", None)
+    if ask == "ambiguous":
+        q = "바코드가 여러 장에서 읽혔어요. 맞는 바코드를 적어주세요."
+        _set_pending(user_id, channel_id, data, ["barcode"], q)
+        return q
+    if ask == "missing":
+        q = "바코드를 못 읽었어요. 바코드 숫자를 직접 입력해 주세요."
+        _set_pending(user_id, channel_id, data, ["barcode"], q)
+        return q
+    return ""
+
+
+async def absorb_repair_photos(
+    user_id: str,
+    channel_id: str,
+    user_name: Optional[str] = None,
+    force: bool = False,
+) -> bool:
+    """대기 중인 사진을 현재 수선 초안에 붙인다. 묶음 대기 중이면 그대로 둔다."""
+    if _inbox_count(user_id, channel_id) < 1:
+        return False
+    if not (_get_pending(user_id, channel_id).get("barcode") or "").strip():
+        return False
+    if not force and photo_flush_pending(user_id, channel_id):
+        return False
+    cancel_photo_flush(user_id, channel_id)
+    claimed = _claim_inbox_photos(user_id, channel_id, 1)
+    if not claimed or not claimed.get("ready"):
+        return False
+    photos = [p for p in claimed["photos"] if p.data]
+    if not photos:
+        _release_inbox_claim(user_id, channel_id)
+        return False
+    data = _get_pending(user_id, channel_id)
+    data.setdefault("user_name", user_name or claimed.get("user_name"))
+    data["entry_type"] = "repair"
+    applied = await apply_labeled_photos(data, photos, None)
+    if applied is None:
+        _release_inbox_claim(user_id, channel_id)
+        return False
+    applied.pop("_ask_barcode", None)
+    _set_pending(user_id, channel_id, applied, [], "")
+    _commit_inbox_claim(user_id, channel_id, claimed.get("file_ids"))
+    return True
+
+
+async def _take_inbox_photos(
+    data: Dict[str, Any],
+    user_id: str,
+    channel_id: str,
+    user_name: Optional[str],
+    force: bool = False,
+) -> Dict[str, Any]:
+    if not (data.get("barcode") or "").strip() or _inbox_count(user_id, channel_id) < 1:
+        return data
+    _set_pending(user_id, channel_id, data, [], "")
+    if await absorb_repair_photos(user_id, channel_id, user_name, force=force):
+        fresh = _get_pending(user_id, channel_id)
+        if fresh:
+            return fresh
+    return data
+
+
+async def _with_waiting_photos(
+    data: Dict[str, Any],
+    user_id: str,
+    channel_id: str,
+    user_name: Optional[str],
+) -> str:
+    data = await _take_inbox_photos(data, user_id, channel_id, user_name, force=False)
+    return continue_after_photos_or_text(data, user_id, channel_id)
+
+
 async def finalize_photo_set(
     user_id: str,
     channel_id: str,
@@ -1462,37 +1631,16 @@ async def finalize_photo_set(
     classified: Optional[dict] = None,
 ) -> str:
     ensure_repair_tables()
-    if classified is None:
-        classified = await _classify_photos_safe(photos)
-        if classified is None:
-            return PHOTO_RETRY_MSG
-    classified = _positional_photo_slots(photos, classified)
-    saved_names: List[Optional[str]] = [
-        save_image_bytes(p.data, p.ext) if p.data else None for p in photos
-    ]
-
     data = _get_pending(user_id, channel_id)
     data.setdefault("user_name", user_name)
     data["entry_type"] = "repair"
-    _assign_saved_photos(data, classified, saved_names)
-
-    if classified.get("ambiguous"):
-        data["barcode"] = classified.get("barcode") or data.get("barcode")
-        q = "바코드가 여러 장에서 읽혔어요. 맞는 바코드를 적어주세요."
-        _set_pending(user_id, channel_id, data, ["barcode"], q)
-        return q
-
-    if classified.get("barcode"):
-        data["barcode"] = classified["barcode"]
-        found = _lookup(data["barcode"])
-        if found:
-            data = _attach_master(data, found)
-    else:
-        q = "바코드를 못 읽었어요. 바코드 숫자를 직접 입력해 주세요."
-        _set_pending(user_id, channel_id, data, ["barcode"], q)
-        return q
-
-    return continue_after_photos_or_text(data, user_id, channel_id)
+    applied = await apply_labeled_photos(data, photos, classified)
+    if applied is None:
+        return PHOTO_RETRY_MSG
+    asked = _reply_for_photo_barcode(applied, user_id, channel_id)
+    if asked:
+        return asked
+    return continue_after_photos_or_text(applied, user_id, channel_id)
 
 
 def save_repair_from_tool(args: Dict[str, Any], user_id: str, user_name: str) -> Dict[str, Any]:
