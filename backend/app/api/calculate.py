@@ -86,208 +86,32 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
     if not is_admin:
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
     
-    items: List[Dict[str, Any]] = []
-    warnings: List[str] = []
-    
     d_from = req.date_from.isoformat()
     d_to = req.date_to.isoformat()
-    
+
     try:
-        # 1. 기본 출고비
-        if req.include_basic_shipping:
-            df_items = pd.DataFrame(columns=["항목", "수량", "단가", "금액"])
-            try:
-                df_items = add_basic_shipping(df_items, req.vendor, d_from, d_to)
-                for _, row in df_items.iterrows():
-                    if row["수량"] > 0:
-                        items.append({
-                            "항목": row["항목"],
-                            "수량": row["수량"],
-                            "단가": row["단가"],
-                            "금액": row["금액"],
-                            "비고": ""
-                        })
-            except Exception as e:
-                warnings.append(f"기본 출고비 계산 오류: {str(e)}")
-        
-        # 2. 택배요금 (구간별) - 반드시 먼저 계산해야 zone_counts 확보
-        zone_counts: Dict[str, int] = {}
-        if req.include_courier_fee:
-            try:
-                zone_counts = calculate_courier_fee_by_zone(
-                    req.vendor, d_from, d_to, items
-                )
-                # 택배비 항목이 추가되었는지 확인
-                courier_items_count = sum(1 for item in items if "택배요금" in item.get("항목", ""))
-                if courier_items_count == 0 and zone_counts:
-                    # zone_counts는 있지만 items에 추가되지 않은 경우
-                    warnings.append(f"택배요금 계산: 구간별 수량은 있으나 항목 추가 실패 (구간: {list(zone_counts.keys())})")
-                elif not zone_counts:
-                    warnings.append("택배요금 계산: 해당 기간에 배송 데이터가 없거나 shipping_zone 테이블에 요금제 데이터가 없습니다.")
-            except Exception as e:
-                warnings.append(f"택배요금 계산 오류: {str(e)}")
-        
-        # 3. 합포장 (택배요금 바로 다음)
-        if req.include_combined_fee:
-            try:
-                # 배송통계 조회
-                df_ship = shipping_stats(req.vendor, d_from, d_to)
-                if not df_ship.empty:
-                    success, error_msg = add_combined_pack_fee(df_ship, items)
-                    if not success and error_msg:
-                        warnings.append(f"합포장 계산 오류: {error_msg}")
-            except Exception as e:
-                warnings.append(f"합포장 계산 오류: {str(e)}")
-        
-        # 4. 도서산간 (택배요금 바로 다음)
-        if req.include_remote_fee:
-            try:
-                success, error_msg, info_msg = add_remote_area_fee(req.vendor, d_from, d_to, items)
-                if not success and error_msg:
-                    warnings.append(f"도서산간 계산 오류: {error_msg}")
-            except Exception as e:
-                warnings.append(f"도서산간 계산 오류: {str(e)}")
-        
-        # 5. 박스/봉투 (택배요금 다음에 바로 추가)
-        if zone_counts:
-            box_warnings = add_box_fee_by_zone(items, req.vendor, zone_counts)
-            if box_warnings:
-                warnings.extend(box_warnings)
-        
-        # 6. 플래그 기반 요금 (바코드, 완충작업 등)
-        add_barcode_fee(items, req.vendor)
-        add_void_fee(items, req.vendor)
-        add_ppbag_fee(items, req.vendor)
-        add_video_out_fee(items, req.vendor)
-        
-        # 7. 반품 관련
-        add_return_pickup_fee(items, req.vendor, d_from, d_to)
-        add_return_courier_fee(items, req.vendor, d_from, d_to)
-        add_video_ret_fee(items, req.vendor, d_from, d_to)
-        
-        # 8. 입고검수
-        if req.include_inbound_fee:
-            inbound = calculate_inbound_inspection_fee(req.vendor, d_from, d_to)
-            if inbound:
-                items.append(inbound)
-        
-        # 9. 작업일지 (플래그/반품 요금 뒤에 추가)
-        if req.include_worklog:
-            items_before = len(items)
-            try:
-                add_worklog_items(items, req.vendor, d_from, d_to, source=req.worklog_source)
-                items_added = len(items) - items_before
-                if items_added == 0:
-                    # 디버깅: 왜 0건인지 확인
-                    with get_connection() as con:
-                        wl_total = con.execute("SELECT COUNT(*) FROM work_log").fetchone()[0]
-                        wl_vendor = con.execute(
-                            "SELECT COUNT(*) FROM work_log WHERE [업체명]=?", (req.vendor,)
-                        ).fetchone()[0]
-                        wl_cols = [c[1] for c in con.execute("PRAGMA table_info(work_log)")]
-                        has_source = '출처' in wl_cols
-                        src_info = ""
-                        if has_source:
-                            src_rows = con.execute("SELECT [출처], COUNT(*) FROM work_log WHERE [업체명]=? GROUP BY [출처]", (req.vendor,)).fetchall()
-                            src_info = f", 출처분포={dict(src_rows)}"
-                        # aliases 확인
-                        alias_rows = con.execute(
-                            "SELECT alias FROM aliases WHERE vendor=? AND file_type IN ('work_log','all')",
-                            (req.vendor,)
-                        ).fetchall()
-                        alias_list = [r[0] for r in alias_rows]
-                        # work_log에서 해당 업체 날짜 범위
-                        date_range = con.execute(
-                            "SELECT MIN([날짜]), MAX([날짜]) FROM work_log WHERE [업체명]=?", (req.vendor,)
-                        ).fetchone()
-                        warnings.append(
-                            f"작업일지 0건 반영 - vendor='{req.vendor}', source='{req.worklog_source}', "
-                            f"work_log전체={wl_total}건, vendor매칭={wl_vendor}건, "
-                            f"aliases={alias_list}, 날짜범위={date_range}{src_info}, "
-                            f"요청기간={d_from}~{d_to}"
-                        )
-            except Exception as e:
-                warnings.append(f"작업일지 계산 오류: {str(e)}")
-        
-        # 10. 거래처별 보관료 (활성 상태인 항목은 매월 자동 청구)
-        # 보관료가 한 번 추가되면 이후 모든 월에 계속 반영됨 (수정하기 전까지 고정)
-        # period 컬럼이 있더라도 기간 조건 없이 is_active=1인 모든 항목을 가져옴
-        try:
-            add_storage_fee(items, req.vendor)
-        except Exception as e:
-            warnings.append(f"보관료 조회 오류: {str(e)}")
-        
-        # 11. 거래처별 추가 비용 (기타)
-        try:
-            with get_connection() as con:
-                # vendor_charges 테이블이 있는지 확인
-                table_exists = con.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_charges'"
-                ).fetchone()
-                
-                if table_exists:
-                    charges = con.execute(
-                        """
-                        SELECT item_name, qty, unit_price, amount, remark, charge_type
-                        FROM vendor_charges
-                        WHERE vendor_id = ? AND is_active = 1
-                        """,
-                        (req.vendor,)
-                    ).fetchall()
-                    
-                    for charge in charges:
-                        items.append({
-                            "항목": charge[0],
-                            "수량": charge[1],
-                            "단가": charge[2],
-                            "금액": charge[3],
-                            "비고": charge[4] or ""  # 비고 값만 사용
-                        })
-        except Exception as e:
-            warnings.append(f"추가 비용 조회 오류: {str(e)}")
-        
-        # 총 금액 계산
-        total_amount = sum(it.get("금액", 0) for it in items)
-        
-        # InvoiceItem 모델로 변환
+        from backend.app.services.invoice_draft import compute_invoice_draft, insert_unconfirmed_invoice
+
+        draft = compute_invoice_draft(req)
         invoice_items = [
             InvoiceItem(
                 항목=it["항목"],
-                수량=int(float(it["수량"])),
-                단가=int(float(it["단가"])),
-                금액=int(float(it["금액"])),
-                비고=it.get("비고", "")
+                수량=it["수량"],
+                단가=it["단가"],
+                금액=it["금액"],
+                비고=it.get("비고", ""),
             )
-            for it in items
+            for it in draft["items"]
         ]
-        
-        # DB에 인보이스 저장. 실적이 없어 합계가 0원이어도 헤더는 남긴다.
+        total_amount = draft["total_amount"]
+        warnings = draft["warnings"]
+
         with get_connection() as con:
-            vendor_row = con.execute(
-                "SELECT vendor_id FROM vendors WHERE vendor = ? OR name = ?",
-                (req.vendor, req.vendor)
-            ).fetchone()
-            vendor_id = vendor_row[0] if vendor_row else req.vendor
-
-            cur = con.execute(
-                """INSERT INTO invoices 
-                   (vendor_id, period_from, period_to, total_amount, status, created_at)
-                   VALUES (?, ?, ?, ?, '미확정', datetime('now'))""",
-                (vendor_id, d_from, d_to, int(total_amount))
+            invoice_id = insert_unconfirmed_invoice(
+                con, req.vendor, d_from, d_to, draft["items"], total_amount
             )
-            invoice_id = cur.lastrowid
-
-            for item in invoice_items:
-                con.execute(
-                    """INSERT INTO invoice_items 
-                       (invoice_id, item_name, qty, unit_price, amount, remark)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (invoice_id, item.항목, item.수량, item.단가, item.금액, item.비고)
-                )
-
             con.commit()
-        
-        # 로그 기록
+
         add_log(
             action_type="인보이스 생성",
             target_type="invoice",
@@ -296,7 +120,7 @@ async def calculate_invoice(req: InvoiceCalculateRequest, token: Optional[str] =
             user_nickname=nickname,
             details=f"기간: {d_from} ~ {d_to}, 항목수: {len(invoice_items)}, 총액: {int(total_amount):,}원"
         )
-        
+
         return InvoiceCalculateResponse(
             success=True,
             vendor=req.vendor,
