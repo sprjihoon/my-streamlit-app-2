@@ -6,13 +6,21 @@ import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import { Alert } from '@/components/Alert';
 import { KpiStrip } from '@/components/data';
-import { calculateInvoice, getVendors, Vendor } from '@/lib/api';
+import { calculateInvoice, getUnmatchedAliases, getVendors, Vendor } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+const FILE_TYPE_NAMES: Record<string, string> = {
+  inbound_slip: '입고전표',
+  shipping_stats: '배송통계',
+  kpost_in: '우체국접수',
+  kpost_ret: '우체국반품',
+  work_log: '작업일지',
+};
 
 interface InvoiceItem {
   항목: string;
@@ -157,6 +165,29 @@ export default function InvoicePage() {
     }
   }
 
+  // 미매칭 별칭이 있으면 계산 전에 진행 여부를 확인한다.
+  async function confirmIfUnmatched(): Promise<boolean> {
+    try {
+      const unmatched = await getUnmatchedAliases();
+      const remaining = unmatched.filter((item) => item.count > 0);
+      const total = remaining.reduce((sum, item) => sum + item.count, 0);
+      if (total <= 0) return true;
+
+      const lines = remaining.map((item) => {
+        const label = FILE_TYPE_NAMES[item.file_type] || item.file_type;
+        const sample = item.aliases.slice(0, 5).join(', ');
+        const extra = item.aliases.length > 5 ? ` 외 ${item.aliases.length - 5}건` : '';
+        return `· ${label} ${item.count}건: ${sample}${extra}`;
+      });
+      return window.confirm(
+        `매핑값이 남아있습니다. 계속진행하시겠습니까?\n\n미매칭 ${total}건\n${lines.join('\n')}`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '미매칭 매핑을 확인하지 못했습니다.');
+      return false;
+    }
+  }
+
   // 단일 인보이스 계산 (관리자만)
   async function handleSingleCalculate() {
     if (!isAdmin) {
@@ -168,6 +199,8 @@ export default function InvoicePage() {
       setError('공급처명을 입력하세요.');
       return;
     }
+
+    if (!(await confirmIfUnmatched())) return;
 
     setLoading(true);
     setError(null);
@@ -220,6 +253,8 @@ export default function InvoicePage() {
       setError('선택된 거래처가 없습니다.');
       return;
     }
+
+    if (!(await confirmIfUnmatched())) return;
 
     setIsBatchRunning(true);
     setStopRequested(false);
