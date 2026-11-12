@@ -15,7 +15,7 @@ test('leave without approvers records the selected date immediately', async ({ p
   const calls = await installApi(page, STAFF);
   await page.goto('/leave');
   await page.getByRole('button', { name: '연차 신청' }).click();
-  await expect(page.getByText('결재자 없음. 신청하면 선택한 날짜가 바로 반영됩니다.')).toBeVisible();
+  await expect(page.getByText('결재자가 있어도 신청하면 날짜는 바로 확정됩니다.')).toBeVisible();
   await page.locator('input[type="date"]').nth(0).fill('2026-10-21');
   await page.locator('input[type="date"]').nth(1).fill('2026-10-21');
   await page.getByRole('button', { name: '바로 반영' }).click();

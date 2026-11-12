@@ -655,10 +655,13 @@ export default function LeavePage() {
                     )}
                   </div>
 
+                  <p style={{ fontSize: '0.82rem', color: '#198754', marginBottom: '0.5rem' }}>
+                    결재자가 있어도 신청하면 날짜는 바로 확정됩니다.
+                  </p>
                   {/* 결재자 목록 */}
                   {formApprovers.length === 0 ? (
-                    <p style={{ fontSize: '0.82rem', color: '#198754', marginBottom: '0.5rem' }}>
-                      결재자 없음. 신청하면 선택한 날짜가 바로 반영됩니다.
+                    <p style={{ fontSize: '0.82rem', color: '#6c757d', marginBottom: '0.5rem' }}>
+                      결재자 없음
                     </p>
                   ) : (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
@@ -710,7 +713,7 @@ export default function LeavePage() {
 
                 <div className="tw-flex tw-gap-2">
                   <Button type="submit" disabled={submitting || !canSubmit}>
-                    {submitting ? '신청 중...' : formApprovers.length === 0 ? '바로 반영' : '신청'}
+                    {submitting ? '신청 중...' : '바로 반영'}
                   </Button>
                   <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>닫기</Button>
                 </div>

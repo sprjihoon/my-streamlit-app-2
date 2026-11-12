@@ -624,9 +624,10 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         if hours <= 0:
             raise HTTPException(status_code=400, detail="신청 기간에 근무일이 없습니다. (주말/공휴일 확인)")
 
-        # 결재자가 없으면 승인 절차 없이 해당 날짜를 바로 사용 연차로 넣는다.
+        # 결재자가 있어도 신청 즉시 확정한다. 결재 단계는 대기로 남기지 않는다.
         chain = resolve_request_approvers(user_id, data.custom_approvers, con)
-        status = "approved" if not chain else "pending"
+        status = "approved"
+        now = datetime.now().isoformat()
 
         cur = con.execute(
             """INSERT INTO leave_requests (user_id, leave_type, start_date, end_date, hours_requested, reason, status)
@@ -637,21 +638,13 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
 
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
-                """INSERT INTO leave_approvals (request_id, approver_id, step, status)
-                   VALUES (?, ?, ?, 'waiting')""",
-                (request_id, approver_id, step)
+                """INSERT INTO leave_approvals
+                   (request_id, approver_id, step, status, comment, acted_at)
+                   VALUES (?, ?, ?, 'skipped', ?, ?)""",
+                (request_id, approver_id, step, "신청 즉시 확정", now)
             )
 
         con.commit()
-
-        # 결재자 정보 조회 (DM 발송용) — 전체 결재자에게 알림
-        approver_nw_ids = []
-        for approver_id in chain:
-            approver_row = con.execute(
-                "SELECT nickname, naver_works_id FROM users WHERE user_id = ?", (approver_id,)
-            ).fetchone()
-            if approver_row:
-                approver_nw_ids.append((approver_row[0], approver_row[1]))
 
     # 로그
     add_log(
@@ -662,42 +655,19 @@ async def create_leave_request(data: LeaveRequestCreate, token: str):
         user_nickname=nickname,
         details=(
             f"{data.leave_type} {data.start_date}~{data.end_date} "
-            f"({round(hours/HOURS_PER_DAY,1)}일/{hours}시간)"
-            + (" / 결재자없음 즉시반영" if not chain else "")
+            f"({round(hours/HOURS_PER_DAY,1)}일/{hours}시간) / 즉시확정"
         )
     )
 
-    # 네이버웍스 알림
     days_str = round(hours / HOURS_PER_DAY, 1)
-    for approver_name, approver_nw_id in approver_nw_ids:
-        msg = (
-            f"📋 연차 결재 요청\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"👤 신청자: {nickname}\n"
-            f"📅 기간: {data.start_date} ~ {data.end_date}\n"
-            f"🏷️ 종류: {data.leave_type}\n"
-            f"⏱️ 시간: {hours}시간 ({days_str}일)\n"
-            f"💬 사유: {data.reason or '없음'}\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"승인: '승인 #{request_id}'\n"
-            f"반려: '반려 #{request_id} 사유입력'"
-        )
-        import asyncio
-        asyncio.create_task(send_nw_dm(approver_nw_id, msg))
-
-    if not chain:
-        message = f"결재 없이 바로 반영되었습니다. ({days_str}일 / {hours}시간)"
-    else:
-        message = f"연차 신청이 완료되었습니다. ({len(chain)}단계 결재 진행 중)"
-
     return {
         "success": True,
         "request_id": request_id,
         "hours_requested": hours,
         "days_requested": days_str,
         "status": status,
-        "auto_approved": not chain,
-        "message": message,
+        "auto_approved": True,
+        "message": f"신청이 확정되었습니다. ({days_str}일 / {hours}시간)",
     }
 
 
@@ -1639,7 +1609,8 @@ def bot_apply_leave(naver_works_id: str, leave_type: str, start_date: str, end_d
             return {"error": "신청 기간에 근무일이 없습니다. (주말/공휴일 확인)"}
 
         chain = get_approval_chain(user_id, con)
-        status = "approved" if not chain else "pending"
+        status = "approved"
+        now = datetime.now().isoformat()
         cur = con.execute(
             """INSERT INTO leave_requests (user_id, leave_type, start_date, end_date, hours_requested, reason, status)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -1649,42 +1620,14 @@ def bot_apply_leave(naver_works_id: str, leave_type: str, start_date: str, end_d
 
         for step, approver_id in enumerate(chain, start=1):
             con.execute(
-                """INSERT INTO leave_approvals (request_id, approver_id, step, status)
-                   VALUES (?, ?, ?, 'waiting')""",
-                (request_id, approver_id, step)
+                """INSERT INTO leave_approvals
+                   (request_id, approver_id, step, status, comment, acted_at)
+                   VALUES (?, ?, ?, 'skipped', ?, ?)""",
+                (request_id, approver_id, step, "신청 즉시 확정", now)
             )
         con.commit()
 
-        # 결재자 DM 발송 — 전체 결재자에게
-        for approver_id in chain:
-            approver = con.execute(
-                "SELECT nickname, naver_works_id FROM users WHERE user_id=?", (approver_id,)
-            ).fetchone()
-            if approver and approver[1]:
-                days_str = round(hours / HOURS_PER_DAY, 1)
-                msg = (
-                    f"📋 연차 결재 요청\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"👤 신청자: {nickname}\n"
-                    f"📅 기간: {start_date} ~ {end_date}\n"
-                    f"🏷️ 종류: {leave_type}\n"
-                    f"⏱️ {hours}시간 ({days_str}일)\n"
-                    f"💬 사유: {reason or '없음'}\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"승인: '승인 #{request_id}'\n"
-                    f"반려: '반려 #{request_id} 사유입력'"
-                )
-                import asyncio
-                try:
-                    asyncio.get_running_loop().create_task(send_nw_dm(approver[1], msg))
-                except RuntimeError:
-                    pass
-
     days_str = round(hours / HOURS_PER_DAY, 1)
-    if not chain:
-        message = f"#{request_id} 연차가 승인 없이 바로 반영되었습니다 ({days_str}일/{hours}시간)"
-    else:
-        message = f"#{request_id} 연차 신청 완료 ({days_str}일/{hours}시간, {len(chain)}단계 결재)"
     return {
         "success": True,
         "request_id": request_id,
@@ -1692,8 +1635,8 @@ def bot_apply_leave(naver_works_id: str, leave_type: str, start_date: str, end_d
         "days_requested": days_str,
         "approvers": len(chain),
         "status": status,
-        "auto_approved": not chain,
-        "message": message,
+        "auto_approved": True,
+        "message": f"#{request_id} 연차가 확정되었습니다 ({days_str}일/{hours}시간)",
     }
 
 

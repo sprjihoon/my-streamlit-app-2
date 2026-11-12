@@ -98,19 +98,25 @@ def test_no_approver_records_the_date_immediately(isolated_runtime):
     assert summary["pending_hours"] == 0
 
 
-def test_approver_keeps_the_request_pending(isolated_runtime):
+def test_approver_still_confirms_the_date(isolated_runtime):
     ids = _seed(isolated_runtime["db"])
     result = bot_apply_leave("nw-staff", "연차", "2026-10-22", "2026-10-22")
 
-    assert result["auto_approved"] is False
-    assert result["status"] == "pending"
+    assert result["auto_approved"] is True
+    assert result["status"] == "approved"
     status, approvals = _status(isolated_runtime["db"], result["request_id"])
-    assert status == "pending"
+    assert status == "approved"
     assert approvals == 1
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        approval_status = con.execute(
+            "SELECT status FROM leave_approvals WHERE request_id=?",
+            (result["request_id"],),
+        ).fetchone()[0]
+    assert approval_status == "skipped"
 
     summary = get_leave_summary_data(ids["staff_id"])
-    assert summary["used_hours"] == 0
-    assert summary["pending_hours"] == 7
+    assert summary["used_hours"] == 7
+    assert summary["pending_hours"] == 0
 
 
 def test_clearing_approvers_records_the_date_immediately(isolated_runtime, monkeypatch):
@@ -138,7 +144,7 @@ def test_clearing_approvers_records_the_date_immediately(isolated_runtime, monke
     assert status == "approved"
     assert approvals == 0
 
-    pending = asyncio.run(
+    confirmed = asyncio.run(
         create_leave_request(
             LeaveRequestCreate(
                 leave_type="반차(오전)",
@@ -148,14 +154,14 @@ def test_clearing_approvers_records_the_date_immediately(isolated_runtime, monke
             "tok-staff",
         )
     )
-    assert pending["auto_approved"] is False
-    status, approvals = _status(isolated_runtime["db"], pending["request_id"])
-    assert status == "pending"
+    assert confirmed["auto_approved"] is True
+    status, approvals = _status(isolated_runtime["db"], confirmed["request_id"])
+    assert status == "approved"
     assert approvals == 1
 
     summary = get_leave_summary_data(ids["staff_id"])
-    assert summary["used_hours"] == 7
-    assert summary["pending_hours"] == 3.5
+    assert summary["used_hours"] == 10.5
+    assert summary["pending_hours"] == 0
 
 
 def test_existing_pending_request_stays_pending_until_admin_confirms(isolated_runtime):
