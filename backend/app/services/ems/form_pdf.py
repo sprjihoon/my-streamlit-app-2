@@ -320,7 +320,7 @@ def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap, layo
             price = _money(float(item.get("unit_price_usd") or 0) * int(item.get("quantity") or 1))
         _at(page, (29.4, baseline), item.get("name_en"), 6.96)
         _center(page, 167.5, 197.4, baseline, item.get("quantity"), 6.96)
-        _center(page, 197.4, 239.0, baseline, item.get("net_weight_g"), 6.96)
+        # 행 중량은 총중량을 나눈 값이다. 품목 무게로 읽히지 않게 칸은 비운다.
         _center(page, 239.0, 280.8, baseline, price, 6.96)
         _at(page, (284.28, baseline), item.get("print_hs") or item.get("hs_code"), 6.0)
         _center(page, 322.4, 364.2, baseline, item.get("origin_country"), 6.96)
@@ -527,11 +527,6 @@ def _weights_for_layout(data: dict[str, Any], layout: dict[str, Any]):
     if not layout.get("premium_weights") or data.get("contents_type") == "document":
         return items, actual, volume
     shown_actual, shown_volume = _premium_shown_weights(data)
-    raw = str(int(data.get("totweight") or 0))
-    if len(items) == 1:
-        net = str(items[0].get("net_weight_g") or "").strip()
-        if not net or net == raw:
-            items[0]["net_weight_g"] = str(shown_actual)
     return items, shown_actual, shown_volume
 
 
@@ -657,7 +652,7 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
         total_value += unit * qty
         _at(page, (316.20, 208.56 + shift), item.get("name_en"), 8.04, "hebi")
         _at(page, (399.84, 208.56 + shift), qty, 8.04, "hebi")
-        _at(page, (413.88, 208.08 + shift), item.get("net_weight_g"), 6.0, "hebi")
+        # 행 중량은 총중량을 나눈 값이다. 합계 칸에만 총중량을 남긴다.
         _at(page, (441.12, 208.56 + shift), _money(unit * qty), 8.04, "hebi")
         _at(page, (464.04, 207.60 + shift), item.get("print_hs") or item.get("hs_code"), 5.04, "hebi")
         _at(page, (500.40, 208.56 + shift), item.get("origin_country"), 8.04, "hebi")

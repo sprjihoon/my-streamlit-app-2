@@ -1580,6 +1580,73 @@ def test_each_shipping_method_prints_its_own_form():
             assert red > 180 and green < 80, (red, green, blue)
 
 
+def test_printed_invoice_keeps_parcel_weight_off_item_rows():
+    """품목 행에는 총중량을 나눈 값을 찍지 않고, 총중량 칸에만 남긴다."""
+    from backend.app.services.ems.form_pdf import render_label_pdf
+    from backend.app.services.ems.label import render_label_html
+
+    items = [
+        {
+            "name_en": "Shoes",
+            "quantity": 1,
+            "unit_price_usd": 10,
+            "print_hs": "6403990000",
+            "net_weight_g": "321",
+            "origin_country": "KR",
+        },
+        {
+            "name_en": "Hats",
+            "quantity": 2,
+            "unit_price_usd": 8,
+            "print_hs": "6505000000",
+            "net_weight_g": "579",
+            "origin_country": "KR",
+        },
+    ]
+    base = {
+        "order_no": "TIL-WEIGHT",
+        "regino": "EG000000009KR",
+        "post_office": "SEOUL",
+        "ems_fee": 1000,
+        "totweight": 900,
+        "boxlength": 10,
+        "boxwidth": 10,
+        "boxheight": 10,
+        "posted_year": "2026",
+        "posted_month": "10",
+        "posted_day": "01",
+        "sender": {"name": "Spring", "tel": "+821012341234", "address": "Seoul", "zip": "04524"},
+        "recipient": {
+            "name": "Jane Doe",
+            "phone": "+819012341234",
+            "addr3": "1 Main",
+            "zip": "100-0001",
+            "country": "JP",
+            "country_name": "Japan",
+        },
+        "items": items,
+    }
+    ems = render_label_pdf({**base, "shipping_method": "EMS"})
+    _doc, found = _pdf_spans(ems)
+    texts = [item[0] for item in found]
+    assert "321" not in texts
+    assert "579" not in texts
+    _assert_span(found, "900 g", (423.24, 320.76))
+
+    packet = render_label_pdf({**base, "shipping_method": "KPACKET", "regino": "LK000000009KR"})
+    _doc, packet_found = _pdf_spans(packet)
+    packet_texts = [item[0] for item in packet_found]
+    assert "321" not in packet_texts
+    assert "579" not in packet_texts
+    _assert_span(packet_found, "900", (413.64, 304.68))
+    _assert_span(packet_found, "900g", (212.52, 357.12))
+
+    html = render_label_html({**base, "shipping_method": "EMS", "contents_type": "parcel"})
+    assert ">321<" not in html
+    assert ">579<" not in html
+    assert "900 g" in html
+
+
 def test_label_html_escapes_and_prints_canceled(isolated_runtime):
     from fastapi.responses import HTMLResponse
 

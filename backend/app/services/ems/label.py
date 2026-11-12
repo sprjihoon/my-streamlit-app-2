@@ -222,7 +222,6 @@ def _item_rows(items: list[dict[str, Any]]) -> str:
     for item in shown:
         name = item.get("name_en") or ""
         qty = item.get("quantity") or ""
-        weight = item.get("net_weight_g") or ""
         price = _money(item["unit_price_usd"]) if item.get("unit_price_usd") not in (None, "") and name else ""
         hs = item.get("print_hs") or item.get("hs_code") or ""
         origin = item.get("origin_country") or ""
@@ -230,7 +229,7 @@ def _item_rows(items: list[dict[str, Any]]) -> str:
             "<tr>"
             f"<td class='desc'>{_esc(name)}</td>"
             f"<td>{_esc(qty)}</td>"
-            f"<td>{_esc(weight)}</td>"
+            f"<td></td>"
             f"<td>{_esc(price)}</td>"
             f"<td>{_esc(hs)}</td>"
             f"<td>{_esc(origin)}</td>"
