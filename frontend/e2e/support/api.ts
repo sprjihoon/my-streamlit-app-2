@@ -116,7 +116,7 @@ export async function installApi(page: Page, user: SessionUser) {
     calls.push({ method: request.method(), path: url.pathname, body: request.postData(), search: url.search });
   };
 
-  await page.route('https://t1.daumcdn.net/**', (route) => route.abort());
+  await page.route('https://t1.kakaocdn.net/**', (route) => route.abort());
   await page.route('**://maps.googleapis.com/**', (route) => route.abort());
   await page.route('**://*.epost.go.kr/**', (route) => route.abort());
   await page.route('**://*.fedex.com/**', (route) => route.abort());
