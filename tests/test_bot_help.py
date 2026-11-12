@@ -43,8 +43,22 @@ def test_repair_input_questions_share_one_topic():
         assert not looks_like_query_read(text)
     guide = render_help("repair_create")
     assert "사진 2장" in guide
+    assert "제품 사진 1장" in guide
     assert "구멍 바느질" in guide
     assert "비고" in guide
+
+
+def test_defect_input_help_matches_both_photo_paths():
+    for text in ("불량입력방법 알려줘", "불량 어떻게 저장해", "불량 사진 보내는법"):
+        assert looks_like_help_request(text)
+        assert resolve_help_topic(text) == "defect_create"
+    guide = render_help("defect_create")
+    assert "제품 사진 1장" in guide
+    assert "사진 2장" in guide
+    assert "처리결과" in guide
+    overview = render_help("all")
+    assert "불량모드" in overview
+    assert "제품 사진 1장" in overview
 
 
 def test_other_help_questions_collapse_to_topics():

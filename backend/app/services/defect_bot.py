@@ -36,8 +36,11 @@ from logic.db import get_connection
 logger = logging.getLogger(__name__)
 
 EXPIRED_DEFECT_MSG = "작성하던 불량이 만료됐어요. 다시 시작해주세요."
-DEFECT_ONE_PHOTO_MSG = "제품 사진 1장을 받았어요. 바코드 번호를 입력해 주세요."
-DEFECT_BARCODE_HINT = "바코드 번호를 입력해 주세요. 번호를 입력했다면 제품 사진 1장만 보내도 됩니다."
+DEFECT_ONE_PHOTO_MSG = "제품 사진 1장을 받았어요. 바코드 번호를 입력하거나, 바코드 사진을 한 장 더 보내주세요."
+DEFECT_BARCODE_HINT = (
+    "바코드 번호를 입력해 주세요. 번호를 입력했다면 제품 사진 1장만 보내도 됩니다. "
+    "바코드 사진과 제품 사진을 함께 보내도 됩니다."
+)
 YES_RE = re.compile(r"^(네|넵|예|응|어|맞아|맞아요|그래|그래요|ㅇㅇ|ㅇㅋ|저장|저장해|좋아|ㅇ)$")
 CANCEL_RE = re.compile(r"^(취소|그만|아니야|아니)$")
 ASCII_BARCODE_RE = re.compile(r"^[A-Za-z0-9]{6,24}$")

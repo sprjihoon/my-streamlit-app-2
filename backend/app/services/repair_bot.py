@@ -723,7 +723,10 @@ async def handle_user_text(
     )
     if not has_photos and not can_save_without_photos and not data.get("barcode"):
         if data.get("work_type") or data.get("defect"):
-            q = f"사진 2장 이상({PHOTO_SET_HINT})을 보내주세요."
+            q = (
+                "바코드 번호를 입력하거나, 바코드 사진과 제품 사진 2장 이상을 보내주세요. "
+                "번호를 입력했다면 제품 사진 1장만 보내도 됩니다."
+            )
             _set_pending(user_id, channel_id, data, ["photos"], q)
             return q
 

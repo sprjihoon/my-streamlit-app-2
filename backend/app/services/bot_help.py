@@ -16,6 +16,8 @@ HELP_TOPICS = frozenset((
     "repair_query",
     "repair_edit",
     "repair_price",
+    "defect",
+    "defect_create",
     "query",
     "followup",
     "excel",
@@ -69,6 +71,7 @@ def resolve_help_topic(text: str, mode: Optional[str] = None) -> str:
         return "mode"
 
     repair = "수선" in compact
+    defect = "불량" in compact
     journal = "작업일지" in compact or (
         "일지" in compact and "수선일지" not in compact
     )
@@ -82,6 +85,9 @@ def resolve_help_topic(text: str, mode: Optional[str] = None) -> str:
         return "repair_query"
     if repair:
         return "repair_create" if any(cue in compact for cue in ("입력", "저장", "등록", "사진", "바코드", "쓰는", "적어")) or looks_like_help_request(text) else "repair"
+
+    if defect:
+        return "defect_create" if any(cue in compact for cue in ("입력", "저장", "등록", "사진", "바코드", "쓰는", "적어")) or looks_like_help_request(text) else "defect"
 
     if journal and any(cue in compact for cue in ("수정", "바꾸", "바꿔", "고치", "고쳐", "삭제", "지워")):
         return "journal_edit"
@@ -102,6 +108,9 @@ def resolve_help_topic(text: str, mode: Optional[str] = None) -> str:
             return "repair_query"
         if any(cue in compact for cue in ("입력", "저장", "사진")):
             return "repair_create"
+    if mode == "defect":
+        if any(cue in compact for cue in ("입력", "저장", "사진", "바코드")):
+            return "defect_create"
     if mode == "journal":
         if any(cue in compact for cue in ("수정", "바꾸", "바꿔", "고쳐")):
             return "journal_edit"
@@ -123,7 +132,7 @@ _GUIDES = {
     "all": (
         "모드별 기능 안내\n"
         "정해진 단어를 외울 필요는 없습니다. 지금 모드에서 말하면 됩니다.\n"
-        "더 자세히 보려면 `수선입력방법 알려줘`, `일지 조회 어떻게 해`, `수정방법`처럼 물어보세요.\n"
+        "더 자세히 보려면 `수선입력방법 알려줘`, `불량입력방법 알려줘`, `일지 조회 어떻게 해`처럼 물어보세요.\n"
         "\n"
         "• 일지모드\n"
         "  저장: 업체·작업·단가·수량·날짜·비고를 한 문장으로 등록. 빠진 값은 이어서 묻습니다.\n"
@@ -136,7 +145,8 @@ _GUIDES = {
         "  시작: 일지 / 일지모드\n"
         "\n"
         "• 수선모드\n"
-        "  저장: 사진 2장 이상 + 작업·금액. 바코드가 있으면 업체·제품·옵션을 채웁니다.\n"
+        "  저장: 바코드 번호를 입력한 뒤 제품 사진 1장, 또는 바코드 사진과 제품 사진 2장 이상.\n"
+        "  바코드로 업체·제품·옵션을 채운 뒤 작업·금액을 말합니다.\n"
         "  비고는 선택입니다. `비고에 급해`, `급건이라고 메모`처럼 항목마다 넣을 수 있습니다.\n"
         "  예: 구멍 바느질 1500원 비고 급해\n"
         "  조회: 이번달 수선실적, 이달에 수선 전체리스트, 오늘 수선 작업한 업체, 봉제 몇건\n"
@@ -146,6 +156,13 @@ _GUIDES = {
         "  작성 중 업체명을 물으면 그 값은 초안에 넣습니다.\n"
         "  작업일지 저장은 일지모드에서 합니다.\n"
         "  시작: 수선 / 수선. / 수선모드\n"
+        "\n"
+        "• 불량모드\n"
+        "  저장: 바코드 번호를 입력한 뒤 제품 사진 1장, 또는 바코드 사진과 제품 사진 2장 이상.\n"
+        "  업체·제품이 맞으면 불량명을 말하고 `네`로 저장합니다. 예: 구멍, 열펜, 올풀림\n"
+        "  수량은 `3건`처럼 말할 수 있습니다. 말하지 않으면 1건입니다.\n"
+        "  처리결과(업체반송, 반품, 기타)는 웹 불량일지에서 입력합니다.\n"
+        "  시작: 불량모드 / 불량시작 / 불량처리\n"
         "\n"
         "• 조회모드\n"
         "  작업일지·수선일지 목록·건수·수량·금액, 업체·작업별 묶음, 단가·수선 가격\n"
@@ -181,10 +198,12 @@ _GUIDES = {
     ),
     "repair_create": (
         "수선 입력 방법\n"
-        "수선모드에서 사진 2장 이상을 보낸 뒤 작업과 금액을 말하세요.\n"
+        "수선모드에서 아래 중 하나로 시작한 뒤 작업과 금액을 말하세요.\n"
+        "• 바코드 번호를 입력한 뒤 제품 사진 1장\n"
+        "• 바코드 사진과 제품 사진 2장 이상\n"
         "예: 구멍 바느질 1500원 비고 급해\n"
         "비고/메모는 선택입니다. 저장할 때 넣거나, 방금 저장한 항목에 `비고에 급해`처럼 추가할 수 있습니다.\n"
-        "바코드가 보이면 업체·제품·옵션을 채웁니다. 없으면 업체명·제품명을 이어서 묻습니다.\n"
+        "바코드가 읽히면 업체·제품·옵션을 채웁니다. 없으면 업체명·제품명을 이어서 묻습니다.\n"
         "작성 중 업체명을 물으면 `틸리언`처럼 답한 값은 초안에 들어갑니다.\n"
         "시작: 수선 / 수선. / 수선모드"
     ),
@@ -232,9 +251,23 @@ _GUIDES = {
         "모드 사용 방법\n"
         "일지 / 일지모드 → 작업일지 저장·같은 영역 조회·수정\n"
         "수선 / 수선. / 수선모드 → 수선 저장·사진·같은 영역 조회·수정\n"
+        "불량모드 / 불량시작 / 불량처리 → 불량 저장. 번호+제품 사진 1장, 또는 바코드 사진+제품 사진\n"
         "조회 / 조회모드 → 조회만. 쓰기 없음\n"
         "모드 종료 / 현재 모드 / 기능설명"
     ),
 }
 _GUIDES["journal"] = _GUIDES["journal_create"] + "\n\n" + _GUIDES["journal_query"] + "\n\n" + _GUIDES["journal_edit"]
 _GUIDES["repair"] = _GUIDES["repair_create"] + "\n\n" + _GUIDES["repair_query"] + "\n\n" + _GUIDES["repair_edit"]
+_GUIDES["defect_create"] = (
+    "불량 입력 방법\n"
+    "불량모드에서 아래 중 하나로 시작합니다.\n"
+    "• 바코드 번호를 입력한 뒤 제품 사진 1장\n"
+    "• 바코드 사진과 제품 사진 2장 이상\n"
+    "등록된 바코드면 업체·제품·옵션을 채웁니다. 없으면 업체명과 제품명을 이어서 묻습니다.\n"
+    "상품이 맞으면 불량명을 말합니다. 예: 구멍, 열펜, 올풀림\n"
+    "수량은 `3건`처럼 말할 수 있습니다. 말하지 않으면 1건입니다.\n"
+    "`네`로 저장하고, `취소`로 중단합니다.\n"
+    "처리결과(업체반송, 반품, 기타)는 웹 불량일지에서 입력합니다.\n"
+    "시작: 불량모드 / 불량시작 / 불량처리"
+)
+_GUIDES["defect"] = _GUIDES["defect_create"]
