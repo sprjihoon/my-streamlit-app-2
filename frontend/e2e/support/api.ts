@@ -248,7 +248,33 @@ export async function installApi(page: Page, user: SessionUser) {
       });
     }
     if (path === '/overseas-shipping/nations') {
-      return json(route, { items: [{ nationcd: 'JP', nationnm: '일본', nationfn: 'JAPAN' }], fallback: false });
+      return json(route, {
+        items: [
+          { nationcd: 'JP', nationnm: '일본', nationfn: 'JAPAN' },
+          { nationcd: 'CN', nationnm: '중국', nationfn: 'CHINA' },
+        ],
+        fallback: false,
+      });
+    }
+    if (path === '/overseas-shipping/validate-china-address' && method === 'POST') {
+      const body = route.request().postDataJSON() as { receiveaddr1?: string; receivezipcode?: string };
+      const zip = String(body.receivezipcode || '');
+      if ((body.receiveaddr1 || '') === 'Beijing' && zip.startsWith('51')) {
+        return json(route, {
+          ok: false,
+          message: '중국 우편번호 518000의 성은 Guangdong 입니다. 입력한 주/도(Beijing)와 다릅니다.',
+          province: 'Guangdong',
+          suggested_addr1: 'Guangdong',
+          zipcode: '518000',
+        });
+      }
+      return json(route, {
+        ok: true,
+        message: '중국 우편번호와 성이 일치합니다. (Guangdong)',
+        province: 'Guangdong',
+        suggested_addr1: '',
+        zipcode: zip,
+      });
     }
     if (path === '/overseas-shipping/saved-senders') {
       return json(route, { items: [{ id: 1, label: '창고', name: '스프링', phone: '01012345678', zipcode: '41940', addr1: 'Daegu', addr2: 'Jung', addr3: '394', is_default: true }] });

@@ -302,6 +302,25 @@ export async function importOverseasExcel(token: string, file: File) {
   return response.json() as Promise<{ groups: OverseasExcelGroup[] }>;
 }
 
+export async function validateChinaAddress(
+  token: string,
+  addr: { receiveaddr1: string; receiveaddr2: string; receiveaddr3: string; receivezipcode: string }
+) {
+  return fetchApi<{
+    ok: boolean;
+    message: string;
+    province: string;
+    suggested_addr1: string;
+    suggested_addr2?: string;
+    suggested_addr3?: string;
+    zipcode: string;
+    precision?: string;
+  }>(`/overseas-shipping/validate-china-address${overseasQuery(token)}`, {
+    method: 'POST',
+    body: JSON.stringify(addr),
+  });
+}
+
 export async function previewOverseasShipping(token: string, payload: OverseasShippingPayload) {
   return fetchApi<{ ok: boolean; preview: OverseasShippingPreview }>(
     `/overseas-shipping/preview${overseasQuery(token)}`,

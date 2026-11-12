@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.api.kpost_pickup import _get_user
 from backend.app.api.logs import add_log
+from backend.app.services.ems.china_address import review_china_address
 from backend.app.services.ems.client import (
     EmsApiError,
     apply_ems,
@@ -137,6 +138,13 @@ class OverseasSubmitRequest(BaseModel):
     save_sender: bool = False
     save_sender_label: str = ""
     save_sender_default: bool = False
+
+
+class ChinaAddressCheckRequest(BaseModel):
+    receiveaddr1: str = ""
+    receiveaddr2: str = ""
+    receiveaddr3: str = ""
+    receivezipcode: str = ""
 
 
 class SavedOverseasAddressRequest(BaseModel):
@@ -1335,6 +1343,20 @@ async def import_overseas_excel(token: str, file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"groups": groups}
+
+
+@router.post("/validate-china-address")
+def validate_china_address(req: ChinaAddressCheckRequest, token: str):
+    """중국 우편번호·성과, 지도가 찾은 건물 위치를 함께 본다."""
+    _get_user(token)
+    if len((req.receiveaddr3 or "").strip()) < 2:
+        raise HTTPException(status_code=400, detail="수취인 상세주소(도로명+번지)를 입력해주세요.")
+    return review_china_address(
+        addr1=req.receiveaddr1,
+        addr2=req.receiveaddr2,
+        addr3=req.receiveaddr3,
+        zipcode=req.receivezipcode,
+    )
 
 
 @router.post("/preview")

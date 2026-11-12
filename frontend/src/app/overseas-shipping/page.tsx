@@ -7,6 +7,7 @@ import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
 import { DataSection as FormSection } from '@/components/operational';
 import AddressSuggestionDialog from '@/components/AddressSuggestionDialog';
+import ChinaAddressGuideDialog from '@/components/ChinaAddressGuideDialog';
 import { duplicateSubmitQuestion, useYesNo } from '@/components/YesNoDialog';
 import OverseasRecipientPickerModal from '@/components/OverseasRecipientPickerModal';
 import {
@@ -21,6 +22,7 @@ import {
   listOverseasSavedSenders,
   previewOverseasShipping,
   quoteOverseasShipping,
+  validateChinaAddress,
   saveOverseasAddress,
   saveOverseasHs,
   saveOverseasSender,
@@ -226,7 +228,10 @@ export default function OverseasShippingPage() {
   const hsTimer = useRef<Record<number, number>>({});
   const [validating, setValidating] = useState(false);
   const [addressHint, setAddressHint] = useState<string | null>(null);
+  const [chinaGuideOpen, setChinaGuideOpen] = useState(false);
   const [suggestion, setSuggestion] = useState<{
+    title?: string;
+    suggestedLabel?: string;
     original: { addr3: string; addr2: string; addr1: string; zip: string };
     suggested: { addr3: string; addr2: string; addr1: string; zip: string; formattedAddress?: string };
   } | null>(null);
@@ -237,6 +242,8 @@ export default function OverseasShippingPage() {
   countryRef.current = form.countrycd;
   const formRef = useRef(form);
   formRef.current = form;
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
   const nationsRef = useRef(nations);
   nationsRef.current = nations;
   const validateRef = useRef<(opts?: {
@@ -368,6 +375,10 @@ export default function OverseasShippingPage() {
   }, [form.countrycd, loading]);
 
   useEffect(() => {
+    if (form.countrycd === 'CN') setChinaGuideOpen(true);
+  }, [form.countrycd]);
+
+  useEffect(() => {
     if (!token || loading || !form.countrycd || form.totweight < 1) {
       if (form.totweight < 1) {
         setQuoteFee(null);
@@ -458,12 +469,64 @@ export default function OverseasShippingPage() {
     const countrycd = override?.countrycd ?? current.countrycd;
     const silent = !!override?.silent;
 
-    if (!GMAPS_KEY) {
-      if (!silent) window.alert('구글 주소키가 없어 검증할 수 없습니다.');
-      return;
-    }
     if (!addr3) {
       if (!silent) window.alert('수취인 상세주소를 입력한 뒤 검증하세요.');
+      return;
+    }
+    if (countrycd.toUpperCase() === 'CN') {
+      const auth = tokenRef.current;
+      if (!auth) {
+        if (!silent) window.alert('로그인 후 중국 주소를 검증할 수 있습니다.');
+        return;
+      }
+      setValidating(true);
+      setAddressHint(null);
+      try {
+        const result = await validateChinaAddress(auth, {
+          receiveaddr1: addr1,
+          receiveaddr2: addr2,
+          receiveaddr3: addr3,
+          receivezipcode: zip,
+        });
+        if (result.ok) {
+          setAddressHint(result.message);
+          if (!silent) window.alert(result.message);
+          return;
+        }
+        const nextAddr1 = result.suggested_addr1 || addr1;
+        const nextAddr2 = result.suggested_addr2 || addr2;
+        const nextAddr3 = result.suggested_addr3 || addr3;
+        const nextZip = result.zipcode || zip;
+        const changed = nextAddr1 !== addr1 || nextAddr2 !== addr2 || nextAddr3 !== addr3 || nextZip !== zip;
+        if (changed && (result.suggested_addr1 || result.suggested_addr2 || result.suggested_addr3)) {
+          setAddressHint(result.message);
+          setSuggestion({
+            title: nextAddr3 !== addr3 ? '지도에서 찾은 주소로 바꿀까요?' : '우편번호에 맞는 성으로 바꿀까요?',
+            suggestedLabel: nextAddr3 !== addr3 ? '지도 기준' : '우편번호 기준',
+            original: { addr3, addr2, addr1, zip },
+            suggested: {
+              addr3: nextAddr3,
+              addr2: nextAddr2,
+              addr1: nextAddr1,
+              zip: nextZip,
+              formattedAddress: [nextAddr3, nextAddr2, nextAddr1, nextZip].filter(Boolean).join(', '),
+            },
+          });
+          return;
+        }
+        setAddressHint(result.message);
+        if (!silent) window.alert(result.message);
+      } catch (err) {
+        const message = parseApiError(err);
+        setAddressHint(message);
+        if (!silent) window.alert(message);
+      } finally {
+        setValidating(false);
+      }
+      return;
+    }
+    if (!GMAPS_KEY) {
+      if (!silent) window.alert('구글 주소키가 없어 검증할 수 없습니다.');
       return;
     }
     if (!supportsAddressValidation(countrycd)) {
@@ -1086,6 +1149,7 @@ export default function OverseasShippingPage() {
         subtitle="창고에서 EMS / EMS 프리미엄 / K-Packet를 결제 없이 바로 접수합니다."
       />
 
+      {chinaGuideOpen && <ChinaAddressGuideDialog onClose={() => setChinaGuideOpen(false)} />}
       {yesNoDialog}
       {error && <Alert type="error">{error}</Alert>}
       {success && <Alert type="success">{success}</Alert>}
@@ -1100,6 +1164,8 @@ export default function OverseasShippingPage() {
         <AddressSuggestionDialog
           original={suggestion.original}
           suggested={suggestion.suggested}
+          title={suggestion.title}
+          suggestedLabel={suggestion.suggestedLabel}
           onKeepOriginal={() => setSuggestion(null)}
           onUseSuggested={() => {
             const nextRewrites: Record<string, { before: string; after: string }> = {};
@@ -1509,13 +1575,12 @@ export default function OverseasShippingPage() {
                 type="button"
                 className="btn btn-primary tw-min-w-[140px]"
                 onClick={() => void triggerAddressValidation()}
-                disabled={validating || !GMAPS_KEY}
-               
+                disabled={validating || (!GMAPS_KEY && form.countrycd !== 'CN')}
               >
-                {validating ? '검증 중...' : '구글 주소 검증'}
+                {validating ? '검증 중...' : form.countrycd === 'CN' ? '중국 주소 검증' : '구글 주소 검증'}
               </button>
               {addressHint && <span className="text-muted">{addressHint}</span>}
-              {!GMAPS_KEY && <span className="text-muted">구글 주소키가 없어 검증할 수 없습니다.</span>}
+              {!GMAPS_KEY && form.countrycd !== 'CN' && <span className="text-muted">구글 주소키가 없어 검증할 수 없습니다.</span>}
             </div>
           </div>
           <label>

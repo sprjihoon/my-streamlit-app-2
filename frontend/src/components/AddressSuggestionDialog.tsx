@@ -13,6 +13,8 @@ export interface SuggestedAddress {
 interface Props {
   original: SuggestedAddress;
   suggested: SuggestedAddress;
+  title?: string;
+  suggestedLabel?: string;
   onKeepOriginal: () => void;
   onUseSuggested: () => void;
 }
@@ -24,6 +26,8 @@ function formatSingle(a: SuggestedAddress): string {
 export default function AddressSuggestionDialog({
   original,
   suggested,
+  title = '구글 추천 주소로 변경하시겠어요?',
+  suggestedLabel = 'Google 추천 주소',
   onKeepOriginal,
   onUseSuggested,
 }: Props) {
@@ -54,7 +58,7 @@ export default function AddressSuggestionDialog({
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.1rem 0.5rem' }}>
-          <p style={{ fontWeight: 700 }}>구글 추천 주소로 변경하시겠어요?</p>
+          <p style={{ fontWeight: 700 }}>{title}</p>
           <button type="button" className="btn btn-secondary" onClick={onKeepOriginal} style={{ padding: '0.25rem 0.45rem' }}>
             <X size={16} />
           </button>
@@ -66,7 +70,7 @@ export default function AddressSuggestionDialog({
           </div>
           <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>↓</div>
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '0.75rem' }}>
-            <p style={{ fontSize: '0.7rem', color: '#2563eb', marginBottom: 4, fontWeight: 700 }}>Google 추천 주소</p>
+            <p style={{ fontSize: '0.7rem', color: '#2563eb', marginBottom: 4, fontWeight: 700 }}>{suggestedLabel}</p>
             <p>{suggestedDisplay}</p>
           </div>
           <p className="text-muted" style={{ fontSize: '0.8rem', display: 'flex', gap: 6 }}>

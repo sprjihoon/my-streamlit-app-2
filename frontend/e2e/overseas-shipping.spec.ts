@@ -220,3 +220,22 @@ test('list, detail, cancel dismissal, and print link', async ({ page }) => {
   if (await cancel.count()) await cancel.first().click();
   expect(calls.filter((call) => call.path.includes('/cancel'))).toHaveLength(0);
 });
+
+test('china postal zone check replaces the province', async ({ page }) => {
+  await page.goto('/overseas-shipping');
+  await expect(page.getByRole('heading', { name: '해외배송 접수' })).toBeVisible();
+  await page.locator('select').filter({ has: page.locator('option[value="CN"]') }).selectOption('CN');
+  const chinaGuide = page.getByRole('dialog', { name: '중국 주소 검증 방법' });
+  await expect(chinaGuide).toBeVisible();
+  await chinaGuide.getByRole('button', { name: '확인' }).click();
+  await expect(page.getByRole('button', { name: '중국 주소 검증' })).toBeVisible();
+  await page.getByPlaceholder('1-2-3 Example Street Apt 101').fill('Nanshan 1');
+  await page.getByPlaceholder('Shibuya-ku').fill('Shenzhen');
+  await page.getByPlaceholder('Tokyo').fill('Beijing');
+  await page.getByRole('textbox', { name: '우편번호', exact: true }).fill('518000');
+  await page.getByRole('button', { name: '중국 주소 검증' }).click();
+  await expect(page.getByText('우편번호에 맞는 성으로 바꿀까요?')).toBeVisible();
+  await page.getByRole('button', { name: '추천 주소 사용' }).click();
+  await expect(page.getByPlaceholder('Tokyo')).toHaveValue('Guangdong');
+  await expect(page.getByRole('textbox', { name: '우편번호', exact: true })).toHaveValue('518000');
+});

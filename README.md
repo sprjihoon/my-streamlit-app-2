@@ -293,7 +293,8 @@ get_res_info(order_no, req_ymd, req_type="2")
 ### 구글 주소 · 주소록 · HS코드
 
 - Places Autocomplete: 상세주소 입력 시 국가 제한 검색, 주/시/우편번호 자동 채움. 중국·홍콩·대만·태국도 검색된다
-- Address Validation: 지원 국가에서 검증하면 공식 주소와 영문 주소(`englishLatinAddress`)를 같이 받아 주소칸에는 영문을 넣는다. 중국·홍콩·대만·태국은 검증 목록에 없고, 검색으로 채워진 글자는 접수 직전에 영문으로 바꾼다
+- Address Validation: 지원 국가에서 검증하면 공식 주소와 영문 주소(`englishLatinAddress`)를 같이 받아 주소칸에는 영문을 넣는다. 홍콩·대만·태국은 검증 목록에 없고, 검색으로 채워진 글자는 접수 직전에 영문으로 바꾼다
+- 중국 접수: 국가를 중국으로 고르면 사용 방법 팝업이 뜬다. 상세주소·시/구·성·우편번호 6자리를 넣고 **중국 주소 검증**을 누른다. 한자로 넣어도 된다. 건물이 찾아지면 지도의 영문 주소로 바꿀지 물어보고, 추천 주소를 쓰면 그 영문으로 접수한다. 지도가 시/구만 주면 건물 번호는 확인되지 않고, 우편번호와 성이 맞으면 접수는 된다. 우편번호와 성이 다르면 접수가 막힌다. 접수 자체는 우편번호 6자리와 성/직할시가 같은지, 시/구가 있는지만 막는다
 - 주소록: 직원별 수취인 저장/기본주소/접수와 함께 저장 (`overseas_saved_addresses`), 화면 `/overseas-recipients`
 - 발송인: 이름·주소·전화 수정 후 목록 저장 (`overseas_saved_senders`), 화면 `/overseas-senders`
 - HS 검색: 접수 화면에서 한글·영문·HS 6자리 검색. 저장 품목 + 창고 카탈로그 + WCO HS 6자리 목록(`hs6.json`, 약 5,600건)을 API로 합쳐 보여 준다. 고른 품목은 저장해 재사용 (`overseas_saved_hs_codes`). 화면 값은 6자리일 수 있고, 우체국 접수 값은 위의 10자리다.
@@ -312,6 +313,7 @@ get_res_info(order_no, req_ymd, req_type="2")
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-senders` | 발송인 목록 |
 | `GET/POST/PUT/DELETE` | `/overseas-shipping/saved-hs` | 저장 HS코드 목록 |
 | `POST` | `/overseas-shipping/import-excel` | 주문 엑셀을 접수 1건 입력값으로 변환. 없는 항목은 비움 |
+| `POST` | `/overseas-shipping/validate-china-address` | 중국 우편번호·성 검사와 지도 건물 위치. 건물이 보이면 영문 주소를 제안한다 |
 | `POST` | `/overseas-shipping/preview` | 확인용 미리보기 (미기록) |
 | `GET` | `/overseas-shipping` | 접수 목록. 각 건에 요금, DDP, 합계(`spent_total`) |
 | `GET` | `/overseas-shipping/{id}` | 접수 1건 상세. 제품명·HS 품목·수취인·박스·지출을 입력값 그대로 돌려준다 |

@@ -9,6 +9,7 @@ from typing import Any
 
 from anyascii import anyascii
 
+from backend.app.services.ems.china_address import check_china_address
 from backend.app.services.ems.dimension_limits import (
     chargeable_weight_g,
     snap_doc_weight_g,
@@ -723,12 +724,37 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
 
     corrections: list[dict[str, str]] = []
     problems: list[dict[str, str]] = []
+    raw_addr1 = str(data.get("receiveaddr1") or "").strip()
+    raw_addr2 = str(data.get("receiveaddr2") or "").strip()
+    raw_zip = str(data.get("receivezipcode") or "").strip()
+    if countrycd == "CN":
+        china = check_china_address(addr1=raw_addr1, addr2=raw_addr2, zipcode=raw_zip)
+        if not china["ok"]:
+            raise ValueError(str(china["message"]))
+        posted_zip = str(china["zipcode"])
+        posted_addr1 = str(china["province"])
+        if posted_zip != raw_zip:
+            corrections.append({
+                "field": "receivezipcode",
+                "label": "우편번호",
+                "before": raw_zip,
+                "after": posted_zip,
+            })
+        if posted_addr1 != raw_addr1:
+            corrections.append({
+                "field": "receiveaddr1",
+                "label": "주/도",
+                "before": raw_addr1,
+                "after": posted_addr1,
+            })
+        raw_zip = posted_zip
+        raw_addr1 = posted_addr1
     receivename = _fit_epost_text(
         corrections, problems, "수취인", "receivename",
         validate_recipient_name(str(data.get("receivename") or "")),
     )
     addr1 = _fit_epost_text(
-        corrections, problems, "주/도", "receiveaddr1", (str(data.get("receiveaddr1") or "")).strip()
+        corrections, problems, "주/도", "receiveaddr1", raw_addr1
     )
     addr2 = _fit_epost_text(
         corrections, problems, "시/군", "receiveaddr2", (str(data.get("receiveaddr2") or "")).strip()
@@ -795,7 +821,7 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         "boxwidth": 0 if is_doc else int(boxwidth),
         "boxheight": 0 if is_doc else int(boxheight),
         "receivename": receivename,
-        "receivezipcode": str(data.get("receivezipcode") or "").strip(),
+        "receivezipcode": raw_zip,
         "receiveaddr1": addr1,
         "receiveaddr2": addr2,
         "receiveaddr3": addr3,
