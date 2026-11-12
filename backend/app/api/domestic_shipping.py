@@ -952,34 +952,53 @@ def create_domestic(req: DomesticSubmitRequest, token: str):
     created: list[tuple] = []
     for offset in range(remaining):
         index = len(existing) + offset + 1
-        order_no = truncate_utf8_bytes(
-            re.sub(r"[^A-Za-z0-9]", "", f"DOM{int(datetime.now(KST).timestamp() * 1000)}{index:02d}").upper(),
-            30,
-        )
-        params = _api_params(data, order_no, test_yn="N" if live else "Y")
-        if not live:
-            result = mock_insert_order()
-        else:
-            try:
-                result = insert_order(params)
-            except EpostError as exc:
-                if created or existing:
-                    break
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-        shipment_id = _store_shipment(data, order_no, result, live=live, user_name=user["nickname"], created_at=now)
-        created.append((shipment_id, result.get("regiNo") or "", order_no, result.get("price") or ""))
-        add_log(
-            action_type="국내출고접수",
-            target_type="domestic_shipment",
-            target_id=str(shipment_id),
-            target_name=result.get("regiNo") or order_no,
-            user_nickname=user["nickname"],
-        )
+        try:
+            created.append(_place_shipment(data, live=live, user_name=user["nickname"], created_at=now, index=index))
+        except EpostError as exc:
+            if created or existing:
+                break
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     rows = list(existing) + created
     if not rows:
         raise HTTPException(status_code=502, detail="접수에 실패했습니다.")
     return _created_payload(rows, requested=requested, live=live, data=data, duplicate=False)
+
+
+def _place_shipment(
+    data: dict[str, Any],
+    *,
+    live: bool,
+    user_name: str,
+    created_at: str,
+    index: int,
+) -> tuple:
+    """출고 접수 1건. live가 아니면 외부 API를 호출하지 않는다."""
+    order_no = truncate_utf8_bytes(
+        re.sub(r"[^A-Za-z0-9]", "", f"DOM{int(datetime.now(KST).timestamp() * 1000)}{index:02d}").upper(),
+        30,
+    )
+    params = _api_params(data, order_no, test_yn="N" if live else "Y")
+    if live:
+        result = insert_order(params)
+    else:
+        result = mock_insert_order()
+    shipment_id = _store_shipment(
+        data,
+        order_no,
+        result,
+        live=live,
+        user_name=user_name,
+        created_at=created_at,
+    )
+    add_log(
+        action_type="국내출고접수",
+        target_type="domestic_shipment",
+        target_id=str(shipment_id),
+        target_name=result.get("regiNo") or order_no,
+        user_nickname=user_name,
+    )
+    return (shipment_id, result.get("regiNo") or "", order_no, result.get("price") or "")
 
 
 def _label_pdf(item: dict[str, Any]) -> bytes:
