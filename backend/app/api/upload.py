@@ -39,18 +39,26 @@ TableType = Literal[
 ]
 
 
-def check_admin(token: Optional[str]) -> tuple:
-    """관리자 권한 확인, (is_admin, nickname) 반환"""
+def session_user(token: Optional[str]) -> Optional[tuple[bool, Optional[str]]]:
+    """유효한 로그인 세션이면 (is_admin, nickname)을 돌려준다."""
     if not token:
-        return False, None
+        return None
     with get_connection() as con:
         result = con.execute(
             "SELECT u.is_admin, u.nickname FROM sessions s JOIN users u ON s.user_id = u.user_id WHERE s.token = ?",
-            (token,)
+            (token,),
         ).fetchone()
-        if result:
-            return bool(result[0]), result[1]
-    return False, None
+    if not result:
+        return None
+    return bool(result[0]), result[1]
+
+
+def check_admin(token: Optional[str]) -> tuple:
+    """관리자 권한 확인, (is_admin, nickname) 반환"""
+    user = session_user(token)
+    if not user:
+        return False, None
+    return user
 
 
 @router.post("", response_model=UploadResponse)
@@ -61,13 +69,16 @@ async def upload_file(
     token: Optional[str] = Form(None, description="인증 토큰")
 ) -> UploadResponse:
     """
-    Excel 파일 업로드 (관리자만).
-    
-    logic.ingest() 호출.
+    Excel 파일 업로드.
+
+    반품정보는 로그인한 사용자 모두 올릴 수 있다. 그 외 테이블은 관리자만.
+    삭제는 이 함수가 하지 않으며 관리자 전용 엔드포인트에 남긴다.
     """
-    # 관리자 권한 체크
-    is_admin, nickname = check_admin(token)
-    if not is_admin:
+    user = session_user(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    is_admin, nickname = user
+    if table != "return_info" and not is_admin:
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
     
     try:

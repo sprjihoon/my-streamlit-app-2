@@ -28,13 +28,18 @@ test('return info upload card lives on the query page', async ({ page }) => {
   await expect(page.getByLabel('반품정보 엑셀')).toBeAttached();
 });
 
-test('staff cannot see the return info upload card', async ({ page }) => {
+test('staff can upload return info but cannot delete it', async ({ page }) => {
   await seedSession(page, STAFF);
   await installApi(page, STAFF);
   await page.goto('/return-info');
   await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
-  await expect(page.getByText('반품정보 업로드', { exact: true })).toHaveCount(0);
+  const upload = page.locator('details.return-filter-accordion', { hasText: '반품정보 업로드' });
+  await expect(upload).toBeVisible();
+  await upload.locator('summary').click();
+  await expect(page.getByLabel('반품정보 엑셀')).toBeAttached();
   await expect(page.getByRole('button', { name: '데이터 초기화' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '기간 데이터 삭제' })).toHaveCount(0);
+  await expect(page.getByLabel('반품정보 삭제 시작일')).toHaveCount(0);
 });
 
 test('stale admin flag does not show return info reset', async ({ page }) => {
@@ -63,8 +68,12 @@ test('stale admin flag does not show return info reset', async ({ page }) => {
   });
   await page.goto('/return-info');
   await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
+  const upload = page.locator('details.return-filter-accordion', { hasText: '반품정보 업로드' });
+  await expect(upload).toBeVisible();
+  await upload.locator('summary').click();
+  await expect(page.getByLabel('반품정보 엑셀')).toBeAttached();
   await expect(page.getByRole('button', { name: '데이터 초기화' })).toHaveCount(0);
-  await expect(page.getByText('반품정보 업로드', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '기간 데이터 삭제' })).toHaveCount(0);
 });
 
 test('admin must confirm before resetting return info', async ({ page }) => {

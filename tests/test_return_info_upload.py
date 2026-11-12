@@ -45,6 +45,73 @@ def _row(**overrides) -> dict:
     return base
 
 
+def test_staff_can_upload_return_info_but_cannot_delete(isolated_runtime, monkeypatch):
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    from backend.app.main import app
+
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                nickname TEXT NOT NULL,
+                is_admin INTEGER DEFAULT 0
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        con.execute(
+            "INSERT INTO users (username, password_hash, nickname, is_admin) VALUES (?,?,?,?)",
+            ("staff-upload", "x", "직원", 0),
+        )
+        staff_id = con.execute("SELECT user_id FROM users WHERE username='staff-upload'").fetchone()[0]
+        con.execute("INSERT INTO sessions (token, user_id) VALUES (?, ?)", ("staff-up", staff_id))
+        con.commit()
+
+    monkeypatch.setattr(
+        "backend.app.api.upload.ingest",
+        lambda *_args, **_kwargs: (True, "반품정보 업로드 완료"),
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    files = {
+        "file": (
+            "return.xlsx",
+            b"not-a-real-workbook",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    staff = client.post("/upload", data={"table": "return_info", "token": "staff-up"}, files=files)
+    assert staff.status_code == 200
+    assert staff.json()["success"] is True
+
+    other = client.post("/upload", data={"table": "work_log", "token": "staff-up"}, files=files)
+    assert other.status_code == 403
+
+    guest = client.post("/upload", data={"table": "return_info"}, files=files)
+    assert guest.status_code == 401
+
+    wiped = client.delete("/upload/table/return_info", params={"token": "staff-up"})
+    assert wiped.status_code == 403
+    period = client.delete(
+        "/upload/table/return_info/period",
+        params={"token": "staff-up", "date_from": "2026-11-01", "date_to": "2026-11-04"},
+    )
+    assert period.status_code == 403
+
+
 def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
     monkeypatch.setattr("logic.upload.UPLOAD_DIR", isolated_runtime["uploads"])
     ensure_tables()

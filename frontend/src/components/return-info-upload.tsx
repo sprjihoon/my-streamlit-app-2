@@ -7,6 +7,7 @@ import { getUploadList, resetTableData, resetTableDataByPeriod, uploadFile } fro
 export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const [uploadCount, setUploadCount] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
@@ -20,23 +21,28 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
     const token = localStorage.getItem('token');
     if (!token) {
       setIsAdmin(false);
+      setSignedIn(false);
       return;
     }
     const api = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     let cancelled = false;
     fetch(`${api}/auth/me?token=${encodeURIComponent(token)}`)
       .then(async (res) => {
-        if (!res.ok) return false;
-        const user = await res.json();
-        return Boolean(user?.is_admin);
+        if (!res.ok) return null;
+        return res.json();
       })
-      .then((admin) => {
+      .then((user) => {
         if (cancelled) return;
+        const admin = Boolean(user?.is_admin);
+        setSignedIn(Boolean(user));
         setIsAdmin(admin);
-        localStorage.setItem('isAdmin', admin ? 'true' : 'false');
+        if (user) localStorage.setItem('isAdmin', admin ? 'true' : 'false');
       })
       .catch(() => {
-        if (!cancelled) setIsAdmin(false);
+        if (!cancelled) {
+          setSignedIn(false);
+          setIsAdmin(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -59,8 +65,6 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
       cancelled = true;
     };
   }, [isAdmin, message]);
-
-  if (!isAdmin) return null;
 
   async function handleUpload(file: File) {
     const maxSize = 100 * 1024 * 1024;
@@ -146,6 +150,8 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
     }
   }
 
+  if (!signedIn) return null;
+
   return (
     <details className="return-filter-accordion">
       <summary>반품정보 업로드</summary>
@@ -172,12 +178,14 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
         )}
       </div>
       <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
-        재입고 대기 엑셀입니다. 기간 삭제는 등록일 기준이고, 모든 칸이 같은 행은 다시 올리지 않습니다.
+        재입고 대기 엑셀입니다. 모든 칸이 같은 행은 다시 올리지 않습니다.
       </p>
+      {isAdmin && (
       <div className="metric" style={{ marginTop: '0.5rem' }}>
         <div className="metric-value">{uploadCount}</div>
         <div className="metric-label">업로드 수</div>
       </div>
+      )}
       {isAdmin && uploadCount > 0 && (
         <button
           type="button"
@@ -239,6 +247,8 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
           </div>
         </div>
       )}
+      {isAdmin && (
+      <>
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginTop: '0.85rem' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           <label style={{ fontSize: '0.8rem', fontWeight: 600 }}>등록일 시작</label>
@@ -269,6 +279,8 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
       <p style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.78rem', color: '#666' }}>
         * 반품정보는 등록일 기준으로 삭제됩니다.
       </p>
+      </>
+      )}
       </div>
     </details>
   );
