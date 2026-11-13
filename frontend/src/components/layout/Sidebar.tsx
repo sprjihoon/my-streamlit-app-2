@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { CreditCard, Settings, ShieldCheck } from 'lucide-react';
 import { NavGroup } from './NavGroup';
 import { UserPanel } from './UserPanel';
-import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, INBOUND_NAV_GROUP, NAV_GROUPS, RETURN_INFO_LOG_NAV_ITEM, RETURN_INFO_NAV_ITEM, canSeeNavItem } from './navigation';
+import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, INBOUND_NAV_GROUP, NAV_GROUPS, RETURN_INFO_NAV_GROUP, canSeeNavItem } from './navigation';
 import type { User } from './types';
 
 export function Sidebar({
@@ -19,6 +18,7 @@ export function Sidebar({
   onLogout: () => void;
 }) {
   const inboundItems = INBOUND_NAV_GROUP.items.filter((item) => canSeeNavItem(user, item));
+  const returnItems = RETURN_INFO_NAV_GROUP.items.filter((item) => canSeeNavItem(user, item));
 
   return (
     <aside className="sidebar">
@@ -63,21 +63,14 @@ export function Sidebar({
           />
         )}
 
-        <Link
-          href={RETURN_INFO_NAV_ITEM.href}
-          className={pathname === RETURN_INFO_NAV_ITEM.href ? 'active' : ''}
-          style={{ marginTop: '0.35rem' }}
-        >
-          <span className="tw-flex tw-shrink-0 tw-items-center">{RETURN_INFO_NAV_ITEM.icon}</span>
-          <span>{RETURN_INFO_NAV_ITEM.label}</span>
-        </Link>
-        <Link
-          href={RETURN_INFO_LOG_NAV_ITEM.href}
-          className={pathname === RETURN_INFO_LOG_NAV_ITEM.href ? 'active' : ''}
-        >
-          <span className="tw-flex tw-shrink-0 tw-items-center">{RETURN_INFO_LOG_NAV_ITEM.icon}</span>
-          <span>{RETURN_INFO_LOG_NAV_ITEM.label}</span>
-        </Link>
+        {returnItems.length > 0 && (
+          <NavGroup
+            label={RETURN_INFO_NAV_GROUP.label}
+            icon={RETURN_INFO_NAV_GROUP.icon}
+            items={returnItems}
+            pathname={pathname}
+          />
+        )}
 
         {user?.is_admin && (
           <NavGroup

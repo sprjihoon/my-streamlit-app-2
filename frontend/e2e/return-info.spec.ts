@@ -6,27 +6,31 @@ const COLUMNS = [
   '주문번호', '수령자', '상품명', '바코드', '옵션', '수량', '불량', 'CS이력', '반품메모', '공급처',
 ];
 
-test('return info menu sits below marketing outside a category', async ({ page }) => {
+test('return info menu sits in its own category below marketing', async ({ page }) => {
   await seedSession(page, ADMIN);
   await installApi(page, ADMIN);
   await page.goto('/');
-  const link = page.locator('aside.sidebar nav > a', { hasText: '반품정보 조회' });
-  await expect(link).toBeVisible();
-  await expect(page.locator('.sidebar-group a', { hasText: '반품정보 조회' })).toHaveCount(0);
+  const group = page.locator('.sidebar-group', { has: page.getByRole('button', { name: '반품정보', exact: true }) });
+  await expect(group).toBeVisible();
+  await expect(page.locator('aside.sidebar nav > a', { hasText: '반품정보 조회' })).toHaveCount(0);
   const marketing = await page.getByRole('button', { name: '마케팅' }).boundingBox();
-  const item = await link.boundingBox();
+  const item = await group.getByRole('button', { name: '반품정보', exact: true }).boundingBox();
   const billing = await page.getByRole('button', { name: '실 청구서' }).boundingBox();
   expect(marketing).not.toBeNull();
   expect(item).not.toBeNull();
   expect(billing).not.toBeNull();
   expect(item!.y).toBeGreaterThan(marketing!.y);
   expect(item!.y).toBeLessThan(billing!.y);
+  await group.getByRole('button', { name: '반품정보', exact: true }).click();
+  await expect(group.getByRole('link', { name: '반품정보 조회' })).toBeVisible();
+  await expect(group.getByRole('link', { name: '반품정보 로그 분석' })).toBeVisible();
 });
 
 test('staff can open the return info menu', async ({ page }) => {
   await seedSession(page, STAFF);
   await installApi(page, STAFF);
   await page.goto('/insights');
+  await page.getByRole('button', { name: '반품정보', exact: true }).click();
   await page.getByRole('link', { name: '반품정보 조회' }).click();
   await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
 });

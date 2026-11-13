@@ -49,7 +49,7 @@ function showValue(value: string | number | null | undefined) {
 }
 
 function changeText(entry: ReturnInfoLogEntry) {
-  if (!entry.changes?.length) return entry.summary || '-';
+  if (!entry.changes?.length) return '-';
   return entry.changes
     .map((change) => `${change.field}: ${showValue(change.before)} → ${showValue(change.after)}`)
     .join('\n');

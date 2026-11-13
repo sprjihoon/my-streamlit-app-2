@@ -142,16 +142,14 @@ export const INBOUND_NAV_GROUP = {
   ] satisfies NavItem[],
 };
 
-export const RETURN_INFO_NAV_ITEM: NavItem = {
-  href: '/return-info',
-  label: '반품정보 조회',
+export const RETURN_INFO_NAV_GROUP = {
+  key: 'return-info',
+  label: '반품정보',
   icon: <Search {...IC} />,
-};
-
-export const RETURN_INFO_LOG_NAV_ITEM: NavItem = {
-  href: '/return-info-log',
-  label: '반품정보 로그 분석',
-  icon: <ScrollText {...IC} />,
+  items: [
+    { href: '/return-info', label: '반품정보 조회', icon: <Search {...IC} /> },
+    { href: '/return-info-log', label: '반품정보 로그 분석', icon: <ScrollText {...IC} /> },
+  ] satisfies NavItem[],
 };
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [

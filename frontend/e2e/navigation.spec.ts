@@ -12,7 +12,9 @@ test('sidebar accordion opens a menu route', async ({ page }) => {
     const inbound = [...nav.querySelectorAll('.sidebar-group')].find((group) =>
       group.querySelector('button')?.textContent?.includes('입고'),
     );
-    const returns = [...nav.querySelectorAll('a')].find((link) => link.textContent?.includes('반품정보 조회'));
+    const returns = [...nav.querySelectorAll('.sidebar-group')].find((group) =>
+      group.querySelector('button')?.textContent?.includes('반품정보'),
+    );
     if (!inbound || !returns) return false;
     return Boolean(inbound.compareDocumentPosition(returns) & Node.DOCUMENT_POSITION_FOLLOWING)
       && inbound.nextElementSibling === returns;
