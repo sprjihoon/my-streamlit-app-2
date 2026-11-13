@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert } from '@/components/Alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
+import { Select } from '@/components/ui/select';
 import {
   RETURN_INFO_COLUMNS,
   RETURN_INFO_DATE_COLUMNS,
@@ -13,6 +14,7 @@ import {
 const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
 const WIDE_COLUMNS = new Set(['CS이력', '반품메모', '수정사항메모']);
 const EDIT_COLUMNS = [...RETURN_INFO_COLUMNS, '수정사항메모'];
+const DEFECT_CHOICES = ['정상', '불량'] as const;
 
 function fieldValue(column: string, value: string | number | null | undefined) {
   if (value === null || value === undefined) return '';
@@ -144,7 +146,18 @@ export function ReturnInfoEditModal({
                 label={column}
                 className={WIDE_COLUMNS.has(column) ? 'return-create-wide' : undefined}
               >
-                {WIDE_COLUMNS.has(column) ? (
+                {column === '불량' ? (
+                  <Select
+                    aria-label="상세 불량"
+                    value={DEFECT_CHOICES.includes(fields[column] as typeof DEFECT_CHOICES[number]) ? fields[column] : ''}
+                    onChange={(event) => updateField(column, event.target.value)}
+                  >
+                    <option value="">{fields[column] && !DEFECT_CHOICES.includes(fields[column] as typeof DEFECT_CHOICES[number]) ? fields[column] : '선택'}</option>
+                    {DEFECT_CHOICES.map((value) => (
+                      <option key={value} value={value}>{value}</option>
+                    ))}
+                  </Select>
+                ) : WIDE_COLUMNS.has(column) ? (
                   <textarea
                     aria-label={`상세 ${column}`}
                     value={fields[column] || ''}

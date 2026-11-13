@@ -180,6 +180,13 @@ test('return info updates selected defect values and keeps a memo', async ({ pag
   });
 
   await page.goto('/return-info');
+  await expect(page.getByRole('button', { name: '111 수정' })).toBeVisible();
+  await page.getByRole('button', { name: '111 수정' }).click();
+  const editor = page.getByRole('dialog', { name: '반품정보 상세 수정' });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByLabel('상세 불량')).toBeVisible();
+  await editor.getByRole('button', { name: '상세 수정 닫기' }).click();
+  await expect(editor).toHaveCount(0);
   await page.getByRole('checkbox', { name: '이 페이지 모두 선택' }).check();
   await page.getByLabel('변경할 불량').selectOption('불량');
   await page.getByLabel('수정사항메모 입력').fill('재검수');
@@ -244,6 +251,7 @@ test('return info manual entry opens a field for every header', async ({ page })
     await expect(dialog.locator('label', { hasText: column })).toBeVisible();
     await expect(dialog.getByLabel(`직접입력 ${column}`)).toBeVisible();
   }
+  await expect(dialog.getByLabel('직접입력 수정사항메모')).toBeVisible();
   await dialog.getByRole('button', { name: '저장' }).click();
   await expect(dialog.getByText('등록일 외에 내용을 하나 이상 입력해 주세요.')).toBeVisible();
   expect(posts).toBe(0);
@@ -252,6 +260,7 @@ test('return info manual entry opens a field for every header', async ({ page })
   await dialog.getByLabel('직접입력 관리번호').fill('M-1');
   await dialog.getByLabel('직접입력 상품명').fill('셔츠');
   await dialog.getByLabel('직접입력 수량').fill('2');
+  await dialog.getByLabel('직접입력 수정사항메모').fill('입고 확인');
   const saved = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return request.method() === 'POST' && url.pathname === '/return-info';
@@ -265,6 +274,7 @@ test('return info manual entry opens a field for every header', async ({ page })
   expect(body.상품명).toBe('셔츠');
   expect(body.수량).toBe(2);
   expect(body.CS이력).toBeNull();
+  expect(body.수정사항메모).toBe('입고 확인');
   await expect(page.getByText('목록에 수동 입력으로 표시됩니다.')).toBeVisible();
   await expect(page.getByRole('columnheader', { name: '입력구분' })).toBeVisible();
   await expect(page.getByRole('cell', { name: '수동 입력' })).toBeVisible();
@@ -319,7 +329,7 @@ test('return info log shows the actor and restores a deleted row', async ({ page
   await page.goto('/return-info-log');
   await expect(page.getByRole('heading', { name: '반품정보 조회 로그 분석' })).toBeVisible();
   await expect(page.getByRole('cell', { name: '물류담당' })).toBeVisible();
-  await expect(page.getByRole('cell', { name: '삭제 · 셔츠 · 111' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '삭제 · 셔츠 · 111', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '삭제 · 셔츠 · 111 되돌리기' }).click();
   await page.getByRole('button', { name: '네' }).click();
   await expect(page.getByText('삭제한 반품정보를 목록으로 되돌렸습니다.')).toBeVisible();

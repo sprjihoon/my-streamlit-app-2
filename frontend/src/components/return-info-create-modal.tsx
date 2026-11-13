@@ -11,8 +11,12 @@ import {
 } from '@/lib/api';
 
 const DATE_COLUMNS = new Set<string>(RETURN_INFO_DATE_COLUMNS);
-const WIDE_COLUMNS = new Set(['CS이력', '반품메모']);
-const CONTENT_COLUMNS = RETURN_INFO_COLUMNS.filter((column) => column !== '등록일' && column !== '등록자');
+const MEMO_COLUMN = '수정사항메모';
+const FORM_COLUMNS = RETURN_INFO_COLUMNS.flatMap((column) => (
+  column === '반품메모' ? [column, MEMO_COLUMN] : [column]
+));
+const WIDE_COLUMNS = new Set(['CS이력', '반품메모', MEMO_COLUMN]);
+const CONTENT_COLUMNS = FORM_COLUMNS.filter((column) => column !== '등록일' && column !== '등록자');
 
 function todayValue() {
   const now = new Date();
@@ -33,7 +37,7 @@ function authorName() {
 
 function blankFields() {
   const fields: Record<string, string> = {};
-  RETURN_INFO_COLUMNS.forEach((column) => {
+  FORM_COLUMNS.forEach((column) => {
     fields[column] = '';
   });
   fields['등록일'] = todayValue();
@@ -103,7 +107,7 @@ export function ReturnInfoCreateModal({
       return;
     }
     const payload: Record<string, string | number | null> = {};
-    RETURN_INFO_COLUMNS.forEach((column) => {
+    FORM_COLUMNS.forEach((column) => {
       const value = (fields[column] || '').trim();
       if (column === '수량') {
         payload[column] = value === '' ? null : Number(value);
@@ -152,7 +156,7 @@ export function ReturnInfoCreateModal({
           </p>
           {error ? <Alert type="error" message={error} onClose={() => setError(null)} /> : null}
           <div className="return-create-grid">
-            {RETURN_INFO_COLUMNS.map((column) => (
+            {FORM_COLUMNS.map((column) => (
               <Field
                 key={column}
                 label={column}

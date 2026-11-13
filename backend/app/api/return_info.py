@@ -323,7 +323,8 @@ def _manual_qty(value) -> int | None:
 def _normalize_manual_row(payload, nickname: str) -> dict:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="입력 형식이 올바르지 않습니다.")
-    if any(key not in RETURN_HEADERS for key in payload):
+    allowed = set(RETURN_HEADERS) | {MEMO_HEADER}
+    if any(key not in allowed for key in payload):
         raise HTTPException(status_code=400, detail="허용되지 않은 항목이 있습니다.")
     values = {}
     for name in RETURN_HEADERS:
@@ -334,9 +335,10 @@ def _normalize_manual_row(payload, nickname: str) -> dict:
             values[name] = _manual_qty(raw)
         else:
             values[name] = _manual_text(name, raw)
+    values[MEMO_HEADER] = _manual_text(MEMO_HEADER, payload.get(MEMO_HEADER))
     if not values.get("등록자") and nickname:
         values["등록자"] = nickname
-    if not any(values.get(name) not in (None, "") for name in MANUAL_CONTENT_HEADERS):
+    if not any(values.get(name) not in (None, "") for name in (*MANUAL_CONTENT_HEADERS, MEMO_HEADER)):
         raise HTTPException(status_code=400, detail="등록일 외에 내용을 하나 이상 입력해 주세요.")
     return values
 
@@ -379,7 +381,7 @@ def _same_return_row(con, values: dict, exclude_id: int | None = None) -> bool:
 
 def _insert_return_row(con, values: dict) -> int:
     present = set(_columns(con))
-    names = [name for name in RETURN_HEADERS if name in present]
+    names = [name for name in (*RETURN_HEADERS, MEMO_HEADER) if name in present]
     if SOURCE_HEADER in present:
         names.append(SOURCE_HEADER)
     if not names:

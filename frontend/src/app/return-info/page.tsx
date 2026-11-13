@@ -22,7 +22,6 @@ import {
   deleteReturnInfo,
   getReturnInfo,
   getReturnInfoOptions,
-  updateReturnInfo,
   updateReturnInfoDefect,
   type ReturnInfoChoices,
   type ReturnInfoFilters,
@@ -34,7 +33,15 @@ const MULTI_COLUMNS = ['판매처', '공급처'] as const;
 const WIDE_COLUMNS = new Set(['반품메모', '수정사항메모']);
 const SHORT_COLUMNS = new Set(['상태', '등록자', '관리번호', '주문번호', '수령자', '수량', '불량']);
 const DEFECT_CHOICES = ['정상', '불량'] as const;
+const WIDE_CELLS = new Set(['CS이력', '반품메모', '수정사항메모', '상품명']);
+const SHORT_CELLS = new Set(['상태', '등록자', '수량', '불량', '입력구분']);
 const PAGE_SIZES = [20, 50, 100];
+
+function columnClass(column: string) {
+  if (WIDE_CELLS.has(column)) return 'return-col-wide';
+  if (SHORT_CELLS.has(column)) return 'return-col-short';
+  return 'return-col';
+}
 
 function rowId(row: Record<string, string | number | null>) {
   const value = row.id;
@@ -91,7 +98,6 @@ export default function ReturnInfoPage() {
   const [editMemo, setEditMemo] = useState('');
   const [savingDefect, setSavingDefect] = useState(false);
   const [editRow, setEditRow] = useState<Record<string, string | number | null> | null>(null);
-  const [inline, setInline] = useState<Record<number, { 불량: string; 수정사항메모: string }>>({});
   const [savingRow, setSavingRow] = useState<number | null>(null);
   const savingDefectRef = useRef(false);
   const savingRowRef = useRef<number | null>(null);
@@ -107,7 +113,6 @@ export default function ReturnInfoPage() {
         setColumns(data.columns?.length ? data.columns : [...RETURN_INFO_COLUMNS]);
         setRows(data.rows || []);
         setTotal(data.total || 0);
-        setInline({});
       })
       .catch((err) => {
         if (cancelled) return;
@@ -229,59 +234,6 @@ export default function ReturnInfoPage() {
     if (number !== '-') return number;
     const name = cellText(row.상품명);
     return name !== '-' ? name : '이 행';
-  }
-
-  function inlineFields(row: Record<string, string | number | null>) {
-    const id = rowId(row);
-    const stored = id !== null ? inline[id] : undefined;
-    return {
-      불량: stored?.불량 ?? String(row.불량 ?? ''),
-      수정사항메모: stored?.수정사항메모 ?? String(row.수정사항메모 ?? ''),
-    };
-  }
-
-  function setInlineField(row: Record<string, string | number | null>, field: '불량' | '수정사항메모', value: string) {
-    const id = rowId(row);
-    if (id === null) return;
-    setInline((current) => ({
-      ...current,
-      [id]: {
-        불량: current[id]?.불량 ?? String(row.불량 ?? ''),
-        수정사항메모: current[id]?.수정사항메모 ?? String(row.수정사항메모 ?? ''),
-        [field]: value,
-      },
-    }));
-  }
-
-  async function saveInline(row: Record<string, string | number | null>) {
-    const id = rowId(row);
-    if (id === null || savingRowRef.current !== null) return;
-    const draft = inlineFields(row);
-    const payload: Record<string, string | null> = {};
-    if (draft.불량.trim() !== String(row.불량 ?? '').trim()) payload.불량 = draft.불량.trim() || null;
-    if (draft.수정사항메모.trim() !== String(row.수정사항메모 ?? '').trim()) {
-      payload.수정사항메모 = draft.수정사항메모.trim() || null;
-    }
-    if (Object.keys(payload).length === 0) {
-      setMessage({ type: 'error', text: '바뀐 불량이나 수정사항메모가 없습니다.' });
-      return;
-    }
-    savingRowRef.current = id;
-    setSavingRow(id);
-    setMessage(null);
-    try {
-      const result = await updateReturnInfo(id, payload);
-      setMessage({
-        type: 'success',
-        text: result.changed ? `${rowLabel(row)} 행을 저장했습니다.` : '바뀐 내용이 없습니다.',
-      });
-      setListVersion((current) => current + 1);
-    } catch (err) {
-      setMessage({ type: 'error', text: errorText(err) });
-    } finally {
-      savingRowRef.current = null;
-      setSavingRow(null);
-    }
   }
 
   async function removeRow(row: Record<string, string | number | null>) {
@@ -615,44 +567,47 @@ export default function ReturnInfoPage() {
               <p className="caption">조건에 맞는 반품정보가 없습니다.</p>
             ) : (
               <>
-              <div className="return-defect-bar">
-                <Field label="불량" className="return-defect-choice">
-                  <Select
-                    aria-label="변경할 불량"
-                    value={defectChoice}
-                    onChange={(event) => setDefectChoice(event.target.value as '' | '정상' | '불량')}
+              {selectedCount > 0 ? (
+                <div className="return-defect-bar">
+                  <Field label="불량" className="return-defect-choice">
+                    <Select
+                      aria-label="변경할 불량"
+                      value={defectChoice}
+                      onChange={(event) => setDefectChoice(event.target.value as '' | '정상' | '불량')}
+                    >
+                      <option value="">선택</option>
+                      {DEFECT_CHOICES.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="수정사항메모" className="return-defect-memo">
+                    <input
+                      aria-label="수정사항메모 입력"
+                      value={editMemo}
+                      maxLength={4000}
+                      placeholder="선택한 행에 같이 남길 메모"
+                      onChange={(event) => setEditMemo(event.target.value)}
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    disabled={savingDefect || defectChoice === ''}
+                    onClick={applyDefect}
                   >
-                    <option value="">선택</option>
-                    {DEFECT_CHOICES.map((value) => (
-                      <option key={value} value={value}>{value}</option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="수정사항메모" className="return-defect-memo">
-                  <textarea
-                    aria-label="수정사항메모 입력"
-                    value={editMemo}
-                    maxLength={4000}
-                    placeholder="선택한 행에 같이 남길 메모"
-                    onChange={(event) => setEditMemo(event.target.value)}
-                  />
-                </Field>
-                <Button
-                  type="button"
-                  disabled={savingDefect || selectedCount === 0 || defectChoice === ''}
-                  onClick={applyDefect}
-                >
-                  {savingDefect ? '변경하는 중...' : `선택 ${selectedCount}건 변경`}
-                </Button>
-              </div>
-              <p className="caption tw-mb-2 tw-mt-0">
-                체크한 행은 한 번에 바꾸고, 각 행의 불량과 수정사항메모는 바로 고친 뒤 저장합니다. 다른 항목은 수정으로 열고, 지운 행은 로그 분석에서 되돌립니다.
-              </p>
-              <div style={{ overflowX: 'auto' }}>
+                    {savingDefect ? '변경하는 중...' : `선택 ${selectedCount}건 변경`}
+                  </Button>
+                </div>
+              ) : (
+                <p className="caption tw-mb-2 tw-mt-0">
+                  여러 행은 체크한 뒤 불량만 한 번에 바꿉니다. 한 행의 다른 항목은 수정을 누르면 팝업에서 고칩니다.
+                </p>
+              )}
+              <div className="return-sheet">
                 <table>
                   <thead>
                     <tr>
-                      <th className="return-check-col">
+                      <th className="return-sticky return-sticky-check">
                         <input
                           ref={pageCheckRef}
                           type="checkbox"
@@ -663,10 +618,10 @@ export default function ReturnInfoPage() {
                           onChange={(event) => togglePage(event.target.checked)}
                         />
                       </th>
+                      <th className="return-sticky return-sticky-actions">작업</th>
                       {tableColumns.map((column) => (
-                        <th key={column}>{column}</th>
+                        <th key={column} className={columnClass(column)}>{column}</th>
                       ))}
-                      <th>작업</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -674,7 +629,7 @@ export default function ReturnInfoPage() {
                       const id = rowId(row);
                       return (
                       <tr key={id ?? `${row.관리번호 ?? ''}-${index}`}>
-                        <td className="return-check-col">
+                        <td className="return-sticky return-sticky-check">
                           <input
                             type="checkbox"
                             className="return-row-check"
@@ -686,72 +641,43 @@ export default function ReturnInfoPage() {
                             }}
                           />
                         </td>
+                        <td className="return-sticky return-sticky-actions">
+                          {id === null ? '-' : (
+                            <div className="return-row-actions">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                disabled={savingRow === id}
+                                aria-label={`${rowLabel(row)} 수정`}
+                                onClick={() => setEditRow(row)}
+                              >
+                                수정
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="danger"
+                                disabled={savingRow === id}
+                                aria-label={`${rowLabel(row)} 삭제`}
+                                onClick={() => void removeRow(row)}
+                              >
+                                삭제
+                              </Button>
+                            </div>
+                          )}
+                        </td>
                         {tableColumns.map((column) => (
                           <td
                             key={column}
-                            className={column === 'CS이력' || column === '수정사항메모' ? 'cell-memo' : column === '반품메모' ? 'cell-truncate' : undefined}
-                            title={column === '입력구분' && row[column] === '수동 입력' ? '수동 입력' : column === '불량' || column === '수정사항메모' ? undefined : cellText(row[column])}
+                            className={columnClass(column)}
+                            title={cellText(row[column])}
                           >
-                            {column === '입력구분' ? (
-                              row[column] === '수동 입력' ? (
-                                <span className="return-source-manual">수동 입력</span>
-                              ) : (
-                                '-'
-                              )
-                            ) : column === '불량' && id !== null ? (
-                              <select
-                                aria-label={`${rowLabel(row)} 불량`}
-                                value={inlineFields(row).불량}
-                                onChange={(event) => setInlineField(row, '불량', event.target.value)}
-                              >
-                                <option value="">선택</option>
-                                {[...new Set([...DEFECT_CHOICES, inlineFields(row).불량].filter(Boolean))].map((value) => (
-                                  <option key={value} value={value}>{value}</option>
-                                ))}
-                              </select>
-                            ) : column === '수정사항메모' && id !== null ? (
-                              <textarea
-                                aria-label={`${rowLabel(row)} 수정사항메모`}
-                                className="return-inline-memo"
-                                value={inlineFields(row).수정사항메모}
-                                maxLength={4000}
-                                onChange={(event) => setInlineField(row, '수정사항메모', event.target.value)}
-                              />
+                            {column === '입력구분' && row[column] === '수동 입력' ? (
+                              <span className="return-source-manual">수동 입력</span>
                             ) : (
                               cellText(row[column])
                             )}
                           </td>
                         ))}
-                        <td>
-                          <div className="return-row-actions">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              disabled={id === null || savingRow === id}
-                              aria-label={`${rowLabel(row)} 수정`}
-                              onClick={() => setEditRow(row)}
-                            >
-                              수정
-                            </Button>
-                            <Button
-                              type="button"
-                              disabled={id === null || savingRow === id}
-                              aria-label={`${rowLabel(row)} 저장`}
-                              onClick={() => void saveInline(row)}
-                            >
-                              {savingRow === id ? '처리 중...' : '저장'}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="danger"
-                              disabled={id === null || savingRow === id}
-                              aria-label={`${rowLabel(row)} 삭제`}
-                              onClick={() => void removeRow(row)}
-                            >
-                              삭제
-                            </Button>
-                          </div>
-                        </td>
                       </tr>
                       );
                     })}

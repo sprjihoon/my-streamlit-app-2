@@ -345,6 +345,18 @@ def test_return_info_manual_create_keeps_work_log(isolated_runtime):
     assert body["row"]["상품명"] == "셔츠"
     assert body["row"]["수량"] == 2
     assert body["row"]["입력구분"] == "수동 입력"
+    assert body["row"]["수정사항메모"] is None
+
+    noted = client.post(
+        "/return-info",
+        params={"token": "staff-tok"},
+        json=_manual_payload(관리번호="M-79", 수정사항메모="입고 확인"),
+    )
+    assert noted.status_code == 200
+    assert noted.json()["row"]["수정사항메모"] == "입고 확인"
+    noted_row = client.get("/return-info", params={"token": "staff-tok", "관리번호": "M-79"})
+    assert noted_row.status_code == 200
+    assert noted_row.json()["rows"][0]["수정사항메모"] == "입고 확인"
 
     listed = client.get("/return-info", params={"token": "staff-tok", "관리번호": "M-77"})
     assert listed.status_code == 200
