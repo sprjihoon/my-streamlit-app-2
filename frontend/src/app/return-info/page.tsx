@@ -33,15 +33,18 @@ const MULTI_COLUMNS = ['판매처', '공급처'] as const;
 const WIDE_COLUMNS = new Set(['반품메모', '수정사항메모']);
 const SHORT_COLUMNS = new Set(['상태', '등록자', '관리번호', '주문번호', '수령자', '수량', '불량']);
 const DEFECT_CHOICES = ['정상', '불량'] as const;
-const WIDE_CELLS = new Set(['CS이력', '반품메모', '수정사항메모', '상품명']);
-const SHORT_CELLS = new Set(['상태', '등록자', '수량', '불량', '입력구분']);
+const LIST_COLUMNS = ['등록일', '관리번호', '판매처', '상품명', '수량', '불량', '수정사항메모', '공급처'] as const;
+const LIST_CLASS: Record<string, string> = {
+  등록일: 'return-col-date',
+  관리번호: 'return-col-id',
+  판매처: 'return-col-party',
+  상품명: 'return-col-name',
+  수량: 'return-col-qty',
+  불량: 'return-col-flag',
+  수정사항메모: 'return-col-memo',
+  공급처: 'return-col-party',
+};
 const PAGE_SIZES = [20, 50, 100];
-
-function columnClass(column: string) {
-  if (WIDE_CELLS.has(column)) return 'return-col-wide';
-  if (SHORT_CELLS.has(column)) return 'return-col-short';
-  return 'return-col';
-}
 
 function rowId(row: Record<string, string | number | null>) {
   const value = row.id;
@@ -148,7 +151,7 @@ export default function ReturnInfoPage() {
   }, [listVersion]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const tableColumns = ['입력구분', ...columns.filter((column) => column !== '입력구분')];
+  const tableColumns = LIST_COLUMNS.filter((column) => columns.includes(column));
   const extraColumns = columns.filter((column) => !RETURN_INFO_COLUMNS.includes(column as typeof RETURN_INFO_COLUMNS[number]));
   const dateActive = RETURN_INFO_DATE_COLUMNS.some((column) => draft[`${column}_from`] || draft[`${column}_to`]);
   const conditionColumns = [
@@ -600,14 +603,14 @@ export default function ReturnInfoPage() {
                 </div>
               ) : (
                 <p className="caption tw-mb-2 tw-mt-0">
-                  여러 행은 체크한 뒤 불량만 한 번에 바꿉니다. 한 행의 다른 항목은 수정을 누르면 팝업에서 고칩니다.
+                  여러 행은 체크한 뒤 불량만 한 번에 바꿉니다. 주문번호, 바코드, CS이력 등 나머지 항목은 수정에서 봅니다.
                 </p>
               )}
               <div className="return-sheet">
                 <table>
                   <thead>
                     <tr>
-                      <th className="return-sticky return-sticky-check">
+                      <th className="return-col-check">
                         <input
                           ref={pageCheckRef}
                           type="checkbox"
@@ -618,9 +621,9 @@ export default function ReturnInfoPage() {
                           onChange={(event) => togglePage(event.target.checked)}
                         />
                       </th>
-                      <th className="return-sticky return-sticky-actions">작업</th>
+                      <th className="return-col-actions">작업</th>
                       {tableColumns.map((column) => (
-                        <th key={column} className={columnClass(column)}>{column}</th>
+                        <th key={column} className={LIST_CLASS[column]}>{column}</th>
                       ))}
                     </tr>
                   </thead>
@@ -629,7 +632,7 @@ export default function ReturnInfoPage() {
                       const id = rowId(row);
                       return (
                       <tr key={id ?? `${row.관리번호 ?? ''}-${index}`}>
-                        <td className="return-sticky return-sticky-check">
+                        <td className="return-col-check">
                           <input
                             type="checkbox"
                             className="return-row-check"
@@ -641,7 +644,7 @@ export default function ReturnInfoPage() {
                             }}
                           />
                         </td>
-                        <td className="return-sticky return-sticky-actions">
+                        <td className="return-col-actions">
                           {id === null ? '-' : (
                             <div className="return-row-actions">
                               <Button
@@ -668,11 +671,14 @@ export default function ReturnInfoPage() {
                         {tableColumns.map((column) => (
                           <td
                             key={column}
-                            className={columnClass(column)}
+                            className={LIST_CLASS[column]}
                             title={cellText(row[column])}
                           >
-                            {column === '입력구분' && row[column] === '수동 입력' ? (
-                              <span className="return-source-manual">수동 입력</span>
+                            {column === '상품명' && row['입력구분'] === '수동 입력' ? (
+                              <span className="return-name-line">
+                                <span className="return-source-manual">수동</span>
+                                <span>{cellText(row[column])}</span>
+                              </span>
                             ) : (
                               cellText(row[column])
                             )}

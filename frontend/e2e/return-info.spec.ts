@@ -82,6 +82,7 @@ test('return info page filters every header and pages the rows', async ({ page }
   await page.locator('summary', { hasText: '날짜' }).click();
   await page.locator('summary', { hasText: '조건' }).click();
   for (const column of COLUMNS) {
+    if (column === 'CS이력') continue;
     await expect(page.getByText(column, { exact: true }).first()).toBeVisible();
   }
   const registeredStart = await page.getByLabel('등록일 시작').boundingBox();
@@ -123,6 +124,10 @@ test('return info page filters every header and pages the rows', async ({ page }
   await page.getByRole('button', { name: '검색' }).click();
   await keywordSearch;
   await expect(page.getByRole('cell', { name: '111' })).toBeVisible();
+  const sheetFit = await page.locator('.return-sheet').evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(sheetFit).toBeLessThanOrEqual(1);
+  const pageFit = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(pageFit).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: '다음' }).click();
   await expect(page.getByRole('cell', { name: '333' })).toBeVisible();
   await expect(page.getByText('2 / 2')).toBeVisible();
@@ -185,6 +190,18 @@ test('return info updates selected defect values and keeps a memo', async ({ pag
 
   await page.goto('/return-info');
   await expect(page.getByRole('button', { name: '111 수정' })).toBeVisible();
+  const actionFit = await page.locator('.return-sheet').evaluate((sheet) => {
+    const button = sheet.querySelector('button');
+    if (!(button instanceof HTMLElement)) return { sheet: 0, button: 0 };
+    const sheetBox = sheet.getBoundingClientRect();
+    const buttonBox = button.getBoundingClientRect();
+    return {
+      sheet: sheet.scrollWidth - sheet.clientWidth,
+      button: Math.max(0, buttonBox.right - sheetBox.right),
+    };
+  });
+  expect(actionFit.sheet).toBeLessThanOrEqual(1);
+  expect(actionFit.button).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: '111 수정' }).click();
   const editor = page.getByRole('dialog', { name: '반품정보 상세 수정' });
   await expect(editor).toBeVisible();
@@ -280,8 +297,7 @@ test('return info manual entry opens a field for every header', async ({ page })
   expect(body.CS이력).toBeNull();
   expect(body.수정사항메모).toBe('입고 확인');
   await expect(page.getByText('목록에 수동 입력으로 표시됩니다.')).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: '입력구분' })).toBeVisible();
-  await expect(page.getByRole('cell', { name: '수동 입력' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '수동 셔츠' })).toBeVisible();
   await expect(dialog).toHaveCount(0);
   expect(posts).toBe(1);
 
