@@ -654,14 +654,21 @@ h1, h2, h3, h4 {
   vertical-align: middle;
 }
 .return-sheet .return-col-check { width: 4%; text-align: center; }
-.return-sheet .return-col-actions { width: 11%; }
+.return-sheet .return-col-actions { width: 10%; }
 .return-sheet .return-col-date { width: 9%; }
-.return-sheet .return-col-id { width: 12%; }
-.return-sheet .return-col-qty { width: 6%; }
-.return-sheet .return-col-flag { width: 7%; }
-.return-sheet .return-col-party { width: 10%; }
-.return-sheet .return-col-name { width: 18%; }
-.return-sheet .return-col-memo { width: 13%; }
+.return-sheet .return-col-id { width: 8%; }
+.return-sheet .return-col-qty { width: 5%; }
+.return-sheet .return-col-flag { width: 5%; }
+.return-sheet .return-col-party { width: 11%; }
+.return-sheet .return-col-name { width: 22%; }
+.return-sheet .return-col-memo { width: 15%; }
+.return-sheet .return-col-actions,
+.return-sheet .return-col-id,
+.return-sheet .return-col-qty,
+.return-sheet .return-col-flag {
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+}
 .return-name-line {
   display: flex;
   align-items: center;
