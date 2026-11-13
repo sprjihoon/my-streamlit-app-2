@@ -1,21 +1,25 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Alert } from '@/components/Alert';
 import { getUploadList, resetTableData, resetTableDataByPeriod, uploadFile } from '@/lib/api';
 
 export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const uploadImpl = useRef<(file: File) => Promise<void>>(async () => {});
+  const uploadingRef = useRef(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [uploadCount, setUploadCount] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [periodResetting, setPeriodResetting] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -66,6 +70,25 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
     };
   }, [isAdmin, message]);
 
+  useEffect(() => {
+    if (!signedIn) return;
+    function onPaste(event: ClipboardEvent) {
+      if (!detailsRef.current?.open || uploadingRef.current) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const files = event.clipboardData?.files;
+      if (!files?.length) return;
+      event.preventDefault();
+      if (files.length > 1) {
+        setMessage({ type: 'error', text: '엑셀 파일 하나만 붙여넣어 주세요.' });
+        return;
+      }
+      void uploadImpl.current(files[0]);
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [signedIn]);
+
   async function handleUpload(file: File) {
     const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
@@ -101,6 +124,46 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
     }
+  }
+
+  uploadImpl.current = handleUpload;
+  uploadingRef.current = uploading;
+
+  function handleDragEnter(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setDragging(true);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setDragging(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragging(false);
+    if (uploadingRef.current) return;
+    const files = event.dataTransfer.files;
+    if (!files?.length) return;
+    if (files.length > 1) {
+      setMessage({ type: 'error', text: '엑셀 파일 하나만 끌어다 놓아 주세요.' });
+      return;
+    }
+    void handleUpload(files[0]);
+  }
+
+  function openPicker() {
+    if (uploadingRef.current) return;
+    fileRef.current?.click();
   }
 
   async function handleReset() {
@@ -153,11 +216,27 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   if (!signedIn) return null;
 
   return (
-    <details className="return-filter-accordion">
+    <details className="return-filter-accordion" ref={detailsRef}>
       <summary>반품정보 업로드</summary>
-      <div className="return-upload-body">
+      <div
+        className="return-upload-body"
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
       {message && <Alert type={message.type} message={message.text} onClose={() => setMessage(null)} />}
-      <div className="file-upload" onClick={() => fileRef.current?.click()}>
+      <div
+        className={`file-upload${dragging ? ' is-dragover' : ''}`}
+        tabIndex={0}
+        onClick={openPicker}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openPicker();
+          }
+        }}
+      >
         <input
           type="file"
           accept=".xlsx,.xls"
@@ -170,15 +249,17 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
         />
         {uploading ? (
           <span>업로드 중...</span>
+        ) : dragging ? (
+          <div>여기에 놓으면 바로 업로드됩니다</div>
         ) : (
           <>
-            <div>엑셀 파일 선택</div>
-            <small className="text-muted">.xlsx, .xls</small>
+            <div>엑셀 파일을 여기에 끌어다 놓기</div>
+            <small className="text-muted">클릭해서 선택하거나 Ctrl+V로 붙여넣기 · .xlsx, .xls</small>
           </>
         )}
       </div>
       <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
-        재입고 대기 엑셀입니다. 모든 칸이 같은 행은 다시 올리지 않습니다.
+        재입고 대기 엑셀입니다. 폴더에서 파일을 끌어다 놓거나 복사한 뒤 붙여넣을 수 있습니다. 모든 칸이 같은 행은 다시 올리지 않습니다.
       </p>
       {isAdmin && (
       <div className="metric" style={{ marginTop: '0.5rem' }}>

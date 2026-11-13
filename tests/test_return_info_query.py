@@ -87,8 +87,8 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     body = memo.json()
     assert body["columns"] == [
         "상태", "등록일", "등록자", "입고일", "관리번호", "발주일", "판매처",
-        "주문번호", "수령자", "상품명", "바코드", "옵션", "수량", "불량", "CS이력", "반품메모", "공급처",
-        "입력구분",
+        "주문번호", "수령자", "상품명", "바코드", "옵션", "수량", "불량", "CS이력", "반품메모",
+        "수정사항메모", "공급처", "입력구분",
     ]
     assert all(row["입력구분"] is None for row in body["rows"])
     assert body["total"] == 2
@@ -151,7 +151,7 @@ def test_return_info_report_uses_filtered_rows(isolated_runtime):
     headers = [cell.value for cell in sheet[7]]
     assert headers == [
         "번호", "등록일", "등록자", "관리번호", "주문번호", "판매처", "수령자",
-        "상품명", "옵션", "바코드", "수량", "불량", "CS이력", "반품메모",
+        "상품명", "옵션", "바코드", "수량", "불량", "CS이력", "반품메모", "수정사항메모",
     ]
     assert "상태" not in headers
     numbers = [sheet.cell(row, 1).value for row in range(8, sheet.max_row + 1)]
@@ -406,3 +406,188 @@ def test_return_info_manual_create_keeps_work_log(isolated_runtime):
     assert saved == 1
     assert dated == 1
     assert upload_count == 0
+
+
+def test_return_info_defect_update_keeps_other_columns(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    _insert_rows()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    listed = client.get("/return-info", params={"token": "staff-tok"})
+    assert listed.status_code == 200
+    rows = {row["관리번호"]: row for row in listed.json()["rows"]}
+    first = rows["111"]["id"]
+    second = rows["222"]["id"]
+    third = rows["333"]["id"]
+
+    denied = client.post("/return-info/defect", json={"ids": [first], "불량": "불량"})
+    assert denied.status_code == 401
+
+    rejected = client.post(
+        "/return-info/defect",
+        params={"token": "staff-tok"},
+        json={"ids": [first], "불량": "보류"},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "불량은 정상 또는 불량만 선택할 수 있습니다."
+
+    extra = client.post(
+        "/return-info/defect",
+        params={"token": "staff-tok"},
+        json={"ids": [first], "불량": "불량", "상태": "완료"},
+    )
+    assert extra.status_code == 400
+    assert extra.json()["detail"] == "불량과 수정사항메모만 변경할 수 있습니다."
+
+    missing = client.post(
+        "/return-info/defect",
+        params={"token": "staff-tok"},
+        json={"ids": [first, 999999], "불량": "불량", "수정사항메모": "없어야 함"},
+    )
+    assert missing.status_code == 404
+    with get_connection() as con:
+        untouched = con.execute(
+            "SELECT 불량, 수정사항메모 FROM return_info WHERE id=?",
+            (first,),
+        ).fetchone()
+    assert untouched == ("정상", None)
+
+    updated = client.post(
+        "/return-info/defect",
+        params={"token": "staff-tok"},
+        json={"ids": [first, second], "불량": "정상", "수정사항메모": "재검수"},
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {"updated": 2, "불량": "정상", "수정사항메모": "재검수"}
+
+    kept = client.post(
+        "/return-info/defect",
+        params={"token": "admin-tok"},
+        json={"ids": [first], "불량": "불량"},
+    )
+    assert kept.status_code == 200
+    assert "수정사항메모" not in kept.json()
+
+    with get_connection() as con:
+        changed = con.execute(
+            "SELECT 관리번호, 불량, 수정사항메모, 상품명, 반품메모, 입력구분 FROM return_info WHERE id=?",
+            (first,),
+        ).fetchone()
+        paired = con.execute(
+            "SELECT 불량, 수정사항메모, 상품명 FROM return_info WHERE id=?",
+            (second,),
+        ).fetchone()
+        skipped = con.execute(
+            "SELECT 불량, 수정사항메모 FROM return_info WHERE id=?",
+            (third,),
+        ).fetchone()
+        work = con.execute("SELECT 업체명, 출처 FROM work_log").fetchone()
+    assert changed == ("111", "불량", "재검수", "셔츠", "아무개 입고", None)
+    assert paired == ("정상", "재검수", "바지")
+    assert skipped == ("정상", None)
+    assert work == ("기존업체", "bot")
+
+    exported = client.get("/return-info/export", params={"token": "staff-tok", "관리번호": "111"})
+    assert exported.status_code == 200
+    sheet = load_workbook(io.BytesIO(exported.content)).active
+    headers = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
+    memo_col = headers.index("수정사항메모") + 1
+    defect_col = headers.index("불량") + 1
+    assert headers[headers.index("반품메모") + 1] == "수정사항메모"
+    assert sheet.cell(2, defect_col).value == "불량"
+    assert sheet.cell(2, memo_col).value == "재검수"
+
+    report = client.get("/return-info/report", params={"token": "staff-tok", "관리번호": "111"})
+    assert report.status_code == 200
+    report_sheet = load_workbook(io.BytesIO(report.content)).active
+    report_headers = [cell.value for cell in report_sheet[7]]
+    assert report_headers[-1] == "수정사항메모"
+    assert report_sheet.cell(8, len(report_headers)).value == "재검수"
+    assert report_sheet.cell(8, report_headers.index("불량") + 1).value == "불량"
+
+
+def test_return_info_edit_delete_and_restore_keep_work_log(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    _insert_rows()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    listed = client.get("/return-info", params={"token": "staff-tok"})
+    rows = {row["관리번호"]: row for row in listed.json()["rows"]}
+    target = rows["111"]["id"]
+    other = rows["222"]["id"]
+
+    guest = client.patch(f"/return-info/{target}", json={"상품명": "다른셔츠"})
+    assert guest.status_code == 401
+
+    unknown = client.patch(
+        f"/return-info/{target}",
+        params={"token": "staff-tok"},
+        json={"비밀": "값"},
+    )
+    assert unknown.status_code == 400
+    assert unknown.json()["detail"] == "허용되지 않은 항목이 있습니다."
+
+    same = client.patch(
+        f"/return-info/{target}",
+        params={"token": "staff-tok"},
+        json={"상품명": "셔츠"},
+    )
+    assert same.status_code == 200
+    assert same.json()["changed"] is False
+
+    edited = client.patch(
+        f"/return-info/{target}",
+        params={"token": "staff-tok"},
+        json={"상품명": "다른셔츠", "수정사항메모": "색상 확인"},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["changed"] is True
+    assert edited.json()["row"]["상품명"] == "다른셔츠"
+    assert edited.json()["row"]["반품메모"] == "아무개 입고"
+
+    removed = client.delete(f"/return-info/{target}", params={"token": "admin-tok"})
+    assert removed.status_code == 200
+    assert removed.json()["deleted"] is True
+
+    hidden = client.get("/return-info", params={"token": "staff-tok", "관리번호": "111"})
+    assert hidden.json()["total"] == 0
+    still = client.get("/return-info", params={"관리번호": "222"})
+    assert still.json()["total"] == 1
+
+    denied_log = client.get("/return-info/logs")
+    assert denied_log.status_code == 401
+    logs = client.get("/return-info/logs", params={"token": "staff-tok", "actor": "관리자"})
+    assert logs.status_code == 200
+    body = logs.json()
+    assert body["summary"]["delete"] == 1
+    assert body["rows"][0]["actor_name"] == "관리자"
+    assert body["rows"][0]["action"] == "delete"
+    assert body["rows"][0]["can_restore"] is True
+    assert "111" in body["rows"][0]["summary"]
+    delete_log_id = body["rows"][0]["id"]
+
+    staff_edit = client.get("/return-info/logs", params={"token": "staff-tok", "action": "update", "actor": "직원"})
+    assert staff_edit.json()["total"] == 1
+    changes = {item["field"]: item for item in staff_edit.json()["rows"][0]["changes"]}
+    assert changes["상품명"]["before"] == "셔츠"
+    assert changes["상품명"]["after"] == "다른셔츠"
+    assert changes["수정사항메모"]["after"] == "색상 확인"
+
+    brought = client.post(f"/return-info/logs/{delete_log_id}/restore", params={"token": "staff-tok"})
+    assert brought.status_code == 200
+    again = client.post(f"/return-info/logs/{delete_log_id}/restore", params={"token": "staff-tok"})
+    assert again.status_code == 409
+
+    restored = client.get("/return-info", params={"token": "staff-tok", "관리번호": "111"})
+    assert restored.json()["total"] == 1
+    assert restored.json()["rows"][0]["상품명"] == "다른셔츠"
+    assert restored.json()["rows"][0]["수정사항메모"] == "색상 확인"
+    assert restored.json()["rows"][0]["id"] != other
+
+    with get_connection() as con:
+        work = con.execute("SELECT 업체명, 출처 FROM work_log").fetchone()
+        live = con.execute(
+            "SELECT COUNT(*) FROM return_info WHERE 관리번호='111' AND (deleted_at IS NULL OR TRIM(deleted_at)='')"
+        ).fetchone()[0]
+    assert work == ("기존업체", "bot")
+    assert live == 1

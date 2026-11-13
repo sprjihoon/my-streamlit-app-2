@@ -81,6 +81,72 @@ export function createReturnInfo(fields: ReturnInfoDraft) {
   );
 }
 
+export function updateReturnInfo(id: number, fields: ReturnInfoDraft) {
+  return fetchApi<{ id: number; changed: boolean; row: ReturnInfoDraft }>(
+    `/return-info/${id}${returnInfoQuery({})}`,
+    { method: 'PATCH', body: JSON.stringify(fields) },
+  );
+}
+
+export function deleteReturnInfo(id: number) {
+  return fetchApi<{ id: number; deleted: boolean }>(
+    `/return-info/${id}${returnInfoQuery({})}`,
+    { method: 'DELETE' },
+  );
+}
+
+export interface ReturnInfoChange {
+  field: string;
+  before: string | number | null;
+  after: string | number | null;
+}
+
+export interface ReturnInfoLogEntry {
+  id: number;
+  return_info_id: number | null;
+  action: 'create' | 'update' | 'delete' | 'restore';
+  action_label: string;
+  actor_name: string;
+  summary: string;
+  changes: ReturnInfoChange[];
+  created_at: string;
+  can_restore: boolean;
+}
+
+export interface ReturnInfoLogList {
+  rows: ReturnInfoLogEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  summary: Record<'create' | 'update' | 'delete' | 'restore', number>;
+}
+
+export function getReturnInfoLogs(filters: ReturnInfoFilters, page: number, pageSize: number) {
+  return fetchApi<ReturnInfoLogList>(
+    `/return-info/logs${returnInfoQuery(filters, { page, page_size: pageSize })}`,
+  );
+}
+
+export function restoreReturnInfoLog(logId: number) {
+  return fetchApi<{ id: number; return_info_id: number; restored: boolean }>(
+    `/return-info/logs/${logId}/restore${returnInfoQuery({})}`,
+    { method: 'POST' },
+  );
+}
+
+export function updateReturnInfoDefect(ids: number[], defect: '정상' | '불량', memo: string) {
+  const body: { ids: number[]; 불량: '정상' | '불량'; 수정사항메모?: string } = {
+    ids,
+    불량: defect,
+  };
+  const note = memo.trim();
+  if (note) body.수정사항메모 = note;
+  return fetchApi<{ updated: number; 불량: '정상' | '불량'; 수정사항메모?: string }>(
+    `/return-info/defect${returnInfoQuery({})}`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+}
+
 function filenameFromDisposition(header: string | null, fallback: string) {
   if (!header) return fallback;
   const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);

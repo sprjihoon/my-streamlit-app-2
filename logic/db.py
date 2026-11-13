@@ -302,8 +302,11 @@ CRITICAL_COLS = {
         ("불량", "TEXT"),
         ("CS이력", "TEXT"),
         ("반품메모", "TEXT"),
+        ("수정사항메모", "TEXT"),
         ("공급처", "TEXT"),
         ("입력구분", "TEXT"),
+        ("deleted_at", "TEXT"),
+        ("deleted_by", "TEXT"),
     ],
     "work_log_history": [
         ("log_id", "INTEGER"),        # 원본 작업일지 ID
@@ -386,6 +389,24 @@ def ensure_tables() -> None:
             for col, coltype in col_defs:
                 if col not in existing_cols:
                     con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {coltype};")
+
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS return_info_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                return_info_id INTEGER,
+                action TEXT NOT NULL,
+                actor_id INTEGER,
+                actor_name TEXT,
+                summary TEXT,
+                changes_json TEXT,
+                snapshot_json TEXT,
+                restored_log_id INTEGER,
+                restored_at TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
         
         con.commit()
 

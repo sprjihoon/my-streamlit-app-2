@@ -148,6 +148,12 @@ export const RETURN_INFO_NAV_ITEM: NavItem = {
   icon: <Search {...IC} />,
 };
 
+export const RETURN_INFO_LOG_NAV_ITEM: NavItem = {
+  href: '/return-info-log',
+  label: '반품정보 로그 분석',
+  icon: <ScrollText {...IC} />,
+};
+
 export const ADMIN_NAV_ITEMS: NavItem[] = [
   { href: '/storage', label: '보관료 관리', icon: <Package {...IC} /> },
   { href: '/vendor-charges', label: '추가비용 관리', icon: <PlusCircle {...IC} /> },

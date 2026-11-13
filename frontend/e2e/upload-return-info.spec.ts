@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { ADMIN, installApi, seedSession, STAFF } from './support/api';
 
 test('return info upload card lives on the query page', async ({ page }) => {
@@ -126,4 +126,89 @@ test('admin must confirm before resetting return info', async ({ page }) => {
   await page.getByRole('alertdialog', { name: '데이터 초기화 확인' }).getByRole('button', { name: '삭제 확인' }).click();
   await deleted;
   await expect(page.getByText('반품정보 테이블 초기화 완료')).toBeVisible();
+});
+
+async function openReturnUpload(page: Page) {
+  await page.goto('/return-info');
+  const upload = page.locator('details.return-filter-accordion', { hasText: '반품정보 업로드' });
+  await upload.locator('summary').click();
+  await expect(page.getByText('재입고 대기 엑셀입니다.')).toBeVisible();
+  return upload;
+}
+
+test('dragging an excel onto return info upload sends that file', async ({ page }) => {
+  await seedSession(page, STAFF);
+  await installApi(page, STAFF);
+  await page.route('http://localhost:8000/upload', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, message: '반품정보 업로드 완료' }),
+    });
+  });
+
+  await openReturnUpload(page);
+  const uploaded = page.waitForRequest((request) => (
+    request.method() === 'POST' && new URL(request.url()).pathname === '/upload'
+  ));
+  await page.locator('.return-upload-body .file-upload').evaluate((el) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['excel'], 'return-waiting.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }));
+    const drop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer });
+    el.dispatchEvent(drop);
+  });
+  const request = await uploaded;
+  expect(request.postData() || '').toContain('return-waiting.xlsx');
+  await expect(page.getByText('반품정보 업로드 완료')).toBeVisible();
+});
+
+test('pasted excel uploads and other files stay out', async ({ page }) => {
+  await seedSession(page, STAFF);
+  await installApi(page, STAFF);
+  let uploads = 0;
+  await page.route('http://localhost:8000/upload', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.fallback();
+      return;
+    }
+    uploads += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, message: '붙여넣은 반품정보 업로드 완료' }),
+    });
+  });
+
+  await openReturnUpload(page);
+  await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['notes'], '메모.txt', { type: 'text/plain' }));
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: transfer });
+    window.dispatchEvent(event);
+  });
+  await expect(page.getByText('엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.')).toBeVisible();
+  expect(uploads).toBe(0);
+
+  const uploaded = page.waitForRequest((request) => (
+    request.method() === 'POST' && new URL(request.url()).pathname === '/upload'
+  ));
+  await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['excel'], 'pasted.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }));
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: transfer });
+    window.dispatchEvent(event);
+  });
+  const request = await uploaded;
+  expect(request.postData() || '').toContain('pasted.xlsx');
+  await expect(page.getByText('붙여넣은 반품정보 업로드 완료')).toBeVisible();
 });

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { CreditCard, Settings, ShieldCheck } from 'lucide-react';
 import { NavGroup } from './NavGroup';
 import { UserPanel } from './UserPanel';
-import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, INBOUND_NAV_GROUP, NAV_GROUPS, RETURN_INFO_NAV_ITEM, canSeeNavItem } from './navigation';
+import { ADMIN_NAV_ITEMS, BILLING_INVOICE_NAV_ITEMS, IC, INBOUND_NAV_GROUP, NAV_GROUPS, RETURN_INFO_LOG_NAV_ITEM, RETURN_INFO_NAV_ITEM, canSeeNavItem } from './navigation';
 import type { User } from './types';
 
 export function Sidebar({
@@ -70,6 +70,13 @@ export function Sidebar({
         >
           <span className="tw-flex tw-shrink-0 tw-items-center">{RETURN_INFO_NAV_ITEM.icon}</span>
           <span>{RETURN_INFO_NAV_ITEM.label}</span>
+        </Link>
+        <Link
+          href={RETURN_INFO_LOG_NAV_ITEM.href}
+          className={pathname === RETURN_INFO_LOG_NAV_ITEM.href ? 'active' : ''}
+        >
+          <span className="tw-flex tw-shrink-0 tw-items-center">{RETURN_INFO_LOG_NAV_ITEM.icon}</span>
+          <span>{RETURN_INFO_LOG_NAV_ITEM.label}</span>
         </Link>
 
         {user?.is_admin && (
