@@ -62,12 +62,17 @@ function errorText(err: unknown) {
   return '불량을 바꾸지 못했습니다.';
 }
 
-function emptyFilters(): ReturnInfoFilters {
+function todayKst() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+}
+
+function defaultFilters(): ReturnInfoFilters {
   const filters: ReturnInfoFilters = { q: '' };
+  const today = todayKst();
   RETURN_INFO_COLUMNS.forEach((column) => {
     if (DATE_COLUMNS.has(column)) {
-      filters[`${column}_from`] = '';
-      filters[`${column}_to`] = '';
+      filters[`${column}_from`] = column === '등록일' ? today : '';
+      filters[`${column}_to`] = column === '등록일' ? today : '';
     } else {
       filters[column] = '';
     }
@@ -81,8 +86,8 @@ function cellText(value: string | number | null | undefined) {
 }
 
 export default function ReturnInfoPage() {
-  const [draft, setDraft] = useState<ReturnInfoFilters>(emptyFilters);
-  const [applied, setApplied] = useState<ReturnInfoFilters>(emptyFilters);
+  const [draft, setDraft] = useState<ReturnInfoFilters>(defaultFilters);
+  const [applied, setApplied] = useState<ReturnInfoFilters>(defaultFilters);
   const [columns, setColumns] = useState<string[]>([...RETURN_INFO_COLUMNS]);
   const [rows, setRows] = useState<Array<Record<string, string | number | null>>>([]);
   const [total, setTotal] = useState(0);
@@ -281,7 +286,7 @@ export default function ReturnInfoPage() {
   }
 
   function resetFilters() {
-    const cleared = emptyFilters();
+    const cleared = defaultFilters();
     setDraft(cleared);
     setApplied(cleared);
     setChoiceQuery({});
@@ -510,7 +515,7 @@ export default function ReturnInfoPage() {
               </Button>
             </div>
             <p className="caption tw-mb-0 tw-mt-2">
-              전체 검색은 모든 칸을 보고, 아래 조건과 함께 쓰면 둘 다 맞는 행만 남습니다. 날짜는 위가 시작, 아래가 종료입니다. 엑셀과 보고서는 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
+              전체 검색은 모든 칸을 보고, 아래 조건과 함께 쓰면 둘 다 맞는 행만 남습니다. 날짜는 위가 시작, 아래가 종료이고, 등록일은 오늘로 잡혀 있습니다. 비우면 전체 기간입니다. 엑셀과 보고서는 화면 페이지와 관계없이 이 조건의 전체 건을 담습니다.
             </p>
           </Card>
 

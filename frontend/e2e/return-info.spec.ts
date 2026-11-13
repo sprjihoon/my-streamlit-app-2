@@ -81,6 +81,15 @@ test('return info page filters every header and pages the rows', async ({ page }
   await expect(accordions.nth(2)).not.toHaveAttribute('open', '');
   await page.locator('summary', { hasText: '날짜' }).click();
   await page.locator('summary', { hasText: '조건' }).click();
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  await expect(page.getByLabel('등록일 시작')).toHaveValue(today);
+  await expect(page.getByLabel('등록일 종료')).toHaveValue(today);
+  await expect(page.getByLabel('입고일 시작')).toHaveValue('');
+  await expect(page.getByLabel('발주일 시작')).toHaveValue('');
+  await page.getByLabel('등록일 시작').fill('');
+  await page.getByRole('button', { name: '초기화' }).click();
+  await expect(page.getByLabel('등록일 시작')).toHaveValue(today);
+  await expect(page.getByLabel('등록일 종료')).toHaveValue(today);
   for (const column of COLUMNS) {
     if (column === 'CS이력') continue;
     await expect(page.getByText(column, { exact: true }).first()).toBeVisible();
@@ -118,7 +127,10 @@ test('return info page filters every header and pages the rows', async ({ page }
   await expect(page.getByLabel('CS이력')).toHaveCount(0);
   const keywordSearch = page.waitForRequest((request) => {
     const url = new URL(request.url());
-    return url.pathname.endsWith('/return-info') && url.searchParams.get('q') === '모자';
+    return url.pathname.endsWith('/return-info')
+      && url.searchParams.get('q') === '모자'
+      && url.searchParams.get('등록일_from') === today
+      && url.searchParams.get('등록일_to') === today;
   });
   await page.getByLabel('전체 검색').fill('모자');
   await page.getByRole('button', { name: '검색' }).click();
