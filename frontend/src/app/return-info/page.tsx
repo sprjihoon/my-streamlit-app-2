@@ -85,6 +85,13 @@ function cellText(value: string | number | null | undefined) {
   return String(value);
 }
 
+function shownCell(column: string, value: string | number | null | undefined) {
+  const text = cellText(value);
+  if (text === '-' || !DATE_COLUMNS.has(column)) return text;
+  const midnight = text.match(/^(\d{4}-\d{2}-\d{2})[ T]00:00:00(?:\.\d+)?$/);
+  return midnight ? midnight[1] : text;
+}
+
 export default function ReturnInfoPage() {
   const [draft, setDraft] = useState<ReturnInfoFilters>(defaultFilters);
   const [applied, setApplied] = useState<ReturnInfoFilters>(defaultFilters);
@@ -613,6 +620,13 @@ export default function ReturnInfoPage() {
               )}
               <div className="return-sheet">
                 <table>
+                  <colgroup>
+                    <col className="return-col-check" />
+                    <col className="return-col-actions" />
+                    {tableColumns.map((column) => (
+                      <col key={column} className={LIST_CLASS[column]} />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="return-col-check">
@@ -677,15 +691,15 @@ export default function ReturnInfoPage() {
                           <td
                             key={column}
                             className={LIST_CLASS[column]}
-                            title={cellText(row[column])}
+                            title={shownCell(column, row[column])}
                           >
                             {column === '상품명' && row['입력구분'] === '수동 입력' ? (
                               <span className="return-name-line">
                                 <span className="return-source-manual">수동</span>
-                                <span>{cellText(row[column])}</span>
+                                <span>{shownCell(column, row[column])}</span>
                               </span>
                             ) : (
-                              cellText(row[column])
+                              shownCell(column, row[column])
                             )}
                           </td>
                         ))}

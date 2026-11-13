@@ -670,6 +670,12 @@ def ingest(
     series = series.dropna()
     d_min = series.min().date().isoformat() if not series.empty else ""
     d_max = series.max().date().isoformat() if not series.empty else ""
+    if table == "return_info":
+        for name in ("등록일", "입고일", "발주일"):
+            if name not in df.columns:
+                continue
+            parsed = pd.to_datetime(df[name], errors="coerce")
+            df[name] = parsed.dt.strftime("%Y-%m-%d").where(parsed.notna(), None)
 
     # 7) 테이블에 없는 컬럼 자동 추가
     with get_connection() as con:

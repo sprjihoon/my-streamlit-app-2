@@ -126,6 +126,39 @@ def test_return_info_filters_pages_and_export(isolated_runtime):
     assert kept == ("기존업체", "bot")
 
 
+def test_return_info_hides_midnight_time_on_date_columns(isolated_runtime):
+    _seed_users(isolated_runtime["db"])
+    ensure_tables()
+    with get_connection() as con:
+        con.execute(
+            """INSERT INTO return_info
+               (상태, 등록일, 입고일, 발주일, 관리번호, 상품명)
+               VALUES (?,?,?,?,?,?)""",
+            (
+                "입고완료",
+                "2026-11-13 00:00:00",
+                "2026-11-13 00:00:00.000000",
+                "2026-11-12 09:30:00",
+                "M1",
+                "셔츠",
+            ),
+        )
+        con.commit()
+    client = TestClient(app, raise_server_exceptions=False)
+    listed = client.get("/return-info", params={"token": "admin-tok", "관리번호": "M1"})
+    assert listed.status_code == 200
+    row = listed.json()["rows"][0]
+    assert row["등록일"] == "2026-11-13"
+    assert row["입고일"] == "2026-11-13"
+    assert row["발주일"] == "2026-11-12 09:30:00"
+
+    exported = client.get("/return-info/export", params={"token": "admin-tok", "관리번호": "M1"})
+    sheet = load_workbook(io.BytesIO(exported.content)).active
+    headers = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
+    values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+    assert values[headers.index("등록일")] == "2026-11-13"
+
+
 def test_return_info_report_uses_filtered_rows(isolated_runtime):
     _seed_users(isolated_runtime["db"])
     _insert_rows()

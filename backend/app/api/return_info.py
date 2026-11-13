@@ -174,11 +174,30 @@ def _where(columns: list[str], query) -> tuple[str, list]:
     return "WHERE " + " AND ".join(clauses), params
 
 
-def _cell(value):
+_MIDNIGHT_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T]00:00:00(?:\.\d+)?$")
+
+
+def _date_cell(value):
+    if isinstance(value, datetime):
+        if (value.hour, value.minute, value.second, value.microsecond) == (0, 0, 0, 0):
+            return value.date().isoformat()
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        match = _MIDNIGHT_DATE.match(value.strip())
+        if match:
+            return match.group(1)
+    return value
+
+
+def _cell(value, column: str | None = None):
     if value is None:
         return None
     if isinstance(value, float) and value.is_integer():
         return int(value)
+    if column in DATE_HEADERS:
+        return _date_cell(value)
     return value
 
 
@@ -201,7 +220,7 @@ def _rows(con, columns: list[str], where: str, params: list, limit: int, offset:
     for record in fetched:
         row = {"id": int(record[0])}
         for col_index, column in enumerate(columns):
-            row[column] = _cell(record[col_index + 1])
+            row[column] = _cell(record[col_index + 1], column)
         rows.append(row)
     return rows, int(total)
 
@@ -495,7 +514,7 @@ def _load_row(con, row_id: int) -> dict | None:
         return None
     row = {"id": int(record[0]), "deleted_at": record[1]}
     for index, name in enumerate(columns):
-        row[name] = _cell(record[index + 2])
+        row[name] = _cell(record[index + 2], name)
     return row
 
 

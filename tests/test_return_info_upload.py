@@ -159,6 +159,7 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
         rows = con.execute(
             "SELECT 관리번호, 상품명, 상태, substr(등록일, 1, 10), 바코드 FROM return_info ORDER BY id"
         ).fetchall()
+        stored_dates = con.execute("SELECT 등록일, 입고일, 발주일 FROM return_info").fetchall()
         work_rows = con.execute("SELECT 업체명, 출처 FROM work_log").fetchall()
 
     assert rows == [
@@ -166,6 +167,7 @@ def test_return_info_form_dedup_keeps_work_log(isolated_runtime, monkeypatch):
         ("897278", "샘플상품", "입고대기", "2026-11-03", "8801234567890"),
         ("900002", "새상품", "입고완료", "2026-11-03", "8801234567890"),
     ]
+    assert stored_dates == [("2026-11-03", "2026-11-04", "2026-11-03")] * 3
     assert work_rows == [("기존업체", "bot")]
     assert TABLE_DATE_COL["return_info"] == "등록일"
     assert DATE_COL["return_info"] == "등록일"
