@@ -412,7 +412,117 @@ def _should_romanize(ch: str) -> bool:
     )
 
 
-def _fold_epost_text(value: str) -> tuple[str, str]:
+_kakasi = None
+
+
+def _kakasi_converter():
+    global _kakasi
+    if _kakasi is None:
+        import pykakasi
+        _kakasi = pykakasi.kakasi()
+    return _kakasi
+
+
+def _japanese_script(text: str) -> bool:
+    for ch in text:
+        o = ord(ch)
+        if (
+            0x3040 <= o <= 0x30FF
+            or 0x31F0 <= o <= 0x31FF
+            or 0x3400 <= o <= 0x9FFF
+            or 0xF900 <= o <= 0xFAFF
+        ):
+            return True
+    return False
+
+
+def _title_token(piece: str) -> str:
+    if piece[:1].isalpha():
+        return piece[:1].upper() + piece[1:]
+    return piece
+
+
+def _han_script(text: str) -> bool:
+    for ch in text:
+        o = ord(ch)
+        if 0x3400 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF:
+            return True
+    return False
+
+
+def _reading_language(countrycd: str) -> str:
+    """한자처럼 나라마다 소리가 다른 글자는 도착국 발음으로 읽는다."""
+    code = (countrycd or "").upper()
+    if code == "JP":
+        return "ja"
+    if code in {"HK", "MO"}:
+        return "yue"
+    if code in {"CN", "TW", "SG"}:
+        return "zh"
+    return ""
+
+
+def _join_reading(pieces: list[str]) -> str:
+    parts: list[str] = []
+    for piece in pieces:
+        text = piece.strip()
+        if not text:
+            continue
+        if any(ord(ch) > 127 for ch in text):
+            text = anyascii(text).strip()
+        if not text:
+            continue
+        parts.append(_title_token(text) if text[:1].isalpha() else text)
+    return " ".join(parts)
+
+
+def _japanese_roman(run: str) -> str:
+    parts: list[str] = []
+    for item in _kakasi_converter().convert(run):
+        piece = str(item.get("passport") or item.get("hepburn") or "").strip()
+        if piece:
+            parts.append(piece)
+    return _join_reading(parts)
+
+
+def _pinyin_converter():
+    from pypinyin import Style, lazy_pinyin
+    return lazy_pinyin, Style
+
+
+def _mandarin_roman(run: str) -> str:
+    lazy_pinyin, style = _pinyin_converter()
+    return _join_reading(list(lazy_pinyin(run, style=style.NORMAL, errors="default")))
+
+
+def _cantonese_roman(run: str) -> str:
+    import ToJyutping
+    parts: list[str] = []
+    for char, jyut in ToJyutping.get_jyutping_list(run):
+        if jyut:
+            parts.append(re.sub(r"\d", "", jyut))
+            continue
+        piece = char.strip()
+        if piece:
+            parts.append(piece)
+    return _join_reading(parts)
+
+
+def _romanize_run(run: str, countrycd: str) -> str:
+    language = _reading_language(countrycd)
+    roman = ""
+    if language == "ja" and _japanese_script(run):
+        roman = _japanese_roman(run)
+    elif language == "zh" and _han_script(run):
+        roman = _mandarin_roman(run)
+    elif language == "yue" and _han_script(run):
+        roman = _cantonese_roman(run)
+    if _roman_ok(roman):
+        return roman
+    return anyascii(run).strip()
+
+
+def _fold_epost_text(value: str, *, countrycd: str = "") -> tuple[str, str]:
     """EUC-KR로 들어가는 문자열과, 끝까지 못 바꾼 글자."""
     text = value.translate(_EPOST_FOLDS)
     out: list[str] = []
@@ -445,7 +555,7 @@ def _fold_epost_text(value: str) -> tuple[str, str]:
                 break
             j += 1
         run = text[i:j]
-        roman = anyascii(run).strip()
+        roman = _romanize_run(run, countrycd)
         if _roman_ok(roman) and _euc_kr_ok(roman):
             out.append(roman)
         else:
@@ -470,12 +580,14 @@ def _fit_epost_text(
     label: str,
     field: str,
     value: str,
+    *,
+    countrycd: str = "",
 ) -> str:
     """우체국에 넣기 전에 고친다. 고친 내용은 확인 창에, 못 고친 글자는 입력칸에 보여 준다."""
     original = value or ""
     if not original:
         return ""
-    corrected, bad = _fold_epost_text(original)
+    corrected, bad = _fold_epost_text(original, countrycd=countrycd)
     if bad:
         problems.append({"field": field, "label": label, "chars": bad})
         return original
@@ -752,15 +864,18 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
     receivename = _fit_epost_text(
         corrections, problems, "수취인", "receivename",
         validate_recipient_name(str(data.get("receivename") or "")),
+        countrycd=countrycd,
     )
     addr1 = _fit_epost_text(
-        corrections, problems, "주/도", "receiveaddr1", raw_addr1
+        corrections, problems, "주/도", "receiveaddr1", raw_addr1, countrycd=countrycd
     )
     addr2 = _fit_epost_text(
-        corrections, problems, "시/군", "receiveaddr2", (str(data.get("receiveaddr2") or "")).strip()
+        corrections, problems, "시/군", "receiveaddr2", (str(data.get("receiveaddr2") or "")).strip(),
+        countrycd=countrycd,
     )
     addr3 = _fit_epost_text(
-        corrections, problems, "상세주소", "receiveaddr3", (str(data.get("receiveaddr3") or "")).strip()
+        corrections, problems, "상세주소", "receiveaddr3", (str(data.get("receiveaddr3") or "")).strip(),
+        countrycd=countrycd,
     )
 
     raw_items = []
@@ -769,16 +884,21 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         item["product_name"] = _fit_epost_text(
             corrections, problems, f"{index}행 제품명", f"items.{index - 1}.product_name",
             str(item.get("product_name") or "").strip(),
+            countrycd=countrycd,
         )
         item["name_en"] = _fit_epost_text(
             corrections, problems, f"{index}행 품목", f"items.{index - 1}.name_en",
             str(item.get("name_en") or "").strip(),
+            countrycd=countrycd,
         )
         raw_items.append(item)
     invoice = serialize_invoice_items(
         raw_items, chargeable_weight, contents_type=kind, customs_gubun=customs_gubun
     )
-    notes = _fit_epost_text(corrections, problems, "메모", "notes", str(data.get("notes") or "").strip())
+    notes = _fit_epost_text(
+        corrections, problems, "메모", "notes", str(data.get("notes") or "").strip(),
+        countrycd=countrycd,
+    )
     mail = str(data.get("receivemail") or "").strip()
     if mail and not _euc_kr_ok(mail):
         bad_mail = "".join(ch for ch in mail if not _euc_kr_ok(ch))

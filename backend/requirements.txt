@@ -36,6 +36,9 @@ pymupdf==1.26.7
 # ─────────────────────────────────────
 python-dotenv==1.0.1
 anyascii==0.3.2
+pykakasi==2.3.0
+pypinyin==0.55.0
+ToJyutping==3.2.0
 
 # ─────────────────────────────────────
 # Production Server (optional)

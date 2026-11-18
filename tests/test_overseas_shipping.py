@@ -46,6 +46,7 @@ from backend.app.services.ems.fields import (
     epost_sender_name,
     hs_code_for_epost,
     to_euc_kr_text,
+    _fold_epost_text,
     sender_mobile_parts,
     format_recipient_tel,
     split_recipient_tel,
@@ -329,14 +330,51 @@ def test_preview_romanizes_cjk_and_keeps_hangul(isolated_runtime):
     )
     preview = body["preview"]
     assert preview["recipient_name"] == "홍길동"
-    assert "SeGuQu" in preview["recipient_addr"]
-    assert "DongJingDou" in preview["recipient_addr"]
+    assert "Shibuyaku" in preview["recipient_addr"]
+    assert "Tokyouto" in preview["recipient_addr"]
     labels = {row["label"]: row for row in preview["text_corrections"]}
-    assert labels["시/군"]["after"] == "SeGuQu"
-    assert labels["주/도"]["after"] == "DongJingDou"
+    assert labels["시/군"]["after"] == "Shibuyaku"
+    assert labels["주/도"]["after"] == "Tokyouto"
+    assert labels["상세주소"]["after"] == "Shibuya 1-1-1"
     assert labels["메모"]["after"] == "krungethph"
-    assert labels["1행 제품명"]["after"] == "BeiJingShi"
+    assert labels["1행 제품명"]["after"] == "Pekin Shi"
     assert "수취인" not in labels
+
+    other = preview_overseas(
+        _req(
+            countrycd="US",
+            receivetelno="+12025550123",
+            receivezipcode="10001",
+            receivename="홍길동",
+            receiveaddr1="北京市",
+            receiveaddr2="Chaoyang",
+            receiveaddr3="Example 1",
+            notes="",
+            items=[{
+                "product_name": "Clothing",
+                "name_en": "Clothing",
+                "quantity": 1,
+                "unit_price_usd": 12,
+                "hs_code": "610910",
+                "origin_country": "KR",
+            }],
+        ),
+        token,
+    )
+    other_labels = {row["label"]: row for row in other["preview"]["text_corrections"]}
+    assert other_labels["주/도"]["after"] == "BeiJingShi"
+
+
+def test_romanization_follows_destination_country():
+    assert _fold_epost_text("東京都", countrycd="JP")[0] == "Tokyouto"
+    assert _fold_epost_text("渋谷区", countrycd="JP")[0] == "Shibuyaku"
+    assert _fold_epost_text("北京市", countrycd="CN")[0] == "Bei Jing Shi"
+    assert _fold_epost_text("台北市", countrycd="TW")[0] == "Tai Bei Shi"
+    assert _fold_epost_text("北京市", countrycd="SG")[0] == "Bei Jing Shi"
+    assert _fold_epost_text("香港", countrycd="HK")[0] == "Hoeng Gong"
+    assert _fold_epost_text("澳門", countrycd="MO")[0] == "Ou Mun"
+    assert _fold_epost_text("北京市", countrycd="US")[0] == "BeiJingShi"
+    assert _fold_epost_text("홍길동", countrycd="JP")[0] == "홍길동"
 
 
 def test_preview_does_not_write(isolated_runtime):
