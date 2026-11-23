@@ -8,7 +8,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.services.ems.order_excel import parse_order_workbook
+from backend.app.services.ems.order_excel import (
+    englishize_uploaded_addresses,
+    order_excel_template_bytes,
+    parse_order_workbook,
+)
 
 SAMPLE = Path(r"c:\Users\one\Downloads\NAVER WORKS\해외배송 예시.xls")
 
@@ -160,6 +164,129 @@ def test_xlsx_upload_endpoint(isolated_runtime):
     assert groups[0]["items"][0]["product_name"] == "Lip Ampoule"
     assert groups[0]["items"][0]["name_en"] == ""
     assert groups[0]["items"][0]["unit_price_usd"] == 0
+
+
+def test_excel_template_downloads_and_parses_two_shipments(isolated_runtime):
+    raw = order_excel_template_bytes()
+    groups = parse_order_workbook(raw, filename="overseas-order-template.xlsx")
+    assert [group["bundle_no"] for group in groups] == ["100001", "100002"]
+    assert [item["product_name"] for item in groups[0]["items"]] == ["립틴트", "립글로스"]
+    assert groups[0]["countrycd"] == "JP"
+    assert groups[1]["countrycd"] == "MY"
+    token = _seed(isolated_runtime["db"])
+    client = TestClient(app, raise_server_exceptions=False)
+    denied = client.get("/overseas-shipping/import-excel/template")
+    assert denied.status_code in {401, 422}
+    response = client.get("/overseas-shipping/import-excel/template", params={"token": token})
+    assert response.status_code == 200, response.text
+    assert "spreadsheetml" in response.headers["content-type"]
+    assert response.content[:2] == b"PK"
+    downloaded = parse_order_workbook(response.content, filename="overseas-order-template.xlsx")
+    assert len(downloaded) == 2
+
+
+def _japanese_row() -> list[str]:
+    row = _malaysia_row("Lip Tint", "국내", "0")
+    row[6] = ""
+    row[7] = "東京都渋谷区渋谷1-1-1, 日本"
+    row[8] = "ヤマダタロウ"
+    row[9] = "+819012345678"
+    row[11] = ""
+    return row
+
+
+def test_japanese_upload_prefers_google_verified_english_address(monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.services.ems.google_address.google_maps_api_key",
+        lambda *_args, **_kwargs: "test-key",
+    )
+
+    def fake_validate(api_key, addr, timeout=8):
+        assert api_key == "test-key"
+        assert addr["countryCode"] == "JP"
+        assert "渋谷" in addr["addr3"]
+        return {
+            "ok": True,
+            "suggested": {
+                "suggestedAddr1": "Tokyo",
+                "suggestedAddr2": "Shibuya",
+                "suggestedAddr3": "1-1-1 Shibuya",
+                "suggestedZip": "150-0001",
+            },
+        }
+
+    monkeypatch.setattr(
+        "backend.app.services.ems.google_address.validate_address_with_google",
+        fake_validate,
+    )
+    groups = englishize_uploaded_addresses(parse_order_workbook(_html_table([_japanese_row()]), filename="jp.xls"))
+    group = groups[0]
+    assert group["countrycd"] == "JP"
+    assert group["address_english"] == "google"
+    assert group["receiveaddr1"] == "Tokyo"
+    assert group["receiveaddr2"] == "Shibuya"
+    assert group["receiveaddr3"] == "1-1-1 Shibuya"
+    assert group["receivezipcode"] == "150-0001"
+    assert group["receivename"] == "ヤマダタロウ"
+    assert "우편번호" not in group["missing"]
+
+
+def test_japanese_upload_romanizes_when_google_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.services.ems.google_address.google_maps_api_key",
+        lambda *_args, **_kwargs: "",
+    )
+    groups = englishize_uploaded_addresses(parse_order_workbook(_html_table([_japanese_row()]), filename="jp.xls"))
+    group = groups[0]
+    assert group["countrycd"] == "JP"
+    assert group["address_english"] == "romanized"
+    assert "渋" not in group["receiveaddr3"]
+    assert "1-1-1" in group["receiveaddr3"]
+    assert group["receivename"] == "ヤマダタロウ"
+
+
+def test_english_upload_keeps_the_parsed_address(monkeypatch):
+    def fail_validate(*_args, **_kwargs):
+        raise AssertionError("영문 주소는 구글 검증을 호출하지 않는다")
+
+    monkeypatch.setattr(
+        "backend.app.services.ems.google_address.validate_address_with_google",
+        fail_validate,
+    )
+    groups = englishize_uploaded_addresses(parse_order_workbook(
+        _html_table([_malaysia_row("Lip Tint", "국내", "0")]),
+        filename="my.xls",
+    ))
+    assert groups[0]["address_english"] == ""
+    assert groups[0]["receiveaddr1"] == "Johor"
+    assert groups[0]["countrycd"] == "MY"
+
+
+def test_china_upload_uses_map_english_address(monkeypatch):
+    def fake_review(**_kwargs):
+        return {
+            "suggested_addr1": "Beijing",
+            "suggested_addr2": "Chaoyang",
+            "suggested_addr3": "1 Jianguo Road",
+            "zipcode": "100020",
+        }
+
+    monkeypatch.setattr(
+        "backend.app.services.ems.china_address.review_china_address",
+        fake_review,
+    )
+    row = _malaysia_row("Lip Tint", "국내", "0")
+    row[6] = "100020"
+    row[7] = "建国路1号, 朝阳区, 北京市, 中国"
+    row[9] = "+8613800138000"
+    groups = englishize_uploaded_addresses(parse_order_workbook(_html_table([row]), filename="cn.xls"))
+    group = groups[0]
+    assert group["countrycd"] == "CN"
+    assert group["address_english"] == "google"
+    assert group["receiveaddr1"] == "Beijing"
+    assert group["receiveaddr2"] == "Chaoyang"
+    assert group["receiveaddr3"] == "1 Jianguo Road"
+    assert group["receivezipcode"] == "100020"
 
 
 def test_sample_workbook_is_one_shipment():

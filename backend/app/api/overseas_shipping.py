@@ -55,7 +55,11 @@ from backend.app.services.ems.hs_catalog import search_hs_catalog
 from backend.app.services.ems.item_categories import ITEM_CATEGORIES
 from backend.app.services.ems.form_pdf import render_label_pdf
 from backend.app.services.ems.label import build_shipment_label, render_label_html
-from backend.app.services.ems.order_excel import parse_order_workbook
+from backend.app.services.ems.order_excel import (
+    englishize_uploaded_addresses,
+    order_excel_template_bytes,
+    parse_order_workbook,
+)
 from backend.app.services.ems.tracking import track_ems_regino
 from logic.db import get_connection
 
@@ -1333,6 +1337,17 @@ def delete_saved_overseas_hs(hs_id: int, token: str):
     return {"success": True, "id": hs_id}
 
 
+@router.get("/import-excel/template")
+def overseas_excel_template(token: str):
+    """해외배송 주문 엑셀 양식. 같은 합포번호는 접수 1건이다."""
+    _get_user(token)
+    return Response(
+        content=order_excel_template_bytes(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="overseas-order-template.xlsx"'},
+    )
+
+
 @router.post("/import-excel")
 async def import_overseas_excel(token: str, file: UploadFile = File(...)):
     """주문 엑셀 1건(합포)을 접수 입력값으로 바꾼다. 없는 항목은 비워 둔다."""
@@ -1340,6 +1355,7 @@ async def import_overseas_excel(token: str, file: UploadFile = File(...)):
     raw = await file.read()
     try:
         groups = parse_order_workbook(raw, filename=file.filename or "")
+        englishize_uploaded_addresses(groups)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"groups": groups}

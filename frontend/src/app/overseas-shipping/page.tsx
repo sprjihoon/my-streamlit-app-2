@@ -14,6 +14,7 @@ import {
   createOverseasShipping,
   deleteOverseasSavedAddress,
   deleteOverseasSavedSender,
+  downloadOverseasExcelTemplate,
   getOverseasShippingMeta,
   importOverseasExcel,
   listOverseasNations,
@@ -964,8 +965,13 @@ export default function OverseasShippingPage() {
       items.length ? `수량 ${items.length}줄` : '',
     ].filter(Boolean);
     const blank = group.missing.length ? ` 비어 있는 항목: ${group.missing.join(', ')}.` : '';
+    const addressNote = group.address_english === 'google'
+      ? ' 주소는 구글이 확인한 영문 주소로 바꿨습니다.'
+      : group.address_english === 'romanized'
+        ? ' 주소는 영문으로 바꿨습니다.'
+        : '';
     setError(null);
-    setSuccess(`엑셀 1건을 입력란에 채웠습니다. ${filled.join(' · ')}.${blank} 빈 칸을 채운 뒤 접수하세요.`);
+    setSuccess(`엑셀 1건을 입력란에 채웠습니다. ${filled.join(' · ')}.${blank}${addressNote} 빈 칸을 채운 뒤 접수하세요.`);
   }
 
   async function handleExcelFile(file: File | null) {
@@ -1211,7 +1217,7 @@ export default function OverseasShippingPage() {
 
         <FormSection title="주문 엑셀" first>
           <p className="text-muted tw-mt-0">
-            합포 1건의 주문 엑셀을 올리면 수취인, 주소, 제품명, 수량을 채웁니다. 품목란은 HS 품목이라 비워 둡니다.
+            양식의 합포번호가 같으면 접수 1건입니다. 올리면 수취인, 주소, 제품명, 수량을 채웁니다. 품목란은 HS 품목이라 비워 둡니다.
           </p>
           <div className="tw-items-center tw-flex tw-flex-wrap tw-gap-[0.5rem]">
             <input
@@ -1221,6 +1227,16 @@ export default function OverseasShippingPage() {
               className="tw-hidden"
               onChange={(e) => void handleExcelFile(e.target.files?.[0] || null)}
             />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                if (!token) return;
+                void downloadOverseasExcelTemplate(token).catch((err) => setError(parseApiError(err)));
+              }}
+            >
+              양식 다운로드
+            </button>
             <button
               type="button"
               className="btn btn-primary"

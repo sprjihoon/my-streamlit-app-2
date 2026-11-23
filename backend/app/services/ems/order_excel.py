@@ -14,6 +14,22 @@ from typing import Any
 from backend.app.services.ems.fields import FALLBACK_NATIONS
 
 _REQUIRED_HEADERS = ("수령자", "배송지주소", "실제 상품명", "상품명")
+ORDER_EXCEL_HEADERS = (
+    "관리번호",
+    "합포번호",
+    "주문번호",
+    "실제 상품명",
+    "판매개수",
+    "구매자결제금액",
+    "배송지우편번호",
+    "배송지주소",
+    "수령자",
+    "수령자전화",
+    "수령자전화2",
+    "메모",
+    "중량",
+    "원산지",
+)
 _KR_ORIGIN_WORDS = (
     "국내",
     "한국",
@@ -61,6 +77,30 @@ _COUNTRY_ALIASES = {
     "republic of korea": "KR",
     "한국": "KR",
     "대한민국": "KR",
+    "日本": "JP",
+    "日本国": "JP",
+    "일본": "JP",
+    "アメリカ": "US",
+    "美国": "US",
+    "美國": "US",
+    "중국": "CN",
+    "中国": "CN",
+    "中國": "CN",
+    "香港": "HK",
+    "대만": "TW",
+    "台湾": "TW",
+    "台灣": "TW",
+    "タイ": "TH",
+    "태국": "TH",
+    "泰国": "TH",
+    "ドイツ": "DE",
+    "프랑스": "FR",
+    "フランス": "FR",
+    "イギリス": "GB",
+    "シンガポール": "SG",
+    "マレーシア": "MY",
+    "オーストラリア": "AU",
+    "カナダ": "CA",
 }
 
 
@@ -91,6 +131,69 @@ class _TableParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._in_cell:
             self._buf.append(data)
+
+
+def order_excel_template_bytes() -> bytes:
+    """업로드에 쓰는 열과 예시 2건. 같은 합포번호는 한 접수로 묶인다."""
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "해외배송"
+    sheet.append(list(ORDER_EXCEL_HEADERS))
+    sheet.append([
+        "100001",
+        "100001",
+        "",
+        "립틴트",
+        1,
+        "",
+        "1500001",
+        "1-1-1 Shibuya, Shibuya-ku, Tokyo, Japan",
+        "Taro Yamada",
+        "+819012345678",
+        "",
+        "같은 합포번호는 한 접수로 묶입니다. 주소 끝에는 국가명을 적습니다.",
+        "",
+        "국내",
+    ])
+    sheet.append([
+        "100001",
+        "100001",
+        "",
+        "립글로스",
+        2,
+        "",
+        "1500001",
+        "1-1-1 Shibuya, Shibuya-ku, Tokyo, Japan",
+        "Taro Yamada",
+        "+819012345678",
+        "",
+        "",
+        "",
+        "국내",
+    ])
+    sheet.append([
+        "100002",
+        "100002",
+        "",
+        "세럼",
+        1,
+        "",
+        "81100",
+        "8, Jalan Example, Johor Bahru, Johor, Malaysia",
+        "Xie Yu Zheng",
+        "+601154062583",
+        "",
+        "합포번호가 다르면 다른 접수입니다.",
+        "",
+        "국내",
+    ])
+    for column, width in enumerate((14, 14, 14, 24, 12, 16, 16, 52, 18, 18, 16, 42, 10, 12), start=1):
+        sheet.column_dimensions[openpyxl.utils.get_column_letter(column)].width = width
+    buffer = BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
 
 
 def parse_order_workbook(raw: bytes, *, filename: str = "") -> list[dict[str, Any]]:
@@ -131,6 +234,8 @@ def build_shipment(records: list[dict[str, str]]) -> dict[str, Any]:
     address = _split_address(first.get("배송지주소", ""), first.get("배송지우편번호", ""))
     if not address["countrycd"]:
         address["countrycd"] = _country_in_text(first.get("메모", ""))
+    if not address["countrycd"]:
+        address["countrycd"] = _country_from_script(first.get("배송지주소", ""))
     phone = first.get("수령자전화") or first.get("수령자전화2") or ""
     items = [_item_from_row(row) for row in records]
     items = [item for item in items if item["product_name"]]
@@ -153,6 +258,7 @@ def build_shipment(records: list[dict[str, str]]) -> dict[str, Any]:
         "boxheight": 0,
         "items": items,
         "missing": missing,
+        "address_english": "",
     }
 
 
@@ -316,6 +422,141 @@ def _split_address(address: str, zip_hint: str) -> dict[str, str]:
         "addr2": addr2,
         "addr3": addr3,
     }
+
+
+def _needs_english(text: str) -> bool:
+    return any(ord(ch) > 127 for ch in text or "")
+
+
+def _country_from_script(text: str) -> str:
+    """가나 문자가 있으면 일본 주소로 본다."""
+    for ch in text or "":
+        if 0x3040 <= ord(ch) <= 0x30FF:
+            return "JP"
+    return ""
+
+
+def _roman_address_field(value: str, countrycd: str) -> str:
+    from backend.app.services.ems.fields import _fold_epost_text
+
+    converted, _bad = _fold_epost_text(value or "", countrycd=countrycd)
+    return converted
+
+
+def _google_english_address(shipment: dict[str, Any]) -> dict[str, str] | None:
+    from backend.app.services.ems.google_address import (
+        google_maps_api_key,
+        supports_address_validation,
+        validate_address_with_google,
+    )
+
+    country = str(shipment.get("countrycd") or "")
+    if not supports_address_validation(country):
+        return None
+    key = google_maps_api_key()
+    if not key:
+        return None
+    result = validate_address_with_google(
+        key,
+        {
+            "addr3": str(shipment.get("receiveaddr3") or ""),
+            "addr2": str(shipment.get("receiveaddr2") or ""),
+            "addr1": str(shipment.get("receiveaddr1") or ""),
+            "zip": str(shipment.get("receivezipcode") or ""),
+            "countryCode": country,
+        },
+        timeout=8,
+    )
+    if not result or not result.get("ok"):
+        return None
+    suggested = result.get("suggested") or {}
+    addr1 = str(suggested.get("suggestedAddr1") or "").strip()
+    addr2 = str(suggested.get("suggestedAddr2") or "").strip()
+    addr3 = str(suggested.get("suggestedAddr3") or "").strip()
+    if not addr3 or _needs_english(" ".join((addr1, addr2, addr3))):
+        return None
+    return {
+        "receiveaddr1": addr1,
+        "receiveaddr2": addr2,
+        "receiveaddr3": addr3,
+        "receivezipcode": str(suggested.get("suggestedZip") or shipment.get("receivezipcode") or "").strip(),
+        "address_english": "google",
+    }
+
+
+def _china_english_address(shipment: dict[str, Any]) -> dict[str, str] | None:
+    if str(shipment.get("countrycd") or "") != "CN":
+        return None
+    from backend.app.services.ems.china_address import review_china_address
+
+    reviewed = review_china_address(
+        addr1=str(shipment.get("receiveaddr1") or ""),
+        addr2=str(shipment.get("receiveaddr2") or ""),
+        addr3=str(shipment.get("receiveaddr3") or ""),
+        zipcode=str(shipment.get("receivezipcode") or ""),
+    )
+    addr1 = str(reviewed.get("suggested_addr1") or "").strip()
+    addr2 = str(reviewed.get("suggested_addr2") or "").strip()
+    addr3 = str(reviewed.get("suggested_addr3") or "").strip()
+    if not addr3 or _needs_english(" ".join((addr1, addr2, addr3))):
+        return None
+    return {
+        "receiveaddr1": addr1,
+        "receiveaddr2": addr2,
+        "receiveaddr3": addr3,
+        "receivezipcode": str(reviewed.get("zipcode") or shipment.get("receivezipcode") or "").strip(),
+        "address_english": "google",
+    }
+
+
+def _refresh_missing(shipment: dict[str, Any]) -> None:
+    address = {
+        "countrycd": str(shipment.get("countrycd") or ""),
+        "zipcode": str(shipment.get("receivezipcode") or ""),
+        "addr1": str(shipment.get("receiveaddr1") or ""),
+        "addr2": str(shipment.get("receiveaddr2") or ""),
+        "addr3": str(shipment.get("receiveaddr3") or ""),
+    }
+    shipment["missing"] = _missing_fields(
+        address,
+        str(shipment.get("receivetelno") or ""),
+        list(shipment.get("items") or []),
+    )
+
+
+def englishize_uploaded_addresses(shipments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """일본어 등 원문 주소를 영문으로 바꾼다. 구글 검증 주소를 먼저 쓴다."""
+    for shipment in shipments:
+        fields = (
+            str(shipment.get("receiveaddr1") or ""),
+            str(shipment.get("receiveaddr2") or ""),
+            str(shipment.get("receiveaddr3") or ""),
+        )
+        if not any(_needs_english(field) for field in fields):
+            shipment["address_english"] = ""
+            continue
+        converted = None
+        try:
+            converted = _google_english_address(shipment)
+        except Exception:
+            converted = None
+        if converted is None and str(shipment.get("countrycd") or "") == "CN":
+            try:
+                converted = _china_english_address(shipment)
+            except Exception:
+                converted = None
+        if converted is None:
+            country = str(shipment.get("countrycd") or "")
+            converted = {
+                "receiveaddr1": _roman_address_field(fields[0], country),
+                "receiveaddr2": _roman_address_field(fields[1], country),
+                "receiveaddr3": _roman_address_field(fields[2], country),
+                "receivezipcode": str(shipment.get("receivezipcode") or ""),
+                "address_english": "romanized",
+            }
+        shipment.update(converted)
+        _refresh_missing(shipment)
+    return shipments
 
 
 def _match_country(token: str) -> str:

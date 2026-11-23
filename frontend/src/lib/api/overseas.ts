@@ -280,6 +280,30 @@ export interface OverseasExcelGroup {
   boxheight: number;
   items: OverseasExcelItem[];
   missing: string[];
+  address_english?: '' | 'google' | 'romanized';
+}
+
+export async function downloadOverseasExcelTemplate(token: string) {
+  const response = await fetch(`${API_BASE}/overseas-shipping/import-excel/template${overseasQuery(token)}`);
+  if (!response.ok) {
+    let msg = '양식 다운로드에 실패했습니다.';
+    try {
+      const data = await response.json();
+      msg = data.detail || data.message || msg;
+    } catch {
+      msg = (await response.text()) || msg;
+    }
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = '해외배송_업로드양식.xlsx';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function importOverseasExcel(token: string, file: File) {
