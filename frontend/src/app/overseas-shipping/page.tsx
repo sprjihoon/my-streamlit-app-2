@@ -1229,21 +1229,24 @@ export default function OverseasShippingPage() {
             />
             <button
               type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                if (!token) return;
-                void downloadOverseasExcelTemplate(token).catch((err) => setError(parseApiError(err)));
-              }}
-            >
-              양식 다운로드
-            </button>
-            <button
-              type="button"
               className="btn btn-primary"
               disabled={excelLoading}
               onClick={() => excelInputRef.current?.click()}
             >
               {excelLoading ? '읽는 중...' : '엑셀 업로드'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                if (!token) {
+                  setError('로그인 후 양식을 받을 수 있습니다.');
+                  return;
+                }
+                void downloadOverseasExcelTemplate(token).catch((err) => setError(parseApiError(err)));
+              }}
+            >
+              양식 다운로드
             </button>
             {excelName && <span className="text-muted">{excelName}</span>}
           </div>
