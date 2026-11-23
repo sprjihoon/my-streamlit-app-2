@@ -1783,6 +1783,7 @@ def _save_overseas(req: OverseasSubmitRequest, user: dict[str, Any]):
                     {
                         **{k: v for k, v in params.items() if k not in {"custno", "apprno"}},
                         "treatporegipocd": result.get("treatporegipocd") or "",
+                        "receivename_local": validated.get("receivename_local") or "",
                     },
                     ensure_ascii=False,
                 ),

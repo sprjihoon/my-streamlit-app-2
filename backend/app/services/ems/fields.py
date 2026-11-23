@@ -641,6 +641,15 @@ def validate_recipient_name(name: str) -> str:
     return cleaned
 
 
+def printed_recipient_name(local: str, posted: str) -> str:
+    """출력서류 수취인. 입력 원문과 도착국 발음 영문이 다르면 나란히 찍는다."""
+    original = " ".join(str(local or "").split())
+    english = " ".join(str(posted or "").split())
+    if not original or original == english:
+        return english or original
+    return f"{original} {english}"
+
+
 def split_sender_tel(phone: str, fallback: dict[str, str]) -> dict[str, str]:
     digits = re.sub(r"\D", "", phone or "")
     if not digits:
@@ -861,9 +870,10 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
             })
         raw_zip = posted_zip
         raw_addr1 = posted_addr1
+    receivename_local = validate_recipient_name(str(data.get("receivename") or ""))
     receivename = _fit_epost_text(
         corrections, problems, "수취인", "receivename",
-        validate_recipient_name(str(data.get("receivename") or "")),
+        receivename_local,
         countrycd=countrycd,
     )
     addr1 = _fit_epost_text(
@@ -941,6 +951,7 @@ def validate_apply_input(data: dict[str, Any]) -> dict[str, Any]:
         "boxwidth": 0 if is_doc else int(boxwidth),
         "boxheight": 0 if is_doc else int(boxheight),
         "receivename": receivename,
+        "receivename_local": receivename_local,
         "receivezipcode": raw_zip,
         "receiveaddr1": addr1,
         "receiveaddr2": addr2,

@@ -289,7 +289,7 @@ def _fill_page(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap, layo
     _at(page, (88.75, 151.32), _phone(sender.get("tel")), 9.96, "hebi")
     _at(page, (343.27, 149.88), _phone(recipient.get("phone")), 9.96, "hebi")
     _at(page, (93.0, 170.64), sender.get("name"), 9.96, "hebi")
-    _at(page, (350.88, 170.28), recipient.get("name"), 9.96, "hebi")
+    _at_fit(page, (350.88, 170.28), recipient.get("name"), 9.96, 197.0, "hebi")
     _lines(page, 61.68, 197.52, sender.get("address"), 9.96, 210, 12.96, "hebi", next_x=56.76)
     _lines(
         page, 316.2, 202.92, _recipient_address(recipient), 9.96,
@@ -335,6 +335,12 @@ def _font_for(page: fitz.Page, text: str, font: str) -> str:
     return font
 
 
+def _text_width(text: str, fontname: str, size: float) -> float:
+    if fontname == "ems" and _CJK_BUFFER is not None:
+        return fitz.Font(fontbuffer=_CJK_BUFFER).text_length(text, fontsize=size)
+    return fitz.get_text_length(text, fontname=fontname, fontsize=size)
+
+
 def _at(
     page: fitz.Page,
     point: tuple[float, float],
@@ -347,6 +353,26 @@ def _at(
     if not text.strip():
         return
     page.insert_text(point, text, fontsize=size, fontname=_font_for(page, text, font), color=color)
+
+
+def _at_fit(
+    page: fitz.Page,
+    point: tuple[float, float],
+    value: Any,
+    size: float,
+    max_width: float,
+    font: str = "helv",
+    min_size: float = 6.0,
+) -> None:
+    """이름 칸 너비 안에 들어가게 글자 크기를 줄인다."""
+    text = str(value if value is not None else "")
+    if not text.strip():
+        return
+    fontname = _font_for(page, text, font)
+    current = size
+    while current > min_size and _text_width(text, fontname, current) > max_width:
+        current = round(current - 0.3, 2)
+    page.insert_text(point, text, fontsize=current, fontname=fontname, color=(0, 0, 0))
 
 
 def _center(
@@ -670,7 +696,7 @@ def _fill_kpacket(page: fitz.Page, data: dict[str, Any], barcode: fitz.Pixmap) -
     zipcode = str(recipient.get("zip") or "").strip()
     if zipcode:
         _at(page, (210.96, 273.48), f"ZIP: {zipcode}", 8.04, "hebi")
-    _at(page, (69.60, 289.32), recipient.get("name"), 9.0, "hebi")
+    _at_fit(page, (69.60, 289.32), recipient.get("name"), 9.0, 206.0, "hebi")
     street = " ".join(
         part for part in (str(recipient.get("addr3") or "").strip(), str(recipient.get("addr2") or "").strip()) if part
     )

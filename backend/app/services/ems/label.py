@@ -10,7 +10,12 @@ from html import escape
 from typing import Any
 from urllib.parse import quote
 
-from backend.app.services.ems.fields import FALLBACK_NATIONS, format_sender_tel, resolve_sender
+from backend.app.services.ems.fields import (
+    FALLBACK_NATIONS,
+    format_sender_tel,
+    printed_recipient_name,
+    resolve_sender,
+)
 
 SERVICE_LABEL = {
     "EMS": "EMS",
@@ -181,7 +186,10 @@ def build_shipment_label(
         "posted_min": minute,
         "sender": _sender_from_snapshot(snapshot, str(row.get("sender_name") or "")),
         "recipient": {
-            "name": str(row.get("recipient_name") or ""),
+            "name": printed_recipient_name(
+                str((snapshot or {}).get("receivename_local") or ""),
+                str(row.get("recipient_name") or ""),
+            ),
             "addr1": str(row.get("recipient_addr1") or ""),
             "addr2": str(row.get("recipient_addr2") or ""),
             "addr3": str(row.get("recipient_addr3") or ""),

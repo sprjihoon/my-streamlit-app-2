@@ -49,6 +49,7 @@ from backend.app.services.ems.fields import (
     _fold_epost_text,
     sender_mobile_parts,
     format_recipient_tel,
+    printed_recipient_name,
     split_recipient_tel,
     serialize_invoice_items,
     validate_apply_input,
@@ -375,6 +376,64 @@ def test_romanization_follows_destination_country():
     assert _fold_epost_text("澳門", countrycd="MO")[0] == "Ou Mun"
     assert _fold_epost_text("北京市", countrycd="US")[0] == "BeiJingShi"
     assert _fold_epost_text("홍길동", countrycd="JP")[0] == "홍길동"
+
+
+def test_label_prints_original_name_beside_country_romanization(isolated_runtime):
+    """우체국 접수 이름은 도착국 발음 영문이고, 출력서류만 원문을 옆에 붙인다."""
+    token = _seed_user(isolated_runtime["db"])
+    original = "山田太郎"
+    roman = _fold_epost_text(original, countrycd="JP")[0]
+    kana = "ヤマダタロウ"
+    kana_roman = _fold_epost_text(kana, countrycd="JP")[0]
+    assert roman != original and roman.isascii()
+    assert kana_roman != kana and kana_roman.isascii()
+    mandarin = _fold_epost_text(original, countrycd="CN")[0]
+    assert mandarin != roman and mandarin.isascii()
+    assert printed_recipient_name("홍길동", "홍길동") == "홍길동"
+    assert printed_recipient_name(original, roman) == f"{original} {roman}"
+
+    validated = validate_apply_input(_req(
+        receivename=original,
+        receiveaddr1="東京都",
+    ).model_dump())
+    assert validated["receivename"] == roman
+    assert validated["receivename_local"] == original
+    assert validated["receiveaddr1"] == "Tokyouto"
+    params = build_apply_params(validated, order_no="TIL-NAME", custno="1", apprno="1")
+    assert params["receivename"] == roman
+    assert "receivename_local" not in params
+    assert "山田" not in build_ems_params(params)
+
+    created = create_overseas(_req(
+        confirm=True,
+        receivename=original,
+        receiveaddr1="東京都",
+        receivetelno="+819099900077",
+    ), token)
+    assert get_overseas(created["id"], token)["recipient_name"] == roman
+    label = overseas_label(created["id"], token)["label"]
+    assert label["recipient"]["name"] == f"{original} {roman}"
+    assert label["recipient"]["addr1"] == "Tokyouto"
+
+    html = overseas_label(created["id"], token, format="html")
+    text = html.body.decode("utf-8")
+    assert f"{original} {roman}" in text
+    assert "Tokyouto" in text
+
+    pdf = overseas_label(created["id"], token, format="pdf")
+    import fitz
+    printed = "".join(page.get_text() for page in fitz.open(stream=pdf.body, filetype="pdf"))
+    assert original in printed
+    assert roman in printed
+
+    kana_row = create_overseas(_req(
+        confirm=True,
+        receivename=kana,
+        receivetelno="+819099900078",
+    ), token)
+    kana_label = overseas_label(kana_row["id"], token)["label"]
+    assert get_overseas(kana_row["id"], token)["recipient_name"] == kana_roman
+    assert kana_label["recipient"]["name"] == f"{kana} {kana_roman}"
 
 
 def test_preview_does_not_write(isolated_runtime):
