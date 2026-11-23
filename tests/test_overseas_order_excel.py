@@ -116,6 +116,28 @@ def test_html_xls_fills_one_shipment_and_leaves_gaps():
     assert "우편번호" not in missing
 
 
+def test_management_number_stays_separate_from_bundle():
+    same = _malaysia_row("Lip Tint", "국내", "0")
+    same[0] = "M-1"
+    same[1] = "100001"
+    other_item = _malaysia_row("Lip Gloss", "국내", "0")
+    other_item[0] = "M-2"
+    other_item[1] = "100001"
+    solo_a = _malaysia_row("Serum", "국내", "0")
+    solo_a[0] = "M-9"
+    solo_a[1] = ""
+    solo_b = list(solo_a)
+    solo_b[0] = "M-8"
+    solo_b[3] = "Toner"
+    raw = _html_table([same, other_item, solo_a, solo_b])
+    groups = parse_order_workbook(raw, filename="orders.xls")
+    assert [group["bundle_no"] for group in groups] == ["100001", "", ""]
+    assert groups[0]["management_no"] == "M-1, M-2"
+    assert [item["product_name"] for item in groups[0]["items"]] == ["Lip Tint", "Lip Gloss"]
+    assert {groups[1]["management_no"], groups[2]["management_no"]} == {"M-9", "M-8"}
+    assert all(len(group["items"]) == 1 for group in groups[1:])
+
+
 def test_two_bundle_numbers_stay_two_shipments():
     second = _malaysia_row("Lip Tint", "KR", "0")
     second[0] = "900001"
@@ -170,6 +192,8 @@ def test_excel_template_downloads_and_parses_two_shipments(isolated_runtime):
     raw = order_excel_template_bytes()
     groups = parse_order_workbook(raw, filename="overseas-order-template.xlsx")
     assert [group["bundle_no"] for group in groups] == ["100001", "100002"]
+    assert groups[0]["management_no"] == "M-100001"
+    assert groups[1]["management_no"] == "M-100002"
     assert [item["product_name"] for item in groups[0]["items"]] == ["립틴트", "립글로스"]
     assert groups[0]["countrycd"] == "JP"
     assert groups[1]["countrycd"] == "MY"

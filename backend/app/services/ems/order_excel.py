@@ -1,6 +1,7 @@
 """해외배송 주문 엑셀(HTML .xls / xlsx)을 접수 입력값으로 바꾼다.
 
-합포번호가 같으면 접수 1건이다. 상품 행은 그 건의 인보이스 품목이다.
+합포번호가 같으면 접수 1건이다. 관리번호는 합포번호와 따로 둔다.
+상품 행은 그 건의 인보이스 품목이다.
 엑셀에 없거나 숫자로 쓸 수 없는 값은 비워 두고 missing에 적는다.
 """
 
@@ -142,7 +143,7 @@ def order_excel_template_bytes() -> bytes:
     sheet.title = "해외배송"
     sheet.append(list(ORDER_EXCEL_HEADERS))
     sheet.append([
-        "100001",
+        "M-100001",
         "100001",
         "",
         "립틴트",
@@ -158,7 +159,7 @@ def order_excel_template_bytes() -> bytes:
         "국내",
     ])
     sheet.append([
-        "100001",
+        "M-100001",
         "100001",
         "",
         "립글로스",
@@ -174,7 +175,7 @@ def order_excel_template_bytes() -> bytes:
         "국내",
     ])
     sheet.append([
-        "100002",
+        "M-100002",
         "100002",
         "",
         "세럼",
@@ -240,9 +241,9 @@ def build_shipment(records: list[dict[str, str]]) -> dict[str, Any]:
     items = [_item_from_row(row) for row in records]
     items = [item for item in items if item["product_name"]]
     missing = _missing_fields(address, phone, items)
-    bundle = first.get("합포번호") or first.get("관리번호") or ""
     return {
-        "bundle_no": bundle,
+        "bundle_no": first.get("합포번호", ""),
+        "management_no": _management_no(records),
         "receivename": first.get("수령자", ""),
         "receivetelno": phone,
         "receivemail": "",
@@ -341,10 +342,22 @@ def _cell(cells: list[str], pos: int) -> str:
     return cells[pos].strip()
 
 
+def _management_no(records: list[dict[str, str]]) -> str:
+    seen: list[str] = []
+    for row in records:
+        value = (row.get("관리번호") or "").strip()
+        if value and value not in seen:
+            seen.append(value)
+    return ", ".join(seen)
+
+
 def _group_key(record: dict[str, str], offset: int) -> str:
     bundle = record.get("합포번호", "")
     if bundle:
         return f"bundle:{bundle}"
+    management = record.get("관리번호", "")
+    if management:
+        return f"manage:{management}"
     recipient = record.get("수령자", "")
     address = record.get("배송지주소", "")
     if recipient or address:

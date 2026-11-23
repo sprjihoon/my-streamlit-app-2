@@ -5,6 +5,7 @@ import Card from '@/components/Card';
 import Alert from '@/components/Alert';
 import Loading from '@/components/Loading';
 import PageHeader from '@/components/PageHeader';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { DataSection as FormSection } from '@/components/operational';
 import AddressSuggestionDialog from '@/components/AddressSuggestionDialog';
 import ChinaAddressGuideDialog from '@/components/ChinaAddressGuideDialog';
@@ -37,7 +38,7 @@ import {
   type OverseasSavedSender,
   type OverseasShippingPayload,
 } from '@/lib/api';
-import { ITEM_CATEGORIES, searchItemCategories, type ItemCategory } from '@/lib/item-categories';
+import { ITEM_CATEGORIES, ITEM_GROUPS, searchItemCategories, type ItemCategory } from '@/lib/item-categories';
 import {
   googleMapsApiKey,
   loadGoogleMapsScript,
@@ -171,6 +172,58 @@ const METHOD_PREMIUM: Record<OverseasShippingPayload['shipping_method'], string>
   KPACKET: '14',
 };
 
+const EXCEL_HS_GROUPS = [
+  '화장품·미용',
+  '의류',
+  ...ITEM_GROUPS.filter((group) => group !== '화장품·미용' && group !== '의류'),
+];
+
+const EXCEL_FILLED_GAPS = new Set([
+  'HS코드',
+  'HS 품목',
+  '단가 USD',
+  '총중량(g)',
+  '가로(cm)',
+  '세로(cm)',
+  '높이(cm)',
+  '원산지',
+]);
+
+type ExcelBatch = {
+  category: ItemCategory;
+  totweight: number;
+  boxlength: number;
+  boxwidth: number;
+  boxheight: number;
+  unitPrice: number;
+};
+
+function stampExcelGroup(group: OverseasExcelGroup, batch: ExcelBatch): OverseasExcelGroup {
+  return {
+    ...group,
+    totweight: group.totweight || batch.totweight,
+    boxlength: batch.boxlength,
+    boxwidth: batch.boxwidth,
+    boxheight: batch.boxheight,
+    items: group.items.map((item) => ({
+      ...item,
+      name_en: batch.category.name_en,
+      hs_code: batch.category.hs_code,
+      origin_country: item.origin_country || 'KR',
+      unit_price_usd: item.unit_price_usd || batch.unitPrice,
+    })),
+    missing: group.missing.filter((name) => !EXCEL_FILLED_GAPS.has(name)),
+  };
+}
+
+function excelGroupLabel(group: OverseasExcelGroup) {
+  return [
+    group.bundle_no ? `합포 ${group.bundle_no}` : '',
+    group.management_no ? `관리 ${group.management_no}` : '',
+    group.receivename || '수취인 없음',
+  ].filter(Boolean).join(' · ');
+}
+
 const GMAPS_KEY = googleMapsApiKey();
 
 export default function OverseasShippingPage() {
@@ -212,7 +265,18 @@ export default function OverseasShippingPage() {
   const [excelGroups, setExcelGroups] = useState<OverseasExcelGroup[]>([]);
   const [excelName, setExcelName] = useState('');
   const [excelLoading, setExcelLoading] = useState(false);
+  const [excelHsOpen, setExcelHsOpen] = useState(false);
+  const [excelHsGroup, setExcelHsGroup] = useState('화장품·미용');
+  const [excelHsId, setExcelHsId] = useState('');
+  const [excelParcel, setExcelParcel] = useState({
+    totweight: '500',
+    boxlength: '30',
+    boxwidth: '25',
+    boxheight: '15',
+    unitPrice: '20',
+  });
   const excelInputRef = useRef<HTMLInputElement | null>(null);
+  const excelBatchRef = useRef<ExcelBatch | null>(null);
   const [hsQuery, setHsQuery] = useState<Record<number, string>>({});
   const [hsOpen, setHsOpen] = useState<number | null>(null);
   const [hsMatches, setHsMatches] = useState<Record<number, ItemCategory[]>>({});
@@ -914,7 +978,7 @@ export default function OverseasShippingPage() {
     }
   }
 
-  function applyExcelGroup(group: OverseasExcelGroup) {
+  function applyExcelGroup(group: OverseasExcelGroup, quiet = false) {
     const allowed = !group.countrycd || nations.some((n) => n.nationcd === group.countrycd) || nations.length === 0;
     if (group.countrycd && !allowed) {
       window.alert(`엑셀의 국가 ${group.countrycd} 는 현재 배송방법으로 발송할 수 없습니다. 배송방법을 바꾸거나 국가를 직접 선택하세요.`);
@@ -928,7 +992,7 @@ export default function OverseasShippingPage() {
         : undefined;
       return {
         product_name: orderName,
-        name_en: hit?.name_en || '',
+        name_en: item.name_en || hit?.name_en || '',
         quantity: item.quantity || 1,
         unit_price_usd: item.unit_price_usd || 0,
         hs_code: item.hs_code || hit?.hs_code || '',
@@ -948,10 +1012,10 @@ export default function OverseasShippingPage() {
       receiveaddr1: group.receiveaddr1,
       receiveaddr2: group.receiveaddr2,
       receiveaddr3: group.receiveaddr3,
-      totweight: group.totweight || 0,
-      boxlength: group.boxlength || 0,
-      boxwidth: group.boxwidth || 0,
-      boxheight: group.boxheight || 0,
+      totweight: group.totweight || prev.totweight,
+      boxlength: group.boxlength || prev.boxlength,
+      boxwidth: group.boxwidth || prev.boxwidth,
+      boxheight: group.boxheight || prev.boxheight,
       notes: group.notes || '',
       items,
     }));
@@ -970,12 +1034,126 @@ export default function OverseasShippingPage() {
       : group.address_english === 'romanized'
         ? ' 주소는 영문으로 바꿨습니다.'
         : '';
+    if (quiet) return;
     setError(null);
     setSuccess(`엑셀 1건을 입력란에 채웠습니다. ${filled.join(' · ')}.${blank}${addressNote} 빈 칸을 채운 뒤 접수하세요.`);
   }
 
+  function openExcelUpload() {
+    if (!token) {
+      setError('로그인 후 엑셀을 올릴 수 있습니다.');
+      return;
+    }
+    setExcelParcel({
+      totweight: String(form.totweight || 500),
+      boxlength: String(form.boxlength || 30),
+      boxwidth: String(form.boxwidth || 25),
+      boxheight: String(form.boxheight || 15),
+      unitPrice: String(form.items.find((item) => item.unit_price_usd > 0)?.unit_price_usd || 20),
+    });
+    setExcelHsOpen(true);
+  }
+
+  function proceedExcelFile() {
+    const category = ITEM_CATEGORIES.find((item) => item.id === excelHsId);
+    const totweight = Math.round(Number(excelParcel.totweight));
+    const boxlength = Math.round(Number(excelParcel.boxlength));
+    const boxwidth = Math.round(Number(excelParcel.boxwidth));
+    const boxheight = Math.round(Number(excelParcel.boxheight));
+    const unitPrice = Number(excelParcel.unitPrice);
+    if (!category?.hs_code) {
+      setError('HS코드를 선택하세요.');
+      return;
+    }
+    if (!totweight || totweight < 1 || !boxlength || !boxwidth || !boxheight || !unitPrice || unitPrice <= 0) {
+      setError('무게, 박스 크기, 단가를 입력하세요. 이 값으로 합포마다 접수합니다.');
+      return;
+    }
+    excelBatchRef.current = { category, totweight, boxlength, boxwidth, boxheight, unitPrice };
+    setError(null);
+    setExcelHsOpen(false);
+    excelInputRef.current?.click();
+  }
+
+  function payloadFromExcel(group: OverseasExcelGroup, batch: ExcelBatch): OverseasShippingPayload {
+    return {
+      ...form,
+      test_mode: Boolean(isAdmin && form.test_mode),
+      countrycd: group.countrycd || form.countrycd,
+      receivename: group.receivename,
+      receivetelno: group.receivetelno,
+      receivemail: group.receivemail || '',
+      receivezipcode: group.receivezipcode,
+      receiveaddr1: group.receiveaddr1,
+      receiveaddr2: group.receiveaddr2,
+      receiveaddr3: group.receiveaddr3,
+      notes: group.notes || '',
+      totweight: group.totweight || batch.totweight,
+      boxlength: batch.boxlength,
+      boxwidth: batch.boxwidth,
+      boxheight: batch.boxheight,
+      save_address: false,
+      save_sender: false,
+      items: group.items.map((item) => ({
+        product_name: item.product_name,
+        name_en: batch.category.name_en,
+        quantity: item.quantity || 1,
+        unit_price_usd: item.unit_price_usd || batch.unitPrice,
+        hs_code: batch.category.hs_code,
+        origin_country: item.origin_country || 'KR',
+      })),
+    };
+  }
+
+  async function submitExcelGroups(groups: OverseasExcelGroup[], batch: ExcelBatch) {
+    const names = groups.slice(0, 8).map((group) => excelGroupLabel(group)).join('\n');
+    const more = groups.length > 8 ? `\n외 ${groups.length - 8}건` : '';
+    const mode = liveReady && !(isAdmin && form.test_mode) ? '실접수' : '테스트 접수';
+    const ok = window.confirm(
+      `${groups.length}건을 우체국에 ${mode} 합니다.\n\n` +
+        `HS: ${batch.category.name_ko} (${batch.category.hs_code})\n` +
+        `무게 ${batch.totweight}g · 박스 ${batch.boxlength}×${batch.boxwidth}×${batch.boxheight}cm · 단가 USD ${batch.unitPrice}\n` +
+        `엑셀에 중량이 없으면 이 무게와 박스를 모든 합포에 씁니다.\n\n${names}${more}`,
+    );
+    if (!ok) {
+      if (groups[0]) applyExcelGroup(groups[0], true);
+      setSuccess('접수를 보류했습니다. 합포를 누르면 그 건만 입력란에 넣습니다.');
+      return;
+    }
+    setSaving(true);
+    const lines: string[] = [];
+    let done = 0;
+    let lastId: number | null = null;
+    for (const group of groups) {
+      const label = excelGroupLabel(group);
+      if (!group.items.length) {
+        lines.push(`${label}: 품목이 없습니다.`);
+        continue;
+      }
+      try {
+        const result = await createOverseasShipping(token, payloadFromExcel(group, batch));
+        if (result.duplicate_guard) {
+          lines.push(`${label}: 같은 내용이 있어 건너뜀${result.tracking_no ? ` (${result.tracking_no})` : ''}`);
+        } else {
+          done += 1;
+          lastId = result.id;
+          lines.push(`${label}: ${result.tracking_no || result.order_no}`);
+        }
+      } catch (err) {
+        lines.push(`${label}: ${parseApiError(err)}`);
+      }
+    }
+    setSaving(false);
+    setPrintId(done === 1 ? lastId : null);
+    const summary = `${done}/${groups.length}건 접수했습니다. ${lines.join(' · ')}`;
+    if (groups[0]) applyExcelGroup(groups[0], true);
+    if (done === 0) setError(summary);
+    else setSuccess(summary);
+  }
+
   async function handleExcelFile(file: File | null) {
     if (!file || !token) return;
+    const batch = excelBatchRef.current;
     setExcelLoading(true);
     setError(null);
     setSuccess(null);
@@ -987,12 +1165,15 @@ export default function OverseasShippingPage() {
         setExcelGroups([]);
         return;
       }
+      const stamped = batch ? groups.map((group) => stampExcelGroup(group, batch)) : groups;
       setExcelName(file.name);
-      setExcelGroups(groups);
-      if (groups.length === 1) {
-        applyExcelGroup(groups[0]);
+      setExcelGroups(stamped);
+      if (batch) {
+        await submitExcelGroups(stamped, batch);
+      } else if (stamped.length === 1) {
+        applyExcelGroup(stamped[0]);
       } else {
-        setSuccess(`합포 ${groups.length}건이 있습니다. 접수할 1건을 선택하세요.`);
+        setSuccess(`합포 ${stamped.length}건이 있습니다. 접수할 1건을 선택하세요.`);
       }
     } catch (err) {
       setExcelGroups([]);
@@ -1155,6 +1336,72 @@ export default function OverseasShippingPage() {
         subtitle="창고에서 EMS / EMS 프리미엄 / K-Packet를 결제 없이 바로 접수합니다."
       />
 
+      {excelHsOpen && (
+        <Dialog open onOpenChange={(open) => { if (!open) setExcelHsOpen(false); }}>
+          <DialogContent className="tw-w-[min(720px,calc(100vw-2rem))] tw-max-h-[85vh] tw-overflow-auto tw-rounded-lg tw-p-6 tw-shadow-xl">
+            <DialogTitle className="tw-m-0 tw-text-lg tw-font-semibold">엑셀 업로드 HS코드</DialogTitle>
+            <DialogDescription className="tw-mt-2 tw-text-sm tw-text-neutral-600">
+              고른 HS를 파일의 모든 품목에 넣습니다. 다음에서 파일을 고르면 합포마다 우체국에 접수합니다.
+            </DialogDescription>
+            <div className="tw-mt-4 tw-flex tw-flex-wrap tw-gap-2">
+              {EXCEL_HS_GROUPS.map((group) => (
+                <button
+                  key={group}
+                  type="button"
+                  className={group === excelHsGroup ? 'btn btn-primary' : 'btn btn-secondary'}
+                  onClick={() => {
+                    setExcelHsGroup(group);
+                    setExcelHsId('');
+                  }}
+                >
+                  {group}
+                </button>
+              ))}
+            </div>
+            <div className="tw-mt-3 tw-grid tw-gap-2">
+              {ITEM_CATEGORIES.filter((item) => item.group === excelHsGroup && item.hs_code).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={item.id === excelHsId ? 'btn btn-primary tw-justify-start' : 'btn btn-secondary tw-justify-start'}
+                  onClick={() => setExcelHsId(item.id)}
+                >
+                  {item.name_ko} · {item.hs_code}
+                </button>
+              ))}
+            </div>
+            <div className="tw-mt-4 tw-grid tw-grid-cols-2 tw-gap-3 sm:tw-grid-cols-5">
+              <label className="tw-text-sm">
+                무게(g)
+                <input className="ui-control" inputMode="numeric" value={excelParcel.totweight} onChange={(e) => setExcelParcel((prev) => ({ ...prev, totweight: e.target.value }))} />
+              </label>
+              <label className="tw-text-sm">
+                가로(cm)
+                <input className="ui-control" inputMode="numeric" value={excelParcel.boxlength} onChange={(e) => setExcelParcel((prev) => ({ ...prev, boxlength: e.target.value }))} />
+              </label>
+              <label className="tw-text-sm">
+                세로(cm)
+                <input className="ui-control" inputMode="numeric" value={excelParcel.boxwidth} onChange={(e) => setExcelParcel((prev) => ({ ...prev, boxwidth: e.target.value }))} />
+              </label>
+              <label className="tw-text-sm">
+                높이(cm)
+                <input className="ui-control" inputMode="numeric" value={excelParcel.boxheight} onChange={(e) => setExcelParcel((prev) => ({ ...prev, boxheight: e.target.value }))} />
+              </label>
+              <label className="tw-text-sm">
+                단가 USD
+                <input className="ui-control" inputMode="decimal" value={excelParcel.unitPrice} onChange={(e) => setExcelParcel((prev) => ({ ...prev, unitPrice: e.target.value }))} />
+              </label>
+            </div>
+            <p className="tw-mb-0 tw-mt-2 tw-text-sm tw-text-neutral-600">
+              엑셀에 무게와 박스가 없으면 이 값을 모든 합포에 같이 씁니다.
+            </p>
+            <div className="tw-mt-4 tw-flex tw-justify-end tw-gap-2">
+              <button type="button" className="btn btn-secondary" onClick={() => setExcelHsOpen(false)}>취소</button>
+              <button type="button" className="btn btn-primary" disabled={!excelHsId} onClick={proceedExcelFile}>다음</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       {chinaGuideOpen && <ChinaAddressGuideDialog onClose={() => setChinaGuideOpen(false)} />}
       {yesNoDialog}
       {error && <Alert type="error">{error}</Alert>}
@@ -1217,7 +1464,7 @@ export default function OverseasShippingPage() {
 
         <FormSection title="주문 엑셀" first>
           <p className="text-muted tw-mt-0">
-            양식의 합포번호가 같으면 접수 1건입니다. 올리면 수취인, 주소, 제품명, 수량을 채웁니다. 품목란은 HS 품목이라 비워 둡니다.
+            합포번호가 같으면 접수 1건입니다. 관리번호는 합포번호와 따로 둡니다. 엑셀 업로드에서 HS를 고르면 그 코드로 모든 품목을 채운 뒤 합포마다 우체국에 접수합니다.
           </p>
           <div className="tw-items-center tw-flex tw-flex-wrap tw-gap-[0.5rem]">
             <input
@@ -1230,8 +1477,8 @@ export default function OverseasShippingPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={excelLoading}
-              onClick={() => excelInputRef.current?.click()}
+              disabled={excelLoading || saving}
+              onClick={openExcelUpload}
             >
               {excelLoading ? '읽는 중...' : '엑셀 업로드'}
             </button>
@@ -1250,16 +1497,16 @@ export default function OverseasShippingPage() {
             </button>
             {excelName && <span className="text-muted">{excelName}</span>}
           </div>
-          {excelGroups.length > 1 && (
+          {excelGroups.length > 0 && (
             <div className="tw-flex tw-flex-wrap tw-gap-[0.5rem] tw-mt-[0.75rem]">
               {excelGroups.map((group, index) => (
                 <button
-                  key={`${group.bundle_no}-${index}`}
+                  key={`${group.bundle_no}-${group.management_no || ''}-${index}`}
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => applyExcelGroup(group)}
                 >
-                  {group.bundle_no || '합포'} · {group.receivename || '수취인 없음'} · 품목 {group.items.length}
+                  {excelGroupLabel(group)} · 품목 {group.items.length}
                 </button>
               ))}
             </div>

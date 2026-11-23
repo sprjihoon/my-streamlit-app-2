@@ -265,6 +265,7 @@ export interface OverseasExcelItem {
 
 export interface OverseasExcelGroup {
   bundle_no: string;
+  management_no?: string;
   receivename: string;
   receivetelno: string;
   receivemail: string;
