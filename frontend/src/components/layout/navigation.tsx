@@ -118,6 +118,14 @@ export const NAV_GROUPS: {
     ],
   },
   {
+    key: 'staff',
+    label: '직원관리',
+    icon: <Users {...IC} />,
+    items: [
+      { href: '/employment-contracts', label: '근로계약', icon: <FileText {...IC} />, adminOnly: true },
+    ],
+  },
+  {
     key: 'marketing',
     label: '마케팅',
     icon: <Globe {...IC} />,

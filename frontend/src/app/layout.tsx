@@ -29,7 +29,8 @@ export default function RootLayout({
   const isPublicPage = pathname === '/estimate';
   const isMobileWorkPage = pathname.startsWith('/inbound/') && pathname !== '/inbound-log';
   const isSharePage = pathname.startsWith('/share/');
-  const isPrintPage = pathname.startsWith('/overseas-print/');
+  const isContractPrint = pathname.startsWith('/employment-contracts/print');
+  const isPrintPage = pathname.startsWith('/overseas-print/') || isContractPrint;
 
   useEffect(() => {
     if (isLoginPage || isPublicPage || isMobileWorkPage || isSharePage || isPrintPage) {
@@ -93,7 +94,7 @@ export default function RootLayout({
     return (
       <html lang="ko">
         <head>
-          <title>{isPrintPage ? '해외배송 출력서류' : isPublicPage ? '견적서 만들기' : isMobileWorkPage ? '입고 작업' : isSharePage ? '입고 현황' : '로그인'} - 틸리언 그룹웨어</title>
+          <title>{isContractPrint ? '근로계약서' : isPrintPage ? '해외배송 출력서류' : isPublicPage ? '견적서 만들기' : isMobileWorkPage ? '입고 작업' : isSharePage ? '입고 현황' : '로그인'} - 틸리언 그룹웨어</title>
           <link rel="icon" href="/favicon.png" type="image/png" />
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         </head>

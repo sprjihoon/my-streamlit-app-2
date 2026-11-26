@@ -34,6 +34,7 @@ from backend.app.api.overseas_shipping import router as overseas_shipping_router
 from backend.app.api.domestic_shipping import router as domestic_shipping_router, ensure_domestic_tables
 from backend.app.api.inbound import router as inbound_router, ensure_inbound_tables
 from backend.app.api.return_info import router as return_info_router
+from backend.app.api.employment_contracts import router as employment_contracts_router, ensure_contract_tables
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -86,6 +87,7 @@ app.include_router(overseas_shipping_router)
 app.include_router(domestic_shipping_router)
 app.include_router(inbound_router)
 app.include_router(return_info_router)
+app.include_router(employment_contracts_router)
 
 
 # 루트 엔드포인트
@@ -149,6 +151,7 @@ async def startup_event():
     ensure_overseas_tables()
     ensure_domestic_tables()
     ensure_inbound_tables()
+    ensure_contract_tables()
     # 스케줄러 시작 (평일 오전 10시 인사)
     from backend.app.services.scheduler import start_scheduler
     start_scheduler()
