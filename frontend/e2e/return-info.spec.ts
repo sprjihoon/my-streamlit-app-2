@@ -76,11 +76,10 @@ test('return info page filters every header and pages the rows', async ({ page }
   await expect(page.getByRole('heading', { name: '반품정보 조회' })).toBeVisible();
   const accordions = page.locator('details.return-filter-accordion');
   await expect(accordions).toHaveCount(3);
-  await expect(accordions.nth(0)).not.toHaveAttribute('open', '');
+  await expect(accordions.nth(0)).toHaveAttribute('open', '');
   await expect(accordions.nth(1)).not.toHaveAttribute('open', '');
-  await expect(accordions.nth(2)).not.toHaveAttribute('open', '');
+  await expect(accordions.nth(2)).toHaveAttribute('open', '');
   await page.locator('summary', { hasText: '날짜' }).click();
-  await page.locator('summary', { hasText: '조건' }).click();
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
   await expect(page.getByLabel('등록일 시작')).toHaveValue(today);
   await expect(page.getByLabel('등록일 종료')).toHaveValue(today);

@@ -470,7 +470,7 @@ export default function ReturnInfoPage() {
                 ))}
               </div>
             </details>
-            <details className="return-filter-accordion">
+            <details className="return-filter-accordion" open>
               <summary>조건{conditionActive ? ' · 선택됨' : ''}</summary>
               <div className="return-filter-fields">
                 {orderedConditionColumns.filter((column) => SHORT_COLUMNS.has(column)).map((column) => renderConditionField(column))}

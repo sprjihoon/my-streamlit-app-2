@@ -216,7 +216,7 @@ export function ReturnInfoUpload({ onChanged }: { onChanged: () => void }) {
   if (!signedIn) return null;
 
   return (
-    <details className="return-filter-accordion" ref={detailsRef}>
+    <details className="return-filter-accordion" ref={detailsRef} open>
       <summary>반품정보 업로드</summary>
       <div
         className="return-upload-body"
