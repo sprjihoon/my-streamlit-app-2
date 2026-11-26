@@ -13,6 +13,7 @@ PENSION_RATE = 0.0475
 HEALTH_RATE = 0.03595
 CARE_RATE = 0.1314
 EMPLOYMENT_RATE = 0.009
+INDUSTRIAL_RATE = 0.008  # 도소매·소비자용품수리업. 산재는 회사 전액, 근로자 공제 아님.
 
 
 def _down(value: float, unit: int) -> int:
@@ -27,6 +28,7 @@ def _deductions(taxable: int, dependents: int = 1) -> dict[str, int]:
     income_tax = lookup_simple_tax(taxable, dependents)
     local_tax = _down(income_tax * 0.1, 10)
     employment = _down(taxable * EMPLOYMENT_RATE, 10)
+    industrial = _down(taxable * INDUSTRIAL_RATE, 10)
     total = pension + health + care + income_tax + local_tax + employment
     return {
         "pension_base": pension_base,
@@ -36,8 +38,27 @@ def _deductions(taxable: int, dependents: int = 1) -> dict[str, int]:
         "income_tax": income_tax,
         "local_tax": local_tax,
         "employment": employment,
+        "industrial": industrial,
         "total": total,
     }
+
+
+def industrial_insurance(line_or_taxable) -> int:
+    """산재보험(회사부담). 실수령 공제에는 넣지 않는다."""
+    if isinstance(line_or_taxable, dict):
+        stored = int(line_or_taxable.get("industrial") or 0)
+        if stored:
+            return stored
+        taxable = int(line_or_taxable.get("taxable_pay") or line_or_taxable.get("taxable") or 0)
+        if not taxable:
+            taxable = max(
+                int(line_or_taxable.get("gross_pay") or line_or_taxable.get("gross") or 0)
+                - int(line_or_taxable.get("vehicle_allowance") or 0)
+                - int(line_or_taxable.get("meal_allowance") or 0),
+                0,
+            )
+        return _down(taxable * INDUSTRIAL_RATE, 10)
+    return _down(max(int(line_or_taxable or 0), 0) * INDUSTRIAL_RATE, 10)
 
 
 def _int(data: dict, key: str) -> int:
@@ -142,6 +163,7 @@ def calculate_contract_pay(data: dict) -> dict:
         "income_tax": ded["income_tax"],
         "local_tax": ded["local_tax"],
         "employment": ded["employment"],
+        "industrial": ded["industrial"],
         "hourly": int(round(hourly)),
         "base_pay": base_pay,
         "overtime_pay": overtime_pay,

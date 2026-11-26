@@ -49,6 +49,7 @@ def _blank_line() -> dict:
         "health": 0,
         "care": 0,
         "employment": 0,
+        "industrial": 0,
         "year_end_tax": 0,
         "insurance_adjust": 0,
         "prepaid": 0,

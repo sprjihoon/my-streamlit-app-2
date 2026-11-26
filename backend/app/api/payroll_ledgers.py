@@ -53,6 +53,7 @@ LINE_FIELDS = (
     "health",
     "care",
     "employment",
+    "industrial",
     "year_end_tax",
     "insurance_adjust",
     "prepaid",
@@ -81,6 +82,7 @@ MONEY_TOTALS = (
     "health",
     "care",
     "employment",
+    "industrial",
     "year_end_tax",
     "insurance_adjust",
     "prepaid",
@@ -150,6 +152,7 @@ def ensure_payroll_tables() -> None:
                 health INTEGER,
                 care INTEGER,
                 employment INTEGER,
+                industrial INTEGER DEFAULT 0,
                 year_end_tax INTEGER DEFAULT 0,
                 insurance_adjust INTEGER DEFAULT 0,
                 prepaid INTEGER DEFAULT 0,
@@ -159,6 +162,9 @@ def ensure_payroll_tables() -> None:
             )
             """
         )
+        line_cols = [row[1] for row in con.execute("PRAGMA table_info(payroll_lines)")]
+        if "industrial" not in line_cols:
+            con.execute("ALTER TABLE payroll_lines ADD COLUMN industrial INTEGER DEFAULT 0")
         con.commit()
         _seed_october_2026(con)
         con.commit()
@@ -186,7 +192,7 @@ def _seed_october_2026(con) -> None:
     for line in lines:
         con.execute(
             f"INSERT INTO payroll_lines (ledger_id, {columns}) VALUES (?, {placeholders})",
-            (ledger_id, *[line[name] for name in LINE_FIELDS]),
+            (ledger_id, *[line[name] if name in line else 0 for name in LINE_FIELDS]),
         )
 
 
@@ -342,6 +348,7 @@ def _lines_from_contracts(year: int, month: int) -> tuple[list[dict], list[str]]
             "health": calc["health"],
             "care": calc["care"],
             "employment": calc["employment"],
+            "industrial": calc["industrial"],
             "year_end_tax": 0,
             "insurance_adjust": 0,
             "prepaid": 0,
@@ -472,6 +479,7 @@ def _recalc_line(line: dict) -> dict:
         "health": calc["health"],
         "care": calc["care"],
         "employment": calc["employment"],
+        "industrial": calc["industrial"],
         "gross_pay": calc["gross"] + extras,
         "deduction_total": calc["deduction_total"],
         "net_pay": calc["net"],
@@ -552,7 +560,7 @@ def _store(year: int, month: int, company: str, label: str, lines: list[dict], o
             for line in lines:
                 con.execute(
                     f"INSERT INTO payroll_lines (ledger_id, {columns}) VALUES (?, {placeholders})",
-                    (ledger_id, *[line[name] for name in LINE_FIELDS]),
+                    (ledger_id, *[line[name] if name in line else 0 for name in LINE_FIELDS]),
                 )
         con.commit()
     saved = _load(year, month)

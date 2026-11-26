@@ -5,6 +5,7 @@ import re
 
 import fitz
 
+from backend.app.services.employment_contract.calc import industrial_insurance
 from backend.app.services.employment_contract.pdf import render_page_pngs
 
 _BLACK = (0, 0, 0)
@@ -43,6 +44,7 @@ _BASIS = (
     ("휴일근로시간", "holiday_hours"),
     ("야간근로시간", "night_hours"),
     ("통상시급", "hourly"),
+    ("산재보험(회사)", "industrial"),
 )
 _METHODS = (
     "시간외근로수당  연장근무시간×통상시급×1.5",
@@ -53,6 +55,7 @@ _METHODS = (
     "고용보험  과세대상임금×0.9%",
     "건강보험  과세대상임금×3.595%",
     "장기요양보험  건강보험료×13.14%",
+    "산재보험(회사부담)  과세대상임금×0.8%",
 )
 
 
@@ -232,6 +235,8 @@ class _Sheet:
                     shown = _compact_span(str(raw or ""))
                 elif key == "hourly":
                     shown = _num(raw)
+                elif key == "industrial":
+                    shown = _num(industrial_insurance(line))
                 else:
                     shown = _hours(raw)
                 self._put(fitz.Rect(basis_x, y0, basis_val, y0 + row_h), label, 6.4, 0)

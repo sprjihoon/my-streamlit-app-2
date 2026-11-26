@@ -86,6 +86,9 @@ def test_admin_can_preview_slip_before_release(isolated_runtime):
     text = fitz.open(stream=pdf.content, filetype="pdf")[0].get_text()
     assert "전은정" in text
     assert "1,966,730" in text
+    assert "산재보험" in text.replace(" ", "")
+    assert "15,840" in text
+    assert "회사" in text
 
 
 def test_slip_numbers_and_dates_stay_inside_page():

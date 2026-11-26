@@ -77,6 +77,11 @@ def test_sample_pay_matches_contract_sheet():
     assert calc["income_tax"] == lookup_simple_tax(calc["taxable"], 1)
     assert calc["local_tax"] == int(calc["income_tax"] * 0.1 // 10 * 10)
     assert calc["pension"] == int(calc["pension_base"] * 0.0475 // 10 * 10)
+    assert calc["industrial"] == int(calc["taxable"] * 0.008 // 10 * 10)
+    assert calc["deduction_total"] == (
+        calc["pension"] + calc["health"] + calc["care"]
+        + calc["income_tax"] + calc["local_tax"] + calc["employment"]
+    )
     assert calc["net"] == 1966730
     assert calc["vehicle_allowance"] == 200000
     assert calc["gross"] == calc["taxable"] + calc["vehicle_allowance"]
