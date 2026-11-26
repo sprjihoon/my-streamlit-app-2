@@ -149,6 +149,20 @@ def test_meal_stays_out_of_taxable_pay_and_lines_still_sum():
     assert parts == with_meal["gross"]
 
 
+def _worker_confirms(client: TestClient, staff_id: int):
+    mark = client.put(
+        f"/employment-contracts/users/{staff_id}/mark",
+        params={"token": "staff-tok"},
+        json={"kind": "grid"},
+    )
+    assert mark.status_code == 200, mark.text
+    sealed = client.post(
+        f"/employment-contracts/users/{staff_id}/worker-seal",
+        params={"token": "staff-tok"},
+    )
+    assert sealed.status_code == 200, sealed.text
+
+
 def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     staff_id = _prepare(isolated_runtime["db"])
     client = TestClient(app)
@@ -172,6 +186,21 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     assert opened.status_code == 200
     assert any(row["user_id"] == staff_id for row in opened.json()["employees"])
     assert client.get("/auth/me", params={"token": "staff-tok"}).json()["needs_contract"] is True
+
+    blocked = client.post(
+        f"/employment-contracts/users/{staff_id}/complete",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert blocked.status_code == 400
+
+    drafted = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200
+    _worker_confirms(client, staff_id)
 
     completed = client.post(
         f"/employment-contracts/users/{staff_id}/complete",
@@ -287,6 +316,7 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     assert after_admin["address"] == "부산광역시"
     assert after_admin["phone"] == "010-3333-4444"
 
+    _worker_confirms(client, staff_id)
     renewed = client.post(
         f"/employment-contracts/users/{staff_id}/complete",
         params={"token": "admin-tok"},
@@ -366,6 +396,17 @@ def test_name_seal_uses_the_workers_own_name_and_is_stamped(isolated_runtime):
     assert chosen.json()["name"] == "김철수"
 
     body = _sample(employee_name="김철수")
+    drafted = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200
+    ready = client.post(
+        f"/employment-contracts/users/{staff_id}/worker-seal",
+        params={"token": "staff-tok"},
+    )
+    assert ready.status_code == 200
     completed = client.post(
         f"/employment-contracts/users/{staff_id}/complete",
         params={"token": "admin-tok"},

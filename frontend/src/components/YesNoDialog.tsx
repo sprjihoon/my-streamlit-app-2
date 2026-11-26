@@ -9,12 +9,19 @@ export function duplicateSubmitQuestion(tracking?: string) {
 export function useYesNo() {
   const [pending, setPending] = useState<{
     message: string;
+    yes: string;
+    no: string;
     resolve: (value: boolean) => void;
   } | null>(null);
 
-  function ask(message: string) {
+  function ask(message: string, labels?: { yes?: string; no?: string }) {
     return new Promise<boolean>((resolve) => {
-      setPending({ message, resolve });
+      setPending({
+        message,
+        yes: labels?.yes || '네',
+        no: labels?.no || '아니오',
+        resolve,
+      });
     });
   }
 
@@ -54,10 +61,10 @@ export function useYesNo() {
         </p>
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => answer(false)}>
-            아니오
+            {pending.no}
           </button>
           <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => answer(true)}>
-            네
+            {pending.yes}
           </button>
         </div>
       </div>

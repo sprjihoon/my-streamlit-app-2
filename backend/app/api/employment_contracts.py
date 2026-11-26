@@ -142,6 +142,8 @@ def ensure_contract_tables() -> None:
             con.execute("ALTER TABLE employment_contracts ADD COLUMN pay_basis TEXT DEFAULT 'net'")
         if "dependents" not in columns:
             con.execute("ALTER TABLE employment_contracts ADD COLUMN dependents INTEGER DEFAULT 1")
+        if "worker_sealed_at" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN worker_sealed_at TEXT")
         con.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_employment_contracts_user
@@ -514,7 +516,7 @@ def apply_payroll_contract_fields(lines: list[dict]) -> dict:
                 con.execute(
                     f"""
                     UPDATE employment_contracts
-                    SET {assignments}, gross_pay = ?, calc_json = ?, updated_at = CURRENT_TIMESTAMP
+                    SET {assignments}, gross_pay = ?, calc_json = ?, worker_sealed_at = NULL, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
                     (
@@ -567,7 +569,8 @@ def list_contracts(token: str, view: str = "open"):
             rows = con.execute(
                 """
                 SELECT u.user_id, u.nickname, u.department, u.position, u.join_date,
-                       c.id, c.employee_name, c.updated_at, c.address, c.phone, c.resident_id
+                       c.id, c.employee_name, c.updated_at, c.address, c.phone, c.resident_id,
+                       c.worker_sealed_at
                 FROM users u
                 LEFT JOIN employment_contracts c
                   ON c.id = (
@@ -592,6 +595,7 @@ def list_contracts(token: str, view: str = "open"):
                         "employee_name": row[6] or row[1],
                         "updated_at": row[7],
                         "worker_filled": bool((row[8] or "").strip() and (row[9] or "").strip() and (row[10] or "").strip()),
+                        "worker_sealed": bool(row[11]),
                     }
                     for row in rows
                 ]
@@ -645,6 +649,13 @@ def get_contract_draft(user_id: int, token: str):
             raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
         locked = _locked_resident_id(con, user_id)
         draft = _load_contract(con, latest[0]) if latest else None
+        sealed_at = ""
+        if latest:
+            sealed_row = con.execute(
+                "SELECT worker_sealed_at FROM employment_contracts WHERE id = ?",
+                (latest[0],),
+            ).fetchone()
+            sealed_at = (sealed_row[0] or "") if sealed_row else ""
     if draft:
         shown = dict(draft["input"])
         if locked:
@@ -660,6 +671,7 @@ def get_contract_draft(user_id: int, token: str):
             "completed_at": draft.get("completed_at"),
             "rrn_locked": bool(locked),
             "renewal": bool(locked and draft["status"] == "draft"),
+            "worker_sealed": bool(sealed_at) and draft["status"] == "draft",
         }
     return {
         "user": user,
@@ -698,6 +710,7 @@ def get_contract_draft(user_id: int, token: str):
         "completed_at": None,
         "rrn_locked": False,
         "renewal": False,
+        "worker_sealed": False,
     }
 
 
@@ -764,6 +777,72 @@ def preview_contract_pages(body: ContractInput, token: str, user_id: int | None 
     return _pages_from_pdf(pdf)
 
 
+@router.post("/users/{user_id}/preview-own")
+def preview_own_contract(user_id: int, token: str):
+    """저장된 초안을 근로자가 확인하고 날인하기 전에 본다."""
+    actor = _own_or_admin(token, user_id)
+    if not actor["is_admin"] and not worker_needs_contract(user_id, False):
+        raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
+    with get_connection() as con:
+        _user_or_404(con, user_id)
+        latest = _latest(con, user_id)
+        if not latest or latest[1] != "draft":
+            raise HTTPException(status_code=400, detail="회사에서 계약 내용을 저장한 뒤 확인할 수 있습니다.")
+        draft = _load_contract(con, latest[0])
+    payload = draft["input"]
+    calc = draft["calc"] or _preview_calc(payload)
+    pdf = render_contract_pdf(
+        0,
+        _company(),
+        payload,
+        calc,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        preview=True,
+        employee_mark=_employee_mark(user_id),
+    )
+    return _pages_from_pdf(pdf)
+
+
+@router.post("/users/{user_id}/worker-seal")
+def worker_seal_contract(user_id: int, token: str):
+    """근로자가 계약서를 확인한 뒤 본인 도장으로 날인한다."""
+    actor = _session(token)
+    if actor["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="본인 계약서만 날인할 수 있습니다.")
+    if not _employee_mark(user_id):
+        raise HTTPException(status_code=400, detail="도장이나 싸인을 먼저 저장하세요.")
+    with get_connection() as con:
+        _user_or_404(con, user_id)
+        _require_open(con, user_id)
+        latest = _latest(con, user_id)
+        if not latest or latest[1] != "draft":
+            raise HTTPException(status_code=400, detail="회사에서 계약 내용을 저장한 뒤 날인할 수 있습니다.")
+        payload = _load_contract(con, latest[0])["input"]
+        if not _personal_filled(payload):
+            raise HTTPException(status_code=400, detail="성명, 주민등록번호, 주소, 연락처를 저장한 뒤 날인하세요.")
+        if not (int(payload.get("net_pay") or 0) or int(payload.get("taxable_pay") or 0) or int(payload.get("annual_pay") or 0)):
+            raise HTTPException(status_code=400, detail="회사에서 급여를 저장한 뒤 날인할 수 있습니다.")
+        sealed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        con.execute(
+            """
+            UPDATE employment_contracts
+            SET worker_sealed_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (sealed_at, latest[0]),
+        )
+        con.commit()
+    add_log(
+        action_type="근로계약 근로자 날인",
+        target_type="employment_contract",
+        target_id=str(latest[0]),
+        target_name=payload.get("employee_name") or actor["nickname"],
+        user_nickname=actor["nickname"],
+        details="근로자가 계약서를 확인하고 날인",
+    )
+    return {"worker_sealed_at": sealed_at}
+
+
 def _worker_values(data: WorkerInput, locked_rrn: str = "") -> dict:
     name = data.employee_name.strip()
     address = data.address.strip()
@@ -797,7 +876,7 @@ def save_worker_fields(user_id: int, body: WorkerInput, token: str):
             con.execute(
                 """
                 UPDATE employment_contracts
-                SET employee_name = ?, resident_id = ?, address = ?, phone = ?, updated_at = CURRENT_TIMESTAMP
+                SET employee_name = ?, resident_id = ?, address = ?, phone = ?, worker_sealed_at = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (worker["employee_name"], worker["resident_id"], worker["address"], worker["phone"], latest[0]),
@@ -948,7 +1027,7 @@ def save_contract_draft(user_id: int, body: ContractInput, token: str):
             con.execute(
                 f"""
                 UPDATE employment_contracts
-                SET {assignments}, gross_pay = ?, calc_json = ?, updated_at = CURRENT_TIMESTAMP
+                SET {assignments}, gross_pay = ?, calc_json = ?, worker_sealed_at = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 [
@@ -979,6 +1058,14 @@ def complete_contract(user_id: int, body: ContractInput, token: str):
         _require_open(con, user_id)
         latest = _latest(con, user_id)
         locked = _locked_resident_id(con, user_id)
+        if not latest or latest[1] != "draft":
+            raise HTTPException(status_code=400, detail="근로자가 계약서를 확인하고 날인한 뒤 회사 날인을 할 수 있습니다.")
+        sealed_row = con.execute(
+            "SELECT worker_sealed_at FROM employment_contracts WHERE id = ?",
+            (latest[0],),
+        ).fetchone()
+        if not sealed_row or not (sealed_row[0] or "").strip():
+            raise HTTPException(status_code=400, detail="근로자가 계약서를 확인하고 날인한 뒤 회사 날인을 할 수 있습니다.")
         if latest and latest[1] == "draft":
             previous = _load_contract(con, latest[0])["input"]
             for key in ("employee_name", "resident_id", "address", "phone"):

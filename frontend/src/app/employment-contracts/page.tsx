@@ -24,6 +24,7 @@ interface EmployeeRow {
   employee_name: string;
   updated_at: string | null;
   worker_filled?: boolean;
+  worker_sealed?: boolean;
 }
 
 interface StoredContract {
@@ -158,6 +159,7 @@ export default function EmploymentContractsPage() {
   const [markRevision, setMarkRevision] = useState(0);
   const [rrnLocked, setRrnLocked] = useState(false);
   const [renewal, setRenewal] = useState(false);
+  const [workerSealed, setWorkerSealed] = useState(false);
 
   const load = useCallback(async (nextView: 'open' | 'completed') => {
     const token = localStorage.getItem('token') || '';
@@ -195,6 +197,7 @@ export default function EmploymentContractsPage() {
     setForm({ ...EMPTY_FORM, ...data.input });
     setRrnLocked(!!data.rrn_locked);
     setRenewal(!!data.renewal);
+    setWorkerSealed(!!data.worker_sealed);
     setSealed(false);
     setLoading(false);
   }, [router]);
@@ -246,6 +249,7 @@ export default function EmploymentContractsPage() {
     setCalc(data.calc);
     setRrnLocked(!!data.rrn_locked);
     setRenewal(!!data.renewal);
+    setWorkerSealed(!!data.worker_sealed);
     setView('open');
   }
 
@@ -346,7 +350,8 @@ export default function EmploymentContractsPage() {
       setError(await apiError(res));
       return;
     }
-    setSuccess('근로자 기재란을 저장했습니다.');
+    setWorkerSealed(false);
+    setSuccess('근로자 기재란을 저장했습니다. 내용을 바꾸면 다시 날인합니다.');
     setMarkRevision((value) => value + 1);
   }
 
@@ -367,13 +372,17 @@ export default function EmploymentContractsPage() {
     }
     const data = await res.json();
     setCalc(data.calc);
-    setSuccess('작성 중인 내용을 저장했습니다.');
+    setWorkerSealed(false);
+    setSuccess('작성 중인 내용을 저장했습니다. 내용이 바뀌면 근로자가 다시 날인합니다.');
     load('open');
   }
 
   async function complete() {
     if (!editingId) return;
-    const ok = await ask('회사 직인을 찍어 근로계약서를 날인합니다.\n근로자가 도장이나 싸인을 등록했다면 을 서명란에도 올라갑니다.\n날인하면 이 직원은 작성 목록에서 숨겨지고 PDF로 보관됩니다.\n진행할까요?');
+    const ok = await ask(
+      '계약서를 확인했고 날인을 진행합니다.\n회사 직인을 찍고 PDF로 보관합니다.',
+      { yes: '날인 진행', no: '취소' },
+    );
     if (!ok) return;
     const token = localStorage.getItem('token') || '';
     setBusy(true);
@@ -427,14 +436,72 @@ export default function EmploymentContractsPage() {
     return <Loading text="불러오는 중..." />;
   }
 
+  async function previewMine() {
+    if (!myId) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`${API}/employment-contracts/users/${myId}/preview-own?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    setSheets(data.pages || []);
+  }
+
+  async function sealMine() {
+    if (!myId) return;
+    const ok = await ask(
+      '계약서를 확인했고 날인을 진행합니다.',
+      { yes: '날인 진행', no: '취소' },
+    );
+    if (!ok) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const saved = await fetch(`${API}/employment-contracts/users/${myId}/worker?token=${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employee_name: form.employee_name,
+        resident_id: form.resident_id,
+        address: form.address,
+        phone: form.phone,
+      }),
+    });
+    if (!saved.ok) {
+      setBusy(false);
+      setError(await apiError(saved));
+      return;
+    }
+    const res = await fetch(`${API}/employment-contracts/users/${myId}/worker-seal?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setWorkerSealed(false);
+      setError(await apiError(res));
+      return;
+    }
+    setWorkerSealed(true);
+    setMarkRevision((value) => value + 1);
+    setSuccess('계약서를 확인하고 날인했습니다. 회사에서 날인하면 계약이 보관됩니다.');
+  }
+
   if (!isAdmin) {
     return (
       <div>
+        {dialog}
+        {sheets && <A4Preview pages={sheets} overlay onClose={() => setSheets(null)} />}
         <PageHeader
           title="근로계약"
           subtitle={renewal
-            ? '이전 계약 내용을 불러왔습니다. 주소·연락처·성함 등 바뀐 항목만 고치면 됩니다. 주민번호는 그대로입니다.'
-            : '근로자가 적는 항목만 입력합니다. 급여와 근로조건은 회사에서 적습니다.'}
+            ? '이전 계약 내용을 불러왔습니다. 주소·연락처·성함 등 바뀐 항목만 고친 뒤 계약서를 확인하고 날인합니다. 주민번호는 그대로입니다.'
+            : '성명과 연락처를 저장하고 도장을 등록한 뒤, 계약서를 확인하고 날인합니다. 급여와 근로조건은 회사에서 적습니다.'}
         />
         {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
         {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
@@ -451,9 +518,14 @@ export default function EmploymentContractsPage() {
               <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
               <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
             </div>
-            <div style={{ marginTop: '1rem' }}>
-              <Button type="button" variant="primary" disabled={busy} onClick={saveWorker}>저장</Button>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+              <Button type="button" variant="secondary" disabled={busy} onClick={saveWorker}>저장</Button>
+              <Button type="button" variant="secondary" disabled={busy} onClick={previewMine}>계약서 확인</Button>
+              <Button type="button" variant="success" disabled={busy || workerSealed} onClick={sealMine}>날인</Button>
             </div>
+            {workerSealed && (
+              <p style={{ marginBottom: 0, color: '#166534' }}>날인했습니다. 내용을 바꾸면 다시 날인합니다.</p>
+            )}
           </Card>
         )}
         {!loading && !sealed && myId && (
@@ -583,6 +655,11 @@ export default function EmploymentContractsPage() {
               <Button type="button" variant="secondary" disabled={busy} onClick={saveDraft}>임시 저장</Button>
               <Button type="button" variant="success" disabled={busy} onClick={complete}>날인</Button>
             </div>
+            <p style={{ margin: '0.7rem 0 0', color: workerSealed ? '#166534' : '#92400e', fontSize: '0.85rem' }}>
+              {workerSealed
+                ? '근로자가 계약서를 확인하고 날인했습니다.'
+                : '근로자가 계약서를 확인하고 날인하기 전에는 회사 날인을 할 수 없습니다.'}
+            </p>
             {calc && (
               <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
                 {[
@@ -618,12 +695,12 @@ export default function EmploymentContractsPage() {
           <table>
             <thead>
               <tr>
-                {['성함', '팀', '직급', '입사일', '상태', '근로자 기재', ''].map((head) => <th key={head || 'actions'}>{head}</th>)}
+                {['성함', '팀', '직급', '입사일', '상태', '근로자 기재', '근로자 날인', ''].map((head) => <th key={head || 'actions'}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
               {employees.length === 0 && (
-                <tr><td colSpan={7} style={{ color: '#6b7280' }}>작성할 직원이 없습니다. 완료한 계약은 완료 보관에 있습니다.</td></tr>
+                <tr><td colSpan={8} style={{ color: '#6b7280' }}>작성할 직원이 없습니다. 완료한 계약은 완료 보관에 있습니다.</td></tr>
               )}
               {employees.map((row) => (
                 <tr key={row.user_id}>
@@ -633,6 +710,7 @@ export default function EmploymentContractsPage() {
                   <td>{row.join_date || '—'}</td>
                   <td>{row.state === 'draft' ? '작성 중' : '미작성'}</td>
                   <td>{row.worker_filled ? '기재 완료' : '미기재'}</td>
+                  <td>{row.worker_sealed ? '날인' : '대기'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <Button type="button" variant="primary" disabled={busy} onClick={() => openEditor(row.user_id)}>
                       {row.state === 'draft' ? '이어서 작성' : '작성'}
