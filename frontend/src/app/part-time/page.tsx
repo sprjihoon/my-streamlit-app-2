@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Alert } from '@/components/Alert';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
+import { dateFromPointTarget, dropWorkerOntoDate, workersAvailableOnDate } from './calendar-actions';
 import { API, CalendarData, DayEntry, Worker, apiError, downloadPartTimeExcel, hoursText, readAdmin, won } from './model';
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
@@ -27,6 +28,23 @@ interface HourDraft {
   existing: boolean;
 }
 
+interface DayAdd {
+  date: string;
+  workerId: string;
+  hours: string;
+}
+
+interface DragSession {
+  pointerId: number;
+  workerId: number;
+  name: string;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  moved: boolean;
+}
+
 export default function PartTimePage() {
   const now = new Date();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
@@ -36,7 +54,15 @@ export default function PartTimePage() {
   const [workerDraft, setWorkerDraft] = useState<WorkerDraft | null>(null);
   const [recallOpen, setRecallOpen] = useState(false);
   const [hourDraft, setHourDraft] = useState<HourDraft | null>(null);
-  const draggingId = useRef<number | null>(null);
+  const [dayAdd, setDayAdd] = useState<DayAdd | null>(null);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const [dragName, setDragName] = useState<string | null>(null);
+  const calendarRef = useRef<CalendarData | null>(null);
+  const dragSession = useRef<DragSession | null>(null);
+  const ghostRef = useRef<HTMLDivElement | null>(null);
+  const hoverDateRef = useRef<string | null>(null);
+  const dropWorkerRef = useRef<(date: string, workerId: number) => void>(() => {});
+  const skipClickRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +87,64 @@ export default function PartTimePage() {
     if (admin) load(year, month);
     else setLoading(false);
   }, [load, year, month]);
+
+  useEffect(() => {
+    function dateUnder(event: PointerEvent) {
+      return dateFromPointTarget(document.elementFromPoint(event.clientX, event.clientY));
+    }
+    function move(event: PointerEvent) {
+      const session = dragSession.current;
+      if (!session || session.pointerId !== event.pointerId) return;
+      const dx = event.clientX - session.startX;
+      const dy = event.clientY - session.startY;
+      if (!session.moved && dx * dx + dy * dy < 25) return;
+      event.preventDefault();
+      session.x = event.clientX;
+      session.y = event.clientY;
+      if (!session.moved) {
+        session.moved = true;
+        setDragName(session.name);
+      }
+      if (ghostRef.current) {
+        ghostRef.current.style.transform = `translate(${event.clientX + 14}px, ${event.clientY + 14}px)`;
+      }
+      const date = dateUnder(event);
+      if (date !== hoverDateRef.current) {
+        hoverDateRef.current = date;
+        setHoverDate(date);
+      }
+    }
+    function end(event: PointerEvent) {
+      const session = dragSession.current;
+      if (!session || session.pointerId !== event.pointerId) return;
+      const moved = session.moved;
+      const workerId = session.workerId;
+      dragSession.current = null;
+      hoverDateRef.current = null;
+      setHoverDate(null);
+      setDragName(null);
+      if (!moved) return;
+      skipClickRef.current = true;
+      const date = dateUnder(event);
+      if (date) dropWorkerRef.current(date, workerId);
+    }
+    function swallowClick(event: MouseEvent) {
+      if (!skipClickRef.current) return;
+      skipClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    window.addEventListener('pointermove', move, { capture: true, passive: false });
+    window.addEventListener('pointerup', end, { capture: true });
+    window.addEventListener('pointercancel', end, { capture: true });
+    window.addEventListener('click', swallowClick, true);
+    return () => {
+      window.removeEventListener('pointermove', move, { capture: true } as EventListenerOptions);
+      window.removeEventListener('pointerup', end, { capture: true } as EventListenerOptions);
+      window.removeEventListener('pointercancel', end, { capture: true } as EventListenerOptions);
+      window.removeEventListener('click', swallowClick, true);
+    };
+  }, []);
 
   function shiftMonth(delta: number) {
     const next = new Date(year, month - 1 + delta, 1);
@@ -138,17 +222,48 @@ export default function PartTimePage() {
   }
 
   function dropWorker(date: string, workerId: number) {
-    if (!calendar) return;
-    const worker = calendar.workers.find((item) => item.id === workerId);
-    if (!worker || !worker.active) return;
-    const exists = (calendar.days[date] || []).some((item) => item.worker_id === workerId);
-    if (exists) {
+    const data = calendarRef.current;
+    if (!data) return;
+    const outcome = dropWorkerOntoDate(data.workers, data.days[date] || [], workerId);
+    if (outcome.kind === 'ignore') return;
+    if (outcome.kind === 'duplicate') {
       setSuccess(null);
-      setError(`${worker.name} 님은 이 날짜에 이미 들어가 있습니다.`);
+      setError(`${outcome.name} 님은 이 날짜에 이미 들어가 있습니다.`);
       return;
     }
     setError(null);
-    setHourDraft({ date, workerId, name: worker.name, hours: '', existing: false });
+    setDayAdd(null);
+    setHourDraft({ date, workerId: outcome.workerId, name: outcome.name, hours: '', existing: false });
+  }
+  dropWorkerRef.current = dropWorker;
+
+  function beginDrag(event: ReactPointerEvent<HTMLDivElement>, worker: Worker) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* capture는 브라우저가 막으면 창 리스너로 이어 간다 */
+    }
+    dragSession.current = {
+      pointerId: event.pointerId,
+      workerId: worker.id,
+      name: worker.name,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+    };
+  }
+
+  function openDayAdd(date: string) {
+    const data = calendarRef.current;
+    if (!data) return;
+    const available = workersAvailableOnDate(data.workers, data.days[date] || []);
+    setHourDraft(null);
+    setDayAdd({ date, workerId: available[0] ? String(available[0].id) : '', hours: '' });
   }
 
   function editHours(date: string, entry: DayEntry) {
@@ -178,7 +293,45 @@ export default function PartTimePage() {
     }
     setCalendar(await res.json());
     setHourDraft(null);
+    setDayAdd(null);
     setSuccess(remove ? `${hourDraft.date}에서 ${hourDraft.name}을 뺐습니다.` : `${hourDraft.date} ${hourDraft.name} ${hoursText(hours)}시간을 기록했습니다.`);
+  }
+
+  async function saveDayAdd() {
+    if (!dayAdd) return;
+    const data = calendarRef.current;
+    const worker = data?.workers.find((item) => item.id === Number(dayAdd.workerId));
+    if (!worker) {
+      setError('알바를 선택하세요.');
+      return;
+    }
+    const hours = Number(dayAdd.hours || 0);
+    if (hours <= 0) {
+      setError('근무시간을 입력하세요.');
+      return;
+    }
+    const exists = (data?.days[dayAdd.date] || []).some((item) => item.worker_id === worker.id);
+    if (exists) {
+      setError(`${worker.name} 님은 이 날짜에 이미 들어가 있습니다.`);
+      return;
+    }
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    const res = await fetch(`${API}/part-time/days?token=${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ work_date: dayAdd.date, entries: [{ worker_id: worker.id, hours }] }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    setCalendar(await res.json());
+    setDayAdd(null);
+    setSuccess(`${dayAdd.date} ${worker.name} ${hoursText(hours)}시간을 기록했습니다.`);
   }
 
   if (isAdmin === null) return <Loading text="불러오는 중..." />;
@@ -199,14 +352,18 @@ export default function PartTimePage() {
   while (cells.length % 7 !== 0) cells.push(null);
   const today = new Date();
   const holidayBySunday = new Map((calendar?.weeks || []).map((week) => [week.sunday, week.workers.filter((person) => person.weekly_holiday_pay > 0)]));
+  calendarRef.current = calendar;
   const activeWorkers = (calendar?.workers || []).filter((worker) => worker.active);
   const inactiveWorkers = (calendar?.workers || []).filter((worker) => !worker.active);
+  const dayAddWorkers = dayAdd
+    ? workersAvailableOnDate(calendar?.workers || [], calendar?.days[dayAdd.date] || [])
+    : [];
 
   return (
     <div>
       <PageHeader
         title="관리대장"
-        subtitle="알바를 달력으로 끌어다 놓으면 그 날 근무시간을 적습니다. 같은 알바는 같은 날에 한 번만 들어갑니다."
+        subtitle="알바 이름을 날짜로 끌어다 놓거나, 날짜를 눌러 알바를 추가합니다. 같은 알바는 같은 날에 한 번만 들어갑니다."
         actions={(
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <Button type="button" variant="secondary" onClick={() => setRecallOpen(true)}>
@@ -227,14 +384,8 @@ export default function PartTimePage() {
             {activeWorkers.map((worker) => (
               <div key={worker.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', border: '1px solid #d1d5db', borderRadius: 8, padding: '0.35rem 0.45rem', background: 'white' }}>
                 <div
-                  draggable
-                  onDragStart={(event) => {
-                    draggingId.current = worker.id;
-                    event.dataTransfer.setData('text/plain', String(worker.id));
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onDragEnd={() => { draggingId.current = null; }}
-                  style={{ cursor: 'grab', fontSize: '0.9rem' }}
+                  onPointerDown={(event) => beginDrag(event, worker)}
+                  style={{ cursor: 'grab', touchAction: 'none', userSelect: 'none', fontSize: '0.9rem' }}
                   title="달력 날짜로 끌어다 놓으세요"
                 >
                   <strong>{worker.name}</strong>
@@ -277,7 +428,7 @@ export default function PartTimePage() {
           }}>노무사 전달용 엑셀</Button>
         </div>
         <p style={{ margin: '0 0 0.75rem', color: '#6b7280', fontSize: '0.85rem' }}>
-          초록은 신고, 회색은 미신고입니다. 금액은 그날 시급에 근무시간을 곱한 값이고, 일요일의 주휴는 신고 알바만 표시됩니다. 이름을 누르면 시간을 고치거나 뺄 수 있습니다.
+          날짜를 누르면 그 날 알바를 추가합니다. 등록된 알바 이름을 끌어다 놓아도 됩니다. 초록은 신고, 회색은 미신고입니다. 이미 들어간 이름을 누르면 시간을 고치거나 뺄 수 있습니다.
         </p>
         {loading || !calendar ? <Loading text="불러오는 중..." /> : (
           <div style={{ border: '1px solid #dee2e6', borderRadius: 8, overflow: 'hidden' }}>
@@ -300,44 +451,35 @@ export default function PartTimePage() {
                 return (
                   <div
                     key={index}
-                    onDragOver={(event) => {
-                      if (!day || draggingId.current === null) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = 'copy';
-                      event.currentTarget.style.outline = '2px solid #0d6efd';
-                    }}
-                    onDragLeave={(event) => { event.currentTarget.style.outline = ''; }}
-                    onDrop={(event) => {
-                      if (!day) return;
-                      event.preventDefault();
-                      event.currentTarget.style.outline = '';
-                      const workerId = draggingId.current || Number(event.dataTransfer.getData('text/plain'));
-                      draggingId.current = null;
-                      if (workerId) dropWorker(date, workerId);
-                    }}
+                    data-date={date || undefined}
+                    onClick={() => { if (day) openDayAdd(date); }}
                     style={{
                       minHeight: 124,
                       padding: '0.35rem',
                       borderTop: '1px solid #dee2e6',
                       borderRight: index % 7 < 6 ? '1px solid #dee2e6' : 'none',
                       background: !day ? '#fafafa' : index % 7 === 6 ? '#fff8f8' : 'white',
+                      outline: day && hoverDate === date ? '2px solid #0d6efd' : undefined,
+                      cursor: day ? 'pointer' : 'default',
                     }}
                   >
                     {day && (
                       <>
-                        <div style={{
-                          fontSize: '0.8rem', fontWeight: isToday ? 700 : 500,
-                          color: isToday ? 'white' : index % 7 === 6 ? '#dc3545' : '#212529',
-                          background: isToday ? '#0d6efd' : 'transparent',
-                          borderRadius: 11, width: 22, height: 22,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>{day}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{
+                            fontSize: '0.8rem', fontWeight: isToday ? 700 : 500,
+                            color: isToday ? 'white' : index % 7 === 6 ? '#dc3545' : '#212529',
+                            background: isToday ? '#0d6efd' : 'transparent',
+                            borderRadius: 11, width: 22, height: 22,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>{day}</div>
+                          <span style={{ fontSize: '0.68rem', color: '#2563eb' }}>추가</span>
+                        </div>
                         {entries.map((entry) => (
                           <button
                             key={entry.worker_id}
                             type="button"
-                            onDragOver={(event) => event.preventDefault()}
-                            onClick={() => editHours(date, entry)}
+                            onClick={(event) => { event.stopPropagation(); editHours(date, entry); }}
                             style={{
                               display: 'block', width: '100%', textAlign: 'left', marginTop: 3,
                               border: 0, background: entry.reported ? '#dcfce7' : '#f3f4f6',
@@ -452,6 +594,63 @@ export default function PartTimePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {dayAdd && (
+        <div className="data-modal-backdrop" onClick={() => setDayAdd(null)}>
+          <div className="data-modal" style={{ maxWidth: 420 }} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="data-modal-head">
+              <h2>{dayAdd.date} 알바 추가</h2>
+              <Button type="button" variant="ghost" onClick={() => setDayAdd(null)}>닫기</Button>
+            </div>
+            <div className="data-modal-body">
+              {dayAddWorkers.length === 0 ? (
+                <p style={{ margin: 0, color: '#6b7280' }}>이 날짜에 추가할 알바가 없습니다.</p>
+              ) : (
+                <>
+                  <label className="ops-label">
+                    알바
+                    <select className="ui-control" value={dayAdd.workerId} onChange={(event) => setDayAdd({ ...dayAdd, workerId: event.target.value })}>
+                      {dayAddWorkers.map((worker) => (
+                        <option key={worker.id} value={worker.id}>{worker.name} · {worker.reported ? '신고' : '미신고'} · {won(worker.hourly_wage)}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="ops-label" style={{ marginTop: '0.75rem' }}>
+                    근무시간
+                    <input
+                      className="ui-control"
+                      type="number"
+                      min={0.5}
+                      max={24}
+                      step={0.5}
+                      autoFocus
+                      value={dayAdd.hours}
+                      onChange={(event) => setDayAdd({ ...dayAdd, hours: event.target.value })}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+            <div className="data-modal-foot">
+              <Button type="button" variant="primary" disabled={busy || dayAddWorkers.length === 0} onClick={saveDayAdd}>기록</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dragName && (
+        <div
+          ref={(node) => {
+            ghostRef.current = node;
+            const session = dragSession.current;
+            if (node && session) node.style.transform = `translate(${session.x + 14}px, ${session.y + 14}px)`;
+          }}
+          style={{
+            position: 'fixed', left: 0, top: 0, zIndex: 3000, pointerEvents: 'none',
+            background: '#111827', color: 'white', borderRadius: 8, padding: '0.35rem 0.6rem', fontSize: '0.85rem',
+          }}
+        >{dragName}</div>
       )}
 
       {hourDraft && (
