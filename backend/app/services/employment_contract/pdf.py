@@ -44,8 +44,11 @@ def render_contract_pdf(
     pen.line(f"(갑) 사용자    사업체명 {_text(company_name)}    대표자 {_text(company.get('representative'))}")
     pen.line(f"주소 {_text(company.get('address'))}")
     pen.blank(4)
-    pen.line(f"(을) 근로자    성명 {_text(fields.get('employee_name'))}    주민등록번호 {_text(fields.get('resident_id'))}")
-    pen.line(f"주소 {_text(fields.get('address'))}    연락처 {_text(fields.get('phone'))}")
+    pen.line("(을) 근로자 기재")
+    pen.line(f"성명  {_blank(fields.get('employee_name'))}")
+    pen.line(f"주민등록번호  {_blank(fields.get('resident_id'))}")
+    pen.line(f"주소  {_blank(fields.get('address'))}")
+    pen.line(f"연락처  {_blank(fields.get('phone'))}")
     pen.line(
         f"직무 {_text(fields.get('job_title'))}    직급 {_text(fields.get('rank_title'))}"
         f"    입사일 {_date(fields.get('hire_date') or '')}"
@@ -163,6 +166,11 @@ def _seal_bytes() -> bytes:
     if not _SEAL_PATH.is_file():
         raise ValueError("회사 직인 파일이 없습니다.")
     return _SEAL_PATH.read_bytes()
+
+
+def _blank(value) -> str:
+    text = str(value or "").strip()
+    return text or "＿" * 24
 
 
 def _text(value, fallback: str = "—") -> str:

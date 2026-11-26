@@ -130,7 +130,15 @@ def _contract_dir() -> Path:
     return path
 
 
-def _admin(token: str) -> dict:
+class WorkerInput(BaseModel):
+    """근로자가 계약서에 직접 적는 항목."""
+    employee_name: str = ""
+    resident_id: str = ""
+    address: str = ""
+    phone: str = ""
+
+
+def _session(token: str) -> dict:
     ensure_contract_tables()
     with get_connection() as con:
         row = con.execute(
@@ -144,9 +152,21 @@ def _admin(token: str) -> dict:
         ).fetchone()
     if not row:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    if not row[2]:
+    return {"user_id": row[0], "nickname": row[1], "is_admin": bool(row[2])}
+
+
+def _admin(token: str) -> dict:
+    actor = _session(token)
+    if not actor["is_admin"]:
         raise HTTPException(status_code=403, detail="관리자만 근로계약서를 다룰 수 있습니다.")
-    return {"user_id": row[0], "nickname": row[1]}
+    return actor
+
+
+def _own_or_admin(token: str, user_id: int) -> dict:
+    actor = _session(token)
+    if not actor["is_admin"] and actor["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="본인 계약서만 적을 수 있습니다.")
+    return actor
 
 
 def _company() -> dict:
@@ -183,6 +203,10 @@ def _values(data: ContractInput, *, required: bool) -> dict:
     name = data.employee_name.strip()
     if required and not name:
         raise HTTPException(status_code=400, detail="성명을 입력하세요.")
+    if required and not data.address.strip():
+        raise HTTPException(status_code=400, detail="주소를 입력하세요.")
+    if required and not data.phone.strip():
+        raise HTTPException(status_code=400, detail="연락처를 입력하세요.")
     for label, amount in (
         ("차량지원", data.vehicle_allowance),
         ("식대", data.meal_allowance),
@@ -304,7 +328,7 @@ def list_contracts(token: str, view: str = "open"):
             rows = con.execute(
                 """
                 SELECT u.user_id, u.nickname, u.department, u.position, u.join_date,
-                       c.id, c.employee_name, c.updated_at
+                       c.id, c.employee_name, c.updated_at, c.address, c.phone, c.resident_id
                 FROM users u
                 LEFT JOIN employment_contracts c
                   ON c.id = (
@@ -328,6 +352,7 @@ def list_contracts(token: str, view: str = "open"):
                         "draft_id": row[5],
                         "employee_name": row[6] or row[1],
                         "updated_at": row[7],
+                        "worker_filled": bool((row[8] or "").strip() and (row[9] or "").strip() and (row[10] or "").strip()),
                     }
                     for row in rows
                 ]
@@ -367,7 +392,7 @@ def list_contracts(token: str, view: str = "open"):
 
 @router.get("/users/{user_id}")
 def get_contract_draft(user_id: int, token: str):
-    _admin(token)
+    actor = _own_or_admin(token, user_id)
     with get_connection() as con:
         user = _user_or_404(con, user_id)
         latest = _latest(con, user_id)
@@ -376,7 +401,14 @@ def get_contract_draft(user_id: int, token: str):
         draft = _load_contract(con, latest[0]) if latest else None
     if draft:
         shown = dict(draft["input"])
-        return {"user": user, "input": shown, "calc": draft["calc"], "draft_id": draft["id"]}
+        if not actor["is_admin"]:
+            shown = {key: shown.get(key, "") for key in ("employee_name", "resident_id", "address", "phone")}
+        return {
+            "user": user,
+            "input": shown,
+            "calc": None if not actor["is_admin"] else draft["calc"],
+            "draft_id": draft["id"],
+        }
     return {
         "user": user,
         "input": {
@@ -415,6 +447,37 @@ def preview_contract(body: ContractInput, token: str):
     return {"calc": _calculate(payload)}
 
 
+def _preview_calc(payload: dict) -> dict:
+    if int(payload.get("net_pay") or 0) > 0:
+        return _calculate(payload)
+    return {
+        "taxable": 0,
+        "gross": 0,
+        "net": 0,
+        "annual": 0,
+        "deduction_total": 0,
+        "pension_base": 0,
+        "pension": 0,
+        "health": 0,
+        "care": 0,
+        "income_tax": 0,
+        "local_tax": 0,
+        "employment": 0,
+        "hourly": 0,
+        "base_pay": 0,
+        "overtime_pay": 0,
+        "holiday_pay": 0,
+        "night_pay": 0,
+        "meal_allowance": int(payload.get("meal_allowance") or 0),
+        "vehicle_allowance": int(payload.get("vehicle_allowance") or 0),
+        "position_allowance": int(payload.get("position_allowance") or 0),
+        "base_hours": payload.get("base_hours") or 0,
+        "overtime_hours": payload.get("overtime_hours") or 0,
+        "holiday_hours": payload.get("holiday_hours") or 0,
+        "night_hours": payload.get("night_hours") or 0,
+    }
+
+
 def _pages_from_pdf(pdf: bytes) -> dict:
     return {"pages": [base64.b64encode(png).decode("ascii") for png in render_page_pngs(pdf)]}
 
@@ -424,7 +487,7 @@ def preview_contract_pages(body: ContractInput, token: str):
     """입력 중인 계약을 A4 페이지 이미지로 보여 준다. 보관하지 않는다."""
     _admin(token)
     payload = _values(body, required=False)
-    calc = _calculate(payload)
+    calc = _preview_calc(payload)
     pdf = render_contract_pdf(
         0,
         _company(),
@@ -434,6 +497,62 @@ def preview_contract_pages(body: ContractInput, token: str):
         preview=True,
     )
     return _pages_from_pdf(pdf)
+
+
+def _worker_values(data: WorkerInput) -> dict:
+    name = data.employee_name.strip()
+    address = data.address.strip()
+    phone = data.phone.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="성명을 입력하세요.")
+    if not address:
+        raise HTTPException(status_code=400, detail="주소를 입력하세요.")
+    if not phone:
+        raise HTTPException(status_code=400, detail="연락처를 입력하세요.")
+    return {
+        "employee_name": name[:40],
+        "resident_id": _normalize_rrn(data.resident_id, True),
+        "address": address[:120],
+        "phone": phone[:30],
+    }
+
+
+@router.put("/users/{user_id}/worker")
+def save_worker_fields(user_id: int, body: WorkerInput, token: str):
+    """근로자가 성명, 주민등록번호, 주소, 연락처를 적는다."""
+    _own_or_admin(token, user_id)
+    worker = _worker_values(body)
+    with get_connection() as con:
+        user = _user_or_404(con, user_id)
+        _require_open(con, user_id)
+        latest = _latest(con, user_id)
+        if latest and latest[1] == "draft":
+            con.execute(
+                """
+                UPDATE employment_contracts
+                SET employee_name = ?, resident_id = ?, address = ?, phone = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (worker["employee_name"], worker["resident_id"], worker["address"], worker["phone"], latest[0]),
+            )
+            draft_id = latest[0]
+        else:
+            payload = _values(
+                ContractInput(
+                    employee_name=worker["employee_name"],
+                    resident_id=worker["resident_id"],
+                    address=worker["address"],
+                    phone=worker["phone"],
+                    rank_title=user["position"],
+                    hire_date=user["join_date"],
+                    contract_start=user["join_date"],
+                ),
+                required=False,
+            )
+            payload.update(worker)
+            draft_id = _insert_contract(con, user_id, payload, None, "draft")
+        con.commit()
+    return {"draft_id": draft_id}
 
 
 @router.put("/users/{user_id}")

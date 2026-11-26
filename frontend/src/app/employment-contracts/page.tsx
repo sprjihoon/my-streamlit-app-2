@@ -21,6 +21,7 @@ interface EmployeeRow {
   draft_id: number | null;
   employee_name: string;
   updated_at: string | null;
+  worker_filled?: boolean;
 }
 
 interface StoredContract {
@@ -131,7 +132,9 @@ export default function EmploymentContractsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [printedId, setPrintedId] = useState<number | null>(null);
-  const [isAdmin, setIsAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [myId, setMyId] = useState<number | null>(null);
+  const [sealed, setSealed] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ContractForm>(EMPTY_FORM);
   const [calc, setCalc] = useState<PayCalc | null>(null);
@@ -154,15 +157,43 @@ export default function EmploymentContractsPage() {
     setLoading(false);
   }, []);
 
+  const loadMine = useCallback(async (userId: number) => {
+    const token = localStorage.getItem('token') || '';
+    setLoading(true);
+    setError(null);
+    const res = await fetch(`${API}/employment-contracts/users/${userId}?token=${encodeURIComponent(token)}`);
+    if (res.status === 400) {
+      setSealed(true);
+      setLoading(false);
+      return;
+    }
+    if (!res.ok) {
+      setError(await apiError(res));
+      setLoading(false);
+      return;
+    }
+    const data = await res.json();
+    setForm({ ...EMPTY_FORM, ...data.input });
+    setSealed(false);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
+    let admin = false;
+    let userId: number | null = null;
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
-      setIsAdmin(!!user.is_admin);
+      admin = !!user.is_admin;
+      userId = user.user_id ?? null;
     } catch {
-      setIsAdmin(false);
+      admin = false;
     }
-    load('open');
-  }, [load]);
+    setIsAdmin(admin);
+    setMyId(userId);
+    if (admin) load('open');
+    else if (userId) loadMine(userId);
+    else setLoading(false);
+  }, [load, loadMine]);
 
   function patch<K extends keyof ContractForm>(key: K, value: ContractForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -222,6 +253,54 @@ export default function EmploymentContractsPage() {
     }
     const data = await res.json();
     setSheets(data.pages || []);
+  }
+
+  async function previewRow(userId: number) {
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const draft = await fetch(`${API}/employment-contracts/users/${userId}?token=${encodeURIComponent(token)}`);
+    if (!draft.ok) {
+      setBusy(false);
+      setError(await apiError(draft));
+      return;
+    }
+    const data = await draft.json();
+    const res = await fetch(`${API}/employment-contracts/preview-pages?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...EMPTY_FORM, ...data.input }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const pages = await res.json();
+    setSheets(pages.pages || []);
+  }
+
+  async function saveWorker() {
+    if (!myId) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`${API}/employment-contracts/users/${myId}/worker?token=${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        employee_name: form.employee_name,
+        resident_id: form.resident_id,
+        address: form.address,
+        phone: form.phone,
+      }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    setSuccess('근로자 기재란을 저장했습니다.');
   }
 
   async function saveDraft() {
@@ -297,11 +376,32 @@ export default function EmploymentContractsPage() {
     load(next);
   }
 
+  if (isAdmin === null) {
+    return <Loading text="불러오는 중..." />;
+  }
+
   if (!isAdmin) {
     return (
       <div>
-        <PageHeader title="근로계약" subtitle="직원관리" />
-        <Alert type="error" message="관리자만 근로계약서를 다룰 수 있습니다." />
+        <PageHeader title="근로계약" subtitle="근로자가 적는 항목만 입력합니다. 급여와 근로조건은 회사에서 적습니다." />
+        {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+        {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
+        {loading ? <Loading text="불러오는 중..." /> : sealed ? (
+          <Alert type="info" message="이미 날인된 계약입니다. 내용을 바꾸려면 관리자에게 다시 활성화를 요청하세요." />
+        ) : (
+          <Card>
+            <h3 style={{ marginTop: 0 }}>근로자 기재</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+              <Field label="성명" value={form.employee_name} onChange={(value) => patch('employee_name', value)} />
+              <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} />
+              <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
+              <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
+            </div>
+            <div style={{ marginTop: '1rem' }}>
+              <Button type="button" variant="primary" disabled={busy} onClick={saveWorker}>저장</Button>
+            </div>
+          </Card>
+        )}
       </div>
     );
   }
@@ -334,67 +434,89 @@ export default function EmploymentContractsPage() {
       </div>
 
       {editingId && view === 'open' && (
-        <Card style={{ marginBottom: '1.25rem' }}>
-          <h3 style={{ marginTop: 0 }}>계약 작성</h3>
-          <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>
-            차량지원과 식대는 비과세라 보험료 기준에서 빠집니다. 직책수당은 월급 안에서 기본급과 나눠 표시하며, 맞추는 금액은 실수령액입니다. 회사명과 대표, 주소는 회사 설정을 사용합니다.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-            <Field label="성명" value={form.employee_name} onChange={(value) => patch('employee_name', value)} />
-            <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} />
-            <Field label="직무" value={form.job_title} onChange={(value) => patch('job_title', value)} />
-            <Field label="직급" value={form.rank_title} onChange={(value) => patch('rank_title', value)} />
-            <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
-            <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
-            <Field label="입사일" type="date" value={form.hire_date} onChange={(value) => patch('hire_date', value)} />
-            <Field label="계약 시작" type="date" value={form.contract_start} onChange={(value) => patch('contract_start', value)} />
-            <Field label="계약 종료" type="date" value={form.contract_end} onChange={(value) => patch('contract_end', value)} />
-            <Field label="평일 근로시간" value={form.weekday_hours} onChange={(value) => patch('weekday_hours', value)} />
-            <Field label="휴게시간" value={form.break_time} onChange={(value) => patch('break_time', value)} />
-            <Field label="근로일" value={form.work_days} onChange={(value) => patch('work_days', value)} />
-            <Field label="급여일" type="number" value={String(form.pay_day)} onChange={(value) => patch('pay_day', Number(value) || 0)} />
-            <Field label="실수령액" type="number" value={String(form.net_pay)} onChange={(value) => patch('net_pay', Number(value) || 0)} />
-            <Field label="차량지원" type="number" value={String(form.vehicle_allowance)} onChange={(value) => patch('vehicle_allowance', Number(value) || 0)} />
-            <Field label="식대" type="number" value={String(form.meal_allowance)} onChange={(value) => patch('meal_allowance', Number(value) || 0)} />
-            <Field label="직책수당" type="number" value={String(form.position_allowance)} onChange={(value) => patch('position_allowance', Number(value) || 0)} />
-            <Field label="소득세" type="number" value={String(form.income_tax)} onChange={(value) => patch('income_tax', Number(value) || 0)} />
-            <Field label="기본근로시간" type="number" value={String(form.base_hours)} onChange={(value) => patch('base_hours', Number(value) || 0)} />
-            <Field label="초과근로시간" type="number" value={String(form.overtime_hours)} onChange={(value) => patch('overtime_hours', Number(value) || 0)} />
-            <Field label="휴일근로시간" type="number" value={String(form.holiday_hours)} onChange={(value) => patch('holiday_hours', Number(value) || 0)} />
-            <Field label="야간근로시간" type="number" value={String(form.night_hours)} onChange={(value) => patch('night_hours', Number(value) || 0)} />
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-            <Button type="button" variant="secondary" disabled={busy} onClick={preview}>급여 계산</Button>
-            <Button type="button" variant="secondary" disabled={busy} onClick={openA4Preview}>A4 미리보기</Button>
-            <Button type="button" variant="secondary" disabled={busy} onClick={saveDraft}>임시 저장</Button>
-            <Button type="button" variant="success" disabled={busy} onClick={complete}>날인</Button>
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => setEditingId(null)}>닫기</Button>
-          </div>
-          {calc && (
-            <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
-              {[
-                ['월급여', calc.gross],
-                ['실수령액', calc.net],
-                ['총연봉', calc.annual],
-                ['공제합계', calc.deduction_total],
-                ['기본급', calc.base_pay],
-                ['통상시급', calc.hourly],
-                ['연장수당', calc.overtime_pay],
-                ['휴일수당', calc.holiday_pay],
-                ['야간수당', calc.night_pay],
-                ['국민연금', calc.pension],
-                ['건강보험', calc.health],
-                ['장기요양', calc.care],
-                ['고용보험', calc.employment],
-              ].map(([label, value]) => (
-                <div key={String(label)} style={{ background: '#f8f9fc', borderRadius: 8, padding: '0.55rem 0.7rem' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{label}</div>
-                  <div style={{ fontWeight: 700 }}>{won(Number(value))}</div>
-                </div>
-              ))}
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="계약 작성"
+          style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '4vh 1rem', overflow: 'auto' }}
+          onClick={() => { if (!busy) setEditingId(null); }}
+        >
+          <div
+            style={{ width: 'min(920px, 100%)', background: '#fff', borderRadius: 14, padding: '1.25rem', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.25)' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+              <h3 style={{ margin: 0 }}>계약 작성</h3>
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => setEditingId(null)}>닫기</Button>
             </div>
-          )}
-        </Card>
+            <section style={{ marginTop: '1rem', border: '1px solid #bbf7d0', background: '#f0fdf4', borderRadius: 12, padding: '0.9rem' }}>
+              <h4 style={{ margin: '0 0 0.35rem' }}>근로자가 적는 항목</h4>
+              <p style={{ margin: '0 0 0.75rem', color: '#166534', fontSize: '0.82rem' }}>성명, 주민등록번호, 주소, 연락처는 근로자가 직접 적습니다.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                <Field label="성명" value={form.employee_name} onChange={(value) => patch('employee_name', value)} />
+                <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} />
+                <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
+                <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
+              </div>
+            </section>
+            <section style={{ marginTop: '0.9rem', border: '1px solid #dbeafe', background: '#f8fbff', borderRadius: 12, padding: '0.9rem' }}>
+              <h4 style={{ margin: '0 0 0.35rem' }}>내가 적는 항목</h4>
+              <p style={{ margin: '0 0 0.75rem', color: '#1e3a8a', fontSize: '0.82rem' }}>
+                직무, 근무조건, 급여는 회사에서 적습니다. 차량지원과 식대는 비과세이고, 맞추는 금액은 실수령액입니다.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                <Field label="직무" value={form.job_title} onChange={(value) => patch('job_title', value)} />
+                <Field label="직급" value={form.rank_title} onChange={(value) => patch('rank_title', value)} />
+                <Field label="입사일" type="date" value={form.hire_date} onChange={(value) => patch('hire_date', value)} />
+                <Field label="계약 시작" type="date" value={form.contract_start} onChange={(value) => patch('contract_start', value)} />
+                <Field label="계약 종료" type="date" value={form.contract_end} onChange={(value) => patch('contract_end', value)} />
+                <Field label="평일 근로시간" value={form.weekday_hours} onChange={(value) => patch('weekday_hours', value)} />
+                <Field label="휴게시간" value={form.break_time} onChange={(value) => patch('break_time', value)} />
+                <Field label="근로일" value={form.work_days} onChange={(value) => patch('work_days', value)} />
+                <Field label="급여일" type="number" value={String(form.pay_day)} onChange={(value) => patch('pay_day', Number(value) || 0)} />
+                <Field label="실수령액" type="number" value={String(form.net_pay)} onChange={(value) => patch('net_pay', Number(value) || 0)} />
+                <Field label="차량지원" type="number" value={String(form.vehicle_allowance)} onChange={(value) => patch('vehicle_allowance', Number(value) || 0)} />
+                <Field label="식대" type="number" value={String(form.meal_allowance)} onChange={(value) => patch('meal_allowance', Number(value) || 0)} />
+                <Field label="직책수당" type="number" value={String(form.position_allowance)} onChange={(value) => patch('position_allowance', Number(value) || 0)} />
+                <Field label="소득세" type="number" value={String(form.income_tax)} onChange={(value) => patch('income_tax', Number(value) || 0)} />
+                <Field label="기본근로시간" type="number" value={String(form.base_hours)} onChange={(value) => patch('base_hours', Number(value) || 0)} />
+                <Field label="초과근로시간" type="number" value={String(form.overtime_hours)} onChange={(value) => patch('overtime_hours', Number(value) || 0)} />
+                <Field label="휴일근로시간" type="number" value={String(form.holiday_hours)} onChange={(value) => patch('holiday_hours', Number(value) || 0)} />
+                <Field label="야간근로시간" type="number" value={String(form.night_hours)} onChange={(value) => patch('night_hours', Number(value) || 0)} />
+              </div>
+            </section>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+              <Button type="button" variant="secondary" disabled={busy} onClick={preview}>급여 계산</Button>
+              <Button type="button" variant="secondary" disabled={busy} onClick={openA4Preview}>출력 미리보기</Button>
+              <Button type="button" variant="secondary" disabled={busy} onClick={saveDraft}>임시 저장</Button>
+              <Button type="button" variant="success" disabled={busy} onClick={complete}>날인</Button>
+            </div>
+            {calc && (
+              <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
+                {[
+                  ['월급여', calc.gross],
+                  ['실수령액', calc.net],
+                  ['총연봉', calc.annual],
+                  ['공제합계', calc.deduction_total],
+                  ['기본급', calc.base_pay],
+                  ['통상시급', calc.hourly],
+                  ['연장수당', calc.overtime_pay],
+                  ['휴일수당', calc.holiday_pay],
+                  ['야간수당', calc.night_pay],
+                  ['국민연금', calc.pension],
+                  ['건강보험', calc.health],
+                  ['장기요양', calc.care],
+                  ['고용보험', calc.employment],
+                ].map(([label, value]) => (
+                  <div key={String(label)} style={{ background: '#f8f9fc', borderRadius: 8, padding: '0.55rem 0.7rem' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{label}</div>
+                    <div style={{ fontWeight: 700 }}>{won(Number(value))}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {loading ? <Loading text="불러오는 중..." /> : view === 'open' ? (
@@ -402,12 +524,12 @@ export default function EmploymentContractsPage() {
           <table>
             <thead>
               <tr>
-                {['성함', '팀', '직급', '입사일', '상태', ''].map((head) => <th key={head}>{head}</th>)}
+                {['성함', '팀', '직급', '입사일', '상태', '근로자 기재', ''].map((head) => <th key={head || 'actions'}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
               {employees.length === 0 && (
-                <tr><td colSpan={6} style={{ color: '#6b7280' }}>작성할 직원이 없습니다. 완료한 계약은 완료 보관에 있습니다.</td></tr>
+                <tr><td colSpan={7} style={{ color: '#6b7280' }}>작성할 직원이 없습니다. 완료한 계약은 완료 보관에 있습니다.</td></tr>
               )}
               {employees.map((row) => (
                 <tr key={row.user_id}>
@@ -416,9 +538,13 @@ export default function EmploymentContractsPage() {
                   <td>{row.position || '—'}</td>
                   <td>{row.join_date || '—'}</td>
                   <td>{row.state === 'draft' ? '작성 중' : '미작성'}</td>
-                  <td>
+                  <td>{row.worker_filled ? '기재 완료' : '미기재'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     <Button type="button" variant="primary" disabled={busy} onClick={() => openEditor(row.user_id)}>
                       {row.state === 'draft' ? '이어서 작성' : '작성'}
+                    </Button>
+                    <Button type="button" variant="secondary" style={{ marginLeft: 8 }} disabled={busy} onClick={() => previewRow(row.user_id)}>
+                      출력 미리보기
                     </Button>
                   </td>
                 </tr>

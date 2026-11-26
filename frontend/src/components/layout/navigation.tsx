@@ -122,7 +122,7 @@ export const NAV_GROUPS: {
     label: '직원관리',
     icon: <Users {...IC} />,
     items: [
-      { href: '/employment-contracts', label: '근로계약', icon: <FileText {...IC} />, adminOnly: true },
+      { href: '/employment-contracts', label: '근로계약', icon: <FileText {...IC} /> },
     ],
   },
   {
