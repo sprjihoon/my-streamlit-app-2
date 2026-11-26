@@ -134,6 +134,8 @@ export const NAV_GROUPS: {
     icon: <Clock {...IC} />,
     items: [
       { href: '/part-time', label: '관리대장', icon: <Calendar {...IC} />, adminOnly: true },
+      { href: '/part-time/stats', label: '비용 통계', icon: <BarChart2 {...IC} />, adminOnly: true },
+      { href: '/part-time/slips', label: '급여명세서', icon: <Receipt {...IC} />, adminOnly: true },
     ],
   },
   {

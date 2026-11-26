@@ -4,109 +4,44 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert } from '@/components/Alert';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
-import { useYesNo } from '@/components/YesNoDialog';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
-
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-interface Worker {
-  id: number;
-  name: string;
-  resident_id: string;
-  reported: boolean;
-  hourly_wage: number;
-  active: boolean;
-}
-
-interface DayEntry {
-  worker_id: number;
-  name: string;
-  hours: number;
-  reported: boolean;
-}
-
-interface WeekPerson {
-  worker_id: number;
-  name: string;
-  reported: boolean;
-  basic_hours: number;
-  weekly_holiday_hours: number;
-  weekly_holiday_pay: number;
-}
-
-interface CalendarData {
-  year: number;
-  month: number;
-  minimum_wage: number;
-  workers: Worker[];
-  days: Record<string, DayEntry[]>;
-  weeks: { monday: string; sunday: string; workers: WeekPerson[] }[];
-  totals: {
-    worker_id: number;
-    name: string;
-    reported: boolean;
-    hourly_wage: number;
-    basic_hours: number;
-    weekly_holiday_hours: number;
-    weekly_holiday_pay: number;
-  }[];
-}
+import { API, CalendarData, DayEntry, Worker, apiError, hoursText, readAdmin, won } from './model';
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
-function won(value: number) {
-  return `${Math.round(value).toLocaleString('ko-KR')}원`;
+interface WorkerDraft {
+  id: number | null;
+  name: string;
+  residentId: string;
+  reported: boolean;
+  wage: string;
+  leaving: boolean;
 }
 
-function hoursText(value: number) {
-  const rounded = Math.round(value * 100) / 100;
-  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
-}
-
-async function apiError(res: Response) {
-  try {
-    const data = await res.json();
-    return data.detail || '요청을 처리하지 못했습니다.';
-  } catch {
-    return '요청을 처리하지 못했습니다.';
-  }
+interface HourDraft {
+  date: string;
+  workerId: number;
+  name: string;
+  hours: string;
+  existing: boolean;
 }
 
 export default function PartTimePage() {
-  const { ask, dialog } = useYesNo();
   const now = new Date();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [calendar, setCalendar] = useState<CalendarData | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
-  const [name, setName] = useState('');
-  const [residentId, setResidentId] = useState('');
-  const [reported, setReported] = useState(true);
-  const [wage, setWage] = useState('');
-  const [wageTouched, setWageTouched] = useState(false);
-  const [edits, setEdits] = useState<Record<number, { name: string; reported: boolean; hourly_wage: string; resident_id: string }>>({});
+  const [workerDraft, setWorkerDraft] = useState<WorkerDraft | null>(null);
+  const [hourDraft, setHourDraft] = useState<HourDraft | null>(null);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const fillDrafts = useCallback((data: CalendarData, date: string | null) => {
-    if (!date) return;
-    const next: Record<number, string> = {};
-    const present = new Set((data.days[date] || []).map((item) => item.worker_id));
-    data.workers.forEach((worker) => {
-      if (worker.active || present.has(worker.id)) next[worker.id] = '';
-    });
-    (data.days[date] || []).forEach((item) => {
-      next[item.worker_id] = hoursText(item.hours);
-    });
-    setDrafts(next);
-  }, []);
-
-  const load = useCallback(async (nextYear: number, nextMonth: number, date: string | null) => {
+  const load = useCallback(async (nextYear: number, nextMonth: number) => {
     const token = localStorage.getItem('token') || '';
     setLoading(true);
     setError(null);
@@ -116,114 +51,76 @@ export default function PartTimePage() {
       setError(await apiError(res));
       return;
     }
-    const data: CalendarData = await res.json();
-    setCalendar(data);
-    setEdits((current) => {
-      const next = { ...current };
-      data.workers.forEach((worker) => {
-        if (!next[worker.id]) {
-          next[worker.id] = { name: worker.name, reported: worker.reported, hourly_wage: String(worker.hourly_wage), resident_id: '' };
-        }
-      });
-      return next;
-    });
-    fillDrafts(data, date);
-  }, [fillDrafts]);
+    setCalendar(await res.json());
+  }, []);
 
   useEffect(() => {
-    let admin = false;
-    try {
-      admin = !!JSON.parse(localStorage.getItem('user') || '{}').is_admin;
-    } catch {
-      admin = false;
-    }
+    const admin = readAdmin();
     setIsAdmin(admin);
-    if (admin) load(year, month, selected);
+    if (admin) load(year, month);
     else setLoading(false);
-  }, [load, year, month]); // selected is applied inside load via the argument captured at call time
-
-  useEffect(() => {
-    if (!calendar) return;
-    if (!wageTouched) setWage(String(calendar.minimum_wage));
-  }, [calendar, wageTouched]);
+  }, [load, year, month]);
 
   function shiftMonth(delta: number) {
     const next = new Date(year, month - 1 + delta, 1);
-    setSelected(null);
     setYear(next.getFullYear());
     setMonth(next.getMonth() + 1);
   }
 
-  function chooseDay(date: string) {
-    setSelected(date);
-    if (calendar) fillDrafts(calendar, date);
-  }
-
-  async function register() {
-    const token = localStorage.getItem('token') || '';
-    setBusy(true);
-    setError(null);
-    setSuccess(null);
-    const res = await fetch(`${API}/part-time/workers?token=${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        resident_id: residentId,
-        reported,
-        hourly_wage: Number(wage || 0),
-      }),
+  function openRegister() {
+    setWorkerDraft({
+      id: null,
+      name: '',
+      residentId: '',
+      reported: true,
+      wage: String(calendar?.minimum_wage || ''),
+      leaving: false,
     });
-    setBusy(false);
-    if (!res.ok) {
-      setError(await apiError(res));
-      return;
-    }
-    setName('');
-    setResidentId('');
-    setReported(true);
-    setWageTouched(false);
-    setSuccess('알바를 등록했습니다.');
-    await load(year, month, selected);
   }
 
-  async function saveWorker(worker: Worker) {
-    const edit = edits[worker.id];
-    if (!edit) return;
+  function openEdit(worker: Worker) {
+    setWorkerDraft({
+      id: worker.id,
+      name: worker.name,
+      residentId: '',
+      reported: worker.reported,
+      wage: String(worker.hourly_wage),
+      leaving: false,
+    });
+  }
+
+  async function saveWorker() {
+    if (!workerDraft) return;
     const token = localStorage.getItem('token') || '';
     setBusy(true);
     setError(null);
     setSuccess(null);
+    const creating = workerDraft.id === null;
     const body: Record<string, string | number | boolean> = {
-      name: edit.name,
-      reported: edit.reported,
-      hourly_wage: Number(edit.hourly_wage || 0),
+      name: workerDraft.name,
+      reported: workerDraft.reported,
+      hourly_wage: Number(workerDraft.wage || 0),
     };
-    if (edit.resident_id.trim()) body.resident_id = edit.resident_id.trim();
-    const res = await fetch(`${API}/part-time/workers/${worker.id}?token=${encodeURIComponent(token)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    if (creating || workerDraft.residentId.trim()) body.resident_id = workerDraft.residentId.trim();
+    const res = await fetch(
+      `${API}/part-time/workers${creating ? '' : `/${workerDraft.id}`}?token=${encodeURIComponent(token)}`,
+      { method: creating ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    );
     setBusy(false);
     if (!res.ok) {
       setError(await apiError(res));
       return;
     }
-    setEdits((current) => ({ ...current, [worker.id]: { ...edit, resident_id: '' } }));
-    setSuccess(`${edit.name} 정보를 저장했습니다.`);
-    await load(year, month, selected);
+    setWorkerDraft(null);
+    setSuccess(creating ? '알바를 등록했습니다.' : '알바 정보를 저장했습니다.');
+    await load(year, month);
   }
 
-  async function setActive(worker: Worker, active: boolean) {
-    if (!active) {
-      const ok = await ask(`${worker.name} 알바를 그만둔 사람으로 둡니다.\n지난 근무 기록은 달력에 남습니다.\n진행할까요?`);
-      if (!ok) return;
-    }
+  async function setActive(workerId: number, active: boolean) {
     const token = localStorage.getItem('token') || '';
     setBusy(true);
     setError(null);
-    const res = await fetch(`${API}/part-time/workers/${worker.id}?token=${encodeURIComponent(token)}`, {
+    const res = await fetch(`${API}/part-time/workers/${workerId}?token=${encodeURIComponent(token)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active }),
@@ -233,33 +130,52 @@ export default function PartTimePage() {
       setError(await apiError(res));
       return;
     }
-    await load(year, month, selected);
+    setWorkerDraft(null);
+    await load(year, month);
   }
 
-  async function saveDay() {
-    if (!selected || !calendar) return;
+  function dropWorker(date: string, workerId: number) {
+    if (!calendar) return;
+    const worker = calendar.workers.find((item) => item.id === workerId);
+    if (!worker || !worker.active) return;
+    const exists = (calendar.days[date] || []).some((item) => item.worker_id === workerId);
+    if (exists) {
+      setSuccess(null);
+      setError(`${worker.name} 님은 이 날짜에 이미 들어가 있습니다.`);
+      return;
+    }
+    setError(null);
+    setHourDraft({ date, workerId, name: worker.name, hours: '', existing: false });
+  }
+
+  function editHours(date: string, entry: DayEntry) {
+    setHourDraft({ date, workerId: entry.worker_id, name: entry.name, hours: hoursText(entry.hours), existing: true });
+  }
+
+  async function saveHours(remove: boolean) {
+    if (!hourDraft) return;
+    const hours = remove ? 0 : Number(hourDraft.hours || 0);
+    if (!remove && hours <= 0) {
+      setError('근무시간을 입력하세요.');
+      return;
+    }
     const token = localStorage.getItem('token') || '';
     setBusy(true);
     setError(null);
     setSuccess(null);
-    const entries = Object.entries(drafts).map(([workerId, value]) => ({
-      worker_id: Number(workerId),
-      hours: Number(value || 0),
-    }));
     const res = await fetch(`${API}/part-time/days?token=${encodeURIComponent(token)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ work_date: selected, entries }),
+      body: JSON.stringify({ work_date: hourDraft.date, entries: [{ worker_id: hourDraft.workerId, hours }] }),
     });
     setBusy(false);
     if (!res.ok) {
       setError(await apiError(res));
       return;
     }
-    const data: CalendarData = await res.json();
-    setCalendar(data);
-    fillDrafts(data, selected);
-    setSuccess(`${selected} 근무시간을 기록했습니다.`);
+    setCalendar(await res.json());
+    setHourDraft(null);
+    setSuccess(remove ? `${hourDraft.date}에서 ${hourDraft.name}을 뺐습니다.` : `${hourDraft.date} ${hourDraft.name} ${hoursText(hours)}시간을 기록했습니다.`);
   }
 
   if (isAdmin === null) return <Loading text="불러오는 중..." />;
@@ -280,131 +196,66 @@ export default function PartTimePage() {
   while (cells.length % 7 !== 0) cells.push(null);
   const today = new Date();
   const holidayBySunday = new Map((calendar?.weeks || []).map((week) => [week.sunday, week.workers.filter((person) => person.weekly_holiday_pay > 0)]));
+  const activeWorkers = (calendar?.workers || []).filter((worker) => worker.active);
+  const inactiveWorkers = (calendar?.workers || []).filter((worker) => !worker.active);
 
   return (
     <div>
-      {dialog}
       <PageHeader
         title="관리대장"
-        subtitle="알바를 등록하고 달력에 실제 근무시간을 적습니다. 신고 알바만 주휴수당이 계산됩니다."
+        subtitle="알바를 달력으로 끌어다 놓으면 그 날 근무시간을 적습니다. 같은 알바는 같은 날에 한 번만 들어갑니다."
+        actions={<Button type="button" variant="primary" onClick={openRegister}>알바 등록</Button>}
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
 
-      <Card title="알바 등록" style={{ marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'end' }}>
-          <label className="ops-label">
-            이름
-            <input className="ui-control" value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label className="ops-label">
-            주민번호
-            <input className="ui-control" value={residentId} placeholder="900101-1234567" onChange={(event) => setResidentId(event.target.value)} />
-          </label>
-          <label className="ops-label">
-            구분
-            <select className="ui-control" value={reported ? 'reported' : 'unreported'} onChange={(event) => setReported(event.target.value === 'reported')}>
-              <option value="reported">신고</option>
-              <option value="unreported">미신고</option>
-            </select>
-          </label>
-          <label className="ops-label">
-            시급
-            <input
-              className="ui-control"
-              type="number"
-              min={1}
-              value={wage}
-              onChange={(event) => {
-                setWageTouched(true);
-                setWage(event.target.value);
-              }}
-            />
-          </label>
-          <Button type="button" variant="primary" disabled={busy} onClick={register}>등록</Button>
-        </div>
-        <p style={{ margin: '0.7rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
-          {year}년 최저시급 {won(minimum)}이 기본값입니다. 알바마다 바꿀 수 있습니다.
-          미신고는 주휴수당을 주지 않습니다.
-        </p>
-        {wageTouched && minimum > 0 && Number(wage || 0) < minimum && (
-          <p style={{ margin: '0.35rem 0 0', color: '#92400e', fontSize: '0.85rem' }}>입력한 시급이 {year}년 최저시급보다 낮습니다.</p>
-        )}
-      </Card>
-
       <Card title="등록된 알바" style={{ marginBottom: '1rem' }}>
-        {!calendar ? <Loading text="불러오는 중..." /> : calendar.workers.length === 0 ? (
-          <p style={{ margin: 0, color: '#6b7280' }}>등록된 알바가 없습니다.</p>
+        {loading && !calendar ? <Loading text="불러오는 중..." /> : activeWorkers.length === 0 ? (
+          <p style={{ margin: 0, color: '#6b7280' }}>근무 중인 알바가 없습니다. 알바 등록으로 추가하세요.</p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  {['이름', '주민번호', '구분', '시급', '주민번호 변경', ''].map((head) => <th key={head || 'actions'}>{head}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {calendar.workers.map((worker) => {
-                  const edit = edits[worker.id] || { name: worker.name, reported: worker.reported, hourly_wage: String(worker.hourly_wage), resident_id: '' };
-                  return (
-                    <tr key={worker.id} style={worker.active ? undefined : { opacity: 0.45 }}>
-                      <td>
-                        <input className="ui-control" value={edit.name} onChange={(event) => setEdits((current) => ({ ...current, [worker.id]: { ...edit, name: event.target.value } }))} />
-                      </td>
-                      <td>{worker.resident_id}</td>
-                      <td>
-                        <select
-                          className="ui-control"
-                          value={edit.reported ? 'reported' : 'unreported'}
-                          onChange={(event) => setEdits((current) => ({ ...current, [worker.id]: { ...edit, reported: event.target.value === 'reported' } }))}
-                        >
-                          <option value="reported">신고</option>
-                          <option value="unreported">미신고</option>
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          className="ui-control"
-                          type="number"
-                          style={{ width: '7rem' }}
-                          value={edit.hourly_wage}
-                          onChange={(event) => setEdits((current) => ({ ...current, [worker.id]: { ...edit, hourly_wage: event.target.value } }))}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="ui-control"
-                          style={{ width: '9rem' }}
-                          placeholder="바꿀 때만"
-                          value={edit.resident_id}
-                          onChange={(event) => setEdits((current) => ({ ...current, [worker.id]: { ...edit, resident_id: event.target.value } }))}
-                        />
-                      </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        <Button type="button" variant="secondary" disabled={busy} onClick={() => saveWorker(worker)}>저장</Button>
-                        {worker.active ? (
-                          <Button type="button" variant="ghost" disabled={busy} onClick={() => setActive(worker, false)}>그만둠</Button>
-                        ) : (
-                          <Button type="button" variant="ghost" disabled={busy} onClick={() => setActive(worker, true)}>다시 근무</Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {activeWorkers.map((worker) => (
+              <div key={worker.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', border: '1px solid #d1d5db', borderRadius: 8, padding: '0.35rem 0.45rem', background: 'white' }}>
+                <div
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('text/plain', String(worker.id));
+                    event.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  style={{ cursor: 'grab', fontSize: '0.9rem' }}
+                  title="달력 날짜로 끌어다 놓으세요"
+                >
+                  <strong>{worker.name}</strong>
+                  <span style={{ marginLeft: 6, color: worker.reported ? '#166534' : '#6b7280', fontSize: '0.75rem' }}>
+                    {worker.reported ? '신고' : '미신고'}
+                  </span>
+                  <span style={{ marginLeft: 6, color: '#374151', fontSize: '0.75rem' }}>{won(worker.hourly_wage)}</span>
+                </div>
+                <Button type="button" variant="ghost" onClick={() => openEdit(worker)}>수정</Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {inactiveWorkers.length > 0 && (
+          <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ color: '#6b7280', fontSize: '0.85rem' }}>그만둔 알바</span>
+            {inactiveWorkers.map((worker) => (
+              <Button key={worker.id} type="button" variant="ghost" disabled={busy} onClick={() => setActive(worker.id, true)}>
+                {worker.name} 다시 근무
+              </Button>
+            ))}
           </div>
         )}
       </Card>
 
-      <Card title="근무 달력" style={{ marginBottom: '1rem' }}>
+      <Card title="근무 달력">
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(-1)}>이전 달</Button>
           <strong>{year}년 {month}월</strong>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(1)}>다음 달</Button>
         </div>
         <p style={{ margin: '0 0 0.75rem', color: '#6b7280', fontSize: '0.85rem' }}>
-          날짜를 누르면 그 날의 알바별 근무시간을 적습니다. 한 주는 월요일부터 일요일입니다. 일요일에 나오는 주휴수당은 그 주 근무시간 합 ÷ 40 × 8 × 시급입니다.
+          초록은 신고, 회색은 미신고입니다. 금액은 그날 시급에 근무시간을 곱한 값이고, 일요일의 주휴는 신고 알바만 표시됩니다. 이름을 누르면 시간을 고치거나 뺄 수 있습니다.
         </p>
         {loading || !calendar ? <Loading text="불러오는 중..." /> : (
           <div style={{ border: '1px solid #dee2e6', borderRadius: 8, overflow: 'hidden' }}>
@@ -420,26 +271,32 @@ export default function PartTimePage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
               {cells.map((day, index) => {
                 const date = day ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
-                const entries = day ? calendar.days[date] || [] : [];
+                const entries = day && calendar.days[date] ? calendar.days[date] : [];
                 const holidays = day ? holidayBySunday.get(date) || [] : [];
+                const dayPay = entries.reduce((sum, entry) => sum + entry.pay, 0) + holidays.reduce((sum, person) => sum + person.weekly_holiday_pay, 0);
                 const isToday = day === today.getDate() && month === today.getMonth() + 1 && year === today.getFullYear();
-                const selectedDay = date && date === selected;
                 return (
-                  <button
+                  <div
                     key={index}
-                    type="button"
-                    disabled={!day}
-                    onClick={() => day && chooseDay(date)}
+                    onDragOver={(event) => {
+                      if (!day) return;
+                      event.preventDefault();
+                      setHoverDate(date);
+                    }}
+                    onDragLeave={() => setHoverDate((current) => (current === date ? null : current))}
+                    onDrop={(event) => {
+                      if (!day) return;
+                      event.preventDefault();
+                      setHoverDate(null);
+                      const workerId = Number(event.dataTransfer.getData('text/plain'));
+                      if (workerId) dropWorker(date, workerId);
+                    }}
                     style={{
-                      minHeight: 108,
-                      textAlign: 'left',
+                      minHeight: 124,
                       padding: '0.35rem',
-                      border: 'none',
                       borderTop: '1px solid #dee2e6',
                       borderRight: index % 7 < 6 ? '1px solid #dee2e6' : 'none',
-                      background: !day ? '#fafafa' : selectedDay ? '#e7f1ff' : index % 7 === 6 ? '#fff8f8' : 'white',
-                      cursor: day ? 'pointer' : 'default',
-                      font: 'inherit',
+                      background: !day ? '#fafafa' : hoverDate === date ? '#e7f1ff' : index % 7 === 6 ? '#fff8f8' : 'white',
                     }}
                   >
                     {day && (
@@ -452,79 +309,126 @@ export default function PartTimePage() {
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}>{day}</div>
                         {entries.map((entry) => (
-                          <div key={entry.worker_id} style={{ fontSize: '0.72rem', marginTop: 2, color: entry.reported ? '#166534' : '#4b5563' }}>
+                          <button
+                            key={entry.worker_id}
+                            type="button"
+                            onClick={() => editHours(date, entry)}
+                            style={{
+                              display: 'block', width: '100%', textAlign: 'left', marginTop: 3,
+                              border: 0, background: entry.reported ? '#dcfce7' : '#f3f4f6',
+                              color: entry.reported ? '#166534' : '#374151',
+                              borderRadius: 4, padding: '2px 4px', font: 'inherit', fontSize: '0.72rem', cursor: 'pointer',
+                            }}
+                          >
                             {entry.name} {hoursText(entry.hours)}시간
-                          </div>
+                            <div>{won(entry.pay)}</div>
+                          </button>
                         ))}
                         {holidays.map((person) => (
-                          <div key={`h-${person.worker_id}`} style={{ fontSize: '0.68rem', marginTop: 2, color: '#9a3412' }}>
+                          <div key={`h-${person.worker_id}`} style={{ fontSize: '0.68rem', marginTop: 3, color: '#9a3412' }}>
                             {person.name} 주휴 {won(person.weekly_holiday_pay)}
                           </div>
                         ))}
+                        {dayPay > 0 && <div style={{ marginTop: 4, fontSize: '0.72rem', fontWeight: 700 }}>일계 {won(dayPay)}</div>}
                       </>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
           </div>
         )}
+      </Card>
 
-        {selected && calendar && (
-          <div style={{ marginTop: '1rem' }}>
-            <strong>{selected} 근무시간</strong>
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.6rem', alignItems: 'end' }}>
-              {calendar.workers.filter((worker) => worker.active || Object.prototype.hasOwnProperty.call(drafts, worker.id)).map((worker) => (
-                <label key={worker.id} className="ops-label">
-                  {worker.name} · {worker.reported ? '신고' : '미신고'}
+      {workerDraft && (
+        <div className="data-modal-backdrop" onClick={() => setWorkerDraft(null)}>
+          <div className="data-modal" style={{ maxWidth: 480 }} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="data-modal-head">
+              <h2>{workerDraft.id === null ? '알바 등록' : '알바 수정'}</h2>
+              <Button type="button" variant="ghost" onClick={() => setWorkerDraft(null)}>닫기</Button>
+            </div>
+            <div className="data-modal-body">
+              <div className="data-form-grid">
+                <label className="ops-label">
+                  이름
+                  <input className="ui-control" value={workerDraft.name} onChange={(event) => setWorkerDraft({ ...workerDraft, name: event.target.value })} />
+                </label>
+                <label className="ops-label">
+                  주민번호
                   <input
                     className="ui-control"
-                    type="number"
-                    min={0}
-                    max={24}
-                    step={0.5}
-                    style={{ width: '6rem' }}
-                    value={drafts[worker.id] ?? ''}
-                    onChange={(event) => setDrafts((current) => ({ ...current, [worker.id]: event.target.value }))}
+                    placeholder={workerDraft.id === null ? '900101-1234567' : '바꿀 때만 입력'}
+                    value={workerDraft.residentId}
+                    onChange={(event) => setWorkerDraft({ ...workerDraft, residentId: event.target.value })}
                   />
                 </label>
-              ))}
-              <Button type="button" variant="primary" disabled={busy || calendar.workers.length === 0} onClick={saveDay}>이 날 기록</Button>
+                <label className="ops-label">
+                  구분
+                  <select className="ui-control" value={workerDraft.reported ? 'reported' : 'unreported'} onChange={(event) => setWorkerDraft({ ...workerDraft, reported: event.target.value === 'reported' })}>
+                    <option value="reported">신고</option>
+                    <option value="unreported">미신고</option>
+                  </select>
+                </label>
+                <label className="ops-label">
+                  시급
+                  <input className="ui-control" type="number" min={1} value={workerDraft.wage} onChange={(event) => setWorkerDraft({ ...workerDraft, wage: event.target.value })} />
+                </label>
+              </div>
+              <p style={{ margin: '0.75rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                {year}년 최저시급은 {won(minimum)}입니다. 미신고는 주휴수당이 없습니다.
+              </p>
+              {Number(workerDraft.wage || 0) > 0 && Number(workerDraft.wage) < minimum && (
+                <p style={{ margin: '0.35rem 0 0', color: '#92400e', fontSize: '0.85rem' }}>입력한 시급이 {year}년 최저시급보다 낮습니다.</p>
+              )}
+              {workerDraft.leaving && (
+                <p style={{ margin: '0.75rem 0 0', color: '#92400e' }}>그만둔 알바로 두면 달력에 새로 올릴 수 없습니다. 지난 근무 기록은 남습니다.</p>
+              )}
             </div>
-            {calendar.workers.every((worker) => !worker.active) && (
-              <p style={{ margin: '0.5rem 0 0', color: '#6b7280' }}>근무 중인 알바가 없습니다. 위에서 먼저 등록하세요.</p>
-            )}
+            <div className="data-modal-foot">
+              {workerDraft.id !== null && !workerDraft.leaving && (
+                <Button type="button" variant="ghost" disabled={busy} onClick={() => setWorkerDraft({ ...workerDraft, leaving: true })}>그만둠</Button>
+              )}
+              {workerDraft.leaving && (
+                <Button type="button" variant="danger" disabled={busy} onClick={() => workerDraft.id !== null && setActive(workerDraft.id, false)}>그만둠 확인</Button>
+              )}
+              <Button type="button" variant="primary" disabled={busy} onClick={saveWorker}>저장</Button>
+            </div>
           </div>
-        )}
-      </Card>
+        </div>
+      )}
 
-      <Card title="이달 합계">
-        {!calendar || calendar.totals.length === 0 ? (
-          <p style={{ margin: 0, color: '#6b7280' }}>이 달에 기록된 근무가 없습니다.</p>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  {['이름', '구분', '시급', '근무시간', '주휴시간', '주휴수당'].map((head) => <th key={head}>{head}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {calendar.totals.map((row) => (
-                  <tr key={row.worker_id}>
-                    <td>{row.name}</td>
-                    <td>{row.reported ? '신고' : '미신고'}</td>
-                    <td>{won(row.hourly_wage)}</td>
-                    <td>{hoursText(row.basic_hours)}</td>
-                    <td>{hoursText(row.weekly_holiday_hours)}</td>
-                    <td>{won(row.weekly_holiday_pay)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {hourDraft && (
+        <div className="data-modal-backdrop" onClick={() => setHourDraft(null)}>
+          <div className="data-modal" style={{ maxWidth: 420 }} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="data-modal-head">
+              <h2>{hourDraft.date} {hourDraft.name}</h2>
+              <Button type="button" variant="ghost" onClick={() => setHourDraft(null)}>닫기</Button>
+            </div>
+            <div className="data-modal-body">
+              <label className="ops-label">
+                근무시간
+                <input
+                  className="ui-control"
+                  type="number"
+                  min={0.5}
+                  max={24}
+                  step={0.5}
+                  autoFocus
+                  value={hourDraft.hours}
+                  onChange={(event) => setHourDraft({ ...hourDraft, hours: event.target.value })}
+                />
+              </label>
+              <p style={{ margin: '0.7rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>실제 근무한 시간을 적습니다. 같은 알바를 같은 날에 다시 올리면 추가되지 않습니다.</p>
+            </div>
+            <div className="data-modal-foot">
+              {hourDraft.existing && (
+                <Button type="button" variant="danger" disabled={busy} onClick={() => saveHours(true)}>이 날에서 빼기</Button>
+              )}
+              <Button type="button" variant="primary" disabled={busy} onClick={() => saveHours(false)}>기록</Button>
+            </div>
           </div>
-        )}
-      </Card>
+        </div>
+      )}
     </div>
   );
 }

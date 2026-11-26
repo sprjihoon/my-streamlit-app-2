@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.app.api.logs import add_log
-from backend.app.services.part_time.calc import minimum_wage, weekly_holiday_pay
+from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, weekly_holiday_pay
 from logic.db import get_connection
 
 router = APIRouter(prefix="/part-time", tags=["part-time"])
@@ -287,6 +287,8 @@ def month_calendar(year: int, month: int, token: str):
                 "name": worker["name"],
                 "hours": amount,
                 "reported": worker["reported"],
+                "hourly_wage": worker["hourly_wage"],
+                "pay": int(round(amount * worker["hourly_wage"])),
             })
     for items in days.values():
         items.sort(key=lambda item: item["name"])
@@ -343,8 +345,10 @@ def month_calendar(year: int, month: int, token: str):
             "hourly_wage": worker["hourly_wage"],
             "active": worker["active"],
             "basic_hours": round(basic, 2),
+            "base_pay": int(round(basic * worker["hourly_wage"])),
             "weekly_holiday_hours": round(holiday_hours, 2),
             "weekly_holiday_pay": holiday_pay,
+            "total_pay": int(round(basic * worker["hourly_wage"])) + holiday_pay,
         })
     return {
         "year": year,
@@ -363,8 +367,15 @@ def save_day(body: DayIn, token: str):
     work_day = _parse_day(body.work_date)
     stamp = _now()
     saved = []
+    seen: set[int] = set()
+    entries = []
+    for entry in body.entries:
+        if entry.worker_id in seen:
+            continue
+        seen.add(entry.worker_id)
+        entries.append(entry)
     with get_connection() as con:
-        for entry in body.entries:
+        for entry in entries:
             worker = con.execute(
                 "SELECT name FROM part_time_workers WHERE id = ?",
                 (entry.worker_id,),
@@ -397,3 +408,38 @@ def save_day(body: DayIn, token: str):
         details=", ".join(saved) if saved else "기록 없음",
     )
     return month_calendar(work_day.year, work_day.month, token)
+
+
+def _slips(data: dict) -> list[dict]:
+    slips = []
+    for total in data["totals"]:
+        lines = []
+        for work_date in sorted(data["days"]):
+            for entry in data["days"][work_date]:
+                if entry["worker_id"] != total["worker_id"]:
+                    continue
+                lines.append({
+                    "work_date": work_date,
+                    "hours": entry["hours"],
+                    "pay": entry["pay"],
+                })
+        taxable = int(total["total_pay"])
+        tax = daily_worker_tax(taxable, len(lines))
+        average = round(total["basic_hours"] / len(lines), 2) if lines else 0
+        slips.append({
+            **total,
+            "work_days": len(lines),
+            "average_hours": average,
+            "taxable_pay": taxable,
+            "nontaxable_pay": 0,
+            "lines": lines,
+            **tax,
+            "net_pay": taxable - tax["deduction_total"],
+        })
+    return slips
+
+
+@router.get("/slips")
+def list_slips(year: int, month: int, token: str):
+    data = month_calendar(year, month, token)
+    return {"year": year, "month": month, "slips": _slips(data)}

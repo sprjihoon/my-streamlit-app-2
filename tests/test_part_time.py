@@ -7,7 +7,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.services.part_time.calc import minimum_wage, weekly_holiday_pay
+from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, weekly_holiday_pay
 
 
 def _prepare(db_path):
@@ -45,6 +45,14 @@ def test_weekly_holiday_follows_the_sheet_formula():
     assert weekly_holiday_pay(40, 10320, False) == (0, 0)
     assert minimum_wage(2026) == 10320
     assert minimum_wage(2027) == 10700
+    taxed = daily_worker_tax(4_000_000, 20)
+    assert taxed["tax_base"] == 1_000_000
+    assert taxed["calculated_tax"] == 60_000
+    assert taxed["tax_credit"] == 33_000
+    assert taxed["income_tax"] == 27_000
+    assert taxed["local_tax"] == 2_700
+    assert daily_worker_tax(700_000, 7)["income_tax"] == 0
+    assert daily_worker_tax(3_030_000, 20)["income_tax"] == 0
 
 
 def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_runtime):
@@ -115,11 +123,26 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     reported_total = next(row for row in calendar["totals"] if row["worker_id"] == reported_body["id"])
     hidden_total = next(row for row in calendar["totals"] if row["worker_id"] == hidden_id)
     assert reported_total["basic_hours"] == 10
+    assert reported_total["base_pay"] == 120000
     assert reported_total["weekly_holiday_hours"] == 2
     assert reported_total["weekly_holiday_pay"] == 24000
+    assert reported_total["total_pay"] == 144000
+    day_entry = next(item for item in calendar["days"]["2026-11-03"] if item["worker_id"] == reported_body["id"])
+    assert day_entry["pay"] == 60000
     assert hidden_total["basic_hours"] == 10
     assert hidden_total["weekly_holiday_hours"] == 0
     assert hidden_total["weekly_holiday_pay"] == 0
+    slips = client.get("/part-time/slips", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert slips.status_code == 200, slips.text
+    reported_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == reported_body["id"])
+    assert reported_slip["work_days"] == 2
+    assert reported_slip["taxable_pay"] == 144000
+    assert reported_slip["nontaxable_pay"] == 0
+    assert reported_slip["income_tax"] == 0
+    assert reported_slip["net_pay"] == 144000
+    denied_slip = client.get("/part-time/slips", params={"token": "staff-tok", "year": 2026, "month": 11})
+    assert denied_slip.status_code == 403
+
     sunday = next(week for week in calendar["weeks"] if week["sunday"] == "2026-11-08")
     assert any(person["weekly_holiday_pay"] == 24000 for person in sunday["workers"])
 
@@ -132,6 +155,22 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     after = next(row for row in cleared.json()["totals"] if row["worker_id"] == reported_body["id"])
     assert after["basic_hours"] == 5
     assert after["weekly_holiday_pay"] == 12000
+
+    duplicated = client.put(
+        "/part-time/days",
+        params={"token": "admin-tok"},
+        json={
+            "work_date": "2026-11-04",
+            "entries": [
+                {"worker_id": reported_body["id"], "hours": 3},
+                {"worker_id": reported_body["id"], "hours": 9},
+            ],
+        },
+    )
+    assert duplicated.status_code == 200, duplicated.text
+    once = [item for item in duplicated.json()["days"]["2026-11-04"] if item["worker_id"] == reported_body["id"]]
+    assert len(once) == 1
+    assert once[0]["hours"] == 3
 
 
 def test_weekly_holiday_uses_the_sunday_month_when_the_week_crosses(isolated_runtime):
