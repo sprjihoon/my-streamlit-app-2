@@ -1,0 +1,160 @@
+"""근로자가 본인 급여명세서를 받고, 관리자는 그달 전체를 제공한다."""
+from __future__ import annotations
+
+from urllib.parse import quote
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
+
+from backend.app.api.employment_contracts import _company
+from backend.app.api.payroll_ledgers import _load, _mask_rrn, _public_line, ensure_payroll_tables
+from backend.app.services.payroll_ledger.slip import render_bundle_pdf, render_slip_pdf, slip_preview_pages
+from logic.db import get_connection
+
+router = APIRouter(prefix="/payroll-slips", tags=["payroll-slips"])
+
+
+def _session(token: str) -> dict:
+    ensure_payroll_tables()
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT u.user_id, u.nickname, u.is_admin
+            FROM sessions s
+            JOIN users u ON u.user_id = s.user_id
+            WHERE s.token = ?
+            """,
+            (token,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    return {"user_id": row[0], "nickname": row[1] or "", "is_admin": bool(row[2])}
+
+
+def _owns(line: dict, actor: dict) -> bool:
+    if line.get("user_id") and int(line["user_id"]) == int(actor["user_id"]):
+        return True
+    return (line.get("employee_name") or "").strip() == (actor.get("nickname") or "").strip()
+
+
+def _visible_ledger(year: int, month: int, actor: dict) -> dict:
+    ledger = _load(year, month)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="이 달 급여명세서가 없습니다.")
+    if not actor["is_admin"] and not ledger.get("released_at"):
+        raise HTTPException(status_code=404, detail="아직 제공된 급여명세서가 없습니다.")
+    return ledger
+
+
+def _pick_line(ledger: dict, actor: dict, user_id: int | None, employee_name: str | None) -> dict:
+    if actor["is_admin"]:
+        name = (employee_name or "").strip()
+        if user_id:
+            for line in ledger["lines"]:
+                if int(line.get("user_id") or 0) == user_id:
+                    return line
+        if name:
+            for line in ledger["lines"]:
+                if (line.get("employee_name") or "").strip() == name:
+                    return line
+        if not user_id and not name:
+            raise HTTPException(status_code=400, detail="직원을 지정하세요.")
+        raise HTTPException(status_code=404, detail="그 직원의 급여명세서가 없습니다.")
+    for line in ledger["lines"]:
+        if _owns(line, actor):
+            return line
+    raise HTTPException(status_code=404, detail="이 달 본인 급여명세서가 없습니다.")
+
+
+def _pdf_response(content: bytes, filename: str) -> Response:
+    encoded = quote(filename)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded}"},
+    )
+
+
+@router.get("")
+def list_slips(token: str):
+    actor = _session(token)
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT l.year, l.month, l.period_label, l.released_at,
+                   p.user_id, p.employee_name, p.affiliation, p.net_pay, p.seq
+            FROM payroll_ledgers l
+            JOIN payroll_lines p ON p.ledger_id = l.id
+            ORDER BY l.year DESC, l.month DESC, p.seq, p.id
+            """
+        ).fetchall()
+    items = []
+    for row in rows:
+        line = {"user_id": row[4], "employee_name": row[5]}
+        mine = _owns(line, actor)
+        if actor["is_admin"]:
+            pass
+        elif not row[3] or not mine:
+            continue
+        items.append(
+            {
+                "year": row[0],
+                "month": row[1],
+                "period_label": row[2],
+                "released_at": row[3],
+                "user_id": row[4],
+                "employee_name": row[5],
+                "affiliation": row[6] or "",
+                "net_pay": row[7],
+                "seq": row[8],
+                "mine": mine,
+            }
+        )
+    return {"company_name": _company().get("company_name") or "틸리언", "slips": items}
+
+
+@router.get("/{year}/{month}")
+def get_slip(year: int, month: int, token: str, user_id: int | None = None, employee_name: str | None = None):
+    actor = _session(token)
+    ledger = _visible_ledger(year, month, actor)
+    line = _pick_line(ledger, actor, user_id if actor["is_admin"] else None, employee_name if actor["is_admin"] else None)
+    shown = _public_line(line)
+    return {
+        "year": year,
+        "month": month,
+        "company_name": ledger.get("company_name") or _company().get("company_name") or "틸리언",
+        "period_label": ledger.get("period_label") or "",
+        "released_at": ledger.get("released_at"),
+        "line": shown,
+    }
+
+
+@router.get("/{year}/{month}/pdf")
+def download_slip(year: int, month: int, token: str, user_id: int | None = None, employee_name: str | None = None):
+    actor = _session(token)
+    ledger = _visible_ledger(year, month, actor)
+    line = _pick_line(ledger, actor, user_id if actor["is_admin"] else None, employee_name if actor["is_admin"] else None)
+    pdf = render_slip_pdf(ledger, line, masked_rrn=_mask_rrn(str(line.get("resident_id") or "")))
+    name = line.get("employee_name") or "직원"
+    return _pdf_response(pdf, f"급여명세서 {year}년 {month:02d}월 {name}.pdf")
+
+
+@router.get("/{year}/{month}/pages")
+def preview_slip(year: int, month: int, token: str, user_id: int | None = None, employee_name: str | None = None):
+    actor = _session(token)
+    ledger = _visible_ledger(year, month, actor)
+    line = _pick_line(ledger, actor, user_id if actor["is_admin"] else None, employee_name if actor["is_admin"] else None)
+    pdf = render_slip_pdf(ledger, line, masked_rrn=_mask_rrn(str(line.get("resident_id") or "")))
+    return {"pages": slip_preview_pages(pdf)}
+
+
+@router.get("/{year}/{month}/bundle.pdf")
+def download_bundle(year: int, month: int, token: str):
+    actor = _session(token)
+    if not actor["is_admin"]:
+        raise HTTPException(status_code=403, detail="관리자만 전체 명세서를 받을 수 있습니다.")
+    ledger = _load(year, month)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="이 달 급여대장이 없습니다.")
+    pdf = render_bundle_pdf(ledger, ledger["lines"], _mask_rrn)
+    return _pdf_response(pdf, f"급여명세서 {year}년 {month:02d}월.pdf")

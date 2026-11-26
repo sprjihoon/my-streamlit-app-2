@@ -7,6 +7,7 @@ import { Loading } from '@/components/Loading';
 import { useYesNo } from '@/components/YesNoDialog';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
+import { A4Preview } from '@/app/employment-contracts/a4-preview';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -54,6 +55,7 @@ interface Ledger {
   origin?: string;
   lines: PayrollLine[];
   totals: PayrollLine;
+  released_at?: string | null;
   existed?: boolean;
   from_previous?: boolean;
   skipped?: string[];
@@ -85,6 +87,7 @@ export default function PayrollLedgerPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [pages, setPages] = useState<string[] | null>(null);
 
   function showLedger(data: Ledger) {
     setLedger(data);
@@ -212,6 +215,44 @@ export default function PayrollLedgerPage() {
     setSuccess('이달 변동을 저장했습니다. 노무사 전달용 엑셀을 받으면 이 값이 양식에 채워집니다.');
   }
 
+  async function releaseSlips() {
+    const ok = await ask('이달 급여명세서를 근로자에게 제공합니다.\n본인 분만 확인할 수 있습니다.\n진행할까요?');
+    if (!ok) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    const res = await fetch(`${API}/payroll-ledgers/${year}/${month}/release?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    showLedger(await res.json());
+    setSuccess('근로자에게 이달 급여명세서를 제공했습니다.');
+  }
+
+  async function previewSlip(name: string) {
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`${API}/payroll-slips/${year}/${month}/pages?token=${encodeURIComponent(token)}&employee_name=${encodeURIComponent(name)}`);
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    setPages(data.pages || []);
+  }
+
+  function downloadBundle() {
+    const token = localStorage.getItem('token') || '';
+    window.open(`${API}/payroll-slips/${year}/${month}/bundle.pdf?token=${encodeURIComponent(token)}`, '_blank');
+  }
+
   async function importFile(file: File | undefined) {
     if (!file) return;
     const token = localStorage.getItem('token') || '';
@@ -253,6 +294,9 @@ export default function PayrollLedgerPage() {
   }
 
   const totals = ledger?.totals;
+  if (pages) {
+    return <A4Preview pages={pages} overlay onClose={() => setPages(null)} title="급여명세서" />;
+  }
   return (
     <div>
       {dialog}
@@ -278,6 +322,10 @@ export default function PayrollLedgerPage() {
             <input className="ui-control" type="file" accept=".xlsx" disabled={busy} onChange={(event) => { importFile(event.target.files?.[0]); event.target.value = ''; }} />
           </label>
           <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={download}>노무사 전달용 엑셀</Button>
+          <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={downloadBundle}>전체 명세서 PDF</Button>
+          <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={releaseSlips}>
+            {ledger?.released_at ? '명세서 다시 제공' : '근로자에게 명세서 제공'}
+          </Button>
           <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={() => create(true)}>계약에서 다시 만들기</Button>
         </div>
       </Card>
@@ -349,6 +397,7 @@ export default function PayrollLedgerPage() {
           <p style={{ marginTop: 0, color: '#374151' }}>
             {ledger.company_name} · {ledger.period_label} · {ledger.lines.length}명
             {ledger.origin === 'excel' ? ' · 급여대장 파일을 그대로 반영했습니다.' : ''}
+            {ledger.released_at ? ' · 근로자에게 명세서를 제공했습니다.' : ''}
           </p>
           {!!ledger.skipped?.length && (
             <p style={{ color: '#92400e' }}>급여를 맞추지 못해 뺀 직원: {ledger.skipped.join(', ')}</p>
@@ -357,7 +406,7 @@ export default function PayrollLedgerPage() {
             <table>
               <thead>
                 <tr>
-                  {['순번', '성명', '소속', '입사일', '기본급', '시간외', '휴일', '야간', '직책', '차량', '식대', '총급여', '소득세', '주민세', '국민연금', '건강보험', '장기요양', '고용보험', '공제합계', '실수령액'].map((head) => (
+                  {['순번', '성명', '소속', '입사일', '기본급', '시간외', '휴일', '야간', '직책', '차량', '식대', '총급여', '소득세', '주민세', '국민연금', '건강보험', '장기요양', '고용보험', '공제합계', '실수령액', ''].map((head, index) => (
                     <th key={head}>{head}</th>
                   ))}
                 </tr>
@@ -385,6 +434,9 @@ export default function PayrollLedgerPage() {
                     <td>{won(line.employment)}</td>
                     <td>{won(line.deduction_total)}</td>
                     <td>{won(line.net_pay)}</td>
+                    <td>
+                      <Button type="button" variant="secondary" disabled={busy} onClick={() => previewSlip(line.employee_name)}>명세서</Button>
+                    </td>
                   </tr>
                 ))}
                 {totals && (
@@ -406,6 +458,7 @@ export default function PayrollLedgerPage() {
                     <td>{won(totals.employment)}</td>
                     <td>{won(totals.deduction_total)}</td>
                     <td>{won(totals.net_pay)}</td>
+                    <td />
                   </tr>
                 )}
               </tbody>

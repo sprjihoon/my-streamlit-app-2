@@ -110,6 +110,8 @@ def ensure_payroll_tables() -> None:
         columns = [row[1] for row in con.execute("PRAGMA table_info(payroll_ledgers)")]
         if "origin" not in columns:
             con.execute("ALTER TABLE payroll_ledgers ADD COLUMN origin TEXT DEFAULT 'contract'")
+        if "released_at" not in columns:
+            con.execute("ALTER TABLE payroll_ledgers ADD COLUMN released_at TEXT")
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS payroll_lines (
@@ -490,7 +492,7 @@ def _public_line(line: dict) -> dict:
 def _load(year: int, month: int) -> dict | None:
     with get_connection() as con:
         header = con.execute(
-            "SELECT id, year, month, company_name, period_label, created_at, origin FROM payroll_ledgers WHERE year = ? AND month = ?",
+            "SELECT id, year, month, company_name, period_label, created_at, origin, released_at FROM payroll_ledgers WHERE year = ? AND month = ?",
             (year, month),
         ).fetchone()
         if not header:
@@ -509,6 +511,7 @@ def _load(year: int, month: int) -> dict | None:
         "period_label": header[4] or "",
         "created_at": header[5],
         "origin": header[6] or "contract",
+        "released_at": header[7],
         "lines": lines,
         "totals": _totals(lines),
     }
@@ -526,21 +529,22 @@ def _match_users(lines: list[dict]) -> None:
 def _store(year: int, month: int, company: str, label: str, lines: list[dict], origin: str, replace: bool) -> dict:
     with get_connection() as con:
         existing = con.execute(
-            "SELECT id FROM payroll_ledgers WHERE year = ? AND month = ?",
+            "SELECT id, released_at FROM payroll_ledgers WHERE year = ? AND month = ?",
             (year, month),
         ).fetchone()
         if existing and not replace:
             pass
         else:
+            released_at = existing[1] if existing else None
             if existing and replace:
                 con.execute("DELETE FROM payroll_lines WHERE ledger_id = ?", (existing[0],))
                 con.execute("DELETE FROM payroll_ledgers WHERE id = ?", (existing[0],))
             cur = con.execute(
                 """
-                INSERT INTO payroll_ledgers (year, month, company_name, period_label, origin, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO payroll_ledgers (year, month, company_name, period_label, origin, created_at, released_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (year, month, company, label, origin, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                (year, month, company, label, origin, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), released_at),
             )
             ledger_id = cur.lastrowid
             placeholders = ", ".join("?" for _ in LINE_FIELDS)
@@ -582,7 +586,7 @@ def list_ledgers(token: str):
     with get_connection() as con:
         rows = con.execute(
             """
-            SELECT year, month, period_label, created_at,
+            SELECT year, month, period_label, created_at, released_at,
                    (SELECT COUNT(*) FROM payroll_lines WHERE ledger_id = payroll_ledgers.id)
             FROM payroll_ledgers
             ORDER BY year DESC, month DESC
@@ -595,7 +599,8 @@ def list_ledgers(token: str):
                 "month": row[1],
                 "period_label": row[2],
                 "created_at": row[3],
-                "headcount": row[4],
+                "released_at": row[4],
+                "headcount": row[5],
             }
             for row in rows
         ]
@@ -739,3 +744,30 @@ def download_ledger(year: int, month: int, token: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
+
+
+@router.post("/{year}/{month}/release")
+def release_slips(year: int, month: int, token: str):
+    actor = _admin(token)
+    ledger = _load(year, month)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="이 달 급여대장이 없습니다.")
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as con:
+        con.execute(
+            "UPDATE payroll_ledgers SET released_at = ? WHERE year = ? AND month = ?",
+            (stamp, year, month),
+        )
+        con.commit()
+    add_log(
+        action_type="급여명세서 제공",
+        target_type="payroll_ledger",
+        target_id=f"{year}-{month:02d}",
+        target_name=ledger["period_label"],
+        user_nickname=actor["nickname"],
+        details=f"{len(ledger['lines'])}명",
+    )
+    saved = _load(year, month)
+    shown = dict(saved)
+    shown["lines"] = [_public_line(line) for line in saved["lines"]]
+    return shown

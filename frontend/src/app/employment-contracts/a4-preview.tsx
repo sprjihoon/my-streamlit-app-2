@@ -26,14 +26,14 @@ const PRINT_STYLE = `
 }
 `;
 
-function Pages({ pages }: { pages: string[] }) {
+function Pages({ pages, title }: { pages: string[]; title: string }) {
   return (
     <>
       {pages.map((page, index) => (
         <div className="a4-preview-sheet" key={index}>
           <img
             src={page.startsWith('data:') ? page : `data:image/png;base64,${page}`}
-            alt={`근로계약서 ${index + 1}쪽`}
+            alt={`${title} ${index + 1}쪽`}
           />
         </div>
       ))}
@@ -45,10 +45,12 @@ export function A4Preview({
   pages,
   onClose,
   overlay = false,
+  title = '근로계약서',
 }: {
   pages: string[];
   onClose?: () => void;
   overlay?: boolean;
+  title?: string;
 }) {
   useEffect(() => {
     const style = document.createElement('style');
@@ -118,7 +120,7 @@ export function A4Preview({
             <button type="button" onClick={onClose} style={barButton}>닫기</button>
           </div>
           <div className="a4-preview-body" id="a4-print-area" style={{ overflow: 'auto', background: '#e5e7eb', padding: '16px 12px' }}>
-            <Pages pages={pages} />
+            <Pages pages={pages} title={title} />
           </div>
         </div>
       </div>
@@ -139,7 +141,7 @@ export function A4Preview({
         <span>A4 {pages.length}장 · 인쇄하면 이 크기 그대로 나갑니다.</span>
       </div>
       <div id="a4-print-area" style={{ padding: '16px 0' }}>
-        <Pages pages={pages} />
+        <Pages pages={pages} title={title} />
       </div>
     </div>
   );
