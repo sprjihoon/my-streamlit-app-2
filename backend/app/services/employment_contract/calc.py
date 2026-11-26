@@ -17,9 +17,9 @@ def _down(value: float, unit: int) -> int:
     return int(math.floor((value / unit) + 1e-9)) * unit
 
 
-def _deductions(taxable: int, income_tax: int) -> dict[str, int]:
+def _deductions(taxable: int, income_tax: int, pension_override: int | None = None) -> dict[str, int]:
     pension_base = _down(taxable, 1000)
-    pension = _down(pension_base * PENSION_RATE, 10)
+    pension = int(pension_override) if pension_override is not None else _down(pension_base * PENSION_RATE, 10)
     health = _down(taxable * HEALTH_RATE, 10)
     care = _down(health * CARE_RATE, 10)
     local_tax = _down(income_tax * 0.1, 10)
@@ -43,6 +43,13 @@ def calculate_contract_pay(data: dict) -> dict:
     vehicle = int(data["vehicle_allowance"])
     position = int(data["position_allowance"])
     income_tax = int(data["income_tax"])
+    pension_override = data.get("pension")
+    if pension_override in ("", None, 0):
+        pension_override = None
+    else:
+        pension_override = int(pension_override)
+        if pension_override < 0:
+            raise ValueError("국민연금은 0 이상이어야 합니다.")
     base_hours = float(data["base_hours"])
     overtime_hours = float(data["overtime_hours"])
     holiday_hours = float(data["holiday_hours"])
@@ -67,7 +74,7 @@ def calculate_contract_pay(data: dict) -> dict:
     taxable = max(net - meal - vehicle, 0)
     best: tuple | None = None
     for _ in range(60):
-        ded = _deductions(taxable, income_tax)
+        ded = _deductions(taxable, income_tax, pension_override)
         gross = taxable + meal + vehicle
         actual = gross - ded["total"]
         error = abs(actual - net)

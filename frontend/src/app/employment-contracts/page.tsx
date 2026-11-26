@@ -55,6 +55,7 @@ interface ContractForm {
   meal_allowance: number;
   position_allowance: number;
   income_tax: number;
+  pension: number | null;
   weekday_hours: string;
   break_time: string;
   work_days: string;
@@ -102,6 +103,7 @@ const EMPTY_FORM: ContractForm = {
   meal_allowance: 0,
   position_allowance: 0,
   income_tax: 0,
+  pension: 0,
   weekday_hours: '09:00~18:00',
   break_time: '1시간 (12~13)',
   work_days: '주중 평균 5일 근무',
@@ -462,7 +464,7 @@ export default function EmploymentContractsPage() {
             <section style={{ marginTop: '0.9rem', border: '1px solid #dbeafe', background: '#f8fbff', borderRadius: 12, padding: '0.9rem' }}>
               <h4 style={{ margin: '0 0 0.35rem' }}>내가 적는 항목</h4>
               <p style={{ margin: '0 0 0.75rem', color: '#1e3a8a', fontSize: '0.82rem' }}>
-                직무, 근무조건, 급여는 회사에서 적습니다. 차량지원과 식대는 비과세이고, 맞추는 금액은 실수령액입니다.
+                실수령액, 차량지원, 식대, 소득세만 적으면 건강보험·장기요양·고용보험·주민세는 엑셀과 같은 식으로 채워집니다. 국민연금은 엑셀처럼 따로 적을 수 있고, 비우면 과세월급의 4.75%로 계산합니다.
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
                 <Field label="직무" value={form.job_title} onChange={(value) => patch('job_title', value)} />
@@ -479,6 +481,7 @@ export default function EmploymentContractsPage() {
                 <Field label="식대" type="number" value={String(form.meal_allowance)} onChange={(value) => patch('meal_allowance', Number(value) || 0)} />
                 <Field label="직책수당" type="number" value={String(form.position_allowance)} onChange={(value) => patch('position_allowance', Number(value) || 0)} />
                 <Field label="소득세" type="number" value={String(form.income_tax)} onChange={(value) => patch('income_tax', Number(value) || 0)} />
+                <Field label="국민연금" type="number" value={String(form.pension || 0)} onChange={(value) => patch('pension', Number(value) || 0)} />
                 <Field label="기본근로시간" type="number" value={String(form.base_hours)} onChange={(value) => patch('base_hours', Number(value) || 0)} />
                 <Field label="초과근로시간" type="number" value={String(form.overtime_hours)} onChange={(value) => patch('overtime_hours', Number(value) || 0)} />
                 <Field label="휴일근로시간" type="number" value={String(form.holiday_hours)} onChange={(value) => patch('holiday_hours', Number(value) || 0)} />

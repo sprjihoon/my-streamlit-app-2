@@ -93,6 +93,35 @@ def test_sample_pay_matches_contract_sheet():
     assert parts == calc["gross"]
 
 
+def test_excel_insurance_formulas_fill_from_net_and_income_tax():
+    from backend.app.services.employment_contract.calc import calculate_contract_pay
+
+    sungryung = calculate_contract_pay({
+        "net_pay": 2600000,
+        "meal_allowance": 0,
+        "vehicle_allowance": 0,
+        "position_allowance": 0,
+        "income_tax": 30000,
+        "pension": 136750,
+        "base_hours": 209,
+        "overtime_hours": 0,
+        "holiday_hours": 0,
+        "night_hours": 0,
+    })
+    assert sungryung["gross"] == 2914510
+    assert sungryung["net"] == 2600000
+    assert sungryung["pension"] == 136750
+    assert sungryung["health"] == 104770
+    assert sungryung["care"] == 13760
+    assert sungryung["employment"] == 26230
+    assert sungryung["local_tax"] == 3000
+    assert sungryung["deduction_total"] == 314510
+
+    formula = calculate_contract_pay(_sample())
+    assert formula["pension"] == 94090
+    assert formula["health"] == 71220
+
+
 def test_meal_stays_out_of_taxable_pay_and_lines_still_sum():
     plain = calculate_contract_pay(_sample())
     with_meal = calculate_contract_pay(_sample(meal_allowance=100000))

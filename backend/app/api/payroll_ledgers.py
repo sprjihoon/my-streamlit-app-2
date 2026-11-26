@@ -245,7 +245,7 @@ def _lines_from_contracts(year: int, month: int) -> tuple[list[dict], list[str]]
                    c.hire_date, c.contract_start, c.contract_end,
                    c.base_hours, c.overtime_hours, c.holiday_hours, c.night_hours,
                    c.net_pay, c.vehicle_allowance, c.meal_allowance,
-                   c.position_allowance, c.income_tax
+                   c.position_allowance, c.income_tax, c.pension
             FROM users u
             JOIN employment_contracts c ON c.id = (
                 SELECT id FROM employment_contracts
@@ -270,6 +270,7 @@ def _lines_from_contracts(year: int, month: int) -> tuple[list[dict], list[str]]
             "vehicle_allowance": row[16] or 0,
             "position_allowance": row[18] or 0,
             "income_tax": row[19] or 0,
+            "pension": row[20],
             "base_hours": row[11] or 0,
             "overtime_hours": row[12] or 0,
             "holiday_hours": row[13] or 0,

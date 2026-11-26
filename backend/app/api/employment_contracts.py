@@ -42,6 +42,7 @@ INPUT_FIELDS = (
     "meal_allowance",
     "position_allowance",
     "income_tax",
+    "pension",
     "weekday_hours",
     "break_time",
     "work_days",
@@ -68,6 +69,7 @@ class ContractInput(BaseModel):
     meal_allowance: int = 0
     position_allowance: int = 0
     income_tax: int = 0
+    pension: int | None = None
     weekday_hours: str = "09:00~18:00"
     break_time: str = "1시간 (12~13)"
     work_days: str = "주중 평균 5일 근무"
@@ -101,6 +103,7 @@ def ensure_contract_tables() -> None:
                 meal_allowance INTEGER DEFAULT 0,
                 position_allowance INTEGER DEFAULT 0,
                 income_tax INTEGER DEFAULT 0,
+                pension INTEGER,
                 weekday_hours TEXT,
                 break_time TEXT,
                 work_days TEXT,
@@ -115,6 +118,9 @@ def ensure_contract_tables() -> None:
             )
             """
         )
+        columns = [row[1] for row in con.execute("PRAGMA table_info(employment_contracts)")]
+        if "pension" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN pension INTEGER")
         con.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_employment_contracts_user
@@ -212,6 +218,7 @@ def _values(data: ContractInput, *, required: bool) -> dict:
         ("식대", data.meal_allowance),
         ("직책수당", data.position_allowance),
         ("소득세", data.income_tax),
+        ("국민연금", data.pension or 0),
     ):
         if amount < 0:
             raise HTTPException(status_code=400, detail=f"{label}은 0 이상이어야 합니다.")
@@ -232,6 +239,7 @@ def _values(data: ContractInput, *, required: bool) -> dict:
     payload["weekday_hours"] = (data.weekday_hours or "09:00~18:00").strip()[:40]
     payload["break_time"] = (data.break_time or "1시간 (12~13)").strip()[:40]
     payload["work_days"] = (data.work_days or "주중 평균 5일 근무").strip()[:40]
+    payload["pension"] = None if data.pension in (None, 0) else int(data.pension)
     return payload
 
 
@@ -327,6 +335,7 @@ def _contract_defaults(existing: dict | None, position: str, join_date: str) -> 
         "meal_allowance": current.get("meal_allowance") or 0,
         "position_allowance": current.get("position_allowance") or 0,
         "income_tax": current.get("income_tax") or 0,
+        "pension": current.get("pension"),
         "weekday_hours": current.get("weekday_hours") or "09:00~18:00",
         "break_time": current.get("break_time") or "1시간 (12~13)",
         "work_days": current.get("work_days") or "주중 평균 5일 근무",
@@ -388,6 +397,7 @@ def apply_payroll_contract_fields(lines: list[dict]) -> dict:
             payload["meal_allowance"] = int(line.get("meal_allowance") or 0)
             payload["position_allowance"] = int(line.get("position_allowance") or 0)
             payload["income_tax"] = int(line.get("income_tax") or 0)
+            payload["pension"] = int(line.get("pension") or 0) or None
             calc = calculate_contract_pay(payload) if payload["net_pay"] > 0 and payload["base_hours"] > 0 else None
             if latest and latest[1] == "draft":
                 assignments = ", ".join(f"{field} = ?" for field in INPUT_FIELDS)
@@ -549,6 +559,7 @@ def get_contract_draft(user_id: int, token: str):
             "meal_allowance": 0,
             "position_allowance": 0,
             "income_tax": 0,
+            "pension": None,
             "weekday_hours": "09:00~18:00",
             "break_time": "1시간 (12~13)",
             "work_days": "주중 평균 5일 근무",
@@ -576,7 +587,7 @@ def _preview_calc(payload: dict) -> dict:
         "annual": 0,
         "deduction_total": 0,
         "pension_base": 0,
-        "pension": 0,
+        "pension": payload.get("pension") or 0,
         "health": 0,
         "care": 0,
         "income_tax": 0,
