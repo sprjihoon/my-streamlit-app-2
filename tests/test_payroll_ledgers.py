@@ -150,3 +150,41 @@ def test_october_workbook_keeps_the_given_headcount_and_total():
     assert sum(line["gross_pay"] for line in parsed["lines"]) == 18270640
     assert parsed["lines"][6]["vehicle_allowance"] == 200000
     assert parsed["lines"][7]["base_hours"] == 84
+
+
+def test_payroll_file_fills_matching_employment_contract(isolated_runtime):
+    import sqlite3
+
+    _prepare(isolated_runtime["db"])
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            """
+            INSERT INTO users (username, password_hash, nickname, is_admin, department, position, join_date)
+            VALUES ('jang', 'x', '장성령', 0, '패션팀', '팀장', '')
+            """
+        )
+        user_id = con.execute("SELECT user_id FROM users WHERE username = 'jang'").fetchone()[0]
+        con.commit()
+    client = TestClient(app)
+    saved = client.post(
+        "/payroll-ledgers/import",
+        params={"token": "admin-tok"},
+        files={"file": ("ledger.xlsx", _sample_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["contracts"]["updated"] == [{"user_id": user_id, "employee_name": "장성령"}]
+    draft = client.get(f"/employment-contracts/users/{user_id}", params={"token": "admin-tok"})
+    assert draft.status_code == 200
+    fields = draft.json()["input"]
+    assert fields["job_title"] == "패션총괄팀장"
+    assert fields["rank_title"] == "팀장"
+    assert fields["hire_date"] == "2026-02-02"
+    assert fields["contract_start"] == "2026-02-02"
+    assert fields["contract_end"] == "2027-02-01"
+    assert fields["base_hours"] == 209
+    assert fields["net_pay"] == 2600000
+    assert fields["income_tax"] == 30000
+    assert fields["vehicle_allowance"] == 0
+    assert fields["address"] == ""
+    assert len("".join(ch for ch in fields["resident_id"] if ch.isdigit())) == 13

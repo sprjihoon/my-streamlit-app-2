@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -295,6 +295,125 @@ def _insert_contract(con, user_id: int, payload: dict, calc: dict | None, status
         values,
     )
     return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def _one_year_term(start: str) -> str:
+    year, month, day = [int(part) for part in start[:10].split("-")]
+    try:
+        ended = date(year + 1, month, day)
+    except ValueError:
+        ended = date(year + 1, month, 28)
+    return (ended - timedelta(days=1)).isoformat()
+
+
+def _contract_defaults(existing: dict | None, position: str, join_date: str) -> dict:
+    current = dict(existing or {})
+    return {
+        "employee_name": current.get("employee_name") or "",
+        "job_title": current.get("job_title") or "",
+        "rank_title": current.get("rank_title") or position or "",
+        "resident_id": current.get("resident_id") or "",
+        "address": current.get("address") or "",
+        "phone": current.get("phone") or "",
+        "hire_date": current.get("hire_date") or join_date or "",
+        "contract_start": current.get("contract_start") or "",
+        "contract_end": current.get("contract_end") or "",
+        "base_hours": current.get("base_hours") if current.get("base_hours") not in (None, "") else 209,
+        "overtime_hours": current.get("overtime_hours") or 0,
+        "holiday_hours": current.get("holiday_hours") or 0,
+        "night_hours": current.get("night_hours") or 0,
+        "net_pay": current.get("net_pay") or 0,
+        "vehicle_allowance": current.get("vehicle_allowance") or 0,
+        "meal_allowance": current.get("meal_allowance") or 0,
+        "position_allowance": current.get("position_allowance") or 0,
+        "income_tax": current.get("income_tax") or 0,
+        "weekday_hours": current.get("weekday_hours") or "09:00~18:00",
+        "break_time": current.get("break_time") or "1시간 (12~13)",
+        "work_days": current.get("work_days") or "주중 평균 5일 근무",
+        "pay_day": current.get("pay_day") or 15,
+    }
+
+
+def apply_payroll_contract_fields(lines: list[dict]) -> dict:
+    """급여대장에서 계약 조건이 되는 항목만 근로계약 초안에 반영한다.
+
+    연차수당, 근태공제, 상여처럼 그 달에만 있는 금액은 계약서에 넣지 않는다.
+    주소와 연락처, 근무요일 문장은 이미 적힌 값을 유지한다.
+    """
+    updated: list[dict] = []
+    missing: list[str] = []
+    with get_connection() as con:
+        users = con.execute("SELECT user_id, nickname, position, join_date FROM users").fetchall()
+        by_name: dict[str, tuple] = {}
+        for user_id, nickname, position, join_date in users:
+            key = (nickname or "").strip()
+            if key and key not in by_name:
+                by_name[key] = (user_id, position or "", join_date or "")
+        for line in lines:
+            name = (line.get("employee_name") or "").strip()
+            found = by_name.get(name)
+            if not found:
+                missing.append(name)
+                continue
+            user_id, position, join_date = found
+            latest = _latest(con, user_id)
+            existing = None
+            if latest and latest[1] == "draft":
+                existing = _load_contract(con, latest[0])["input"]
+            elif latest and latest[1] == "completed":
+                existing = _load_contract(con, latest[0])["input"]
+            payload = _contract_defaults(existing, position, join_date)
+            payload["employee_name"] = name
+            if line.get("affiliation"):
+                payload["job_title"] = str(line["affiliation"]).strip()
+            if not payload["rank_title"]:
+                payload["rank_title"] = position
+            if line.get("resident_id"):
+                try:
+                    payload["resident_id"] = _normalize_rrn(str(line["resident_id"]), True)
+                except HTTPException:
+                    pass
+            if line.get("hire_date"):
+                payload["hire_date"] = str(line["hire_date"])[:10]
+            if payload["hire_date"] and not payload["contract_start"]:
+                payload["contract_start"] = payload["hire_date"]
+            if payload["contract_start"] and not payload["contract_end"]:
+                payload["contract_end"] = _one_year_term(payload["contract_start"])
+            payload["base_hours"] = float(line.get("base_hours") or 0) or 209
+            payload["overtime_hours"] = float(line.get("overtime_hours") or 0)
+            payload["holiday_hours"] = float(line.get("holiday_hours") or 0)
+            payload["night_hours"] = float(line.get("night_hours") or 0)
+            payload["net_pay"] = int(line.get("net_pay") or 0)
+            payload["vehicle_allowance"] = int(line.get("vehicle_allowance") or 0)
+            payload["meal_allowance"] = int(line.get("meal_allowance") or 0)
+            payload["position_allowance"] = int(line.get("position_allowance") or 0)
+            payload["income_tax"] = int(line.get("income_tax") or 0)
+            calc = calculate_contract_pay(payload) if payload["net_pay"] > 0 and payload["base_hours"] > 0 else None
+            if latest and latest[1] == "draft":
+                assignments = ", ".join(f"{field} = ?" for field in INPUT_FIELDS)
+                con.execute(
+                    f"""
+                    UPDATE employment_contracts
+                    SET {assignments}, gross_pay = ?, calc_json = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        *[payload[field] for field in INPUT_FIELDS],
+                        calc["gross"] if calc else None,
+                        json.dumps(calc, ensure_ascii=False) if calc else None,
+                        latest[0],
+                    ),
+                )
+            else:
+                _insert_contract(con, user_id, payload, calc, "draft")
+            if payload["hire_date"] and not join_date:
+                con.execute(
+                    "UPDATE users SET join_date = ? WHERE user_id = ? AND (join_date IS NULL OR join_date = '')",
+                    (payload["hire_date"], user_id),
+                )
+            updated.append({"user_id": user_id, "employee_name": name})
+        con.commit()
+    return {"updated": updated, "missing": missing}
 
 
 def _load_contract(con, contract_id: int):

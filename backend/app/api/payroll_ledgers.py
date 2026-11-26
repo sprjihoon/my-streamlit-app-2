@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from backend.app.api.employment_contracts import _company, ensure_contract_tables
+from backend.app.api.employment_contracts import _company, apply_payroll_contract_fields, ensure_contract_tables
 from backend.app.api.logs import add_log
 from backend.app.services.employment_contract.calc import calculate_contract_pay
 from backend.app.services.payroll_ledger.excel import parse_payroll_xlsx, render_payroll_xlsx
@@ -427,6 +427,7 @@ async def import_ledger_file(token: str, file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     _match_users(parsed["lines"])
+    contracts = apply_payroll_contract_fields(parsed["lines"])
     saved = _store(
         parsed["year"],
         parsed["month"],
@@ -442,10 +443,11 @@ async def import_ledger_file(token: str, file: UploadFile = File(...)):
         target_id=f"{parsed['year']}-{parsed['month']:02d}",
         target_name=parsed["period_label"],
         user_nickname=actor["nickname"],
-        details=f"{len(parsed['lines'])}명",
+        details=f"대장 {len(parsed['lines'])}명, 계약 {len(contracts['updated'])}명",
     )
     shown = dict(saved)
     shown["lines"] = [_public_line(line) for line in saved["lines"]]
+    shown["contracts"] = contracts
     return shown
 
 
