@@ -223,11 +223,21 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
 
     staff_me = client.get("/auth/me", params={"token": "staff-tok"})
     assert staff_me.status_code == 200
-    assert staff_me.json()["needs_contract"] is False
+    assert staff_me.json()["needs_contract"] is True
     staff_get = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "staff-tok"})
-    assert staff_get.status_code == 400
+    assert staff_get.status_code == 200
+    assert staff_get.json()["download"]["contract_id"] == contract_id
     staff_pdf = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "staff-tok"})
-    assert staff_pdf.status_code == 403
+    assert staff_pdf.status_code == 200
+    assert staff_pdf.content.startswith(b"%PDF")
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE employment_contracts SET completed_at = ? WHERE id = ?",
+            ("2020-01-01 00:00:00", contract_id),
+        )
+    assert client.get("/auth/me", params={"token": "staff-tok"}).json()["needs_contract"] is False
+    expired = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "staff-tok"})
+    assert expired.status_code == 403
     staff_pages = client.get(f"/employment-contracts/{contract_id}/pages", params={"token": "staff-tok"})
     assert staff_pages.status_code == 403
     staff_list = client.get("/employment-contracts", params={"token": "staff-tok", "view": "completed"})

@@ -160,6 +160,7 @@ export default function EmploymentContractsPage() {
   const [rrnLocked, setRrnLocked] = useState(false);
   const [renewal, setRenewal] = useState(false);
   const [workerSealed, setWorkerSealed] = useState(false);
+  const [downloadOffer, setDownloadOffer] = useState<{ contract_id: number; until: string } | null>(null);
 
   const load = useCallback(async (nextView: 'open' | 'completed') => {
     const token = localStorage.getItem('token') || '';
@@ -194,6 +195,13 @@ export default function EmploymentContractsPage() {
       return;
     }
     const data = await res.json();
+    if (data.download?.contract_id) {
+      setDownloadOffer({ contract_id: data.download.contract_id, until: data.download.until || '' });
+      setSealed(true);
+      setLoading(false);
+      return;
+    }
+    setDownloadOffer(null);
     setForm({ ...EMPTY_FORM, ...data.input });
     setRrnLocked(!!data.rrn_locked);
     setRenewal(!!data.renewal);
@@ -499,16 +507,27 @@ export default function EmploymentContractsPage() {
         {sheets && <A4Preview pages={sheets} overlay onClose={() => setSheets(null)} />}
         <PageHeader
           title="근로계약"
-          subtitle={renewal
+          subtitle={downloadOffer
+            ? '회사 날인이 끝난 계약서는 1시간 동안만 받을 수 있습니다.'
+            : renewal
             ? '이전 계약 내용을 불러왔습니다. 주소·연락처·성함 등 바뀐 항목만 고친 뒤 계약서를 확인하고 날인합니다. 주민번호는 그대로입니다.'
             : '성명과 연락처를 저장하고 도장을 등록한 뒤, 계약서를 확인하고 날인합니다. 급여와 근로조건은 회사에서 적습니다.'}
         />
         {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
         {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
-        {loading ? <Loading text="불러오는 중..." /> : sealed ? (
-          <>
-            <Alert type="info" message="이미 날인된 계약입니다. 계약서는 관리자만 확인합니다." />
-          </>
+        {loading ? <Loading text="불러오는 중..." /> : downloadOffer ? (
+          <Card>
+            <h3 style={{ marginTop: 0 }}>계약서 받기</h3>
+            <p>회사 날인이 끝났습니다. 지금부터 1시간 동안만 계약서를 받을 수 있습니다.</p>
+            <p style={{ color: '#166534' }}>{downloadOffer.until}까지 열려 있습니다.</p>
+            <a
+              href={`${API}/employment-contracts/${downloadOffer.contract_id}/pdf?token=${encodeURIComponent(typeof window === 'undefined' ? '' : localStorage.getItem('token') || '')}`}
+            >
+              계약서 다운로드
+            </a>
+          </Card>
+        ) : sealed ? (
+          <Alert type="info" message="날인 후 1시간이 지나 계약서를 받을 수 없습니다." />
         ) : (
           <Card>
             <h3 style={{ marginTop: 0 }}>{renewal ? '바뀐 항목만 수정' : '근로자 기재'}</h3>
