@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+from copy import copy
 from datetime import datetime, date
 from io import BytesIO
 from pathlib import Path
@@ -404,44 +405,253 @@ def _fill_cell(cell, value) -> None:
     cell.value = value
 
 
+def _sheet_ref(sheet_name: str, coord: str) -> str:
+    quoted = sheet_name.replace("'", "''")
+    return f"='{quoted}'!{coord}"
+
+
+def _safe_sheet_title(affiliation: str, name: str, taken: set[str]) -> str:
+    base = " ".join(part for part in ((affiliation or "").strip(), (name or "").strip()) if part) or "직원"
+    base = "".join(ch for ch in base if ch not in r":\/?*[]")[:31] or "직원"
+    title = base
+    index = 2
+    while title in taken or title in SKIP_SHEETS:
+        suffix = f" {index}"
+        title = f"{base[:31 - len(suffix)]}{suffix}"
+        index += 1
+    return title
+
+
+def _person_sheets(book) -> dict[str, object]:
+    found = {}
+    for sheet_name in book.sheetnames:
+        if sheet_name in SKIP_SHEETS:
+            continue
+        ws = book[sheet_name]
+        name = _text(ws["B3"].value)
+        if name:
+            found[name] = ws
+    return found
+
+
+def _fill_person_sheet(ws, line: dict, company: str) -> None:
+    _fill_cell(ws["B3"], (line.get("employee_name") or "").strip())
+    if company:
+        _fill_cell(ws["D3"], company)
+    if line.get("affiliation"):
+        _fill_cell(ws["B5"], line["affiliation"])
+    if line.get("resident_id"):
+        _fill_cell(ws["B6"], line["resident_id"])
+    hire = line.get("hire_date") or ""
+    if hire and not _formula(ws["B9"]):
+        try:
+            ws["B9"] = datetime.strptime(str(hire)[:10], "%Y-%m-%d")
+        except ValueError:
+            ws["B9"] = hire
+    _fill_cell(ws["H20"], int(line.get("net_pay") or 0))
+    _fill_cell(ws["D20"], int(line.get("vehicle_allowance") or 0))
+    _fill_cell(ws["E20"], int(line.get("meal_allowance") or 0))
+    _fill_cell(ws["E24"], int(line.get("income_tax") or 0))
+    _fill_cell(ws["B24"], int(line.get("pension") or 0))
+    _fill_cell(ws["B13"], line.get("base_hours") or 0)
+    _fill_cell(ws["C13"], line.get("overtime_hours") or 0)
+    _fill_cell(ws["D13"], line.get("holiday_hours") or 0)
+    _fill_cell(ws["E13"], line.get("night_hours") or 0)
+    _fill_cell(ws["F13"], line.get("work_days") or "만근")
+    _fill_cell(ws["I33"], int(line.get("position_allowance") or 0))
+    _fill_cell(ws["I39"], int(line.get("annual_leave_pay") or 0))
+    _fill_cell(ws["H40"], int(line.get("incentive_pay") or 0))
+    _fill_cell(ws["G33"], int(line.get("special_pay") or 0))
+    _fill_cell(ws["M39"], int(line.get("year_end_tax") or 0))
+    _fill_cell(ws["M40"], int(line.get("insurance_adjust") or 0))
+    _fill_cell(ws["M41"], int(line.get("prepaid") or 0))
+    if not _formula(ws["I40"]):
+        _fill_cell(ws["I40"], int(line.get("attendance_deduction") or 0))
+    elif not _formula(ws["H33"]):
+        _fill_cell(ws["H33"], int(line.get("attendance_deduction") or 0))
+    _fill_cell(ws["H41"], int(line.get("bonus_pay") or 0) or int(line.get("settlement_pay") or 0))
+
+
+def _apply_style(cell, snapshot: dict) -> None:
+    cell.font = copy(snapshot["font"])
+    cell.border = copy(snapshot["border"])
+    cell.fill = copy(snapshot["fill"])
+    cell.alignment = copy(snapshot["alignment"])
+    cell.number_format = snapshot["number_format"]
+
+
+def _row_style(ws, row: int) -> list[dict]:
+    return [
+        {
+            "font": copy(ws.cell(row, col).font),
+            "border": copy(ws.cell(row, col).border),
+            "fill": copy(ws.cell(row, col).fill),
+            "alignment": copy(ws.cell(row, col).alignment),
+            "number_format": ws.cell(row, col).number_format,
+        }
+        for col in range(1, 16)
+    ]
+
+
+def _unmerge_from(ws, min_row: int) -> None:
+    for ref in [str(rng) for rng in ws.merged_cells.ranges if rng.min_row >= min_row]:
+        ws.unmerge_cells(ref)
+
+
+def _write_person_block(ws, start: int, sheet_name: str, seq_formula, styles: list[list[dict]]) -> None:
+    for offset, src_row in enumerate((39, 40, 41)):
+        row = start + offset
+        for col in range(1, 16):
+            cell = ws.cell(row, col)
+            _apply_style(cell, styles[offset][col - 1])
+            letter = cell.column_letter
+            if offset == 0 and letter == "A":
+                cell.value = seq_formula
+            elif letter in "JNO" and offset > 0:
+                cell.value = None
+            else:
+                cell.value = _sheet_ref(sheet_name, f"{letter}{src_row}")
+        ws.cell(start, 10).value = _sheet_ref(sheet_name, "J39")
+        ws.cell(start, 14).value = _sheet_ref(sheet_name, "N39")
+        ws.cell(start, 15).value = _sheet_ref(sheet_name, "O39")
+    ws.merge_cells(start_row=start, start_column=10, end_row=start + 2, end_column=10)
+    ws.merge_cells(start_row=start, start_column=14, end_row=start + 2, end_column=14)
+    ws.merge_cells(start_row=start, start_column=15, end_row=start + 2, end_column=15)
+    ws.merge_cells(start_row=start + 2, start_column=1, end_row=start + 2, end_column=2)
+
+
+def _write_total_block(ws, start: int, person_starts: list[int], styles: list[list[dict]]) -> None:
+    for offset in range(3):
+        row = start + offset
+        for col in range(1, 16):
+            cell = ws.cell(row, col)
+            _apply_style(cell, styles[offset][col - 1])
+            cell.value = None
+        if offset == 0:
+            ws.cell(row, 1).value = "합계"
+        for col in "FGHIJKLM":
+            rows = [person + offset for person in person_starts]
+            if rows:
+                ws[f"{col}{row}"] = "=" + "+".join(f"{col}{r}" for r in rows)
+        if offset == 0:
+            ws.cell(row, 10).value = f"=SUM(F{start}:I{start + 2})"
+            ws.cell(row, 14).value = f"=SUM(K{start}:M{start + 2})"
+            ws.cell(row, 15).value = f"=J{start}-N{start}"
+    ws.merge_cells(start_row=start, start_column=1, end_row=start + 2, end_column=2)
+    ws.merge_cells(start_row=start, start_column=10, end_row=start + 2, end_column=10)
+    ws.merge_cells(start_row=start, start_column=14, end_row=start + 2, end_column=14)
+    ws.merge_cells(start_row=start, start_column=15, end_row=start + 2, end_column=15)
+
+
+def _rewrite_summary(ws, sheet_names: list[str]) -> None:
+    person_styles = [_row_style(ws, row) for row in (8, 9, 10)]
+    total_styles = [_row_style(ws, row) for row in (32, 33, 34)]
+    _unmerge_from(ws, 8)
+    for row in range(8, 80):
+        for col in range(1, 16):
+            ws.cell(row, col).value = None
+    starts = []
+    for index, sheet_name in enumerate(sheet_names):
+        start = 8 + index * 3
+        starts.append(start)
+        seq = 1 if index == 0 else f"=A{starts[index - 1]}+1"
+        _write_person_block(ws, start, sheet_name, seq, person_styles)
+    reserved = max(8, len(sheet_names))
+    total_row = 8 + reserved * 3
+    _write_total_block(ws, total_row, starts, total_styles)
+    last = total_row + 2
+    ws.print_area = f"A1:O{last}"
+    for row in range(8, last + 1):
+        ws.row_dimensions[row].height = 18
+
+
+def _fill_receipt_names(ws, names: list[str]) -> None:
+    for index in range(20):
+        cell = ws.cell(4 + index, 2)
+        cell.value = names[index] if index < len(names) else None
+
+
+def _extend_statement_slots(ws, count: int) -> None:
+    if count <= 8:
+        return
+    for index in range(8, count):
+        ledger_row = 8 + index * 3
+        src = 1 + (index - 1) * 3
+        dest = 1 + index * 3
+        for offset in range(3):
+            for col in range(31, 45):
+                sample = ws.cell(src + offset, col).value
+                if not isinstance(sample, str) or "급여대장!" not in sample:
+                    continue
+                old_row = 8 + (index - 1) * 3 + offset
+                ws.cell(dest + offset, col).value = sample.replace(f"!A{old_row}", f"!A{ledger_row + offset}").replace(
+                    f"!B{old_row}", f"!B{ledger_row + offset}"
+                ).replace(f"!C{old_row}", f"!C{ledger_row + offset}").replace(
+                    f"!D{old_row}", f"!D{ledger_row + offset}"
+                ).replace(f"!E{old_row}", f"!E{ledger_row + offset}").replace(
+                    f"!F{old_row}", f"!F{ledger_row + offset}"
+                ).replace(f"!G{old_row}", f"!G{ledger_row + offset}").replace(
+                    f"!H{old_row}", f"!H{ledger_row + offset}"
+                ).replace(f"!I{old_row}", f"!I{ledger_row + offset}").replace(
+                    f"!J{old_row}", f"!J{ledger_row + offset}"
+                ).replace(f"!K{old_row}", f"!K{ledger_row + offset}").replace(
+                    f"!L{old_row}", f"!L{ledger_row + offset}"
+                ).replace(f"!M{old_row}", f"!M{ledger_row + offset}").replace(
+                    f"!N{old_row}", f"!N{ledger_row + offset}"
+                )
+
+
 def fill_official_xlsx(ledger: dict) -> bytes:
-    """10월 급여대장 엑셀 양식에 그달 값을 넣어 노무사 전달용으로 만든다."""
+    """10월 급여대장 엑셀 양식에 그달 인원·금액을 넣어 노무사 전달용으로 만든다."""
     if not TEMPLATE_PATH.is_file():
         return render_payroll_xlsx(ledger)
     year = int(ledger["year"])
     month = int(ledger["month"])
     last = calendar.monthrange(year, month)[1]
     book = load_workbook(TEMPLATE_PATH)
+    company = ledger.get("company_name") or "틸리언"
+    lines = [line for line in (ledger.get("lines") or []) if (line.get("employee_name") or "").strip()]
+    by_name = _person_sheets(book)
+    prototype = None
+    for sheet_name in book.sheetnames:
+        if sheet_name not in SKIP_SHEETS:
+            prototype = book[sheet_name]
+            if _formula(book[sheet_name]["B24"]):
+                break
+    if prototype is None:
+        return render_payroll_xlsx(ledger)
+    used = []
+    taken = set(book.sheetnames)
+    for line in lines:
+        name = (line.get("employee_name") or "").strip()
+        ws = by_name.get(name)
+        if ws is None:
+            ws = book.copy_worksheet(prototype)
+            title = _safe_sheet_title(line.get("affiliation") or "", name, taken)
+            ws.title = title
+            taken.add(title)
+            by_name[name] = ws
+        _fill_person_sheet(ws, line, company)
+        used.append(ws.title)
+    keep = set(used)
+    for sheet_name in list(book.sheetnames):
+        if sheet_name in SKIP_SHEETS or sheet_name in keep:
+            continue
+        del book[sheet_name]
+    desired = used + [name for name in ("급여대장", "급여명세서", "2023년 조견표", "급여명세서 수령 확인") if name in book.sheetnames]
+    for index, title in enumerate(desired):
+        current = book.sheetnames.index(title)
+        if current != index:
+            book.move_sheet(book[title], offset=index - current)
     summary = book["급여대장"]
     summary["A1"] = datetime(year, month, 1)
     summary["B3"] = ledger.get("period_label") or f"{year}.{month:02d}.01~{year}.{month:02d}.{last:02d}"
-    if ledger.get("company_name"):
-        summary["L3"] = ledger["company_name"]
-    by_name = {(line.get("employee_name") or "").strip(): line for line in ledger.get("lines") or []}
-    for sheet_name in book.sheetnames:
-        if sheet_name in SKIP_SHEETS:
-            continue
-        ws = book[sheet_name]
-        line = by_name.get(_text(ws["B3"].value))
-        if not line:
-            continue
-        _fill_cell(ws["H20"], int(line.get("net_pay") or 0))
-        _fill_cell(ws["D20"], int(line.get("vehicle_allowance") or 0))
-        _fill_cell(ws["E20"], int(line.get("meal_allowance") or 0))
-        _fill_cell(ws["E24"], int(line.get("income_tax") or 0))
-        _fill_cell(ws["B24"], int(line.get("pension") or 0))
-        _fill_cell(ws["B13"], line.get("base_hours") or 0)
-        _fill_cell(ws["C13"], line.get("overtime_hours") or 0)
-        _fill_cell(ws["D13"], line.get("holiday_hours") or 0)
-        _fill_cell(ws["E13"], line.get("night_hours") or 0)
-        _fill_cell(ws["F13"], line.get("work_days") or "만근")
-        _fill_cell(ws["I33"], int(line.get("position_allowance") or 0))
-        hire = line.get("hire_date") or ""
-        if hire and not _formula(ws["B9"]):
-            try:
-                ws["B9"] = datetime.strptime(str(hire)[:10], "%Y-%m-%d")
-            except ValueError:
-                ws["B9"] = hire
+    summary["L3"] = company
+    _rewrite_summary(summary, used)
+    if "급여명세서 수령 확인" in book.sheetnames:
+        _fill_receipt_names(book["급여명세서 수령 확인"], [line["employee_name"].strip() for line in lines])
+    if "급여명세서" in book.sheetnames:
+        _extend_statement_slots(book["급여명세서"], len(used))
     buf = BytesIO()
     book.save(buf)
     return buf.getvalue()

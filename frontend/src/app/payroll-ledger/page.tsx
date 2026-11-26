@@ -16,6 +16,11 @@ interface PayrollLine {
   affiliation: string;
   hire_date: string;
   resident_id: string;
+  work_days?: string;
+  base_hours?: number;
+  overtime_hours?: number;
+  holiday_hours?: number;
+  night_hours?: number;
   base_pay: number;
   overtime_pay: number;
   holiday_pay: number;
@@ -23,6 +28,11 @@ interface PayrollLine {
   position_allowance: number;
   vehicle_allowance: number;
   meal_allowance: number;
+  annual_leave_pay?: number;
+  special_pay?: number;
+  incentive_pay?: number;
+  attendance_deduction?: number;
+  bonus_pay?: number;
   gross_pay: number;
   income_tax: number;
   local_tax: number;
@@ -32,6 +42,7 @@ interface PayrollLine {
   employment: number;
   deduction_total: number;
   net_pay: number;
+  keep?: boolean;
 }
 
 interface Ledger {
@@ -44,6 +55,7 @@ interface Ledger {
   lines: PayrollLine[];
   totals: PayrollLine;
   existed?: boolean;
+  from_previous?: boolean;
   skipped?: string[];
   contracts?: { updated: { employee_name: string }[]; missing: string[] };
 }
@@ -68,10 +80,16 @@ export default function PayrollLedgerPage() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [ledger, setLedger] = useState<Ledger | null>(null);
+  const [drafts, setDrafts] = useState<PayrollLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  function showLedger(data: Ledger) {
+    setLedger(data);
+    setDrafts((data.lines || []).map((line) => ({ ...line, keep: true })));
+  }
 
   const load = useCallback(async (nextYear: number, nextMonth: number) => {
     const token = localStorage.getItem('token') || '';
@@ -80,6 +98,7 @@ export default function PayrollLedgerPage() {
     const res = await fetch(`${API}/payroll-ledgers/${nextYear}/${nextMonth}?token=${encodeURIComponent(token)}`);
     if (res.status === 404) {
       setLedger(null);
+      setDrafts([]);
       setLoading(false);
       return;
     }
@@ -88,7 +107,7 @@ export default function PayrollLedgerPage() {
       setLoading(false);
       return;
     }
-    setLedger(await res.json());
+    showLedger(await res.json());
     setLoading(false);
   }, []);
 
@@ -124,9 +143,10 @@ export default function PayrollLedgerPage() {
       return;
     }
     const data = await res.json();
-    setLedger(data);
-    if (data.existed) setSuccess('이미 만든 급여대장을 그대로 보여 줍니다.');
-    else setSuccess(`${year}년 ${month}월 급여대장을 근로계약 급여로 만들었습니다.`);
+    showLedger(data);
+    if (data.existed) setSuccess('이미 만든 급여대장을 그대로 보여 줍니다. 이달 변동을 저장한 뒤 노무사 전달용 엑셀을 받으면 됩니다.');
+    else if (data.from_previous) setSuccess(`${year}년 ${month}월 급여대장을 전월 인원과 근로계약 변동으로 만들었습니다. 이달 변동을 저장한 뒤 노무사 전달용 엑셀을 받으세요.`);
+    else setSuccess(`${year}년 ${month}월 급여대장을 근로계약 급여로 만들었습니다. 이달 변동을 저장한 뒤 노무사 전달용 엑셀을 받으세요.`);
   }
 
   async function download() {
@@ -146,6 +166,50 @@ export default function PayrollLedgerPage() {
     link.download = `틸리언 급여대장 ${year}년 ${String(month).padStart(2, '0')}월.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function editDraft(seq: number, field: keyof PayrollLine, value: string | number | boolean) {
+    setDrafts((rows) => rows.map((row) => (row.seq === seq ? { ...row, [field]: value } : row)));
+  }
+
+  async function saveChanges() {
+    if (!ledger) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    const res = await fetch(`${API}/payroll-ledgers/${year}/${month}/lines?token=${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lines: drafts.map((row) => ({
+          seq: row.seq,
+          keep: row.keep !== false,
+          work_days: row.work_days || '만근',
+          base_hours: Number(row.base_hours || 0),
+          overtime_hours: Number(row.overtime_hours || 0),
+          holiday_hours: Number(row.holiday_hours || 0),
+          night_hours: Number(row.night_hours || 0),
+          net_pay: Number(row.net_pay || 0),
+          vehicle_allowance: Number(row.vehicle_allowance || 0),
+          meal_allowance: Number(row.meal_allowance || 0),
+          position_allowance: Number(row.position_allowance || 0),
+          annual_leave_pay: Number(row.annual_leave_pay || 0),
+          special_pay: Number(row.special_pay || 0),
+          incentive_pay: Number(row.incentive_pay || 0),
+          attendance_deduction: Number(row.attendance_deduction || 0),
+          bonus_pay: Number(row.bonus_pay || 0),
+        })),
+      }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    showLedger(data);
+    setSuccess('이달 변동을 저장했습니다. 노무사 전달용 엑셀을 받으면 이 값이 양식에 채워집니다.');
   }
 
   async function importFile(file: File | undefined) {
@@ -168,7 +232,7 @@ export default function PayrollLedgerPage() {
     const data = await res.json();
     setYear(data.year);
     setMonth(data.month);
-    setLedger(data);
+    showLedger(data);
     const names = (data.contracts?.updated || []).map((row: { employee_name: string }) => row.employee_name);
     const missing = data.contracts?.missing || [];
     setSuccess(
@@ -194,7 +258,7 @@ export default function PayrollLedgerPage() {
       {dialog}
       <PageHeader
         title="급여대장"
-        subtitle="급여가 입력된 근로계약을 모아 매달 급여대장을 만듭니다. 차량지원과 식대는 비과세입니다."
+        subtitle="전월 인원과 근로계약 변동으로 그달 대장을 만들고, 이달 변동을 저장한 뒤 노무사 전달용 엑셀을 받습니다."
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
@@ -213,13 +277,74 @@ export default function PayrollLedgerPage() {
             급여대장 파일
             <input className="ui-control" type="file" accept=".xlsx" disabled={busy} onChange={(event) => { importFile(event.target.files?.[0]); event.target.value = ''; }} />
           </label>
-          <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={download}>양식 엑셀 다운로드</Button>
+          <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={download}>노무사 전달용 엑셀</Button>
           <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={() => create(true)}>계약에서 다시 만들기</Button>
         </div>
       </Card>
       {loading ? <Loading text="불러오는 중..." /> : !ledger ? (
-        <Card><p style={{ margin: 0, color: '#6b7280' }}>이 달 급여대장이 없습니다. 대장 만들기를 누르면 근로계약 급여로 채웁니다.</p></Card>
+        <Card><p style={{ margin: 0, color: '#6b7280' }}>이 달 급여대장이 없습니다. 대장 만들기를 누르면 전월 인원과 근로계약 변동으로 채웁니다.</p></Card>
       ) : (
+        <>
+        <Card style={{ marginBottom: '1rem' }}>
+          <p style={{ marginTop: 0, color: '#374151' }}>
+            이달 변동(연장·연차·상여·퇴사 제외)을 저장하면 노무사 전달용 엑셀에 그대로 들어갑니다. 엑셀에서 다시 고칠 필요는 없습니다.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  {['포함', '성명', '근로일수', '기본시간', '연장', '휴일', '야간', '실수령', '연차수당', '특근', '상여', '근태공제'].map((head) => (
+                    <th key={head}>{head}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {drafts.map((row) => (
+                  <tr key={row.seq} style={row.keep === false ? { opacity: 0.45 } : undefined}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={row.keep !== false}
+                        onChange={(event) => editDraft(row.seq, 'keep', event.target.checked)}
+                      />
+                    </td>
+                    <td>{row.employee_name}</td>
+                    {([
+                      ['work_days', 'text'],
+                      ['base_hours', 'number'],
+                      ['overtime_hours', 'number'],
+                      ['holiday_hours', 'number'],
+                      ['night_hours', 'number'],
+                      ['net_pay', 'number'],
+                      ['annual_leave_pay', 'number'],
+                      ['special_pay', 'number'],
+                      ['incentive_pay', 'number'],
+                      ['attendance_deduction', 'number'],
+                    ] as const).map(([field, type]) => (
+                      <td key={field}>
+                        <input
+                          className="ui-control"
+                          type={type}
+                          style={{ width: type === 'text' ? '4.5rem' : '6.5rem' }}
+                          value={row[field] ?? (type === 'text' ? '만근' : 0)}
+                          onChange={(event) => editDraft(
+                            row.seq,
+                            field,
+                            type === 'text' ? event.target.value : Number(event.target.value || 0),
+                          )}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+            <Button type="button" variant="primary" disabled={busy} onClick={saveChanges}>이달 변동 저장</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={download}>노무사 전달용 엑셀</Button>
+          </div>
+        </Card>
         <Card>
           <p style={{ marginTop: 0, color: '#374151' }}>
             {ledger.company_name} · {ledger.period_label} · {ledger.lines.length}명
@@ -287,6 +412,7 @@ export default function PayrollLedgerPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
     </div>
   );

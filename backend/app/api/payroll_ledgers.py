@@ -194,6 +194,30 @@ class LedgerCreate(BaseModel):
     replace: bool = False
 
 
+class LineChange(BaseModel):
+    seq: int
+    work_days: str | None = None
+    base_hours: float | None = None
+    overtime_hours: float | None = None
+    holiday_hours: float | None = None
+    night_hours: float | None = None
+    net_pay: int | None = None
+    vehicle_allowance: int | None = None
+    meal_allowance: int | None = None
+    position_allowance: int | None = None
+    annual_leave_pay: int | None = None
+    special_pay: int | None = None
+    incentive_pay: int | None = None
+    attendance_deduction: int | None = None
+    bonus_pay: int | None = None
+    settlement_pay: int | None = None
+    keep: bool = True
+
+
+class LedgerChanges(BaseModel):
+    lines: list[LineChange]
+
+
 def _admin(token: str) -> dict:
     ensure_payroll_tables()
     with get_connection() as con:
@@ -328,6 +352,131 @@ def _lines_from_contracts(year: int, month: int) -> tuple[list[dict], list[str]]
     return lines, skipped
 
 
+def _previous_ledger(year: int, month: int) -> dict | None:
+    if month > 1:
+        return _load(year, month - 1)
+    return _load(year - 1, 12)
+
+
+def _inactive_names(year: int, month: int) -> set[str]:
+    start, end, _label = _period(year, month)
+    ensure_contract_tables()
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT COALESCE(c.employee_name, u.nickname, ''),
+                   c.contract_start, c.contract_end
+            FROM users u
+            JOIN employment_contracts c ON c.id = (
+                SELECT id FROM employment_contracts
+                WHERE user_id = u.user_id
+                ORDER BY id DESC
+                LIMIT 1
+            )
+            """
+        ).fetchall()
+    ended = set()
+    for row in rows:
+        name = (row[0] or "").strip()
+        if name and not _covers(start, end, row[1] or "", row[2] or ""):
+            ended.add(name)
+    return ended
+
+
+def _lines_for_month(year: int, month: int) -> tuple[list[dict], list[str], bool]:
+    contract_lines, skipped = _lines_from_contracts(year, month)
+    previous = _previous_ledger(year, month)
+    if not previous:
+        return contract_lines, skipped, False
+    by_name = {(line.get("employee_name") or "").strip(): line for line in contract_lines}
+    ended = _inactive_names(year, month)
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for line in previous["lines"]:
+        name = (line.get("employee_name") or "").strip()
+        if not name or name in ended:
+            continue
+        seen.add(name)
+        merged.append(dict(by_name.get(name) or line))
+    for line in contract_lines:
+        name = (line.get("employee_name") or "").strip()
+        if name and name not in seen:
+            merged.append(dict(line))
+            seen.add(name)
+    for seq, line in enumerate(merged, start=1):
+        line["seq"] = seq
+    return merged, skipped, True
+
+
+def _dependents_for(line: dict) -> int:
+    with get_connection() as con:
+        row = None
+        if line.get("contract_id"):
+            row = con.execute(
+                "SELECT dependents FROM employment_contracts WHERE id = ?",
+                (line["contract_id"],),
+            ).fetchone()
+        if row is None and line.get("user_id"):
+            row = con.execute(
+                """
+                SELECT dependents FROM employment_contracts
+                WHERE user_id = ? ORDER BY id DESC LIMIT 1
+                """,
+                (line["user_id"],),
+            ).fetchone()
+    value = int(row[0] or 1) if row else 1
+    return value if 1 <= value <= 10 else 1
+
+
+def _recalc_line(line: dict) -> dict:
+    payload = {
+        "net_pay": int(line.get("net_pay") or 0),
+        "meal_allowance": int(line.get("meal_allowance") or 0),
+        "vehicle_allowance": int(line.get("vehicle_allowance") or 0),
+        "position_allowance": int(line.get("position_allowance") or 0),
+        "dependents": _dependents_for(line),
+        "base_hours": line.get("base_hours") or 209,
+        "overtime_hours": line.get("overtime_hours") or 0,
+        "holiday_hours": line.get("holiday_hours") or 0,
+        "night_hours": line.get("night_hours") or 0,
+    }
+    calc = calculate_contract_pay(payload)
+    extras = (
+        int(line.get("annual_leave_pay") or 0)
+        + int(line.get("special_pay") or 0)
+        + int(line.get("incentive_pay") or 0)
+        + int(line.get("bonus_pay") or 0)
+        + int(line.get("settlement_pay") or 0)
+        - int(line.get("attendance_deduction") or 0)
+    )
+    updated = dict(line)
+    updated.update({
+        "base_hours": calc["base_hours"],
+        "overtime_hours": calc["overtime_hours"],
+        "holiday_hours": calc["holiday_hours"],
+        "night_hours": calc["night_hours"],
+        "extra_hours": float(calc["overtime_hours"]) * 0.5,
+        "hourly": calc["hourly"],
+        "base_pay": calc["base_pay"],
+        "overtime_pay": calc["overtime_pay"],
+        "holiday_pay": calc["holiday_pay"],
+        "night_pay": calc["night_pay"],
+        "position_allowance": calc["position_allowance"],
+        "vehicle_allowance": calc["vehicle_allowance"],
+        "meal_allowance": calc["meal_allowance"],
+        "income_tax": calc["income_tax"],
+        "local_tax": calc["local_tax"],
+        "pension": calc["pension"],
+        "health": calc["health"],
+        "care": calc["care"],
+        "employment": calc["employment"],
+        "gross_pay": calc["gross"] + extras,
+        "deduction_total": calc["deduction_total"],
+        "net_pay": calc["net"],
+    })
+    return updated
+
+
 def _totals(lines: list[dict]) -> dict:
     return {name: sum(int(line.get(name) or 0) for line in lines) for name in MONEY_TOTALS}
 
@@ -416,13 +565,14 @@ def _save(year: int, month: int, replace: bool) -> dict:
         current["replaced"] = False
         current["existed"] = True
         return current
-    lines, skipped = _lines_from_contracts(year, month)
+    lines, skipped, from_previous = _lines_for_month(year, month)
     if not lines:
         raise HTTPException(status_code=400, detail="이 달에 적용할 근로계약 급여가 없습니다.")
     _start, _end, label = _period(year, month)
     company = _company().get("company_name") or "틸리언"
     saved = _store(year, month, company, label, lines, "contract", replace)
     saved["skipped"] = skipped
+    saved["from_previous"] = from_previous
     return saved
 
 
@@ -514,6 +664,63 @@ def create_ledger(body: LedgerCreate, token: str):
             user_nickname=actor["nickname"],
             details=f"{len(saved['lines'])}명",
         )
+    shown = dict(saved)
+    shown["lines"] = [_public_line(line) for line in saved["lines"]]
+    return shown
+
+
+@router.put("/{year}/{month}/lines")
+def update_ledger_lines(year: int, month: int, body: LedgerChanges, token: str):
+    actor = _admin(token)
+    ledger = _load(year, month)
+    if not ledger:
+        raise HTTPException(status_code=404, detail="이 달 급여대장이 없습니다.")
+    current = {int(line["seq"]): line for line in ledger["lines"]}
+    updated: list[dict] = []
+    for change in body.lines:
+        if not change.keep:
+            continue
+        line = current.get(change.seq)
+        if not line:
+            raise HTTPException(status_code=400, detail=f"{change.seq}번 직원을 찾지 못했습니다.")
+        next_line = dict(line)
+        for name in (
+            "work_days",
+            "base_hours",
+            "overtime_hours",
+            "holiday_hours",
+            "night_hours",
+            "net_pay",
+            "vehicle_allowance",
+            "meal_allowance",
+            "position_allowance",
+            "annual_leave_pay",
+            "special_pay",
+            "incentive_pay",
+            "attendance_deduction",
+            "bonus_pay",
+            "settlement_pay",
+        ):
+            value = getattr(change, name)
+            if value is not None:
+                next_line[name] = value
+        try:
+            updated.append(_recalc_line(next_line))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"{line.get('employee_name')}: {exc}") from exc
+    if not updated:
+        raise HTTPException(status_code=400, detail="급여대장에 남을 직원이 없습니다.")
+    for seq, line in enumerate(updated, start=1):
+        line["seq"] = seq
+    saved = _store(year, month, ledger["company_name"], ledger["period_label"], updated, ledger.get("origin") or "contract", True)
+    add_log(
+        action_type="급여대장 변동",
+        target_type="payroll_ledger",
+        target_id=f"{year}-{month:02d}",
+        target_name=saved["period_label"],
+        user_nickname=actor["nickname"],
+        details=f"{len(saved['lines'])}명",
+    )
     shown = dict(saved)
     shown["lines"] = [_public_line(line) for line in saved["lines"]]
     return shown

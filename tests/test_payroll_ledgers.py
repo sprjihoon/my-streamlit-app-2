@@ -52,19 +52,19 @@ def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_run
     assert created.status_code == 200
     payload = created.json()
     assert payload["period_label"] == "2026.11.01~2026.11.30"
-    assert len(payload["lines"]) == 1
-    line = payload["lines"][0]
-    assert line["employee_name"] == "홍길동"
+    names = [line["employee_name"] for line in payload["lines"]]
+    assert "홍길동" in names
+    assert "장성령" in names
+    line = next(item for item in payload["lines"] if item["employee_name"] == "홍길동")
     assert line["net_pay"] == 1966730
     assert line["vehicle_allowance"] == 200000
     assert line["gross_pay"] == line["net_pay"] + line["deduction_total"]
     assert "1234567" not in line["resident_id"]
-    assert payload["totals"]["net_pay"] == 1966730
 
     again = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 11})
     assert again.status_code == 200
     assert again.json()["existed"] is True
-    assert again.json()["lines"][0]["net_pay"] == 1966730
+    assert "홍길동" in [item["employee_name"] for item in again.json()["lines"]]
 
     sheet = client.get("/payroll-ledgers/2026/11/xlsx", params={"token": "admin-tok"})
     assert sheet.status_code == 200
@@ -170,6 +170,48 @@ def test_official_workbook_keeps_the_october_form_for_the_labor_office():
     assert book["수선팀장 전은정"]["D20"].value == 200000
     assert str(book["수선팀장 전은정"]["B24"].value).startswith("=")
     assert str(book["급여대장"]["B8"].value).startswith("=")
+    assert book["급여명세서 수령 확인"]["B4"].value == "장성령"
+    assert book["급여명세서 수령 확인"]["B11"].value == "김민정"
+    assert book["급여명세서 수령 확인"]["B12"].value in (None, "")
+
+
+def test_official_workbook_keeps_only_this_month_people_and_monthly_changes():
+    from backend.app.services.payroll_ledger.excel import fill_official_xlsx
+    from backend.app.services.payroll_ledger.october_2026 import october_2026_lines
+
+    first = dict(october_2026_lines()[0])
+    first["overtime_hours"] = 10
+    first["annual_leave_pay"] = 50000
+    extra = dict(first)
+    extra["employee_name"] = "홍길동"
+    extra["affiliation"] = "테스트"
+    extra["seq"] = 2
+    extra["net_pay"] = 1500000
+    extra["overtime_hours"] = 0
+    extra["annual_leave_pay"] = 0
+    book = load_workbook(BytesIO(fill_official_xlsx({
+        "year": 2026,
+        "month": 11,
+        "company_name": "틸리언",
+        "period_label": "2026.11.01~2026.11.30",
+        "lines": [first, extra],
+    })))
+    person_names = [
+        book[name]["B3"].value
+        for name in book.sheetnames
+        if name not in {"급여대장", "급여명세서", "2023년 조견표", "급여명세서 수령 확인"}
+    ]
+    assert person_names == ["장성령", "홍길동"]
+    assert book["패션팀장 장성령"]["C13"].value == 10
+    assert book["패션팀장 장성령"]["I39"].value == 50000
+    hong = next(name for name in book.sheetnames if book[name]["B3"].value == "홍길동")
+    assert book[hong]["H20"].value == 1500000
+    assert "전은정" in str(book["급여대장"]["B8"].value) or "장성령" in str(book["급여대장"]["B8"].value)
+    assert "장성령" in str(book["급여대장"]["B8"].value)
+    assert "홍길동" in str(book["급여대장"]["B11"].value)
+    assert book["급여명세서 수령 확인"]["B4"].value == "장성령"
+    assert book["급여명세서 수령 확인"]["B5"].value == "홍길동"
+    assert book["급여명세서 수령 확인"]["B6"].value in (None, "")
 
 
 def test_october_2026_is_seeded_from_the_given_workbook_values(isolated_runtime):
@@ -228,3 +270,45 @@ def test_payroll_file_fills_matching_employment_contract(isolated_runtime):
     assert fields["weekday_hours"] == "09:00~18:00"
     assert fields["address"] == ""
     assert len("".join(ch for ch in fields["resident_id"] if ch.isdigit())) == 13
+
+
+def test_month_changes_are_saved_and_filled_in_the_official_workbook(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    created = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 11})
+    assert created.status_code == 200
+    lines = created.json()["lines"]
+    target = next(line for line in lines if line["employee_name"] == "장성령")
+    dropped = next(line for line in lines if line["employee_name"] == "김민정")
+    saved = client.put(
+        "/payroll-ledgers/2026/11/lines",
+        params={"token": "admin-tok"},
+        json={
+            "lines": [
+                {
+                    "seq": line["seq"],
+                    "keep": line["seq"] != dropped["seq"],
+                    "overtime_hours": 10 if line["seq"] == target["seq"] else line.get("overtime_hours") or 0,
+                    "annual_leave_pay": 50000 if line["seq"] == target["seq"] else 0,
+                    "net_pay": line["net_pay"],
+                    "work_days": line.get("work_days") or "만근",
+                    "base_hours": line.get("base_hours") or 209,
+                }
+                for line in lines
+            ]
+        },
+    )
+    assert saved.status_code == 200
+    names = [line["employee_name"] for line in saved.json()["lines"]]
+    assert "장성령" in names
+    assert "김민정" not in names
+    changed = next(line for line in saved.json()["lines"] if line["employee_name"] == "장성령")
+    assert changed["overtime_hours"] == 10
+    assert changed["annual_leave_pay"] == 50000
+    sheet = client.get("/payroll-ledgers/2026/11/xlsx", params={"token": "admin-tok"})
+    assert sheet.status_code == 200
+    book = load_workbook(BytesIO(sheet.content))
+    assert book["패션팀장 장성령"]["C13"].value == 10
+    assert book["패션팀장 장성령"]["I39"].value == 50000
+    assert "단시간 김민정" not in book.sheetnames
+    assert book["급여명세서 수령 확인"]["B4"].value == "장성령"
