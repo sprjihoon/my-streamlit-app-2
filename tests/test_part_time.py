@@ -149,13 +149,24 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     from io import BytesIO
     from openpyxl import load_workbook
     book = load_workbook(BytesIO(sheet.content))
-    assert book.sheetnames == ["일용근로대장", "근무시간"]
-    names = [book["일용근로대장"].cell(row, 1).value for row in range(6, 8)]
-    assert "김알바" in names
-    assert "박알바" not in names
-    assert book["일용근로대장"]["Q6"].value == 0
-    assert book["근무시간"]["D4"].value == 5
-    assert book["일용근로대장"]["B6"].value == "900101-1234567"
+    assert book.sheetnames[:2] == ["11월", "공단"]
+    ledger = book["11월"]
+    assert ledger["A1"].value == "2026년 11월 일용근로대장"
+    assert ledger["B7"].value == "김알바"
+    assert ledger["B8"].value == "900101-1234567"
+    assert ledger["B9"].value == "2일"
+    assert ledger["B11"].value == 144000
+    assert ledger["C13"].value == 5
+    assert ledger["D13"].value == 5
+    assert ledger["H7"].value is None
+    gong = book["공단"]
+    assert gong["O21"].value == "김알바"
+    assert gong["O22"].value == "900101-1234567"
+    assert gong["S27"].value == "o"
+    assert gong["T27"].value == "o"
+    assert gong["O48"].value == "144,000 원 "
+    assert gong["O50"].value == "0 원 "
+    assert gong["AE21"].value is None
 
     left = client.put(
         f"/part-time/workers/{reported_body['id']}",

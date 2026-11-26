@@ -1,135 +1,171 @@
-"""노무사에게 넘기는 일용근로대장. 신고 알바만 넣는다."""
+"""노무사 전달 일용근로대장. 제출 서식과 같은 칸에 신고 알바만 적는다."""
 from __future__ import annotations
 
+from copy import copy
 from io import BytesIO
+from pathlib import Path
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
 
-_THIN = Border(
-    left=Side(style="thin", color="D0D5DD"),
-    right=Side(style="thin", color="D0D5DD"),
-    top=Side(style="thin", color="D0D5DD"),
-    bottom=Side(style="thin", color="D0D5DD"),
+TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "assets" / "part_time_ledger_template.xlsx"
+_BLOCK_HEIGHT = 19
+_FIRST_BLOCK = 7
+_GONG_SLOTS = (
+    {"name": "O", "days": ("O", "S", "T", "Y", "AA"), "avg": "V"},
+    {"name": "AE", "days": ("AE", "AF", "AH", "AM", "AP"), "avg": "AI"},
+    {"name": "AT", "days": ("AT", "AU", "AZ", "BF", "BH"), "avg": "BB"},
+    {"name": "BM", "days": ("BM", "BQ", "BW", "CB", "CF"), "avg": "BY"},
 )
-_HEAD = PatternFill("solid", fgColor="F3F4F6")
-_FONT = Font(name="맑은 고딕", size=9)
-_BOLD = Font(name="맑은 고딕", size=9, bold=True)
-_TITLE = Font(name="맑은 고딕", size=14, bold=True)
 
 
-def _write_row(ws, row: int, values: list, header: bool = False) -> None:
-    for col, value in enumerate(values, start=1):
-        cell = ws.cell(row, col, value)
-        cell.font = _BOLD if header else _FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = _THIN
-        if header:
-            cell.fill = _HEAD
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            cell.number_format = "#,##0"
+def _won(amount: int) -> str:
+    return f"{int(amount):,} 원 "
+
+
+def _hours_label(value: float) -> str:
+    rounded = round(float(value), 2)
+    text = str(int(rounded)) if rounded == int(rounded) else f"{rounded:g}"
+    return f"{text}시간"
+
+
+def _slot_count(needed: int) -> int:
+    count = 8
+    while count < needed:
+        count += 2
+    return count
+
+
+def _copy_block(ws, src_start: int, dst_start: int) -> None:
+    for offset in range(_BLOCK_HEIGHT):
+        src_row = src_start + offset
+        dst_row = dst_start + offset
+        for col in range(1, 13):
+            src = ws.cell(src_row, col)
+            dst = ws.cell(dst_row, col)
+            dst.value = src.value
+            if src.has_style:
+                dst.font = copy(src.font)
+                dst.border = copy(src.border)
+                dst.fill = copy(src.fill)
+                dst.number_format = src.number_format
+                dst.alignment = copy(src.alignment)
+        if ws.row_dimensions[src_row].height:
+            ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
+    for origin in (2, 8):
+        for offset in range(5):
+            ws.merge_cells(
+                start_row=dst_start + offset,
+                start_column=origin,
+                end_row=dst_start + offset,
+                end_column=origin + 4,
+            )
+    for col in (1, 7):
+        ws.merge_cells(
+            start_row=dst_start + 5,
+            start_column=col,
+            end_row=dst_start + 18,
+            end_column=col,
+        )
+
+
+def _ensure_slots(ws, needed: int) -> list[tuple[int, int]]:
+    blocks = _slot_count(needed) // 2
+    last_ready = 4
+    src_start = _FIRST_BLOCK + (last_ready - 1) * _BLOCK_HEIGHT
+    for index in range(last_ready, blocks):
+        _copy_block(ws, src_start, _FIRST_BLOCK + index * _BLOCK_HEIGHT)
+    slots = []
+    for index in range(blocks):
+        start = _FIRST_BLOCK + index * _BLOCK_HEIGHT
+        slots.append((start, 2))
+        slots.append((start, 8))
+    return slots
+
+
+def _write_hours(ws, start: int, origin: int, hours_by_day: dict) -> None:
+    for day, hours in hours_by_day.items():
+        if not hours:
+            continue
+        group = (int(day) - 1) // 5
+        index = (int(day) - 1) % 5
+        cell = ws.cell(start + 6 + group * 2, origin + index, hours)
+        cell.number_format = "0.##"
+
+
+def _write_ledger_person(ws, start: int, origin: int, person: dict) -> None:
+    ws.cell(start, origin, person["name"])
+    ws.cell(start + 1, origin, person["resident_id"])
+    ws.cell(start + 2, origin, f"{person['work_days']}일")
+    if person["average_hours"]:
+        ws.cell(start + 3, origin, _hours_label(person["average_hours"]))
+    pay = ws.cell(start + 4, origin, int(person["taxable_pay"]))
+    pay.number_format = '_-* #,##0_-;\\-* #,##0_-;_-* "-"_-;_-@_-'
+    _write_hours(ws, start, origin, person.get("hours_by_day") or {})
+
+
+def _mark_days(ws, slot: dict, hours_by_day: dict) -> None:
+    for day, hours in hours_by_day.items():
+        if not hours:
+            continue
+        group = (int(day) - 1) // 5
+        index = (int(day) - 1) % 5
+        ws[f"{slot['days'][index]}{26 + group * 2 + 1}"] = "o"
+
+
+def _write_gong_person(ws, slot: dict, person: dict, month: int) -> None:
+    column = slot["name"]
+    ws[f"{column}21"] = person["name"]
+    ws[f"{column}22"] = person["resident_id"]
+    ws[f"{column}23"] = "한국"
+    ws[f"{column}25"] = "029"
+    ws[f"{column}40"] = f"{person['work_days']} 일 "
+    average = _hours_label(person["average_hours"]).removesuffix("시간")
+    ws[f"{slot['avg']}40"] = f"{average} 시간 "
+    ws[f"{column}41"] = f"{person['work_days']} 일 "
+    ws[f"{column}42"] = _won(person["taxable_pay"])
+    ws[f"{column}43"] = _won(person["taxable_pay"] + person["nontaxable_pay"])
+    ws[f"{column}44"] = 1
+    ws[f"{column}47"] = f"{month}월 "
+    ws[f"{column}48"] = _won(person["taxable_pay"])
+    ws[f"{column}49"] = _won(person["nontaxable_pay"])
+    ws[f"{column}50"] = _won(person["income_tax"])
+    ws[f"{column}51"] = _won(person["local_tax"])
+    _mark_days(ws, slot, person.get("hours_by_day") or {})
+
+
+def _usable_business_number(value: str) -> str:
+    text = (value or "").strip()
+    digits = text.replace("-", "")
+    if not digits or set(digits) <= {"0"}:
+        return ""
+    return text
 
 
 def render_part_time_xlsx(year: int, month: int, company: dict, people: list[dict]) -> bytes:
-    book = Workbook()
-    summary = book.active
-    summary.title = "일용근로대장"
-    summary["A1"] = f"{year}년 {month}월 일용근로대장"
-    summary["A1"].font = _TITLE
-    summary["A2"] = company.get("company_name") or "틸리언"
-    summary["C2"] = company.get("business_number") or ""
-    summary["A2"].font = _BOLD
-    summary["C2"].font = _FONT
-    summary["A3"] = "신고 알바만 넣습니다. 미신고 알바는 이 파일에 없습니다."
-    summary["A3"].font = _FONT
+    book = load_workbook(TEMPLATE_PATH)
+    sheet = book["양식"]
+    sheet.title = f"{month}월"
+    sheet["A1"] = f"{year}년 {month}월 일용근로대장"
+    if company.get("company_name"):
+        sheet["B3"] = company["company_name"]
+    business_number = _usable_business_number(company.get("business_number") or "")
+    if business_number:
+        sheet["B4"] = business_number
 
-    headers = [
-        "성명",
-        "주민등록번호",
-        "근로일수",
-        "보수지급기초일수",
-        "일평균근로시간",
-        "총근로시간",
-        "시급",
-        "근무수당",
-        "주휴시간",
-        "주휴수당",
-        "총지급액(과세소득)",
-        "비과세소득",
-        "임금총액",
-        "근로소득공제",
-        "산출세액",
-        "세액공제",
-        "소득세",
-        "지방소득세",
-        "공제합계",
-        "차인지급액",
-    ]
-    _write_row(summary, 5, headers, header=True)
-    for index, person in enumerate(people):
-        _write_row(summary, 6 + index, [
-            person["name"],
-            person["resident_id"],
-            person["work_days"],
-            person["work_days"],
-            person["average_hours"],
-            person["basic_hours"],
-            person["hourly_wage"],
-            person["base_pay"],
-            person["weekly_holiday_hours"],
-            person["weekly_holiday_pay"],
-            person["taxable_pay"],
-            person["nontaxable_pay"],
-            person["taxable_pay"] + person["nontaxable_pay"],
-            person["earned_income_deduction"],
-            person["calculated_tax"],
-            person["tax_credit"],
-            person["income_tax"],
-            person["local_tax"],
-            person["deduction_total"],
-            person["net_pay"],
-        ])
-    for col in range(1, len(headers) + 1):
-        summary.column_dimensions[get_column_letter(col)].width = 16
-    summary.column_dimensions["B"].width = 18
-    summary.row_dimensions[5].height = 32
-    summary.freeze_panes = "A6"
-    summary.auto_filter.ref = f"A5:T{max(5, 5 + len(people))}"
-    summary.page_setup.orientation = "landscape"
-    summary.page_setup.fitToPage = True
-    summary.page_setup.fitToWidth = 1
-    summary.page_setup.fitToHeight = 1
-    summary.sheet_properties.pageSetUpPr.fitToPage = True
-    summary.print_title_rows = "1:5"
-    summary.page_setup.paperSize = summary.PAPERSIZE_A4
-    summary.oddFooter.center.text = f"{year}년 {month}월 일용근로대장"
+    ordered = sorted(people, key=lambda person: (person.get("name") or "", person.get("worker_id") or 0))
+    slots = _ensure_slots(sheet, len(ordered))
+    for slot, person in zip(slots, ordered):
+        _write_ledger_person(sheet, slot[0], slot[1], person)
 
-    hours = book.create_sheet("근무시간")
-    hours["A1"] = f"{year}년 {month}월 근무시간"
-    hours["A1"].font = _TITLE
-    day_headers = ["성명", "주민등록번호", *[str(day) for day in range(1, 32)], "합계"]
-    _write_row(hours, 3, day_headers, header=True)
-    for index, person in enumerate(people):
-        by_day = person.get("hours_by_day") or {}
-        row = [person["name"], person["resident_id"]]
-        for day in range(1, 32):
-            row.append(by_day.get(day, ""))
-        row.append(person["basic_hours"])
-        _write_row(hours, 4 + index, row)
-    hours.column_dimensions["A"].width = 12
-    hours.column_dimensions["B"].width = 18
-    for col in range(3, 35):
-        hours.column_dimensions[get_column_letter(col)].width = 5
-    hours.freeze_panes = "C4"
-    hours.page_setup.orientation = "landscape"
-    hours.page_setup.fitToPage = True
-    hours.page_setup.fitToWidth = 1
-    hours.page_setup.fitToHeight = 1
-    hours.sheet_properties.pageSetUpPr.fitToPage = True
-    hours.print_title_rows = "1:3"
-    hours.page_setup.paperSize = hours.PAPERSIZE_A4
-    hours.oddFooter.center.text = f"{year}년 {month}월 근무시간"
+    gong = book["공단"]
+    pages = [gong]
+    page_count = max(1, (len(ordered) + 3) // 4)
+    for index in range(1, page_count):
+        copied = book.copy_worksheet(gong)
+        copied.title = f"공단{index + 1}"
+        pages.append(copied)
+    for index, person in enumerate(ordered):
+        _write_gong_person(pages[index // 4], _GONG_SLOTS[index % 4], person, month)
 
     buf = BytesIO()
     book.save(buf)
