@@ -143,6 +143,42 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     denied_slip = client.get("/part-time/slips", params={"token": "staff-tok", "year": 2026, "month": 11})
     assert denied_slip.status_code == 403
 
+    sheet = client.get("/part-time/xlsx", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert sheet.status_code == 200
+    assert sheet.content[:2] == b"PK"
+    from io import BytesIO
+    from openpyxl import load_workbook
+    book = load_workbook(BytesIO(sheet.content))
+    assert book.sheetnames == ["일용근로대장", "근무시간"]
+    names = [book["일용근로대장"].cell(row, 1).value for row in range(6, 8)]
+    assert "김알바" in names
+    assert "박알바" not in names
+    assert book["일용근로대장"]["Q6"].value == 0
+    assert book["근무시간"]["D4"].value == 5
+    assert book["일용근로대장"]["B6"].value == "900101-1234567"
+
+    left = client.put(
+        f"/part-time/workers/{reported_body['id']}",
+        params={"token": "admin-tok"},
+        json={"active": False},
+    )
+    assert left.status_code == 200, left.text
+    assert left.json()["active"] is False
+    parked = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert parked.status_code == 200
+    parked_worker = next(item for item in parked.json()["workers"] if item["id"] == reported_body["id"])
+    assert parked_worker["active"] is False
+    brought_back = client.put(
+        f"/part-time/workers/{reported_body['id']}",
+        params={"token": "admin-tok"},
+        json={"active": True},
+    )
+    assert brought_back.status_code == 200, brought_back.text
+    assert brought_back.json()["active"] is True
+    restored = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
+    restored_worker = next(item for item in restored.json()["workers"] if item["id"] == reported_body["id"])
+    assert restored_worker["active"] is True
+
     sunday = next(week for week in calendar["weeks"] if week["sunday"] == "2026-11-08")
     assert any(person["weekly_holiday_pay"] == 24000 for person in sunday["workers"])
 

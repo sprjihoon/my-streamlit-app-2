@@ -4,12 +4,15 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from backend.app.api.logs import add_log
 from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, weekly_holiday_pay
+from backend.app.services.part_time.excel import render_part_time_xlsx
 from logic.db import get_connection
 
 router = APIRouter(prefix="/part-time", tags=["part-time"])
@@ -443,3 +446,43 @@ def _slips(data: dict) -> list[dict]:
 def list_slips(year: int, month: int, token: str):
     data = month_calendar(year, month, token)
     return {"year": year, "month": month, "slips": _slips(data)}
+
+
+def _company_for_excel() -> dict:
+    try:
+        with get_connection() as con:
+            row = con.execute(
+                "SELECT company_name, business_number FROM company_settings WHERE id = 1"
+            ).fetchone()
+    except Exception:
+        return {"company_name": "틸리언", "business_number": ""}
+    if not row:
+        return {"company_name": "틸리언", "business_number": ""}
+    return {"company_name": row[0] or "틸리언", "business_number": row[1] or ""}
+
+
+@router.get("/xlsx")
+def download_xlsx(year: int, month: int, token: str):
+    _admin(token)
+    data = month_calendar(year, month, token)
+    slips = [slip for slip in _slips(data) if slip["reported"]]
+    with get_connection() as con:
+        rows = con.execute("SELECT id, resident_id FROM part_time_workers").fetchall()
+    resident = {row[0]: row[1] for row in rows}
+    people = []
+    for slip in slips:
+        hours_by_day = {}
+        for line in slip["lines"]:
+            hours_by_day[int(line["work_date"][8:10])] = line["hours"]
+        people.append({
+            **slip,
+            "resident_id": resident.get(slip["worker_id"]) or "",
+            "hours_by_day": hours_by_day,
+        })
+    content = render_part_time_xlsx(year, month, _company_for_excel(), people)
+    filename = quote(f"틸리언 일용근로대장 {year}년 {month:02d}월.xlsx")
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )

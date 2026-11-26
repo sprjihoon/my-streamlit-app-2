@@ -6,7 +6,7 @@ import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
-import { API, apiError, hoursText, readAdmin, won } from '../model';
+import { API, apiError, downloadPartTimeExcel, hoursText, readAdmin, won } from '../model';
 
 interface SlipLine {
   work_date: string;
@@ -97,6 +97,14 @@ export default function PartTimeSlipsPage() {
           <Button type="button" variant="secondary" onClick={() => shiftMonth(-1)}>이전 달</Button>
           <strong>{year}년 {month}월</strong>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(1)}>다음 달</Button>
+          <Button type="button" variant="secondary" onClick={async () => {
+            setError(null);
+            try {
+              await downloadPartTimeExcel(year, month);
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : '엑셀을 받지 못했습니다.');
+            }
+          }}>노무사 전달용 엑셀</Button>
         </div>
       </Card>
       {loading ? <Loading text="불러오는 중..." /> : slips.length === 0 ? (

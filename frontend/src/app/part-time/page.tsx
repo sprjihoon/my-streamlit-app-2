@@ -6,7 +6,7 @@ import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
-import { API, CalendarData, DayEntry, Worker, apiError, hoursText, readAdmin, won } from './model';
+import { API, CalendarData, DayEntry, Worker, apiError, downloadPartTimeExcel, hoursText, readAdmin, won } from './model';
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -34,6 +34,7 @@ export default function PartTimePage() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [calendar, setCalendar] = useState<CalendarData | null>(null);
   const [workerDraft, setWorkerDraft] = useState<WorkerDraft | null>(null);
+  const [recallOpen, setRecallOpen] = useState(false);
   const [hourDraft, setHourDraft] = useState<HourDraft | null>(null);
   const draggingId = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -116,10 +117,11 @@ export default function PartTimePage() {
     await load(year, month);
   }
 
-  async function setActive(workerId: number, active: boolean) {
+  async function setActive(workerId: number, active: boolean, name: string) {
     const token = localStorage.getItem('token') || '';
     setBusy(true);
     setError(null);
+    setSuccess(null);
     const res = await fetch(`${API}/part-time/workers/${workerId}?token=${encodeURIComponent(token)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -131,6 +133,7 @@ export default function PartTimePage() {
       return;
     }
     setWorkerDraft(null);
+    setSuccess(active ? `${name} 님을 다시 불러왔습니다.` : `${name} 님을 그만둔 알바로 옮겼습니다. 다시 불러오기에서 되돌릴 수 있습니다.`);
     await load(year, month);
   }
 
@@ -204,7 +207,14 @@ export default function PartTimePage() {
       <PageHeader
         title="관리대장"
         subtitle="알바를 달력으로 끌어다 놓으면 그 날 근무시간을 적습니다. 같은 알바는 같은 날에 한 번만 들어갑니다."
-        actions={<Button type="button" variant="primary" onClick={openRegister}>알바 등록</Button>}
+        actions={(
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <Button type="button" variant="secondary" onClick={() => setRecallOpen(true)}>
+              그만둔 알바 다시 불러오기{inactiveWorkers.length > 0 ? ` (${inactiveWorkers.length})` : ''}
+            </Button>
+            <Button type="button" variant="primary" onClick={openRegister}>알바 등록</Button>
+          </div>
+        )}
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
@@ -242,8 +252,8 @@ export default function PartTimePage() {
           <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ color: '#6b7280', fontSize: '0.85rem' }}>그만둔 알바</span>
             {inactiveWorkers.map((worker) => (
-              <Button key={worker.id} type="button" variant="ghost" disabled={busy} onClick={() => setActive(worker.id, true)}>
-                {worker.name} 다시 근무
+              <Button key={worker.id} type="button" variant="ghost" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>
+                {worker.name} 다시 불러오기
               </Button>
             ))}
           </div>
@@ -255,6 +265,16 @@ export default function PartTimePage() {
           <Button type="button" variant="secondary" onClick={() => shiftMonth(-1)}>이전 달</Button>
           <strong>{year}년 {month}월</strong>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(1)}>다음 달</Button>
+          <Button type="button" variant="secondary" disabled={busy} onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await downloadPartTimeExcel(year, month);
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : '엑셀을 받지 못했습니다.');
+            }
+            setBusy(false);
+          }}>노무사 전달용 엑셀</Button>
         </div>
         <p style={{ margin: '0 0 0.75rem', color: '#6b7280', fontSize: '0.85rem' }}>
           초록은 신고, 회색은 미신고입니다. 금액은 그날 시급에 근무시간을 곱한 값이고, 일요일의 주휴는 신고 알바만 표시됩니다. 이름을 누르면 시간을 고치거나 뺄 수 있습니다.
@@ -386,7 +406,7 @@ export default function PartTimePage() {
                 <p style={{ margin: '0.35rem 0 0', color: '#92400e', fontSize: '0.85rem' }}>입력한 시급이 {year}년 최저시급보다 낮습니다.</p>
               )}
               {workerDraft.leaving && (
-                <p style={{ margin: '0.75rem 0 0', color: '#92400e' }}>그만둔 알바로 두면 달력에 새로 올릴 수 없습니다. 지난 근무 기록은 남습니다.</p>
+                <p style={{ margin: '0.75rem 0 0', color: '#92400e' }}>그만둔 알바는 달력에 새로 올릴 수 없습니다. 지난 근무 기록은 남고, 다시 불러오기에서 되돌릴 수 있습니다.</p>
               )}
             </div>
             <div className="data-modal-foot">
@@ -394,9 +414,41 @@ export default function PartTimePage() {
                 <Button type="button" variant="ghost" disabled={busy} onClick={() => setWorkerDraft({ ...workerDraft, leaving: true })}>그만둠</Button>
               )}
               {workerDraft.leaving && (
-                <Button type="button" variant="danger" disabled={busy} onClick={() => workerDraft.id !== null && setActive(workerDraft.id, false)}>그만둠 확인</Button>
+                <Button type="button" variant="danger" disabled={busy} onClick={() => workerDraft.id !== null && setActive(workerDraft.id, false, workerDraft.name)}>그만둠 확인</Button>
               )}
               <Button type="button" variant="primary" disabled={busy} onClick={saveWorker}>저장</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recallOpen && (
+        <div className="data-modal-backdrop" onClick={() => setRecallOpen(false)}>
+          <div className="data-modal" style={{ maxWidth: 520 }} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="data-modal-head">
+              <h2>그만둔 알바 다시 불러오기</h2>
+              <Button type="button" variant="ghost" onClick={() => setRecallOpen(false)}>닫기</Button>
+            </div>
+            <div className="data-modal-body">
+              {inactiveWorkers.length === 0 ? (
+                <p style={{ margin: 0, color: '#6b7280' }}>그만둔 알바가 없습니다.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {inactiveWorkers.map((worker) => (
+                    <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.6rem 0.75rem' }}>
+                      <div>
+                        <strong>{worker.name}</strong>
+                        <span style={{ marginLeft: 8, color: worker.reported ? '#166534' : '#6b7280', fontSize: '0.8rem' }}>
+                          {worker.reported ? '신고' : '미신고'}
+                        </span>
+                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>시급 {won(worker.hourly_wage)} · {worker.resident_id}</div>
+                      </div>
+                      <Button type="button" variant="primary" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>다시 불러오기</Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p style={{ margin: '0.75rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>다시 불러오면 달력에 근무를 올릴 수 있습니다. 지난 근무 기록은 그대로입니다.</p>
             </div>
           </div>
         </div>

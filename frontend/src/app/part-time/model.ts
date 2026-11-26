@@ -68,6 +68,19 @@ export async function apiError(res: Response) {
   }
 }
 
+export async function downloadPartTimeExcel(year: number, month: number) {
+  const token = localStorage.getItem('token') || '';
+  const res = await fetch(`${API}/part-time/xlsx?token=${encodeURIComponent(token)}&year=${year}&month=${month}`);
+  if (!res.ok) throw new Error(await apiError(res));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `틸리언 일용근로대장 ${year}년 ${String(month).padStart(2, '0')}월.xlsx`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function readAdmin() {
   try {
     return !!JSON.parse(localStorage.getItem('user') || '{}').is_admin;
