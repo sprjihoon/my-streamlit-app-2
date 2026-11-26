@@ -169,7 +169,7 @@ export function WorkerSeal({ userId, name, revision = 0 }: WorkerSealProps) {
     <Card>
       <h3 style={{ marginTop: 0 }}>도장 · 싸인</h3>
       <p style={{ marginTop: 0, color: '#334155', fontSize: '0.9rem' }}>
-        도장은 본인 성명으로만 만들어집니다. 저장해 두면 회사가 날인할 때 근로계약서·동의서·서약서의 을 서명란에 올라갑니다.
+        도장은 본인 성명으로만 만듭니다. 원형은 이름에 인을 붙인 네 글자 목도장이고, 타원은 이름을 세로로 넣습니다. 저장하면 날인할 때 을 서명란에 올라갑니다.
       </p>
       {error && <p style={{ color: '#b91c1c' }}>{error}</p>}
       {notice && <p style={{ color: '#166534' }}>{notice}</p>}
@@ -193,7 +193,7 @@ export function WorkerSeal({ userId, name, revision = 0 }: WorkerSealProps) {
       <h4 style={{ marginBottom: '0.4rem' }}>내 이름 도장</h4>
       {samples ? (
         <p style={{ marginTop: 0, color: '#334155', fontSize: '0.9rem' }}>
-          <strong>{samples.name}</strong> 이름으로 만든 도장입니다. 다른 이름으로는 만들지 않습니다.
+          <strong>{samples.name}</strong> 이름 도장입니다. 세 글자 이름은 원형에 인을 붙여 네 글자로 만들고, 타원에는 이름만 세로로 넣습니다.
           {name.trim() && name.trim() !== samples.name ? ' 성명을 바꿨으면 위의 기재를 저장하세요. 저장한 이름으로 다시 그려집니다.' : ''}
         </p>
       ) : (
@@ -201,8 +201,8 @@ export function WorkerSeal({ userId, name, revision = 0 }: WorkerSealProps) {
       )}
       {samples && (
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.8rem' }}>
-          <SealChoice label="글자 도장" image={samples.grid} disabled={busy} onUse={() => saveKind('grid')} />
-          <SealChoice label="겹원 도장" image={samples.ring} disabled={busy} onUse={() => saveKind('ring')} />
+          <SealChoice label="원형 목도장" image={samples.grid} disabled={busy} onUse={() => saveKind('grid')} />
+          <SealChoice label="타원 도장" image={samples.ring} disabled={busy} onUse={() => saveKind('ring')} />
         </div>
       )}
 

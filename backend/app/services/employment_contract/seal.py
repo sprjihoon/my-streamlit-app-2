@@ -15,29 +15,74 @@ def seal_label(name: str) -> str:
 
 
 def make_seal(name: str, style: str) -> bytes:
-    """이름 도장. grid는 동그라미 안에 글자를 나누고, ring은 겹원 가운데 이름을 넣는다."""
+    """이름 도장. grid는 원 안에 네 글자 목도장, ring은 타원 안에 이름을 세로로 넣는다."""
     if style not in _STYLES:
         raise ValueError("도장 모양을 고르세요.")
-    label = seal_label(name)
     doc = fitz.open()
-    page = doc.new_page(width=280, height=280)
-    shape = page.new_shape()
-    center = fitz.Point(140, 140)
-    shape.draw_circle(center, 118)
-    shape.finish(color=_RED, width=12)
     if style == "ring":
-        shape.draw_circle(center, 96)
-        shape.finish(color=_RED, width=3.2)
-    shape.commit()
-    if style == "ring":
-        size = 46 if len(label) <= 3 else 36
-        x = 140 - (len(label) * size) / 2
-        page.insert_text((x, 140 + size * 0.34), label, fontsize=size, fontname="korea", color=_RED)
+        page = doc.new_page(width=240, height=340)
+        _draw_oval(page, _oval_chars(name))
     else:
-        _draw_grid(page, label)
+        page = doc.new_page(width=280, height=280)
+        _draw_wood(page, _wood_chars(name))
     pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=True)
     doc.close()
     return _finish(pix)
+
+
+def _wood_chars(name: str) -> str:
+    """세 글자 이름은 뒤에 인을 붙여 네 글자 목도장으로 만든다."""
+    label = seal_label(name)
+    if len(label) == 3:
+        return label + "인"
+    return label
+
+
+def _oval_chars(name: str) -> str:
+    """타원에는 본인 이름만 넣는다."""
+    return seal_label(name)
+
+
+def _put_char(page: fitz.Page, char: str, cx: float, cy: float, size: float) -> None:
+    page.insert_text((cx - size / 2, cy + size * 0.34), char, fontsize=size, fontname="korea", color=_RED)
+
+
+def _draw_wood(page: fitz.Page, label: str) -> None:
+    shape = page.new_shape()
+    shape.draw_circle(fitz.Point(140, 140), 118)
+    shape.finish(color=_RED, width=14)
+    shape.commit()
+    if len(label) >= 4:
+        # 오른쪽 줄부터 위에서 아래로 읽는다. 장지훈인 → 지 장 / 인 훈
+        chars = label[:4]
+        size = 64
+        slots = (
+            (176, 104),
+            (176, 176),
+            (104, 104),
+            (104, 176),
+        )
+        for char, (cx, cy) in zip(chars, slots):
+            _put_char(page, char, cx, cy, size)
+        return
+    if len(label) == 2:
+        _put_char(page, label[0], 140, 100, 72)
+        _put_char(page, label[1], 140, 180, 72)
+        return
+    _put_char(page, label[0], 140, 140, 92)
+
+
+def _draw_oval(page: fitz.Page, label: str) -> None:
+    shape = page.new_shape()
+    shape.draw_oval(fitz.Rect(22, 14, 218, 326))
+    shape.finish(color=_RED, width=13)
+    shape.commit()
+    count = len(label)
+    size = {1: 100, 2: 84, 3: 72, 4: 56}[count]
+    gap = {1: 0, 2: 90, 3: 74, 4: 62}[count]
+    top = 170 - gap * (count - 1) / 2
+    for index, char in enumerate(label):
+        _put_char(page, char, 120, top + gap * index, size)
 
 
 def prepare_mark(raw: bytes) -> bytes:
@@ -64,19 +109,6 @@ def prepare_mark(raw: bytes) -> bytes:
 def mark_is_signature(png: bytes) -> bool:
     pix = fitz.Pixmap(png)
     return pix.width >= pix.height * 1.65
-
-
-def _draw_grid(page: fitz.Page, label: str) -> None:
-    count = len(label)
-    size = {1: 84, 2: 62, 3: 50, 4: 46}[count]
-    slots = {
-        1: [(140, 140)],
-        2: [(140, 102), (140, 178)],
-        3: [(140, 96), (96, 178), (184, 178)],
-        4: [(96, 104), (184, 104), (96, 178), (184, 178)],
-    }[count]
-    for char, (cx, cy) in zip(label, slots):
-        page.insert_text((cx - size / 2, cy + size * 0.34), char, fontsize=size, fontname="korea", color=_RED)
 
 
 def _finish(pix: fitz.Pixmap) -> bytes:
