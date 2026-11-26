@@ -1,6 +1,7 @@
 """근로계약서 작성, 완료 보관, 다시 활성화."""
 from __future__ import annotations
 
+import base64
 import json
 import re
 from datetime import datetime
@@ -17,7 +18,7 @@ from backend.app.api.logs import add_log
 from backend.app.api.settings import _ensure_settings_table
 from backend.app.config import settings
 from backend.app.services.employment_contract.calc import calculate_contract_pay
-from backend.app.services.employment_contract.pdf import render_contract_pdf
+from backend.app.services.employment_contract.pdf import render_contract_pdf, render_page_pngs
 from logic.db import get_connection
 
 router = APIRouter(prefix="/employment-contracts", tags=["employment-contracts"])
@@ -414,6 +415,27 @@ def preview_contract(body: ContractInput, token: str):
     return {"calc": _calculate(payload)}
 
 
+def _pages_from_pdf(pdf: bytes) -> dict:
+    return {"pages": [base64.b64encode(png).decode("ascii") for png in render_page_pngs(pdf)]}
+
+
+@router.post("/preview-pages")
+def preview_contract_pages(body: ContractInput, token: str):
+    """입력 중인 계약을 A4 페이지 이미지로 보여 준다. 보관하지 않는다."""
+    _admin(token)
+    payload = _values(body, required=False)
+    calc = _calculate(payload)
+    pdf = render_contract_pdf(
+        0,
+        _company(),
+        payload,
+        calc,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        preview=True,
+    )
+    return _pages_from_pdf(pdf)
+
+
 @router.put("/users/{user_id}")
 def save_contract_draft(user_id: int, body: ContractInput, token: str):
     actor = _admin(token)
@@ -508,6 +530,24 @@ def reactivate_contract(user_id: int, token: str):
         details="작성 목록으로 되돌림",
     )
     return {"draft_id": draft_id, "user_id": user_id}
+
+
+@router.get("/{contract_id}/pages")
+def contract_preview_pages(contract_id: int, token: str):
+    """보관된 계약서를 A4 페이지 이미지로 보여 준다."""
+    _admin(token)
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT pdf_filename, status FROM employment_contracts WHERE id = ?",
+            (contract_id,),
+        ).fetchone()
+    if not row or row[1] != "completed" or not row[0]:
+        raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
+    root = _contract_dir().resolve()
+    path = (root / row[0]).resolve()
+    if path.parent != root or not path.is_file():
+        raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
+    return _pages_from_pdf(path.read_bytes())
 
 
 @router.get("/{contract_id}/pdf")

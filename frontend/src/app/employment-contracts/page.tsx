@@ -7,6 +7,7 @@ import { Loading } from '@/components/Loading';
 import { useYesNo } from '@/components/YesNoDialog';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
+import { A4Preview } from './a4-preview';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -134,6 +135,7 @@ export default function EmploymentContractsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ContractForm>(EMPTY_FORM);
   const [calc, setCalc] = useState<PayCalc | null>(null);
+  const [sheets, setSheets] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (nextView: 'open' | 'completed') => {
@@ -202,6 +204,24 @@ export default function EmploymentContractsPage() {
     }
     const data = await res.json();
     setCalc(data.calc);
+  }
+
+  async function openA4Preview() {
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`${API}/employment-contracts/preview-pages?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    setSheets(data.pages || []);
   }
 
   async function saveDraft() {
@@ -289,6 +309,7 @@ export default function EmploymentContractsPage() {
   return (
     <div>
       {dialog}
+      {sheets && <A4Preview pages={sheets} overlay onClose={() => setSheets(null)} />}
       <PageHeader
         title="근로계약"
         subtitle="계약 내용을 입력하고 날인하면 회사 직인이 찍힌 PDF가 보관됩니다. 날인한 직원은 작성 목록에서 빠집니다."
@@ -344,6 +365,7 @@ export default function EmploymentContractsPage() {
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
             <Button type="button" variant="secondary" disabled={busy} onClick={preview}>급여 계산</Button>
+            <Button type="button" variant="secondary" disabled={busy} onClick={openA4Preview}>A4 미리보기</Button>
             <Button type="button" variant="secondary" disabled={busy} onClick={saveDraft}>임시 저장</Button>
             <Button type="button" variant="success" disabled={busy} onClick={complete}>날인</Button>
             <Button type="button" variant="ghost" disabled={busy} onClick={() => setEditingId(null)}>닫기</Button>

@@ -1,6 +1,7 @@
 """완료한 근로계약서는 PDF로 남고, 작성 목록에서는 빠진다."""
 from __future__ import annotations
 
+import base64
 import sqlite3
 
 import fitz
@@ -114,6 +115,17 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     denied = client.get("/employment-contracts", params={"token": "staff-tok", "view": "open"})
     assert denied.status_code == 403
 
+    sheets = client.post(
+        "/employment-contracts/preview-pages",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert sheets.status_code == 200
+    preview_pages = sheets.json()["pages"]
+    assert preview_pages
+    first_page = base64.b64decode(preview_pages[0])
+    assert first_page.startswith(b"\x89PNG")
+
     opened = client.get("/employment-contracts", params={"token": "admin-tok", "view": "open"})
     assert opened.status_code == 200
     assert any(row["user_id"] == staff_id for row in opened.json()["employees"])
@@ -158,6 +170,10 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     assert again.status_code == 200
     visible = client.get("/employment-contracts", params={"token": "admin-tok", "view": "open"})
     assert any(row["user_id"] == staff_id and row["state"] == "draft" for row in visible.json()["employees"])
+
+    paged = client.get(f"/employment-contracts/{contract_id}/pages", params={"token": "admin-tok"})
+    assert paged.status_code == 200
+    assert paged.json()["pages"]
 
     kept = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "admin-tok"})
     assert kept.status_code == 200

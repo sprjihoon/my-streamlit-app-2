@@ -28,7 +28,15 @@ def _period(start: str, end: str) -> str:
     return "별도 정함"
 
 
-def render_contract_pdf(doc_id: int, company: dict, fields: dict, calc: dict, completed_at: str) -> bytes:
+def render_contract_pdf(
+    doc_id: int,
+    company: dict,
+    fields: dict,
+    calc: dict,
+    completed_at: str,
+    *,
+    preview: bool = False,
+) -> bytes:
     pen = _Pen()
     company_name = company.get("company_name") or "틸리언"
     pen.center("근 로 계 약 서", 18)
@@ -126,7 +134,10 @@ def render_contract_pdf(doc_id: int, company: dict, fields: dict, calc: dict, co
     pen.blank(4)
     pen.line(f"{company_name}  대표 귀하")
     pen.blank(8)
-    pen.line(f"문서번호 {doc_id}    이 문서는 날인 시점의 계약 내용입니다.", 8)
+    if preview:
+        pen.line("미리보기    이 장은 출력 확인용이며 날인 보관본이 아닙니다.", 8)
+    else:
+        pen.line(f"문서번호 {doc_id}    이 문서는 날인 시점의 계약 내용입니다.", 8)
 
     total = pen.doc.page_count
     for index, page in enumerate(pen.doc, start=1):
@@ -139,6 +150,13 @@ def render_contract_pdf(doc_id: int, company: dict, fields: dict, calc: dict, co
             color=(0.35, 0.35, 0.35),
         )
     return pen.doc.tobytes()
+
+
+def render_page_pngs(pdf: bytes, zoom: float = 2.0) -> list[bytes]:
+    """A4 미리보기와 인쇄에 쓰는 페이지 이미지."""
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    matrix = fitz.Matrix(zoom, zoom)
+    return [page.get_pixmap(matrix=matrix, alpha=False).tobytes("png") for page in doc]
 
 
 def _seal_bytes() -> bytes:
