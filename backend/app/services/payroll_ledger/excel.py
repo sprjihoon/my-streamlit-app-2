@@ -1,10 +1,156 @@
-"""근로계약 급여를 급여대장 엑셀 서식으로 적는다."""
+"""급여대장을 엑셀 서식으로 읽고 적는다."""
 from __future__ import annotations
 
+from datetime import datetime, date
 from io import BytesIO
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+def _blank_line() -> dict:
+    return {
+        "user_id": 0,
+        "contract_id": None,
+        "seq": 0,
+        "employee_name": "",
+        "affiliation": "",
+        "hire_date": "",
+        "resident_id": "",
+        "work_days": "",
+        "base_hours": 0,
+        "overtime_hours": 0,
+        "holiday_hours": 0,
+        "night_hours": 0,
+        "extra_hours": 0,
+        "hourly": 0,
+        "base_pay": 0,
+        "overtime_pay": 0,
+        "holiday_pay": 0,
+        "night_pay": 0,
+        "position_allowance": 0,
+        "vehicle_allowance": 0,
+        "meal_allowance": 0,
+        "annual_leave_pay": 0,
+        "special_pay": 0,
+        "incentive_pay": 0,
+        "attendance_deduction": 0,
+        "settlement_pay": 0,
+        "bonus_pay": 0,
+        "income_tax": 0,
+        "local_tax": 0,
+        "pension": 0,
+        "health": 0,
+        "care": 0,
+        "employment": 0,
+        "year_end_tax": 0,
+        "insurance_adjust": 0,
+        "prepaid": 0,
+        "gross_pay": 0,
+        "deduction_total": 0,
+        "net_pay": 0,
+    }
+
+
+def _number(value, default=0):
+    if value is None or value == "":
+        return default
+    if isinstance(value, str):
+        text = value.replace(",", "").strip()
+        if not text:
+            return default
+        return float(text)
+    return float(value)
+
+
+def _text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def parse_payroll_xlsx(content: bytes) -> dict:
+    """급여대장 시트의 계산된 값을 그대로 읽는다."""
+    book = load_workbook(BytesIO(content), data_only=True)
+    if "급여대장" not in book.sheetnames:
+        raise ValueError("급여대장 시트가 없습니다.")
+    ws = book["급여대장"]
+    header_row = 5
+    for row in range(1, 16):
+        if _text(ws.cell(row, 2).value) == "성명":
+            header_row = row
+            break
+    start = header_row + 3
+    title = ws["A1"].value
+    if isinstance(title, datetime):
+        year, month = title.year, title.month
+    else:
+        text = _text(title)
+        parts = text.replace(".", "-").split("-")
+        if len(parts) < 2 or not parts[0].isdigit():
+            raise ValueError("급여대장의 날짜를 읽지 못했습니다.")
+        year, month = int(parts[0]), int(parts[1])
+    lines = []
+    row = start
+    while row <= ws.max_row:
+        marker = _text(ws.cell(row, 1).value)
+        name = _text(ws.cell(row, 2).value)
+        if marker == "합계" or not name:
+            break
+        line = _blank_line()
+        line.update({
+            "seq": int(_number(ws.cell(row, 1).value, len(lines) + 1)),
+            "employee_name": name,
+            "work_days": _text(ws.cell(row, 3).value),
+            "base_hours": _number(ws.cell(row, 4).value),
+            "overtime_hours": _number(ws.cell(row, 5).value),
+            "base_pay": int(round(_number(ws.cell(row, 6).value))),
+            "overtime_pay": int(round(_number(ws.cell(row, 7).value))),
+            "holiday_pay": int(round(_number(ws.cell(row, 8).value))),
+            "annual_leave_pay": int(round(_number(ws.cell(row, 9).value))),
+            "gross_pay": int(round(_number(ws.cell(row, 10).value))),
+            "income_tax": int(round(_number(ws.cell(row, 11).value))),
+            "pension": int(round(_number(ws.cell(row, 12).value))),
+            "year_end_tax": int(round(_number(ws.cell(row, 13).value))),
+            "deduction_total": int(round(_number(ws.cell(row, 14).value))),
+            "net_pay": int(round(_number(ws.cell(row, 15).value))),
+            "affiliation": _text(ws.cell(row + 1, 1).value),
+            "hire_date": _text(ws.cell(row + 1, 2).value),
+            "holiday_hours": _number(ws.cell(row + 1, 3).value),
+            "night_hours": _number(ws.cell(row + 1, 4).value),
+            "hourly": _number(ws.cell(row + 1, 5).value),
+            "night_pay": int(round(_number(ws.cell(row + 1, 6).value))),
+            "special_pay": int(round(_number(ws.cell(row + 1, 7).value))),
+            "incentive_pay": int(round(_number(ws.cell(row + 1, 8).value))),
+            "attendance_deduction": int(round(_number(ws.cell(row + 1, 9).value))),
+            "local_tax": int(round(_number(ws.cell(row + 1, 11).value))),
+            "employment": int(round(_number(ws.cell(row + 1, 12).value))),
+            "insurance_adjust": int(round(_number(ws.cell(row + 1, 13).value))),
+            "resident_id": _text(ws.cell(row + 2, 1).value),
+            "extra_hours": _number(ws.cell(row + 2, 3).value),
+            "vehicle_allowance": int(round(_number(ws.cell(row + 2, 6).value))),
+            "meal_allowance": int(round(_number(ws.cell(row + 2, 7).value))),
+            "settlement_pay": int(round(_number(ws.cell(row + 2, 8).value))),
+            "bonus_pay": int(round(_number(ws.cell(row + 2, 9).value))),
+            "health": int(round(_number(ws.cell(row + 2, 11).value))),
+            "care": int(round(_number(ws.cell(row + 2, 12).value))),
+            "prepaid": int(round(_number(ws.cell(row + 2, 13).value))),
+        })
+        lines.append(line)
+        row += 3
+    if not lines:
+        raise ValueError("급여대장에서 직원을 찾지 못했습니다.")
+    return {
+        "year": year,
+        "month": month,
+        "company_name": _text(ws["L3"].value) or "틸리언",
+        "period_label": _text(ws["B3"].value),
+        "lines": lines,
+    }
+
+
 def render_payroll_xlsx(ledger: dict) -> bytes:
     wb = Workbook()
     ws = wb.active

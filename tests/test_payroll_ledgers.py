@@ -1,8 +1,12 @@
 """급여대장은 그 달에 적용되는 근로계약 급여로 만들고, 만든 달은 다시 덮지 않는다."""
 from __future__ import annotations
 
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from backend.app.main import app
 from tests.test_employment_contracts import _prepare, _sample
@@ -71,3 +75,78 @@ def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_run
     assert ws["B8"].value == "홍길동"
     assert ws["O8"].value == 1966730
     assert ws["A10"].value == "900101-1234567"
+
+
+def _sample_workbook() -> bytes:
+    book = Workbook()
+    ws = book.active
+    ws.title = "급여대장"
+    ws["A1"] = datetime(2026, 11, 1)
+    ws["B3"] = "2026.11.01~2026.11.30"
+    ws["L3"] = "틸리언"
+    ws["B5"] = "성명"
+    ws["A8"] = 1
+    ws["B8"] = "장성령"
+    ws["C8"] = "만근"
+    ws["D8"] = 209
+    ws["F8"] = 2914510
+    ws["J8"] = 2914510
+    ws["K8"] = 30000
+    ws["L8"] = 136750
+    ws["N8"] = 314510
+    ws["O8"] = 2600000
+    ws["A9"] = "패션총괄팀장"
+    ws["B9"] = datetime(2026, 2, 2)
+    ws["E9"] = 13945.02
+    ws["K9"] = 3000
+    ws["L9"] = 26230
+    ws["A10"] = "900101-1234567"
+    ws["K10"] = 104770
+    ws["L10"] = 13760
+    buf = BytesIO()
+    book.save(buf)
+    return buf.getvalue()
+
+
+def test_excel_file_replaces_the_month_with_its_own_figures(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    saved = client.post(
+        "/payroll-ledgers/import",
+        params={"token": "admin-tok"},
+        files={"file": ("ledger.xlsx", _sample_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert saved.status_code == 200
+    payload = saved.json()
+    assert payload["origin"] == "excel"
+    assert payload["month"] == 11
+    assert payload["lines"][0]["employee_name"] == "장성령"
+    assert payload["lines"][0]["affiliation"] == "패션총괄팀장"
+    assert payload["lines"][0]["net_pay"] == 2600000
+    assert payload["lines"][0]["base_pay"] == 2914510
+    assert "1234567" not in payload["lines"][0]["resident_id"]
+
+    denied = client.post(
+        "/payroll-ledgers/import",
+        params={"token": "staff-tok"},
+        files={"file": ("ledger.xlsx", _sample_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert denied.status_code == 403
+
+
+def test_october_workbook_keeps_the_given_headcount_and_total():
+    path = Path(r"C:\Users\one\Documents\카카오톡 받은 파일\틸리언 급여대장 2026년 10월.xlsx")
+    if not path.exists():
+        return
+    from backend.app.services.payroll_ledger.excel import parse_payroll_xlsx
+
+    parsed = parse_payroll_xlsx(path.read_bytes())
+    assert (parsed["year"], parsed["month"]) == (2026, 10)
+    assert len(parsed["lines"]) == 8
+    assert [line["employee_name"] for line in parsed["lines"]] == [
+        "장성령", "장명찬", "신윤미", "태찬기", "신경주", "윤혜준", "전은정", "김민정",
+    ]
+    assert sum(line["net_pay"] for line in parsed["lines"]) == 16400190
+    assert sum(line["gross_pay"] for line in parsed["lines"]) == 18270640
+    assert parsed["lines"][6]["vehicle_allowance"] == 200000
+    assert parsed["lines"][7]["base_hours"] == 84

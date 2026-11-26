@@ -5,14 +5,14 @@ import calendar
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from backend.app.api.employment_contracts import _company, ensure_contract_tables
 from backend.app.api.logs import add_log
 from backend.app.services.employment_contract.calc import calculate_contract_pay
-from backend.app.services.payroll_ledger.excel import render_payroll_xlsx
+from backend.app.services.payroll_ledger.excel import parse_payroll_xlsx, render_payroll_xlsx
 from logic.db import get_connection
 
 router = APIRouter(prefix="/payroll-ledgers", tags=["payroll-ledgers"])
@@ -100,10 +100,14 @@ def ensure_payroll_tables() -> None:
                 company_name TEXT,
                 period_label TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                origin TEXT DEFAULT 'contract',
                 UNIQUE(year, month)
             )
             """
         )
+        columns = [row[1] for row in con.execute("PRAGMA table_info(payroll_ledgers)")]
+        if "origin" not in columns:
+            con.execute("ALTER TABLE payroll_ledgers ADD COLUMN origin TEXT DEFAULT 'contract'")
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS payroll_lines (
@@ -306,7 +310,7 @@ def _public_line(line: dict) -> dict:
 def _load(year: int, month: int) -> dict | None:
     with get_connection() as con:
         header = con.execute(
-            "SELECT id, year, month, company_name, period_label, created_at FROM payroll_ledgers WHERE year = ? AND month = ?",
+            "SELECT id, year, month, company_name, period_label, created_at, origin FROM payroll_ledgers WHERE year = ? AND month = ?",
             (year, month),
         ).fetchone()
         if not header:
@@ -324,34 +328,39 @@ def _load(year: int, month: int) -> dict | None:
         "company_name": header[3] or "",
         "period_label": header[4] or "",
         "created_at": header[5],
+        "origin": header[6] or "contract",
         "lines": lines,
         "totals": _totals(lines),
     }
 
 
-def _save(year: int, month: int, replace: bool) -> dict:
-    lines, skipped = _lines_from_contracts(year, month)
-    if not lines:
-        raise HTTPException(status_code=400, detail="이 달에 적용할 근로계약 급여가 없습니다.")
-    _start, _end, label = _period(year, month)
-    company = _company().get("company_name") or "틸리언"
+def _match_users(lines: list[dict]) -> None:
+    with get_connection() as con:
+        rows = con.execute("SELECT user_id, nickname FROM users").fetchall()
+    by_name = {(row[1] or "").strip(): row[0] for row in rows if (row[1] or "").strip()}
+    for line in lines:
+        line["user_id"] = by_name.get(line["employee_name"], 0)
+        line["contract_id"] = None
+
+
+def _store(year: int, month: int, company: str, label: str, lines: list[dict], origin: str, replace: bool) -> dict:
     with get_connection() as con:
         existing = con.execute(
             "SELECT id FROM payroll_ledgers WHERE year = ? AND month = ?",
             (year, month),
         ).fetchone()
         if existing and not replace:
-            ledger_id = existing[0]
+            pass
         else:
             if existing and replace:
                 con.execute("DELETE FROM payroll_lines WHERE ledger_id = ?", (existing[0],))
                 con.execute("DELETE FROM payroll_ledgers WHERE id = ?", (existing[0],))
             cur = con.execute(
                 """
-                INSERT INTO payroll_ledgers (year, month, company_name, period_label, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO payroll_ledgers (year, month, company_name, period_label, origin, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (year, month, company, label, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                (year, month, company, label, origin, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             )
             ledger_id = cur.lastrowid
             placeholders = ", ".join("?" for _ in LINE_FIELDS)
@@ -364,9 +373,19 @@ def _save(year: int, month: int, replace: bool) -> dict:
         con.commit()
     saved = _load(year, month)
     assert saved is not None
-    saved["skipped"] = skipped
     saved["replaced"] = bool(existing and replace)
     saved["existed"] = bool(existing and not replace)
+    return saved
+
+
+def _save(year: int, month: int, replace: bool) -> dict:
+    lines, skipped = _lines_from_contracts(year, month)
+    if not lines:
+        raise HTTPException(status_code=400, detail="이 달에 적용할 근로계약 급여가 없습니다.")
+    _start, _end, label = _period(year, month)
+    company = _company().get("company_name") or "틸리언"
+    saved = _store(year, month, company, label, lines, "contract", replace)
+    saved["skipped"] = skipped
     return saved
 
 
@@ -394,6 +413,40 @@ def list_ledgers(token: str):
             for row in rows
         ]
     }
+
+
+@router.post("/import")
+async def import_ledger_file(token: str, file: UploadFile = File(...)):
+    """급여대장 엑셀의 계산된 값을 그 달 대장으로 그대로 저장한다."""
+    actor = _admin(token)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="파일이 비어 있습니다.")
+    try:
+        parsed = parse_payroll_xlsx(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _match_users(parsed["lines"])
+    saved = _store(
+        parsed["year"],
+        parsed["month"],
+        parsed["company_name"],
+        parsed["period_label"],
+        parsed["lines"],
+        "excel",
+        True,
+    )
+    add_log(
+        action_type="급여대장 파일 반영",
+        target_type="payroll_ledger",
+        target_id=f"{parsed['year']}-{parsed['month']:02d}",
+        target_name=parsed["period_label"],
+        user_nickname=actor["nickname"],
+        details=f"{len(parsed['lines'])}명",
+    )
+    shown = dict(saved)
+    shown["lines"] = [_public_line(line) for line in saved["lines"]]
+    return shown
 
 
 @router.get("/{year}/{month}")

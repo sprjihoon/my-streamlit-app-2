@@ -40,6 +40,7 @@ interface Ledger {
   company_name: string;
   period_label: string;
   created_at: string;
+  origin?: string;
   lines: PayrollLine[];
   totals: PayrollLine;
   existed?: boolean;
@@ -187,6 +188,7 @@ export default function PayrollLedgerPage() {
         <Card>
           <p style={{ marginTop: 0, color: '#374151' }}>
             {ledger.company_name} · {ledger.period_label} · {ledger.lines.length}명
+            {ledger.origin === 'excel' ? ' · 급여대장 파일을 그대로 반영했습니다.' : ''}
           </p>
           {!!ledger.skipped?.length && (
             <p style={{ color: '#92400e' }}>급여를 맞추지 못해 뺀 직원: {ledger.skipped.join(', ')}</p>
