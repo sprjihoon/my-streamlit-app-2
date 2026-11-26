@@ -38,7 +38,7 @@ def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_run
         json=outside,
     )
     assert updated.status_code == 200
-    missing = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 10})
+    missing = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 9})
     assert missing.status_code == 400
 
     restored = client.put(
@@ -48,10 +48,10 @@ def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_run
     )
     assert restored.status_code == 200
 
-    created = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 10})
+    created = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 11})
     assert created.status_code == 200
     payload = created.json()
-    assert payload["period_label"] == "2026.10.01~2026.10.31"
+    assert payload["period_label"] == "2026.11.01~2026.11.30"
     assert len(payload["lines"]) == 1
     line = payload["lines"][0]
     assert line["employee_name"] == "홍길동"
@@ -62,12 +62,12 @@ def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_run
     assert "1234567" not in line["resident_id"]
     assert payload["totals"]["net_pay"] == 1966730
 
-    again = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 10})
+    again = client.post("/payroll-ledgers", params={"token": "admin-tok"}, json={"year": 2026, "month": 11})
     assert again.status_code == 200
     assert again.json()["existed"] is True
     assert again.json()["lines"][0]["net_pay"] == 1966730
 
-    sheet = client.get("/payroll-ledgers/2026/10/xlsx", params={"token": "admin-tok"})
+    sheet = client.get("/payroll-ledgers/2026/11/xlsx", params={"token": "admin-tok"})
     assert sheet.status_code == 200
     book = load_workbook(filename=__import__("io").BytesIO(sheet.content))
     ws = book["급여대장"]
@@ -150,6 +150,25 @@ def test_october_workbook_keeps_the_given_headcount_and_total():
     assert sum(line["gross_pay"] for line in parsed["lines"]) == 18270640
     assert parsed["lines"][6]["vehicle_allowance"] == 200000
     assert parsed["lines"][7]["base_hours"] == 84
+
+
+def test_october_2026_is_seeded_from_the_given_workbook_values(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    saved = client.get("/payroll-ledgers/2026/10", params={"token": "admin-tok"})
+    assert saved.status_code == 200
+    payload = saved.json()
+    assert payload["origin"] == "excel"
+    assert payload["period_label"] == "2026.10.01~2026.10.31"
+    assert [line["employee_name"] for line in payload["lines"]] == [
+        "장성령", "장명찬", "신윤미", "태찬기", "신경주", "윤혜준", "전은정", "김민정",
+    ]
+    assert payload["totals"]["net_pay"] == 16400190
+    assert payload["totals"]["gross_pay"] == 18270640
+    assert payload["lines"][0]["net_pay"] == 2600000
+    assert payload["lines"][6]["vehicle_allowance"] == 200000
+    assert payload["lines"][7]["base_hours"] == 84
+    assert "1234567" not in "".join(line["resident_id"] for line in payload["lines"])
 
 
 def test_payroll_file_fills_matching_employment_contract(isolated_runtime):

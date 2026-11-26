@@ -13,6 +13,7 @@ from backend.app.api.employment_contracts import _company, apply_payroll_contrac
 from backend.app.api.logs import add_log
 from backend.app.services.employment_contract.calc import calculate_contract_pay
 from backend.app.services.payroll_ledger.excel import parse_payroll_xlsx, render_payroll_xlsx
+from backend.app.services.payroll_ledger.october_2026 import october_2026_lines
 from logic.db import get_connection
 
 router = APIRouter(prefix="/payroll-ledgers", tags=["payroll-ledgers"])
@@ -156,6 +157,34 @@ def ensure_payroll_tables() -> None:
             """
         )
         con.commit()
+        _seed_october_2026(con)
+        con.commit()
+
+
+def _seed_october_2026(con) -> None:
+    existing = con.execute(
+        "SELECT id FROM payroll_ledgers WHERE year = 2026 AND month = 10"
+    ).fetchone()
+    if existing:
+        return
+    lines = october_2026_lines()
+    _match_users(lines)
+    apply_payroll_contract_fields(lines)
+    cur = con.execute(
+        """
+        INSERT INTO payroll_ledgers (year, month, company_name, period_label, origin, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (2026, 10, "틸리언", "2026.10.01~2026.10.31", "excel", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    ledger_id = cur.lastrowid
+    placeholders = ", ".join("?" for _ in LINE_FIELDS)
+    columns = ", ".join(LINE_FIELDS)
+    for line in lines:
+        con.execute(
+            f"INSERT INTO payroll_lines (ledger_id, {columns}) VALUES (?, {placeholders})",
+            (ledger_id, *[line[name] for name in LINE_FIELDS]),
+        )
 
 
 class LedgerCreate(BaseModel):
@@ -379,6 +408,12 @@ def _store(year: int, month: int, company: str, label: str, lines: list[dict], o
 
 
 def _save(year: int, month: int, replace: bool) -> dict:
+    current = _load(year, month)
+    if current and current.get("origin") == "excel" and not replace:
+        current["skipped"] = []
+        current["replaced"] = False
+        current["existed"] = True
+        return current
     lines, skipped = _lines_from_contracts(year, month)
     if not lines:
         raise HTTPException(status_code=400, detail="이 달에 적용할 근로계약 급여가 없습니다.")

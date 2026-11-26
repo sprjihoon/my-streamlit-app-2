@@ -45,6 +45,7 @@ interface Ledger {
   totals: PayrollLine;
   existed?: boolean;
   skipped?: string[];
+  contracts?: { updated: { employee_name: string }[]; missing: string[] };
 }
 
 function won(value: number) {
@@ -147,6 +148,36 @@ export default function PayrollLedgerPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function importFile(file: File | undefined) {
+    if (!file) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    const body = new FormData();
+    body.append('file', file);
+    const res = await fetch(`${API}/payroll-ledgers/import?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      body,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    setYear(data.year);
+    setMonth(data.month);
+    setLedger(data);
+    const names = (data.contracts?.updated || []).map((row: { employee_name: string }) => row.employee_name);
+    const missing = data.contracts?.missing || [];
+    setSuccess(
+      `${data.year}년 ${data.month}월 급여대장 파일을 그대로 반영했습니다.` +
+      (names.length ? ` 근로계약 초안 ${names.length}명.` : '') +
+      (missing.length ? ` 계정 없는 직원: ${missing.join(', ')}.` : ''),
+    );
+  }
+
   if (isAdmin === null) return <Loading text="불러오는 중..." />;
   if (!isAdmin) {
     return (
@@ -178,6 +209,10 @@ export default function PayrollLedgerPage() {
             <input className="ui-control" type="number" min={1} max={12} value={month} onChange={(event) => setMonth(Number(event.target.value) || month)} />
           </label>
           <Button type="button" variant="primary" disabled={busy} onClick={() => create(false)}>대장 만들기</Button>
+          <label className="ops-label" style={{ marginBottom: 0 }}>
+            급여대장 파일
+            <input className="ui-control" type="file" accept=".xlsx" disabled={busy} onChange={(event) => { importFile(event.target.files?.[0]); event.target.value = ''; }} />
+          </label>
           <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={download}>엑셀 다운로드</Button>
           <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={() => create(true)}>계약에서 다시 만들기</Button>
         </div>
