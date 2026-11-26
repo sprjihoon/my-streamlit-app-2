@@ -150,13 +150,18 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     pdf = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "admin-tok"})
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
-    text = "".join(page.get_text() for page in fitz.open(stream=pdf.content, filetype="pdf"))
+    sealed = fitz.open(stream=pdf.content, filetype="pdf")
+    assert sealed.page_count == 3
+    text = "".join(page.get_text() for page in sealed)
     assert "근로계약서" in text.replace(" ", "")
     assert "홍길동" in text
     assert "포괄임금제" in text
     assert "1,966,730" in text
     assert "900101-1234567" in text
-    sealed = fitz.open(stream=pdf.content, filetype="pdf")
+    assert "임금지급방법" in text.replace(" ", "")
+    assert "연장근로동의서" in text.replace(" ", "")
+    assert "정보보호서약서" in text.replace(" ", "")
+    assert len(preview_pages) == 3
     assert any(page.get_images() for page in sealed)
 
     blocked = client.put(

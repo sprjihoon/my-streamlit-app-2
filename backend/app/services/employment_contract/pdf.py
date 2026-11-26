@@ -1,4 +1,4 @@
-"""날인된 근로계약서를 다시 출력할 수 있는 PDF로 만든다."""
+"""날인된 근로계약서를 샘플 양식과 같은 칸 배치로 만든다."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,25 +7,42 @@ import fitz
 
 _SEAL_PATH = Path(__file__).resolve().parents[2] / "assets" / "seal.png"
 
+_LEFT = 69.24
+_RIGHT = 539.4
+_LABEL = 120.18
+_BLACK = (0, 0, 0)
 
-def _won(value: int) -> str:
-    return f"{int(value):,}원"
+
+def _num(value) -> str:
+    return f"{int(value or 0):,}"
 
 
-def _date(value: str) -> str:
+def _pay_cell(value, dash_if_zero: bool = False) -> str:
+    amount = int(value or 0)
+    if dash_if_zero and amount == 0:
+        return "-"
+    return _num(amount)
+
+
+def _hours(value) -> str:
+    number = float(value or 0)
+    shown = str(int(number)) if number.is_integer() else f"{number:g}"
+    return f"{shown} 시간"
+
+
+def _date_parts(value: str) -> tuple[str, str, str]:
     text = (value or "").strip()
     if len(text) >= 10 and text[4] == "-" and text[7] == "-":
         year, month, day = text[:10].split("-")
-        return f"{year}년 {month}월 {day}일"
-    return text or "—"
+        return str(int(year)), str(int(month)), str(int(day))
+    return "", "", ""
 
 
-def _period(start: str, end: str) -> str:
-    if start and end:
-        return f"{_date(start)} 부터 {_date(end)} 까지"
-    if start:
-        return f"{_date(start)} 부터"
-    return "별도 정함"
+def _date(value: str) -> str:
+    year, month, day = _date_parts(value)
+    if not year:
+        return ""
+    return f"{year}년 {month}월 {day}일"
 
 
 def render_contract_pdf(
@@ -37,122 +54,11 @@ def render_contract_pdf(
     *,
     preview: bool = False,
 ) -> bytes:
-    pen = _Pen()
-    company_name = company.get("company_name") or "틸리언"
-    pen.center("근 로 계 약 서", 18)
-    pen.blank(6)
-    pen.line(f"(갑) 사용자    사업체명 {_text(company_name)}    대표자 {_text(company.get('representative'))}")
-    pen.line(f"주소 {_text(company.get('address'))}")
-    pen.blank(4)
-    pen.line("(을) 근로자 기재")
-    pen.line(f"성명  {_blank(fields.get('employee_name'))}")
-    pen.line(f"주민등록번호  {_blank(fields.get('resident_id'))}")
-    pen.line(f"주소  {_blank(fields.get('address'))}")
-    pen.line(f"연락처  {_blank(fields.get('phone'))}")
-    pen.line(
-        f"직무 {_text(fields.get('job_title'))}    직급 {_text(fields.get('rank_title'))}"
-        f"    입사일 {_date(fields.get('hire_date') or '')}"
-    )
-    pen.blank(6)
-    pen.paragraph(
-        '위 당사자는 다음과 같이 자유의사로 포괄임금제 근로계약을 체결하고, 신의성실의 원칙에 의하여 이행할 것을 약정하며, '
-        '"을"의 사규에 위배되는 행위로 인하여 발생하는 불이익에 대해서는 이의를 제기하지 않을 것을 서약합니다.'
-    )
-    pen.blank(4)
-    pen.line("가. 계약내용", 11)
-    pen.paragraph(f"① 계약기간  {_period(fields.get('contract_start') or '', fields.get('contract_end') or '')}")
-    pen.paragraph('② 근로장소  사업장 또는 (갑)이 지정하는 장소')
-    pen.paragraph(f"③ 업무  {_text(fields.get('job_title'))}    직급 {_text(fields.get('rank_title'))}")
-    pen.paragraph(
-        f"④ 근로시간  평일 {_text(fields.get('weekday_hours'), '09:00~18:00')}"
-        f"    휴게시간 {_text(fields.get('break_time'), '1시간 (12~13)')}"
-    )
-    pen.paragraph("업무상 필요한 경우 시업·종업시간과 휴게시간을 1일 소정근로시간 8시간 안에서 조정할 수 있다.")
-    pen.paragraph('갑은 을과 합의하여 1주 12시간 한도로 근로시간을 연장할 수 있다.')
-    pen.paragraph("소정근로시간 외 시간외 근무에 동의하며, 해당 수당은 연봉에 포함하여 산정·지급한다.")
-    pen.paragraph("근로기준법 제51조에서 정한 2주 단위 탄력적 근로시간제를 적용한다.")
-    pen.paragraph(f"⑤ 근로일  {_text(fields.get('work_days'), '주중 평균 5일 근무')}")
-    pen.paragraph("⑥ 휴일  일요일(1주 만근자에 한함), 근로자의 날, 관공서의 공휴일에 관한 규정에 따른 법정공휴일")
-    pen.paragraph("⑦ 휴가  연차휴가는 근로기준법 제60조에 따른다.")
-    pen.paragraph("⑧ 임금  실수령액 기준으로 정한 포괄임금이며, 월 급여 구성은 아래와 같다.")
-    pen.blank(2)
-    pen.line(
-        f"총연봉 {_won(calc['annual'])}    월급여 {_won(calc['gross'])}"
-        f"    공제합계 {_won(calc['deduction_total'])}    실수령액 {_won(calc['net'])}"
-    )
-    pen.line(f"통상시급 {_won(calc['hourly'])}")
-    pen.line(f"기본급 {_won(calc['base_pay'])}  ({_hours(calc['base_hours'])})")
-    pen.line(f"연장수당 {_won(calc['overtime_pay'])}  ({_hours(calc['overtime_hours'])})")
-    pen.line(f"휴일수당 {_won(calc['holiday_pay'])}  ({_hours(calc['holiday_hours'])})")
-    pen.line(f"야간수당 {_won(calc['night_pay'])}  ({_hours(calc['night_hours'])})")
-    pen.line(f"식대 {_won(calc['meal_allowance'])}    차량유지비 {_won(calc['vehicle_allowance'])}    직책수당 {_won(calc['position_allowance'])}")
-    pen.paragraph(
-        "공제  국민연금 {pension}  건강보험 {health}  장기요양 {care}  소득세 {income_tax}  주민세 {local_tax}  고용보험 {employment}".format(
-            pension=_won(calc["pension"]),
-            health=_won(calc["health"]),
-            care=_won(calc["care"]),
-            income_tax=_won(calc["income_tax"]),
-            local_tax=_won(calc["local_tax"]),
-            employment=_won(calc["employment"]),
-        )
-    )
-    pen.paragraph("기본급은 주휴시간을 포함한 월 소정근로시간에 대한 임금으로 한다.")
-    pen.paragraph("월 통상 연장·야간·휴일수당은 이 계약으로 고정되어 발생하는 시간에 대한 임금이며, 이를 넘는 시간은 따로 계산하여 지급한다.")
-    pen.paragraph("연차휴가를 사용하면 수당을 지급하지 않으며, 연차일수와 수당은 계약일부터 1년 뒤에 정산한다.")
-    pay_day = int(fields.get("pay_day") or 15)
-    pen.paragraph(f"⑨ 임금지급  매월 {pay_day}일(전월 1일부터 말일까지) 을에게 직접 지급한다.")
-    pen.blank(4)
-    pen.line("나. 계약의 해지", 11)
-    pen.paragraph("업무수행을 충분히 이행하지 못한 것으로 인정되거나 부정행위를 한 경우")
-    pen.paragraph("고의 또는 과실로 사업장에 재산상 손실을 입히거나 명예를 실추시킨 경우")
-    pen.paragraph("취업규칙을 위반한 경우")
-    pen.blank(4)
-    pen.line("다. 특약사항", 11)
-    pen.paragraph("본인 부주의로 발생한 사고는 본인이 민사상·형사상 책임을 지고 배상한다.")
-    pen.paragraph("사업장에서 알게 된 급여를 포함한 기밀과 개인정보를 외부에 유출하거나 타인에게 제공할 수 없으며, 위반하면 손해배상 책임을 진다.")
-    pen.paragraph("중도퇴직은 퇴직예정일 30일 전에 알리고 사직서를 제출하며, 갑의 승인 후 퇴직한다. 그렇지 않으면 무단결근으로 본다.")
-    pen.paragraph("입사 후 6개월 안에 퇴사하면 지급한 물품을 반환하고, 분실 또는 훼손이 있으면 갑에게 배상한다.")
-    pen.paragraph("본인 임금 내역을 동료를 포함한 타인에게 누설하지 않으며, 위반하면 취업규칙과 사규에 따른 징계에 동의한다.")
-    pen.paragraph("갑의 고객 연락처를 영업 등 개인 목적으로 사용할 수 없으며, 위반하면 법령상 처벌과 손해배상을 감수한다.")
-    pen.paragraph("본인 개인정보를 급여 및 4대보험 업무 관련자에게 제공하는 데 동의한다.")
-    pen.blank(4)
-    pen.paragraph("본 계약서에 적지 않은 사항은 근로기준법, 취업규칙, 사업장 관례에 따른다.")
-    pen.paragraph("근로자 본인은 취업규칙을 충분히 숙지하였음을 확인한다.")
-    pen.blank(8)
-    pen.line(f"날인일 {_date(completed_at)}")
-    pen.blank(4)
-    pen.line_with_seal(
-        f"(갑) {company_name}  {_text(company.get('representative'))}  (인)",
-        _seal_bytes(),
-    )
-    pen.line(f"(을) {_text(fields.get('employee_name'))}  (서명 또는 인)")
-    pen.line("본 계약서의 사본을 받았음을 확인합니다. (서명 또는 인)")
-    pen.blank(10)
-    pen.line("야간, 휴일 및 연장근로 동의서", 12)
-    pen.blank(3)
-    pen.paragraph("본인은 근로기준법에서 정한 야간, 휴일 및 연장(시간외)근로에 동의합니다.")
-    pen.blank(4)
-    pen.line(f"주민등록번호 {_text(fields.get('resident_id'))}")
-    pen.line(f"성명 {_text(fields.get('employee_name'))}  (인)")
-    pen.blank(4)
-    pen.line(f"{company_name}  대표 귀하")
-    pen.blank(8)
-    if preview:
-        pen.line("미리보기    이 장은 출력 확인용이며 날인 보관본이 아닙니다.", 8)
-    else:
-        pen.line(f"문서번호 {doc_id}    이 문서는 날인 시점의 계약 내용입니다.", 8)
-
-    total = pen.doc.page_count
-    for index, page in enumerate(pen.doc, start=1):
-        page.insert_font(fontname="korea", fontbuffer=pen.font.buffer)
-        page.insert_text(
-            (500, 820),
-            f"{index}/{total}",
-            fontsize=8,
-            fontname="korea",
-            color=(0.35, 0.35, 0.35),
-        )
-    return pen.doc.tobytes()
+    form = _Form(doc_id)
+    form.draw_contract(company, fields, calc, preview=preview)
+    form.draw_consent(company, fields, completed_at)
+    form.draw_pledge(company, fields, completed_at)
+    return form.doc.tobytes()
 
 
 def render_page_pngs(pdf: bytes, zoom: float = 2.0) -> list[bytes]:
@@ -168,84 +74,477 @@ def _seal_bytes() -> bytes:
     return _SEAL_PATH.read_bytes()
 
 
-def _blank(value) -> str:
-    text = str(value or "").strip()
-    return text or "＿" * 24
+def _clean(value, fallback: str = "") -> str:
+    return str(value or "").strip() or fallback
 
 
-def _text(value, fallback: str = "—") -> str:
-    text = str(value or "").strip()
-    return text or fallback
+def _birth(resident_id: str) -> str:
+    digits = "".join(ch for ch in str(resident_id or "") if ch.isdigit())
+    if len(digits) < 7:
+        return ""
+    year = int(digits[0:2])
+    month = int(digits[2:4])
+    day = int(digits[4:6])
+    century = {
+        "1": 1900, "2": 1900, "5": 1900, "6": 1900,
+        "3": 2000, "4": 2000, "7": 2000, "8": 2000,
+        "9": 1800, "0": 1800,
+    }.get(digits[6])
+    if century is None or not (1 <= month <= 12 and 1 <= day <= 31):
+        return ""
+    return f"{century + year}년 {month}월 {day}일"
 
 
-def _hours(value) -> str:
-    number = float(value or 0)
-    if number.is_integer():
-        return f"{int(number)}시간"
-    return f"{number:g}시간"
-
-
-class _Pen:
-    def __init__(self):
+class _Form:
+    def __init__(self, doc_id: int):
         self.doc = fitz.open()
+        self.doc.set_metadata({"title": f"근로계약서 {doc_id}" if doc_id else "근로계약서"})
         self.font = fitz.Font("korea")
-        self.page = None
-        self.y = 0.0
-        self.new_page()
-
-    def new_page(self) -> None:
         self.page = self.doc.new_page(width=595, height=842)
+        self._use_font()
+
+    def _use_font(self) -> None:
         self.page.insert_font(fontname="korea", fontbuffer=self.font.buffer)
-        self.y = 46
+
+    def _line(self, x0: float, y0: float, x1: float, y1: float, width: float = 0.55) -> None:
+        self.page.draw_line(fitz.Point(x0, y0), fitz.Point(x1, y1), color=_BLACK, width=width)
+
+    def _box(self, x0: float, y0: float, x1: float, y1: float, width: float = 1.15) -> None:
+        self.page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=_BLACK, width=width)
 
     def _width(self, text: str, size: float) -> float:
         return fitz.get_text_length(text, fontname="korea", fontsize=size)
 
-    def _wrap(self, text: str, size: float) -> list[str]:
-        lines: list[str] = []
-        for paragraph in text.split("\n"):
+    def _put(
+        self,
+        rect: fitz.Rect,
+        text: str,
+        size: float = 7,
+        align: int = fitz.TEXT_ALIGN_CENTER,
+        min_size: float = 4.6,
+        top: bool = False,
+    ) -> None:
+        value = str(text or "").strip()
+        if not value:
+            return
+        pad = 1.5
+        inner = max(rect.width - pad * 2, 8)
+        if top or "\n" in value:
+            box = fitz.Rect(rect.x0 + pad, rect.y0 + 1.0, rect.x1 - pad, rect.y1 - 0.4)
+            self.page.insert_textbox(box, value, fontsize=size, fontname="korea", align=align, color=_BLACK)
+            return
+        use = size
+        while use > min_size and self._width(value, use) > inner:
+            use -= 0.2
+        text_w = self._width(value, use)
+        if align == fitz.TEXT_ALIGN_RIGHT:
+            x = rect.x1 - pad - text_w
+        elif align == fitz.TEXT_ALIGN_LEFT:
+            x = rect.x0 + pad
+        else:
+            x = rect.x0 + (rect.width - text_w) / 2
+        baseline = min(rect.y0 + (rect.height + use * 0.7) / 2, rect.y1 - 1.1)
+        self.page.insert_text((x, baseline), value, fontsize=use, fontname="korea", color=_BLACK)
+
+    def _write(self, x: float, y: float, text: str, size: float = 7) -> None:
+        value = str(text or "")
+        if not value:
+            return
+        self.page.insert_text((x, y), value, fontsize=size, fontname="korea", color=_BLACK)
+
+    def _stack(self, rect: fitz.Rect, lines: list[str], size: float) -> None:
+        gap = size + 1.5
+        baseline = rect.y0 + (rect.height - (gap * (len(lines) - 1) + size)) / 2 + size * 0.78
+        for line in lines:
+            width = self._width(line, size)
+            x = rect.x0 + max((rect.width - width) / 2, 0.6)
+            self.page.insert_text((x, baseline), line, fontsize=size, fontname="korea", color=_BLACK)
+            baseline += gap
+
+    def _paragraphs(self, x: float, y: float, width: float, lines: list[str], size: float, gap: float, fit: bool = False) -> None:
+        if fit:
+            while size > 5.2 and any(self._width(line, size) > width for line in lines):
+                size -= 0.15
+        cursor = y
+        for line in lines:
             current = ""
-            for ch in paragraph:
+            for ch in line:
                 trial = current + ch
-                if current and self._width(trial, size) > 490:
-                    lines.append(current)
+                if current and self._width(trial, size) > width:
+                    self._write(x, cursor, current, size)
+                    cursor += gap
                     current = ch
                 else:
                     current = trial
-            lines.append(current)
-        return lines or [""]
+            self._write(x, cursor, current, size)
+            cursor += gap
 
-    def _draw(self, text: str, size: float, gap: float, align_center: bool = False) -> None:
-        for line in self._wrap(text, size):
-            if self.y > 790:
-                self.new_page()
-            if align_center and line:
-                width = self._width(line, size)
-                x = (595 - width) / 2
+    def draw_contract(self, company: dict, fields: dict, calc: dict, *, preview: bool) -> None:
+        self._write_title()
+        self._draw_grid()
+        self._fill_header(company, fields)
+        self._fill_terms(fields)
+        self._fill_pay(fields, calc)
+        self._fill_closing(company, fields, preview=preview)
+
+    def _write_title(self) -> None:
+        self._put(fitz.Rect(140, 16, 455, 46), "근 로 계 약 서", 12.5)
+
+    def _draw_grid(self) -> None:
+        self._box(_LEFT, 49.44, _RIGHT, 794.28)
+        thin = (
+            (61.02, _LABEL, _RIGHT),
+            (72.54, _LEFT, _RIGHT),
+            (84.06, _LABEL, _RIGHT),
+            (95.58, _LEFT, _RIGHT),
+            (137.82, _LEFT, _RIGHT),
+            (149.34, _LABEL, _RIGHT),
+            (160.86, _LEFT, _RIGHT),
+            (172.38, _LEFT, _RIGHT),
+            (183.90, _LEFT, _RIGHT),
+            (207.24, _LABEL, _RIGHT),
+            (218.46, _LABEL, _RIGHT),
+            (291.18, _LEFT, _RIGHT),
+            (302.70, _LEFT, _RIGHT),
+            (326.82, _LEFT, _RIGHT),
+            (350.82, _LEFT, _RIGHT),
+            (374.22, _LABEL, _RIGHT),
+            (375.42, _LABEL, _RIGHT),
+            (425.94, _LABEL, _RIGHT),
+            (444.78, _LABEL, _RIGHT),
+        )
+        for y, x0, x1 in thin:
+            self._line(x0, y, x1, y, 0.55)
+        self._line(171.06, 195.42, 374.58, 195.42, 0.55)
+        self._line(423.42, 195.42, _RIGHT, 195.42, 0.55)
+        self._line(171.06, 456.30, _RIGHT, 456.30, 0.55)
+        for y in (119.04, 362.76, 389.40, 413.88, 468.24, 530.28, 550.80, 597.96, 713.64):
+            self._line(_LEFT if y not in (362.76, 389.40, 413.88, 468.24) else _LABEL, y, _RIGHT, y, 1.15)
+
+        self._line(_LABEL, 49.44, _LABEL, 95.58, 0.6)
+        self._line(_LABEL, 137.82, _LABEL, 550.80, 0.6)
+        self._line(221.94, 49.44, 221.94, 95.58, 0.55)
+        self._line(374.58, 49.44, 374.58, 61.02, 0.55)
+        self._line(473.34, 49.44, 473.34, 61.02, 0.55)
+        self._line(323.70, 72.54, 323.70, 84.06, 0.55)
+        self._line(423.42, 72.54, 423.42, 84.06, 0.55)
+        self._line(374.58, 160.86, 374.58, 207.24, 0.55)
+        self._line(473.34, 160.86, 473.34, 183.90, 0.55)
+        self._line(171.06, 183.90, 171.06, 207.24, 0.55)
+        self._line(423.42, 183.90, 423.42, 207.24, 0.55)
+        for x in (171.06, 272.82, 374.58, 473.34):
+            self._line(x, 362.76, x, 389.40, 0.55)
+        for x in (171.06, 221.94, 272.82, 323.70, 374.58, 423.42, 473.34):
+            self._line(x, 425.94, x, 468.24, 0.55)
+
+    def _fill_header(self, company: dict, fields: dict) -> None:
+        self._put(fitz.Rect(_LEFT, 49.44, _LABEL, 72.54), "(갑)사용자", 7)
+        self._put(fitz.Rect(_LABEL, 49.44, 221.94, 61.02), "사업체명", 7)
+        self._put(fitz.Rect(221.94, 49.44, 374.58, 61.02), _clean(company.get("company_name"), "틸리언"), 7)
+        self._put(fitz.Rect(374.58, 49.44, 473.34, 61.02), "대표자", 7)
+        self._put(fitz.Rect(473.34, 49.44, _RIGHT, 61.02), _clean(company.get("representative")), 7)
+        self._put(fitz.Rect(_LABEL, 61.02, 221.94, 72.54), "주소", 7)
+        self._put(fitz.Rect(221.94, 61.02, _RIGHT, 72.54), _clean(company.get("address")), 7)
+        self._put(fitz.Rect(_LEFT, 72.54, _LABEL, 95.58), "(을)근로자", 7)
+        self._put(fitz.Rect(_LABEL, 72.54, 221.94, 84.06), "성명", 7)
+        self._put(fitz.Rect(221.94, 72.54, 323.70, 84.06), _clean(fields.get("employee_name")), 7)
+        self._put(fitz.Rect(323.70, 72.54, 423.42, 84.06), "주민등록번호", 7)
+        self._put(fitz.Rect(423.42, 72.54, _RIGHT, 84.06), _clean(fields.get("resident_id")), 6.4)
+        self._put(fitz.Rect(_LABEL, 84.06, 221.94, 95.58), "주소", 7)
+        self._put(fitz.Rect(221.94, 84.06, _RIGHT, 95.58), _clean(fields.get("address")), 7)
+        self._put(
+            fitz.Rect(_LEFT + 2, 96.2, _RIGHT - 2, 118.2),
+            '위 당사자는 다음과 같이 자유의사로 포괄임금제 근로계약을 체결하고, 신의성실의 원칙에 의하여 이행할 것을 약정하며, '
+            '"을"의 사규에 위배되는 행위로 인하여 발생하는 불이익에 대해서는 이의를 제기하지 않을 것을 서약 합니다.',
+            6.2,
+            fitz.TEXT_ALIGN_LEFT,
+            top=True,
+        )
+
+    def _fill_terms(self, fields: dict) -> None:
+        self._put(fitz.Rect(_LEFT, 119.04, _RIGHT, 137.82), '가. "을"의 계약내용(조건)', 7, fitz.TEXT_ALIGN_LEFT)
+        self._put(fitz.Rect(_LEFT, 137.82, _LABEL, 160.86), "① 계약기간", 7)
+        self._period(fields)
+        self._put(fitz.Rect(_LEFT, 160.86, _LABEL, 172.38), "② 근로장소", 7)
+        self._put(fitz.Rect(_LABEL, 160.86, 374.58, 172.38), "사업장 또는 (갑)이 지정하는 장소", 7)
+        self._put(fitz.Rect(374.58, 160.86, 473.34, 172.38), "급여지급형태", 6.2)
+        self._put(fitz.Rect(473.34, 160.86, _RIGHT, 172.38), "연봉제 / 월급제", 6)
+        self._put(fitz.Rect(_LEFT, 172.38, _LABEL, 183.90), "③ 업무/직종", 6.4)
+        self._put(fitz.Rect(_LABEL, 172.38, 374.58, 183.90), _clean(fields.get("job_title")), 7)
+        self._put(fitz.Rect(374.58, 172.38, 473.34, 183.90), "직급", 7)
+        self._put(fitz.Rect(473.34, 172.38, _RIGHT, 183.90), _clean(fields.get("rank_title")), 7)
+        self._put(fitz.Rect(_LABEL, 183.90, 171.06, 207.24), "평일", 7)
+        self._put(
+            fitz.Rect(171.06, 183.90, 374.58, 195.42),
+            _clean(fields.get("weekday_hours"), "09:00~18:00"),
+            7,
+        )
+        self._put(fitz.Rect(374.58, 183.90, 423.42, 207.24), "휴게시간", 6.2)
+        self._put(
+            fitz.Rect(423.42, 183.90, _RIGHT, 195.42),
+            _clean(fields.get("break_time"), "1시간 (12~13)"),
+            6.2,
+        )
+        self._put(fitz.Rect(_LEFT, 210, _LABEL, 280), "④ 근로시간", 7)
+        self._paragraphs(
+            124,
+            228,
+            408,
+            [
+                '▷ 업무상 필요한 경우 "갑"과 "을"이 협의하여 시업 종업시간, 휴게시간을 1일 소정근로시간 8시간 내에서 조정할 수 있다.',
+                '▷ "갑"은"을"과 합의하여 1주 12시간 근로시간을 연장할 수 있다.',
+                '▷ "갑"과 "을"은 소정근로시간외에 시간외 근무에 동의하며 해당시간의 시간외 수당을 연봉에 포함하여 산정 지급한다.',
+                "▷ 근로기준법 제 51조에서 정하고 있는 2주단위 탄력적 근로시간제를 적용하기로 한다.",
+            ],
+            6.5,
+            12.2,
+            fit=True,
+        )
+        self._put(fitz.Rect(_LEFT, 291.18, _LABEL, 302.70), "⑤ 근 로 일", 6.5)
+        self._put(
+            fitz.Rect(_LABEL, 291.18, _RIGHT, 302.70),
+            _clean(fields.get("work_days"), "주중 평균 5일 근무"),
+            7,
+            fitz.TEXT_ALIGN_LEFT,
+        )
+        self._put(fitz.Rect(_LEFT, 302.70, _LABEL, 326.82), "⑥ 휴    일", 7)
+        self._put(
+            fitz.Rect(_LABEL, 302.70, _RIGHT, 326.82),
+            "일요일(1주 만근자에 한함), 근로자의 날, 관공서 공휴일에 관한 규정에 따른 법정공휴일",
+            6.6,
+            fitz.TEXT_ALIGN_LEFT,
+        )
+        self._put(fitz.Rect(_LEFT, 326.82, _LABEL, 350.82), "⑦ 휴    가", 7)
+        self._put(
+            fitz.Rect(_LABEL, 326.82, _RIGHT, 350.82),
+            "연차휴가는 「근로기준법」 제60조에 의한다",
+            6.4,
+            fitz.TEXT_ALIGN_LEFT,
+        )
+
+    def _period(self, fields: dict) -> None:
+        start = _date(fields.get("contract_start") or "")
+        end = _date(fields.get("contract_end") or "")
+        self._put(fitz.Rect(230, 137.82, 276, 149.34), "부터", 7)
+        self._put(fitz.Rect(400, 137.82, 446, 149.34), "까지", 7)
+        if start:
+            self._put(fitz.Rect(_LABEL, 137.82, 230, 149.34), start, 6.4, fitz.TEXT_ALIGN_RIGHT)
+        if end:
+            self._put(fitz.Rect(300, 137.82, 400, 149.34), end, 6.4, fitz.TEXT_ALIGN_RIGHT)
+
+    def _fill_pay(self, fields: dict, calc: dict) -> None:
+        self._put(fitz.Rect(_LABEL, 350.82, _RIGHT, 362.76), "[년간] (연봉제근로자에 한함)", 7, fitz.TEXT_ALIGN_LEFT)
+        headers = ("구분", "총연봉액", "월급여액", "공제합계", "실수령액")
+        annual_x = (_LABEL, 171.06, 272.82, 374.58, 473.34, _RIGHT)
+        for index, label in enumerate(headers):
+            self._put(fitz.Rect(annual_x[index], 362.76, annual_x[index + 1], 374.22), label, 7)
+        values = (
+            "산정금액",
+            _num(calc.get("annual")),
+            _num(calc.get("gross")),
+            _num(calc.get("deduction_total")),
+            _num(calc.get("net")),
+        )
+        for index, label in enumerate(values):
+            self._put(fitz.Rect(annual_x[index], 375.42, annual_x[index + 1], 389.40), label, 7)
+        self._put(
+            fitz.Rect(_LABEL, 389.40, _RIGHT, 404),
+            "(실수령액 기준 계약임.)",
+            7,
+            fitz.TEXT_ALIGN_LEFT,
+        )
+        self._put(fitz.Rect(_LABEL, 413.88, 250, 425.94), "[월급여액 세부내역]", 7, fitz.TEXT_ALIGN_LEFT)
+        gross = _num(calc.get("gross"))
+        self._put(fitz.Rect(250, 413.88, 430, 425.94), f"월 급여액   {gross} 원", 7)
+        self._line(336, 423.2, 392, 423.2, 0.4)
+
+        detail_x = (_LABEL, 171.06, 221.94, 272.82, 323.70, 374.58, 423.42, 473.34, _RIGHT)
+        detail_headers = (
+            "통상시급(원)",
+            "기본급",
+            ("월통상", "연장수당"),
+            ("월통상", "휴일수당"),
+            ("월통상", "야간수당"),
+            "식대",
+            "차량유지비",
+            "직책수당",
+        )
+        for index, label in enumerate(detail_headers):
+            cell = fitz.Rect(detail_x[index], 425.94, detail_x[index + 1], 444.78)
+            if isinstance(label, tuple):
+                self._stack(cell, list(label), 5.6)
             else:
-                x = 48
-            self.page.insert_text((x, self.y), line, fontsize=size, fontname="korea", color=(0, 0, 0))
-            self.y += size + gap
+                self._put(cell, label, 6.0)
+        self._put(fitz.Rect(_LABEL, 444.78, 171.06, 468.24), _num(calc.get("hourly")), 7)
+        hour_values = (
+            _hours(calc.get("base_hours")),
+            _hours(calc.get("overtime_hours")),
+            _hours(calc.get("holiday_hours")),
+            _hours(calc.get("night_hours")),
+        )
+        for index, label in enumerate(hour_values):
+            self._put(fitz.Rect(detail_x[index + 1], 444.78, detail_x[index + 2], 456.30), label, 6.4)
+        amounts = (
+            _pay_cell(calc.get("base_pay")),
+            _pay_cell(calc.get("overtime_pay"), True),
+            _pay_cell(calc.get("holiday_pay"), True),
+            _pay_cell(calc.get("night_pay"), True),
+            _pay_cell(calc.get("meal_allowance"), True),
+            _pay_cell(calc.get("vehicle_allowance")),
+            _pay_cell(calc.get("position_allowance")),
+        )
+        for index, label in enumerate(amounts):
+            self._put(fitz.Rect(detail_x[index + 1], 456.30, detail_x[index + 2], 468.24), label, 6.5)
+        self._stack(fitz.Rect(_LEFT, 418, _LABEL, 462), ["⑧임금구성", "항목 및", "계산방법"], 5.6)
+        self._paragraphs(
+            124,
+            480,
+            408,
+            [
+                "기본급은 주휴시간을 포함하여 월소정 근로시간에 대한 임금으로 한다.",
+                "월통상 연장, 야간, 휴일수당은 매월 근로계약에 의해 고정적으로 발생하는 연장·야간·휴일근로시간에 대한 임금으로 산정하며 이에 초과분에 대해서는 별도 산정하여 추가적으로 지급하기로 한다.",
+                "연차휴가를 사용하는 경우 수당을 지급치 아니하며, 연차휴가일수 및 수당은 계약일로부터 1년 후 정산한다.",
+            ],
+            6.2,
+            10.4,
+        )
+        pay_day = int(fields.get("pay_day") or 15)
+        self._put(fitz.Rect(_LEFT, 530.28, _LABEL, 550.80), "⑨ 임금지급방법", 5.2)
+        self._put(
+            fitz.Rect(_LABEL, 530.28, _RIGHT, 550.80),
+            f'매월 {pay_day}일 (전 월 초일부터 말일까지 산정) "을"에게 직접 지급(현금 또는 "을"명의의 예금계좌)한다.',
+            6.5,
+            fitz.TEXT_ALIGN_LEFT,
+        )
 
-    def center(self, text: str, size: float) -> None:
-        self._draw(text, size, 6, align_center=True)
+    def _fill_closing(self, company: dict, fields: dict, *, preview: bool) -> None:
+        self._write(78, 562, "나. 계약의 해지", 7)
+        self._paragraphs(
+            124,
+            574,
+            408,
+            [
+                "▷ 본인이 업무수행을 충분히 이행하지 못한 것으로 인정될 경우나 부정행위를 하였을 경우",
+                "▷ 본인의 고의 및 과실로 사업장에 재산상 손실, 명예를 실추시켰을 경우",
+                "▷ 취업규칙을 위반하는 행위를 하였을 경우",
+            ],
+            6.2,
+            10.4,
+        )
+        self._write(78, 608, "다. 특약사항", 7)
+        self._paragraphs(
+            118,
+            620,
+            414,
+            [
+                "▷ 본인의 부주의로 발생된 사고는 본인이 민·형사상 책임을 지며 배상하여야 한다.",
+                "▷사업장 내에서 알게된 급여를 포함한 모든 기밀 및 개인 정보와 관련하여 외부유출 또는 타인에게 공개, 제공할 수 없고 사업장내에서 알게된 모든 사항에 대해서 외부로 유출할 수 없고, 이를 위반하였을 때 손해배상책임을 진다.",
+                '▷ 퇴직절차 : 계약일로부터 중도퇴직 시 퇴직예정일로부터 30일전에 사전통지 하고 사직서를 제출하여야 하며, "갑"의 승인 후 퇴직처리하며 그렇지 아니한 경우에는 무단결근으로 간주한다.',
+                "▷을은 입사후 6개월 이내 퇴사할 경우 제공한 물품을 반납해야 하고, 분실 또는 손실이 있을 경우 갑에게 배상하기로 한다.",
+                "▷을은 본인의 임금내역을 동료를 포함한 타인에 누설치 않기로 하고, 만일 이를 위반한 경우 취업규칙이내 사내내규에 따라 징계처분을 받는데 동의한다.",
+                "▷을은 갑의 고객의 연락처 등을 영업 등 개인의 목적으로 사용할 수 없으며 이를 위반한 경우 법에서 정하고 있는 처벌 및 손해배상 등을 감수한다.",
+                "▷을은 본인의 개인정보를 급여 및 4대보험업무 관련자에게 제공하는 데 동의한다. (서명)",
+            ],
+            5.3,
+            8.8,
+        )
+        self._put(
+            fitz.Rect(_LEFT, 716, _RIGHT, 748),
+            "본 계약서에 명시되지 아니한 사항은 근로기준법 ,취업규칙, 사업장관례 의하며,\n"
+            "근로자 본인은 취업규칙을 충분히 숙지하였으므로 이에 확인 함",
+            7,
+        )
+        representative = _clean(company.get("representative"))
+        employee = _clean(fields.get("employee_name"))
+        self._put(fitz.Rect(_LEFT, 752, 300, 776), f"(갑) 사용자   {representative}   (서명또는 인)", 7, fitz.TEXT_ALIGN_LEFT)
+        self._put(fitz.Rect(300, 752, _RIGHT, 776), f"/(을) 근로자   {employee}   (서명 또는 인)", 7)
+        if not preview:
+            seal = _seal_bytes()
+            self.page.insert_image(fitz.Rect(206, 734, 252, 776), stream=seal, keep_proportion=True)
+        self._put(fitz.Rect(_LEFT, 774, _RIGHT, 792), "본 계약서의 사본을 받았음을 확인합니다. (서명 또는 인)", 7)
 
-    def line(self, text: str, size: float = 9.5) -> None:
-        self._draw(text, size, 4)
+    def draw_consent(self, company: dict, fields: dict, completed_at: str) -> None:
+        self.page = self.doc.new_page(width=595, height=842)
+        self._use_font()
+        self._put(fitz.Rect(70, 28, 525, 68), "야간, 휴일 및 연장근로 동의서", 16)
+        resident = _clean(fields.get("resident_id"))
+        employee = _clean(fields.get("employee_name"))
+        self._write(122, 142, f"주민번호:  {resident}", 7.2)
+        self._write(122, 164, f"성   명:  {employee}", 7.6)
+        self._write(71, 228, "본인은 근로기준법의 규정에 의한 야간, 휴일 및 연장(시간외)근로에", 12.5)
+        self._write(71, 248, "동의합니다.", 12.5)
+        year, month, day = _date_parts(completed_at)
+        if year:
+            self._put(fitz.Rect(150, 372, 445, 408), f"{year}  년     {month}  월     {day}  일", 11)
+        else:
+            self._put(fitz.Rect(150, 372, 445, 408), "년          월          일", 11)
+        self._put(fitz.Rect(150, 424, 445, 460), f"위본인      {employee}      (인)", 11)
+        company_name = _clean(company.get("company_name"), "틸리언")
+        self._put(fitz.Rect(150, 500, 445, 540), f"{company_name}          대표귀하", 11)
 
-    def line_with_seal(self, text: str, seal: bytes) -> None:
-        if self.y > 720:
-            self.new_page()
-        baseline = self.y
-        self.line(text)
-        text_width = min(self._width(text, 9.5), 340)
-        x = 56 + text_width
-        rect = fitz.Rect(x, baseline - 58, x + 78, baseline + 20)
-        self.page.insert_image(rect, stream=seal, keep_proportion=True)
-        self.y = max(self.y, baseline + 24)
+    def draw_pledge(self, company: dict, fields: dict, completed_at: str) -> None:
+        """정보보호 서약서. 근로계약서와 같은 PDF에 이어서 보관한다."""
+        self.page = self.doc.new_page(width=595, height=842)
+        self._use_font()
+        company_name = _clean(company.get("company_name"), "틸리언")
+        self._put(fitz.Rect(140, 48, 455, 82), "정보보호 서약서", 18)
+        self._line(231, 84.6, 364, 84.6, 1.0)
 
-    def paragraph(self, text: str) -> None:
-        self._draw(text, 9, 3.5)
+        left, right = 79.44, 514.68
+        row_a, row_b, row_c, bottom = 106.32, 123.0, 139.68, 778.2
+        col_b, col_c, col_d = 186.48, 293.52, 406.8
+        self._box(left, row_a, right, bottom, 0.9)
+        self._line(left, row_b, right, row_b, 0.7)
+        self._line(left, row_c, right, row_c, 0.7)
+        for x in (col_b, col_c, col_d):
+            self._line(x, row_a, x, row_c, 0.7)
 
-    def blank(self, height: float) -> None:
-        self.y += height
+        self._put(fitz.Rect(left, row_a, col_b, row_b), "성명", 11)
+        self._put(fitz.Rect(col_b, row_a, col_c, row_b), _clean(fields.get("employee_name")), 10)
+        self._put(fitz.Rect(col_c, row_a, col_d, row_b), "연락처", 11)
+        self._put(fitz.Rect(col_d, row_a, right, row_b), _clean(fields.get("phone")), 9)
+        self._put(fitz.Rect(left, row_b, col_b, row_c), "생년월일", 11)
+        self._put(fitz.Rect(col_b, row_b, col_c, row_c), _birth(fields.get("resident_id")), 8)
+        self._put(fitz.Rect(col_c, row_b, col_d, row_c), "직급", 11)
+        self._put(fitz.Rect(col_d, row_b, right, row_c), _clean(fields.get("rank_title")), 10)
+
+        lines = [
+            (110.5, f"본인은 {company_name} (이하, '회사'라 함)을 퇴직함에 있어 아래 사항을 충분히 숙지"),
+            (110.5, "하고, 성실히 준수할 것을 서약합니다."),
+            (94.1, "1. 회사에 재직한 기간 중 독자적으로 또는 다른 사람과 함께 취득한 기술정보"),
+            (110.5, "(발명, 특허, 개발, 생산 등 제반 기술) 및 경영정보 (재무, 관리, 기획, 영업,"),
+            (110.5, "인사 등 제반정보) 등 모든 영업비밀은 전적으로 회사의 소유이며, 회사가"),
+            (110.5, "사용하거나 처분할 권리가 있음을 인정합니다."),
+            (94.1, "2. 어떠한 장소에 어떠한 방법으로도 회사의 영업비밀 및 자산을 보유하거나"),
+            (110.5, "저장되고 있지 않음을 확인합니다."),
+            (94.1, "3. 재직기간 중 취득한 회사의 모든 영업비밀 (경영 및 기술정보)은 퇴사 후에도"),
+            (110.5, "회사의 업무 인수, 인계와 관련 없는 어떠한 회사내외 제3자에게도 누설하지"),
+            (110.5, "않겠습니다."),
+            (94.1, "4. 퇴직 후 3년간 회사의 영업비밀을 이용하여 창업하거나 경쟁관계에 있는"),
+            (110.5, "회사 기타 제3자를 위하여 영업비밀을 누설하거나 사용하지 않겠습니다."),
+            (94.1, "5. 회사의 영업비밀 보호를 위한 노력에 적극 협조할 뿐 아니라, 그에 따른"),
+            (110.5, "법적 도덕적 의무를 성실히 이행하겠습니다."),
+            (110.5, "본인은 위의 사항을 충분히 숙지하여 이를 성실히 준수할 것이며 만일 이를"),
+            (110.5, "위반하였을 경우 부정경쟁방지 및 영업비밀에 관한 법률 등 관련 법령에 따라"),
+            (110.5, "민 · 형사상의 책임 뿐만 아니라 제반 손해 배상의 책임 등 불이익을 감수할"),
+            (110.5, "것이며, 회사에 끼친 손해에 대해 지체없이 변상, 복구할 것을 서약합니다."),
+        ]
+        tops = (
+            158.3, 175.0,
+            208.4, 225.0, 241.7, 258.4,
+            291.8, 308.4,
+            341.8, 358.5, 375.2,
+            408.5, 425.2,
+            458.6, 475.2,
+            525.3, 542.0, 558.6, 575.3,
+        )
+        for (x, text), top in zip(lines, tops):
+            self._write(x, top + 9.2, text, 10.5)
+        year, month, day = _date_parts(completed_at)
+        if year:
+            self._put(fitz.Rect(220, 612, 500, 648), f"{year}  년     {month}  월     {day}  일", 11)
+        else:
+            self._put(fitz.Rect(220, 612, 500, 648), "년          월          일", 11)
+        employee = _clean(fields.get("employee_name"))
+        self._put(fitz.Rect(180, 662, 520, 698), f"서약자 :    {employee}      (인)", 11)
+        self._put(fitz.Rect(left, 712, right, 752), company_name, 14)
