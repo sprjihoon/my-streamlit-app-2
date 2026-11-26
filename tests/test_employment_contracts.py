@@ -203,6 +203,12 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     assert "임금지급방법" in text.replace(" ", "")
     assert "연장근로동의서" in text.replace(" ", "")
     assert "정보보호서약서" in text.replace(" ", "")
+    consent = sealed[1].get_text()
+    pledge = sealed[2].get_text()
+    assert "2026" in consent and "10  월" in consent and "1  일" in consent
+    assert "11  월" not in consent and "26  일" not in consent
+    assert "2026년" in pledge and "10월" in pledge and "1일" in pledge
+    assert "11월" not in pledge and "26일" not in pledge
     assert len(preview_pages) == 3
     assert any(page.get_images() for page in sealed)
 

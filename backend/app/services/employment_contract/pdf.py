@@ -56,8 +56,9 @@ def render_contract_pdf(
 ) -> bytes:
     form = _Form(doc_id)
     form.draw_contract(company, fields, calc, preview=preview)
-    form.draw_consent(company, fields, completed_at)
-    form.draw_pledge(company, fields, completed_at)
+    form.draw_consent(company, fields)
+    form.draw_pledge(company, fields)
+    _ = completed_at
     return form.doc.tobytes()
 
 
@@ -463,7 +464,7 @@ class _Form:
             self.page.insert_image(fitz.Rect(206, 734, 252, 776), stream=seal, keep_proportion=True)
         self._put(fitz.Rect(_LEFT, 774, _RIGHT, 792), "본 계약서의 사본을 받았음을 확인합니다. (서명 또는 인)", 7)
 
-    def draw_consent(self, company: dict, fields: dict, completed_at: str) -> None:
+    def draw_consent(self, company: dict, fields: dict) -> None:
         self.page = self.doc.new_page(width=595, height=842)
         self._use_font()
         self._put(fitz.Rect(70, 28, 525, 68), "야간, 휴일 및 연장근로 동의서", 16)
@@ -473,7 +474,7 @@ class _Form:
         self._write(122, 164, f"성   명:  {employee}", 7.6)
         self._write(71, 228, "본인은 근로기준법의 규정에 의한 야간, 휴일 및 연장(시간외)근로에", 12.5)
         self._write(71, 248, "동의합니다.", 12.5)
-        year, month, day = _date_parts(completed_at)
+        year, month, day = _date_parts(str(fields.get("hire_date") or ""))
         if year:
             self._put(fitz.Rect(150, 372, 445, 408), f"{year}  년     {month}  월     {day}  일", 11)
         else:
@@ -482,7 +483,7 @@ class _Form:
         company_name = _clean(company.get("company_name"), "틸리언")
         self._put(fitz.Rect(150, 500, 445, 540), f"{company_name}          대표귀하", 11)
 
-    def draw_pledge(self, company: dict, fields: dict, completed_at: str) -> None:
+    def draw_pledge(self, company: dict, fields: dict) -> None:
         """정보보호 서약서. 근로계약서와 같은 PDF에 이어서 보관한다."""
         self.page = self.doc.new_page(width=595, height=842)
         self._use_font()
@@ -520,7 +521,7 @@ class _Form:
             "본인은 위의 사항을 충분히 숙지하여 이를 성실히 준수할 것이며 만일 이를 위반하였을 경우 부정경쟁방지 및 영업비밀에 관한 법률 등 관련 법령에 따라 민·형사상의 책임 뿐만 아니라 제반 손해 배상의 책임 등 불이익을 감수할 것이며, 회사에 끼친 손해에 대해 지체없이 변상, 복구할 것을 서약합니다.",
         ]
         cursor = self._flow_pledge(paragraphs, text_left, text_right, 156)
-        year, month, day = _date_parts(completed_at)
+        year, month, day = _date_parts(str(fields.get("hire_date") or ""))
         date_text = f"{year}년  {month}월  {day}일" if year else "년     월     일"
         employee = _clean(fields.get("employee_name"))
         sign_text = f"서약자 :  {employee}   (인)"
