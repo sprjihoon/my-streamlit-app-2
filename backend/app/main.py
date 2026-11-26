@@ -37,6 +37,7 @@ from backend.app.api.return_info import router as return_info_router
 from backend.app.api.employment_contracts import router as employment_contracts_router, ensure_contract_tables
 from backend.app.api.payroll_ledgers import router as payroll_ledgers_router, ensure_payroll_tables
 from backend.app.api.payroll_slips import router as payroll_slips_router
+from backend.app.api.part_time import router as part_time_router
 from backend.app.config import settings
 
 # FastAPI 앱 생성
@@ -92,6 +93,7 @@ app.include_router(return_info_router)
 app.include_router(employment_contracts_router)
 app.include_router(payroll_ledgers_router)
 app.include_router(payroll_slips_router)
+app.include_router(part_time_router)
 
 
 # 루트 엔드포인트

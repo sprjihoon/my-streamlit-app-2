@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, ClipboardList, Scissors, Upload, Link2, List, DollarSign, Search,
   BarChart2, FileText, FileSpreadsheet, TrendingUp, CalendarDays,
-  Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package, Truck,
+  Calendar, Receipt, BadgeCheck, Globe, CreditCard, Package, Truck, Clock,
   PlusCircle, Users, ScrollText, Settings, AlertTriangle,
 } from 'lucide-react';
 import type { NavItem } from './types';
@@ -126,6 +126,14 @@ export const NAV_GROUPS: {
       { href: '/employment-contracts', label: '근로계약', icon: <FileText {...IC} /> },
       { href: '/payroll-ledger', label: '급여대장', icon: <FileSpreadsheet {...IC} />, adminOnly: true },
       { href: '/payroll-slips', label: '급여명세서', icon: <Receipt {...IC} /> },
+    ],
+  },
+  {
+    key: 'part-time',
+    label: '아르바이트',
+    icon: <Clock {...IC} />,
+    items: [
+      { href: '/part-time', label: '관리대장', icon: <Calendar {...IC} />, adminOnly: true },
     ],
   },
   {
