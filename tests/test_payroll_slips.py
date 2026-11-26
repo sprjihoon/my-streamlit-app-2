@@ -5,13 +5,20 @@ import fitz
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from tests.test_employment_contracts import _prepare, _sample
+from tests.test_employment_contracts import _prepare, _sample, _worker_confirms
 
 
 def test_worker_receives_only_own_released_payslip(isolated_runtime):
     staff_id = _prepare(isolated_runtime["db"])
     client = TestClient(app)
     body = _sample()
+    drafted = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200
+    _worker_confirms(client, staff_id)
     saved = client.post(
         f"/employment-contracts/users/{staff_id}/complete",
         params={"token": "admin-tok"},
@@ -125,3 +132,46 @@ def test_slip_numbers_and_dates_stay_inside_page():
     for x0, _y0, x1, _y1, word, *_rest in page.get_text("words"):
         assert x0 >= 33, word
         assert x1 <= 562, (word, round(x0, 1), round(x1, 1))
+
+
+def test_slip_list_filters_by_month_and_pages(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+
+    listed = client.get("/payroll-slips", params={"token": "admin-tok", "year": 2026, "month": 10})
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["total"] == 8
+    assert payload["page"] == 1
+    assert all(row["year"] == 2026 and row["month"] == 10 for row in payload["slips"])
+    assert any(row["year"] == 2026 and row["month"] == 10 for row in payload["months"])
+
+    first = client.get(
+        "/payroll-slips",
+        params={"token": "admin-tok", "year": 2026, "month": 10, "page": 1, "page_size": 3},
+    )
+    assert first.status_code == 200
+    assert first.json()["page_size"] == 3
+    assert len(first.json()["slips"]) == 3
+    assert first.json()["total"] == 8
+
+    last = client.get(
+        "/payroll-slips",
+        params={"token": "admin-tok", "year": 2026, "month": 10, "page": 3, "page_size": 3},
+    )
+    assert last.status_code == 200
+    assert len(last.json()["slips"]) == 2
+    names = {row["employee_name"] for row in first.json()["slips"]} | {row["employee_name"] for row in last.json()["slips"]}
+    assert len(names) == 5
+
+    empty = client.get("/payroll-slips", params={"token": "admin-tok", "year": 2026, "month": 12})
+    assert empty.status_code == 200
+    assert empty.json()["slips"] == []
+    assert empty.json()["total"] == 0
+
+    bad = client.get("/payroll-slips", params={"token": "admin-tok", "month": 13})
+    assert bad.status_code == 400
+
+    staff = client.get("/payroll-slips", params={"token": "staff-tok", "year": 2026, "month": 10})
+    assert staff.status_code == 200
+    assert staff.json()["slips"] == []

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { A4Preview } from '@/app/employment-contracts/a4-preview';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const PAGE_SIZES = [10, 20, 50];
 
 interface SlipRow {
   year: number;
@@ -22,8 +23,19 @@ interface SlipRow {
   mine: boolean;
 }
 
+interface MonthOption {
+  year: number;
+  month: number;
+  period_label: string;
+  count: number;
+}
+
 function won(value: number) {
   return `${Number(value || 0).toLocaleString('ko-KR')}원`;
+}
+
+function monthKey(year: number, month: number) {
+  return `${year}-${String(month).padStart(2, '0')}`;
 }
 
 async function apiError(res: Response) {
@@ -41,21 +53,44 @@ export default function PayrollSlipsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [slips, setSlips] = useState<SlipRow[]>([]);
+  const [months, setMonths] = useState<MonthOption[]>([]);
+  const [year, setYear] = useState<number | null>(null);
+  const [month, setMonth] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [pages, setPages] = useState<string[] | null>(null);
 
   const load = useCallback(async () => {
     const token = localStorage.getItem('token') || '';
     setLoading(true);
     setError(null);
-    const res = await fetch(`${API}/payroll-slips?token=${encodeURIComponent(token)}`);
-    setLoading(false);
+    const query = new URLSearchParams({
+      token,
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    if (year) query.set('year', String(year));
+    if (month) query.set('month', String(month));
+    const res = await fetch(`${API}/payroll-slips?${query.toString()}`);
     if (!res.ok) {
+      setLoading(false);
       setError(await apiError(res));
       return;
     }
     const data = await res.json();
+    const nextMonths: MonthOption[] = data.months || [];
+    setMonths(nextMonths);
+    if (year === null && month === null && nextMonths.length) {
+      setYear(nextMonths[0].year);
+      setMonth(nextMonths[0].month);
+      setPage(1);
+      return;
+    }
     setSlips(data.slips || []);
-  }, []);
+    setTotal(Number(data.total || 0));
+    setLoading(false);
+  }, [year, month, page, pageSize]);
 
   useEffect(() => {
     try {
@@ -63,6 +98,9 @@ export default function PayrollSlipsPage() {
     } catch {
       setIsAdmin(false);
     }
+  }, []);
+
+  useEffect(() => {
     load();
   }, [load]);
 
@@ -87,6 +125,12 @@ export default function PayrollSlipsPage() {
     window.open(`${API}/payroll-slips/${row.year}/${row.month}/pdf?token=${encodeURIComponent(token)}${query}`, '_blank');
   }
 
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const selected = year && month ? monthKey(year, month) : 'all';
+  const from = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const to = Math.min(safePage * pageSize, total);
+
   if (pages) {
     return <A4Preview pages={pages} overlay onClose={() => setPages(null)} title="급여명세서" />;
   }
@@ -98,16 +142,73 @@ export default function PayrollSlipsPage() {
         subtitle={isAdmin ? '그달 급여대장으로 명세서를 만들고 근로자에게 제공합니다.' : '제공된 달의 본인 급여명세서를 확인하고 받을 수 있습니다.'}
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
+      <Card style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'end' }}>
+          <label className="ops-label">
+            연월
+            <select
+              className="ui-control"
+              value={selected}
+              onChange={(event) => {
+                const value = event.target.value;
+                setPage(1);
+                if (value === 'all') {
+                  setYear(0);
+                  setMonth(0);
+                  return;
+                }
+                const [nextYear, nextMonth] = value.split('-').map(Number);
+                setYear(nextYear);
+                setMonth(nextMonth);
+              }}
+            >
+              <option value="all">전체</option>
+              {months.map((row) => (
+                <option key={monthKey(row.year, row.month)} value={monthKey(row.year, row.month)}>
+                  {row.year}년 {String(row.month).padStart(2, '0')}월 ({row.count}명)
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="ops-label">
+            페이지당
+            <select
+              className="ui-control"
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>{size}건</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </Card>
       {loading ? (
         <Loading text="불러오는 중..." />
       ) : slips.length === 0 ? (
         <Card>
           <p style={{ margin: 0, color: '#6b7280' }}>
-            {isAdmin ? '아직 만든 급여대장이 없습니다.' : '아직 제공된 급여명세서가 없습니다.'}
+            {isAdmin ? '선택한 달의 급여명세서가 없습니다.' : '아직 제공된 급여명세서가 없습니다.'}
           </p>
         </Card>
       ) : (
         <Card>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>{from}–{to} / {total}건</span>
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', gap: '0.35rem', marginLeft: 'auto' }}>
+                <Button type="button" variant="secondary" disabled={safePage <= 1} onClick={() => setPage(1)}>처음</Button>
+                <Button type="button" variant="secondary" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>이전</Button>
+                <span style={{ alignSelf: 'center', fontSize: '0.85rem' }}>{safePage} / {totalPages}</span>
+                <Button type="button" variant="secondary" disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>다음</Button>
+                <Button type="button" variant="secondary" disabled={safePage >= totalPages} onClick={() => setPage(totalPages)}>마지막</Button>
+              </div>
+            )}
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table>
               <thead>

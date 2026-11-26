@@ -75,42 +75,90 @@ def _pdf_response(content: bytes, filename: str) -> Response:
     )
 
 
+def _list_where(actor: dict, year: int | None, month: int | None) -> tuple[str, list]:
+    where = ["1 = 1"]
+    args: list = []
+    if not actor["is_admin"]:
+        where.append("l.released_at IS NOT NULL")
+        where.append("(p.user_id = ? OR p.employee_name = ?)")
+        args.extend([actor["user_id"], actor.get("nickname") or ""])
+    if year:
+        where.append("l.year = ?")
+        args.append(year)
+    if month:
+        if month < 1 or month > 12:
+            raise HTTPException(status_code=400, detail="월은 1부터 12까지입니다.")
+        where.append("l.month = ?")
+        args.append(month)
+    return " AND ".join(where), args
+
+
 @router.get("")
-def list_slips(token: str):
+def list_slips(token: str, year: int | None = None, month: int | None = None, page: int = 1, page_size: int = 20):
     actor = _session(token)
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+    where, args = _list_where(actor, year, month)
+    month_where, month_args = _list_where(actor, None, None)
     with get_connection() as con:
+        months = con.execute(
+            f"""
+            SELECT l.year, l.month, l.period_label, COUNT(*)
+            FROM payroll_ledgers l
+            JOIN payroll_lines p ON p.ledger_id = l.id
+            WHERE {month_where}
+            GROUP BY l.year, l.month, l.period_label
+            ORDER BY l.year DESC, l.month DESC
+            """,
+            month_args,
+        ).fetchall()
+        total = con.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM payroll_ledgers l
+            JOIN payroll_lines p ON p.ledger_id = l.id
+            WHERE {where}
+            """,
+            args,
+        ).fetchone()[0]
         rows = con.execute(
-            """
+            f"""
             SELECT l.year, l.month, l.period_label, l.released_at,
                    p.user_id, p.employee_name, p.affiliation, p.net_pay, p.seq
             FROM payroll_ledgers l
             JOIN payroll_lines p ON p.ledger_id = l.id
+            WHERE {where}
             ORDER BY l.year DESC, l.month DESC, p.seq, p.id
-            """
+            LIMIT ? OFFSET ?
+            """,
+            [*args, page_size, (page - 1) * page_size],
         ).fetchall()
-    items = []
-    for row in rows:
-        line = {"user_id": row[4], "employee_name": row[5]}
-        mine = _owns(line, actor)
-        if actor["is_admin"]:
-            pass
-        elif not row[3] or not mine:
-            continue
-        items.append(
-            {
-                "year": row[0],
-                "month": row[1],
-                "period_label": row[2],
-                "released_at": row[3],
-                "user_id": row[4],
-                "employee_name": row[5],
-                "affiliation": row[6] or "",
-                "net_pay": row[7],
-                "seq": row[8],
-                "mine": mine,
-            }
-        )
-    return {"company_name": _company().get("company_name") or "틸리언", "slips": items}
+    items = [
+        {
+            "year": row[0],
+            "month": row[1],
+            "period_label": row[2],
+            "released_at": row[3],
+            "user_id": row[4],
+            "employee_name": row[5],
+            "affiliation": row[6] or "",
+            "net_pay": row[7],
+            "seq": row[8],
+            "mine": _owns({"user_id": row[4], "employee_name": row[5]}, actor),
+        }
+        for row in rows
+    ]
+    return {
+        "company_name": _company().get("company_name") or "틸리언",
+        "slips": items,
+        "total": int(total or 0),
+        "page": page,
+        "page_size": page_size,
+        "months": [
+            {"year": row[0], "month": row[1], "period_label": row[2] or "", "count": row[3]}
+            for row in months
+        ],
+    }
 
 
 @router.get("/{year}/{month}")

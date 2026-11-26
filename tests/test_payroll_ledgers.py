@@ -9,13 +9,20 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
 from backend.app.main import app
-from tests.test_employment_contracts import _prepare, _sample
+from tests.test_employment_contracts import _prepare, _sample, _worker_confirms
 
 
 def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_runtime):
     staff_id = _prepare(isolated_runtime["db"])
     client = TestClient(app)
     body = _sample()
+    drafted = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200
+    _worker_confirms(client, staff_id)
     completed = client.post(
         f"/employment-contracts/users/{staff_id}/complete",
         params={"token": "admin-tok"},
