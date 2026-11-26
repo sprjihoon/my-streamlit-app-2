@@ -252,9 +252,40 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     copied = draft.json()["input"]
     assert copied["resident_id"] == "900101-1234567"
     assert copied["address"] == "대구광역시"
+    assert draft.json()["rrn_locked"] is True
+    assert draft.json()["renewal"] is True
     staff_after_renew = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "staff-tok"})
-    assert staff_after_renew.status_code == 400
-    assert client.get("/auth/me", params={"token": "staff-tok"}).json()["needs_contract"] is False
+    assert staff_after_renew.status_code == 200
+    assert staff_after_renew.json()["rrn_locked"] is True
+    assert staff_after_renew.json()["input"]["resident_id"] == "900101-1234567"
+    assert client.get("/auth/me", params={"token": "staff-tok"}).json()["needs_contract"] is True
+
+    worker_change = client.put(
+        f"/employment-contracts/users/{staff_id}/worker",
+        params={"token": "staff-tok"},
+        json={
+            "employee_name": "홍길동",
+            "resident_id": "800101-1111111",
+            "address": "서울특별시",
+            "phone": "010-1111-2222",
+        },
+    )
+    assert worker_change.status_code == 200
+    after_worker = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "admin-tok"}).json()["input"]
+    assert after_worker["resident_id"] == "900101-1234567"
+    assert after_worker["address"] == "서울특별시"
+    assert after_worker["phone"] == "010-1111-2222"
+
+    admin_change = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=_sample(resident_id="800101-1111111", net_pay=2100000, address="부산광역시", phone="010-3333-4444"),
+    )
+    assert admin_change.status_code == 200
+    after_admin = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "admin-tok"}).json()["input"]
+    assert after_admin["resident_id"] == "900101-1234567"
+    assert after_admin["address"] == "부산광역시"
+    assert after_admin["phone"] == "010-3333-4444"
 
     renewed = client.post(
         f"/employment-contracts/users/{staff_id}/complete",

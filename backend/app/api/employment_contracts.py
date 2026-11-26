@@ -353,21 +353,31 @@ def _mask_stored_rrn(value: str) -> str:
     return f"{digits[:6]}-{digits[6]}******"
 
 
+def _locked_resident_id(con, user_id: int) -> str:
+    """한 번 날인한 주민번호는 재계약에서도 그대로 둔다."""
+    row = con.execute(
+        """
+        SELECT resident_id FROM employment_contracts
+        WHERE user_id = ? AND status = 'completed'
+          AND resident_id IS NOT NULL AND TRIM(resident_id) != ''
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (user_id,),
+    ).fetchone()
+    return str(row[0]).strip() if row else ""
+
+
 def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
-    """근로자는 첫 계약이 날인되기 전만 근로계약 메뉴가 필요하다."""
+    """근로자는 작성 중인 초안이 있을 때만 근로계약 메뉴가 필요하다."""
     if is_admin:
         return False
     ensure_contract_tables()
     with get_connection() as con:
-        done = con.execute(
-            """
-            SELECT 1 FROM employment_contracts
-            WHERE user_id = ? AND status = 'completed'
-            LIMIT 1
-            """,
-            (user_id,),
-        ).fetchone()
-    return not bool(done)
+        latest = _latest(con, user_id)
+    if not latest:
+        return True
+    return latest[1] == "draft"
 
 
 def _require_open(con, user_id: int) -> None:
@@ -633,9 +643,12 @@ def get_contract_draft(user_id: int, token: str):
         latest = _latest(con, user_id)
         if not actor["is_admin"] and not worker_needs_contract(user_id, False):
             raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
+        locked = _locked_resident_id(con, user_id)
         draft = _load_contract(con, latest[0]) if latest else None
     if draft:
         shown = dict(draft["input"])
+        if locked:
+            shown["resident_id"] = locked
         if not actor["is_admin"]:
             shown = {key: shown.get(key, "") for key in ("employee_name", "resident_id", "address", "phone")}
         return {
@@ -645,6 +658,8 @@ def get_contract_draft(user_id: int, token: str):
             "draft_id": draft["id"],
             "status": draft["status"],
             "completed_at": draft.get("completed_at"),
+            "rrn_locked": bool(locked),
+            "renewal": bool(locked and draft["status"] == "draft"),
         }
     return {
         "user": user,
@@ -681,6 +696,8 @@ def get_contract_draft(user_id: int, token: str):
         "draft_id": None,
         "status": "new",
         "completed_at": None,
+        "rrn_locked": False,
+        "renewal": False,
     }
 
 
@@ -747,7 +764,7 @@ def preview_contract_pages(body: ContractInput, token: str, user_id: int | None 
     return _pages_from_pdf(pdf)
 
 
-def _worker_values(data: WorkerInput) -> dict:
+def _worker_values(data: WorkerInput, locked_rrn: str = "") -> dict:
     name = data.employee_name.strip()
     address = data.address.strip()
     phone = data.phone.strip()
@@ -759,7 +776,7 @@ def _worker_values(data: WorkerInput) -> dict:
         raise HTTPException(status_code=400, detail="연락처를 입력하세요.")
     return {
         "employee_name": name[:40],
-        "resident_id": _normalize_rrn(data.resident_id, True),
+        "resident_id": locked_rrn or _normalize_rrn(data.resident_id, True),
         "address": address[:120],
         "phone": phone[:30],
     }
@@ -767,14 +784,14 @@ def _worker_values(data: WorkerInput) -> dict:
 
 @router.put("/users/{user_id}/worker")
 def save_worker_fields(user_id: int, body: WorkerInput, token: str):
-    """근로자가 성명, 주민등록번호, 주소, 연락처를 적는다."""
+    """근로자가 성명, 주소, 연락처를 적는다. 재계약이면 주민번호는 고정이다."""
     actor = _own_or_admin(token, user_id)
     if not actor["is_admin"] and not worker_needs_contract(user_id, False):
         raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
-    worker = _worker_values(body)
     with get_connection() as con:
         user = _user_or_404(con, user_id)
         _require_open(con, user_id)
+        worker = _worker_values(body, _locked_resident_id(con, user_id))
         latest = _latest(con, user_id)
         if latest and latest[1] == "draft":
             con.execute(
@@ -922,6 +939,9 @@ def save_contract_draft(user_id: int, body: ContractInput, token: str):
     with get_connection() as con:
         _user_or_404(con, user_id)
         _require_open(con, user_id)
+        locked = _locked_resident_id(con, user_id)
+        if locked:
+            payload["resident_id"] = locked
         latest = _latest(con, user_id)
         if latest and latest[1] == "draft":
             assignments = ", ".join(f"{name} = ?" for name in INPUT_FIELDS)
@@ -958,12 +978,16 @@ def complete_contract(user_id: int, body: ContractInput, token: str):
         user = _user_or_404(con, user_id)
         _require_open(con, user_id)
         latest = _latest(con, user_id)
+        locked = _locked_resident_id(con, user_id)
         if latest and latest[1] == "draft":
             previous = _load_contract(con, latest[0])["input"]
             for key in ("employee_name", "resident_id", "address", "phone"):
                 if not str(payload.get(key) or "").strip() and previous.get(key):
                     payload[key] = previous[key]
-            payload["resident_id"] = _normalize_rrn(str(payload.get("resident_id") or ""), True)
+            if locked:
+                payload["resident_id"] = locked
+            else:
+                payload["resident_id"] = _normalize_rrn(str(payload.get("resident_id") or ""), True)
             con.execute("DELETE FROM employment_contracts WHERE id = ?", (latest[0],))
         contract_id = _insert_contract(con, user_id, payload, calc, "completed")
         con.execute(

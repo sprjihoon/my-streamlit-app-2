@@ -156,6 +156,8 @@ export default function EmploymentContractsPage() {
   const [sheets, setSheets] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [markRevision, setMarkRevision] = useState(0);
+  const [rrnLocked, setRrnLocked] = useState(false);
+  const [renewal, setRenewal] = useState(false);
 
   const load = useCallback(async (nextView: 'open' | 'completed') => {
     const token = localStorage.getItem('token') || '';
@@ -191,6 +193,8 @@ export default function EmploymentContractsPage() {
     }
     const data = await res.json();
     setForm({ ...EMPTY_FORM, ...data.input });
+    setRrnLocked(!!data.rrn_locked);
+    setRenewal(!!data.renewal);
     setSealed(false);
     setLoading(false);
   }, [router]);
@@ -240,6 +244,8 @@ export default function EmploymentContractsPage() {
       annual_pay: basis === 'annual' ? next.annual_pay : 0,
     });
     setCalc(data.calc);
+    setRrnLocked(!!data.rrn_locked);
+    setRenewal(!!data.renewal);
     setView('open');
   }
 
@@ -424,7 +430,12 @@ export default function EmploymentContractsPage() {
   if (!isAdmin) {
     return (
       <div>
-        <PageHeader title="근로계약" subtitle="근로자가 적는 항목만 입력합니다. 급여와 근로조건은 회사에서 적습니다." />
+        <PageHeader
+          title="근로계약"
+          subtitle={renewal
+            ? '이전 계약 내용을 불러왔습니다. 주소·연락처·성함 등 바뀐 항목만 고치면 됩니다. 주민번호는 그대로입니다.'
+            : '근로자가 적는 항목만 입력합니다. 급여와 근로조건은 회사에서 적습니다.'}
+        />
         {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
         {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
         {loading ? <Loading text="불러오는 중..." /> : sealed ? (
@@ -433,10 +444,10 @@ export default function EmploymentContractsPage() {
           </>
         ) : (
           <Card>
-            <h3 style={{ marginTop: 0 }}>근로자 기재</h3>
+            <h3 style={{ marginTop: 0 }}>{renewal ? '바뀐 항목만 수정' : '근로자 기재'}</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
               <Field label="성명" value={form.employee_name} onChange={(value) => patch('employee_name', value)} />
-              <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} />
+              <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} locked={rrnLocked} />
               <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
               <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
             </div>
@@ -460,7 +471,7 @@ export default function EmploymentContractsPage() {
       {sheets && <A4Preview pages={sheets} overlay onClose={() => setSheets(null)} />}
       <PageHeader
         title="근로계약"
-        subtitle="주민번호와 계약 내용은 보관됩니다. 완료된 계약서 파일은 모두 남고 관리자만 확인·출력합니다. 연봉 인상 시 재계약합니다."
+        subtitle="주민번호와 계약 내용은 보관됩니다. 재계약하면 이전 내용을 불러오고, 관리자와 근로자가 바뀐 항목만 고칩니다. 주민번호는 고정입니다."
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && (
@@ -494,15 +505,19 @@ export default function EmploymentContractsPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
-              <h3 style={{ margin: 0 }}>계약 작성</h3>
+              <h3 style={{ margin: 0 }}>{renewal ? '재계약 작성' : '계약 작성'}</h3>
               <Button type="button" variant="ghost" disabled={busy} onClick={() => setEditingId(null)}>닫기</Button>
             </div>
             <section style={{ marginTop: '1rem', border: '1px solid #bbf7d0', background: '#f0fdf4', borderRadius: 12, padding: '0.9rem' }}>
-              <h4 style={{ margin: '0 0 0.35rem' }}>근로자가 적는 항목</h4>
-              <p style={{ margin: '0 0 0.75rem', color: '#166534', fontSize: '0.82rem' }}>성명, 주민등록번호, 주소, 연락처는 근로자가 직접 적습니다.</p>
+              <h4 style={{ margin: '0 0 0.35rem' }}>{renewal ? '변동 항목 (관리자도 수정)' : '근로자가 적는 항목'}</h4>
+              <p style={{ margin: '0 0 0.75rem', color: '#166534', fontSize: '0.82rem' }}>
+                {renewal
+                  ? '이전 계약에서 불러왔습니다. 주소·연락처·성함 등 바뀐 내용만 고치면 됩니다. 주민번호는 바꿀 수 없습니다.'
+                  : '성명, 주민등록번호, 주소, 연락처는 근로자가 직접 적습니다. 관리자도 같은 칸을 고칠 수 있습니다.'}
+              </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
                 <Field label="성명" value={form.employee_name} onChange={(value) => patch('employee_name', value)} />
-                <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} />
+                <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} locked={rrnLocked} />
                 <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
                 <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
               </div>
@@ -685,21 +700,26 @@ function Field({
   value,
   onChange,
   type = 'text',
+  locked = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  locked?: boolean;
 }) {
   return (
     <label>
-      <span className="ops-label">{label}</span>
+      <span className="ops-label">{label}{locked ? ' (고정)' : ''}</span>
       <input
         className="ui-control"
         type={type}
         value={value}
         autoComplete="off"
-        onChange={(event) => onChange(event.target.value)}
+        readOnly={locked}
+        disabled={locked}
+        style={locked ? { background: '#f3f4f6', color: '#4b5563' } : undefined}
+        onChange={(event) => { if (!locked) onChange(event.target.value); }}
       />
     </label>
   );
