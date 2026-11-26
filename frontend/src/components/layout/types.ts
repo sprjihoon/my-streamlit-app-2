@@ -15,4 +15,5 @@ export interface User {
   is_admin: boolean;
   position?: string;
   department?: string;
+  needs_contract?: boolean;
 }

@@ -171,6 +171,8 @@ async def login(request: LoginRequest):
         ).fetchone()
         must_change_password = bool(must_change[0]) if must_change and must_change[0] else False
 
+        from backend.app.api.employment_contracts import worker_needs_contract
+
         return {
             "success": True,
             "token": token,
@@ -181,6 +183,7 @@ async def login(request: LoginRequest):
                 "nickname": nickname,
                 "is_admin": bool(is_admin),
                 "department": department,
+                "needs_contract": worker_needs_contract(user_id, bool(is_admin)),
             }
         }
 
@@ -238,6 +241,8 @@ async def get_current_user(token: str):
         if not user:
             raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
 
+        from backend.app.api.employment_contracts import worker_needs_contract
+
         return {
             "user_id": user[0],
             "username": user[1],
@@ -250,6 +255,7 @@ async def get_current_user(token: str):
             "approver_id": user[8],
             "leave_exempt": bool(user[9]) if user[9] else False,
             "can_jeongyeol": bool(user[10]) if user[10] else False,
+            "needs_contract": worker_needs_contract(user[0], bool(user[3])),
         }
 
 

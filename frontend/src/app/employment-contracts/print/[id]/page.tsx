@@ -17,6 +17,16 @@ export default function EmploymentContractPrintPage() {
       setError('로그인이 필요합니다.');
       return;
     }
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (!user.is_admin) {
+        setError('완료된 근로계약서는 관리자만 확인할 수 있습니다.');
+        return;
+      }
+    } catch {
+      setError('완료된 근로계약서는 관리자만 확인할 수 있습니다.');
+      return;
+    }
     fetch(`${API}/employment-contracts/${id}/pages?token=${encodeURIComponent(token)}`)
       .then(async (res) => {
         if (!res.ok) {

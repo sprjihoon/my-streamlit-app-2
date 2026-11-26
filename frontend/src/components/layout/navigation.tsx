@@ -8,8 +8,9 @@ import type { NavItem } from './types';
 
 export const IC = { size: 14, strokeWidth: 1.75 };
 
-export function canSeeNavItem(user: { is_admin?: boolean; department?: string } | null, item: NavItem) {
+export function canSeeNavItem(user: { is_admin?: boolean; department?: string; needs_contract?: boolean } | null, item: NavItem) {
   if (user?.is_admin) return true;
+  if (item.href === '/employment-contracts' && user?.needs_contract === false) return false;
   if (item.allowDepartments?.length) {
     const dept = (user?.department || '').replace(/\s/g, '');
     return item.allowDepartments.some((allowed) => {
