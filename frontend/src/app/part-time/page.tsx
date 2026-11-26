@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from '@/components/Alert';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
@@ -35,7 +35,7 @@ export default function PartTimePage() {
   const [calendar, setCalendar] = useState<CalendarData | null>(null);
   const [workerDraft, setWorkerDraft] = useState<WorkerDraft | null>(null);
   const [hourDraft, setHourDraft] = useState<HourDraft | null>(null);
-  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const draggingId = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -219,9 +219,11 @@ export default function PartTimePage() {
                 <div
                   draggable
                   onDragStart={(event) => {
+                    draggingId.current = worker.id;
                     event.dataTransfer.setData('text/plain', String(worker.id));
                     event.dataTransfer.effectAllowed = 'copy';
                   }}
+                  onDragEnd={() => { draggingId.current = null; }}
                   style={{ cursor: 'grab', fontSize: '0.9rem' }}
                   title="달력 날짜로 끌어다 놓으세요"
                 >
@@ -279,16 +281,18 @@ export default function PartTimePage() {
                   <div
                     key={index}
                     onDragOver={(event) => {
-                      if (!day) return;
+                      if (!day || draggingId.current === null) return;
                       event.preventDefault();
-                      setHoverDate(date);
+                      event.dataTransfer.dropEffect = 'copy';
+                      event.currentTarget.style.outline = '2px solid #0d6efd';
                     }}
-                    onDragLeave={() => setHoverDate((current) => (current === date ? null : current))}
+                    onDragLeave={(event) => { event.currentTarget.style.outline = ''; }}
                     onDrop={(event) => {
                       if (!day) return;
                       event.preventDefault();
-                      setHoverDate(null);
-                      const workerId = Number(event.dataTransfer.getData('text/plain'));
+                      event.currentTarget.style.outline = '';
+                      const workerId = draggingId.current || Number(event.dataTransfer.getData('text/plain'));
+                      draggingId.current = null;
                       if (workerId) dropWorker(date, workerId);
                     }}
                     style={{
@@ -296,7 +300,7 @@ export default function PartTimePage() {
                       padding: '0.35rem',
                       borderTop: '1px solid #dee2e6',
                       borderRight: index % 7 < 6 ? '1px solid #dee2e6' : 'none',
-                      background: !day ? '#fafafa' : hoverDate === date ? '#e7f1ff' : index % 7 === 6 ? '#fff8f8' : 'white',
+                      background: !day ? '#fafafa' : index % 7 === 6 ? '#fff8f8' : 'white',
                     }}
                   >
                     {day && (
@@ -312,6 +316,7 @@ export default function PartTimePage() {
                           <button
                             key={entry.worker_id}
                             type="button"
+                            onDragOver={(event) => event.preventDefault()}
                             onClick={() => editHours(date, entry)}
                             style={{
                               display: 'block', width: '100%', textAlign: 'left', marginTop: 3,
