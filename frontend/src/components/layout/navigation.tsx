@@ -123,6 +123,7 @@ export const NAV_GROUPS: {
     icon: <Users {...IC} />,
     items: [
       { href: '/employment-contracts', label: '근로계약', icon: <FileText {...IC} /> },
+      { href: '/payroll-ledger', label: '급여대장', icon: <FileSpreadsheet {...IC} />, adminOnly: true },
     ],
   },
   {
