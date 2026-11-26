@@ -269,7 +269,7 @@ def test_payroll_file_fills_matching_employment_contract(isolated_runtime):
     assert fields["rank_title"] == "팀장"
     assert fields["hire_date"] == "2026-02-02"
     assert fields["contract_start"] == "2026-02-02"
-    assert fields["contract_end"] == "2027-02-01"
+    assert fields["contract_end"] == ""
     assert fields["base_hours"] == 209
     assert fields["net_pay"] == 2600000
     assert fields["income_tax"] > 0

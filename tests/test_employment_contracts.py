@@ -21,7 +21,7 @@ def _sample(**overrides):
         "phone": "010-0000-0000",
         "hire_date": "2026-10-01",
         "contract_start": "2026-10-01",
-        "contract_end": "2027-09-30",
+        "contract_end": "",
         "base_hours": 209,
         "overtime_hours": 0,
         "holiday_hours": 0,
@@ -168,6 +168,41 @@ def _worker_confirms(client: TestClient, staff_id: int):
     assert sealed.status_code == 200, sealed.text
 
 
+def test_new_contract_leaves_end_date_blank(isolated_runtime):
+    staff_id = _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    draft = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "admin-tok"})
+    assert draft.status_code == 200
+    assert draft.json()["input"]["contract_end"] == ""
+    assert draft.json()["input"]["contract_start"] == "2026-10-01"
+
+    body = _sample()
+    drafted = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200
+    saved = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "admin-tok"})
+    assert saved.status_code == 200
+    assert saved.json()["input"]["contract_end"] == ""
+    _worker_confirms(client, staff_id)
+    completed = client.post(
+        f"/employment-contracts/users/{staff_id}/complete",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert completed.status_code == 200
+    stored = client.get(
+        f"/employment-contracts/{completed.json()['id']}/pdf",
+        params={"token": "admin-tok"},
+    )
+    assert stored.status_code == 200
+    page = fitz.open(stream=stored.content, filetype="pdf")[0].get_text()
+    assert "까지" in page
+    assert "2027년" not in page
+
+
 def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     staff_id = _prepare(isolated_runtime["db"])
     client = TestClient(app)
@@ -267,6 +302,7 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     assert "2026" in consent and "10  월" in consent and "1  일" in consent
     assert "11  월" not in consent and "26  일" not in consent
     assert "2026년" in pledge and "10월" in pledge and "1일" in pledge
+    assert "2027년" not in text
     assert "11월" not in pledge and "26일" not in pledge
     assert len(preview_pages) == 3
     assert any(page.get_images() for page in sealed)

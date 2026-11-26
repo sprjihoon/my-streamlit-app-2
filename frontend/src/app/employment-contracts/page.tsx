@@ -623,7 +623,7 @@ export default function EmploymentContractsPage() {
                 <Field label="직급" value={form.rank_title} onChange={(value) => patch('rank_title', value)} />
                 <Field label="입사일" type="date" value={form.hire_date} onChange={(value) => patch('hire_date', value)} />
                 <Field label="계약 시작" type="date" value={form.contract_start} onChange={(value) => patch('contract_start', value)} />
-                <Field label="계약 종료" type="date" value={form.contract_end} onChange={(value) => patch('contract_end', value)} />
+                <Field label="계약 종료 (없으면 비움)" type="date" value={form.contract_end} onChange={(value) => patch('contract_end', value)} />
                 <Field label="평일 근로시간" value={form.weekday_hours} onChange={(value) => patch('weekday_hours', value)} />
                 <Field label="휴게시간" value={form.break_time} onChange={(value) => patch('break_time', value)} />
                 <Field label="근로일" value={form.work_days} onChange={(value) => patch('work_days', value)} />

@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -449,15 +449,6 @@ def _insert_contract(con, user_id: int, payload: dict, calc: dict | None, status
     return con.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
-def _one_year_term(start: str) -> str:
-    year, month, day = [int(part) for part in start[:10].split("-")]
-    try:
-        ended = date(year + 1, month, day)
-    except ValueError:
-        ended = date(year + 1, month, 28)
-    return (ended - timedelta(days=1)).isoformat()
-
-
 def _contract_defaults(existing: dict | None, position: str, join_date: str) -> dict:
     current = dict(existing or {})
     return {
@@ -534,8 +525,6 @@ def apply_payroll_contract_fields(lines: list[dict]) -> dict:
                 payload["hire_date"] = str(line["hire_date"])[:10]
             if payload["hire_date"] and not payload["contract_start"]:
                 payload["contract_start"] = payload["hire_date"]
-            if payload["contract_start"] and not payload["contract_end"]:
-                payload["contract_end"] = _one_year_term(payload["contract_start"])
             payload["base_hours"] = float(line.get("base_hours") or 0) or 209
             payload["overtime_hours"] = float(line.get("overtime_hours") or 0)
             payload["holiday_hours"] = float(line.get("holiday_hours") or 0)
