@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Alert } from '@/components/Alert';
 import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
@@ -8,6 +9,7 @@ import { useYesNo } from '@/components/YesNoDialog';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { A4Preview } from './a4-preview';
+import { WorkerSeal } from './worker-seal';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -34,6 +36,8 @@ interface StoredContract {
   department: string;
   nickname: string;
   can_reactivate: boolean;
+  resident_id?: string;
+  has_pdf?: boolean;
 }
 
 interface ContractForm {
@@ -134,6 +138,7 @@ async function apiError(res: Response) {
 }
 
 export default function EmploymentContractsPage() {
+  const router = useRouter();
   const { ask, dialog } = useYesNo();
   const [view, setView] = useState<'open' | 'completed'>('open');
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
@@ -150,6 +155,7 @@ export default function EmploymentContractsPage() {
   const [calc, setCalc] = useState<PayCalc | null>(null);
   const [sheets, setSheets] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [markRevision, setMarkRevision] = useState(0);
 
   const load = useCallback(async (nextView: 'open' | 'completed') => {
     const token = localStorage.getItem('token') || '';
@@ -175,6 +181,7 @@ export default function EmploymentContractsPage() {
     if (res.status === 400) {
       setSealed(true);
       setLoading(false);
+      router.replace('/');
       return;
     }
     if (!res.ok) {
@@ -186,7 +193,7 @@ export default function EmploymentContractsPage() {
     setForm({ ...EMPTY_FORM, ...data.input });
     setSealed(false);
     setLoading(false);
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     let admin = false;
@@ -259,7 +266,8 @@ export default function EmploymentContractsPage() {
     const token = localStorage.getItem('token') || '';
     setBusy(true);
     setError(null);
-    const res = await fetch(`${API}/employment-contracts/preview-pages?token=${encodeURIComponent(token)}`, {
+    const who = editingId ? `&user_id=${editingId}` : '';
+    const res = await fetch(`${API}/employment-contracts/preview-pages?token=${encodeURIComponent(token)}${who}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
@@ -284,7 +292,7 @@ export default function EmploymentContractsPage() {
       return;
     }
     const data = await draft.json();
-    const res = await fetch(`${API}/employment-contracts/preview-pages?token=${encodeURIComponent(token)}`, {
+    const res = await fetch(`${API}/employment-contracts/preview-pages?token=${encodeURIComponent(token)}&user_id=${userId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...EMPTY_FORM, ...data.input }),
@@ -296,6 +304,20 @@ export default function EmploymentContractsPage() {
     }
     const pages = await res.json();
     setSheets(pages.pages || []);
+  }
+
+  async function previewStored(contractId: number) {
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`${API}/employment-contracts/${contractId}/pages?token=${encodeURIComponent(token)}`);
+    setBusy(false);
+    if (!res.ok) {
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    setSheets(data.pages || []);
   }
 
   async function saveWorker() {
@@ -319,6 +341,7 @@ export default function EmploymentContractsPage() {
       return;
     }
     setSuccess('근로자 기재란을 저장했습니다.');
+    setMarkRevision((value) => value + 1);
   }
 
   async function saveDraft() {
@@ -344,7 +367,7 @@ export default function EmploymentContractsPage() {
 
   async function complete() {
     if (!editingId) return;
-    const ok = await ask('회사 직인을 찍어 근로계약서를 날인합니다.\n날인하면 이 직원은 작성 목록에서 숨겨지고 PDF로 보관됩니다.\n진행할까요?');
+    const ok = await ask('회사 직인을 찍어 근로계약서를 날인합니다.\n근로자가 도장이나 싸인을 등록했다면 을 서명란에도 올라갑니다.\n날인하면 이 직원은 작성 목록에서 숨겨지고 PDF로 보관됩니다.\n진행할까요?');
     if (!ok) return;
     const token = localStorage.getItem('token') || '';
     setBusy(true);
@@ -369,7 +392,7 @@ export default function EmploymentContractsPage() {
   }
 
   async function reactivate(row: StoredContract) {
-    const ok = await ask(`${row.employee_name} 님을 작성 목록에 다시 표시합니다.\n기존 PDF는 그대로 남습니다.\n진행할까요?`);
+    const ok = await ask(`${row.employee_name} 님을 재계약합니다.\n주민번호와 이전 계약 내용을 복사하고, 기존 PDF는 그대로 남습니다.\n연봉·기간을 고친 뒤 다시 날인하세요.\n진행할까요?`);
     if (!ok) return;
     const token = localStorage.getItem('token') || '';
     setBusy(true);
@@ -382,7 +405,7 @@ export default function EmploymentContractsPage() {
       setError(await apiError(res));
       return;
     }
-    setSuccess(`${row.employee_name} 님을 다시 작성할 수 있습니다.`);
+    setSuccess(`${row.employee_name} 님 재계약 초안을 만들었습니다. 연봉과 계약 기간을 고친 뒤 날인하세요.`);
     setView('open');
     await load('open');
     openEditor(row.user_id);
@@ -405,7 +428,9 @@ export default function EmploymentContractsPage() {
         {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
         {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
         {loading ? <Loading text="불러오는 중..." /> : sealed ? (
-          <Alert type="info" message="이미 날인된 계약입니다. 내용을 바꾸려면 관리자에게 다시 활성화를 요청하세요." />
+          <>
+            <Alert type="info" message="이미 날인된 계약입니다. 계약서는 관리자만 확인합니다." />
+          </>
         ) : (
           <Card>
             <h3 style={{ marginTop: 0 }}>근로자 기재</h3>
@@ -420,6 +445,11 @@ export default function EmploymentContractsPage() {
             </div>
           </Card>
         )}
+        {!loading && !sealed && myId && (
+          <div style={{ marginTop: '1rem' }}>
+            <WorkerSeal userId={myId} name={form.employee_name} revision={markRevision} />
+          </div>
+        )}
       </div>
     );
   }
@@ -430,7 +460,7 @@ export default function EmploymentContractsPage() {
       {sheets && <A4Preview pages={sheets} overlay onClose={() => setSheets(null)} />}
       <PageHeader
         title="근로계약"
-        subtitle="계약 내용을 입력하고 날인하면 회사 직인이 찍힌 PDF가 보관됩니다. 날인한 직원은 작성 목록에서 빠집니다."
+        subtitle="주민번호와 계약 내용은 보관됩니다. 완료된 계약서 파일은 모두 남고 관리자만 확인·출력합니다. 연봉 인상 시 재계약합니다."
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       {success && (
@@ -606,25 +636,37 @@ export default function EmploymentContractsPage() {
           <table>
             <thead>
               <tr>
-                {['성명', '팀', '완료일', '실수령액', '월급여', ''].map((head) => <th key={head}>{head}</th>)}
+                {['성명', '팀', '주민번호', '완료일', '실수령액', '월급여', '파일', ''].map((head) => <th key={head}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
               {stored.length === 0 && (
-                <tr><td colSpan={6} style={{ color: '#6b7280' }}>보관된 계약서가 없습니다.</td></tr>
+                <tr><td colSpan={8} style={{ color: '#6b7280' }}>보관된 계약서가 없습니다.</td></tr>
               )}
               {stored.map((row) => (
                 <tr key={row.id}>
                   <td>{row.employee_name}</td>
                   <td>{row.department || '—'}</td>
+                  <td>{row.resident_id || '—'}</td>
                   <td>{row.completed_at || '—'}</td>
                   <td>{won(row.net_pay)}</td>
                   <td>{won(row.gross_pay)}</td>
+                  <td>{row.has_pdf === false ? '없음' : '보관'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
+                    <Button type="button" variant="secondary" disabled={busy || row.has_pdf === false} onClick={() => previewStored(row.id)}>확인</Button>
+                    {' '}
                     <a href={`/employment-contracts/print/${row.id}`} target="_blank" rel="noreferrer">출력</a>
+                    {' '}
+                    <a
+                      href={`${API}/employment-contracts/${row.id}/pdf?token=${encodeURIComponent(typeof window === 'undefined' ? '' : localStorage.getItem('token') || '')}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      PDF
+                    </a>
                     {row.can_reactivate && (
                       <Button type="button" variant="secondary" style={{ marginLeft: 8 }} disabled={busy} onClick={() => reactivate(row)}>
-                        다시 활성화
+                        재계약
                       </Button>
                     )}
                   </td>

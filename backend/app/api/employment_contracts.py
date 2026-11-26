@@ -1,4 +1,4 @@
-"""근로계약서 작성, 완료 보관, 다시 활성화."""
+"""근로계약서 작성, 완료 PDF 보관, 재계약. 완료 파일은 관리자만 다룬다."""
 from __future__ import annotations
 
 import base64
@@ -19,6 +19,7 @@ from backend.app.api.settings import _ensure_settings_table
 from backend.app.config import settings
 from backend.app.services.employment_contract.calc import calculate_contract_pay
 from backend.app.services.employment_contract.pdf import render_contract_pdf, render_page_pngs
+from backend.app.services.employment_contract.seal import make_seal, prepare_mark
 from logic.db import get_connection
 
 router = APIRouter(prefix="/employment-contracts", tags=["employment-contracts"])
@@ -147,6 +148,16 @@ def ensure_contract_tables() -> None:
             ON employment_contracts(user_id, id)
             """
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employment_marks (
+                user_id INTEGER PRIMARY KEY,
+                kind TEXT NOT NULL,
+                image BLOB NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         con.commit()
 
 
@@ -162,6 +173,13 @@ class WorkerInput(BaseModel):
     resident_id: str = ""
     address: str = ""
     phone: str = ""
+
+
+class MarkInput(BaseModel):
+    """근로자가 저장하는 도장 또는 싸인."""
+    kind: str = ""
+    name: str = ""
+    image_base64: str = ""
 
 
 def _session(token: str) -> dict:
@@ -184,7 +202,7 @@ def _session(token: str) -> dict:
 def _admin(token: str) -> dict:
     actor = _session(token)
     if not actor["is_admin"]:
-        raise HTTPException(status_code=403, detail="관리자만 근로계약서를 다룰 수 있습니다.")
+        raise HTTPException(status_code=403, detail="관리자만 근로계약서를 확인하고 관리할 수 있습니다.")
     return actor
 
 
@@ -324,10 +342,38 @@ def _latest(con, user_id: int):
     ).fetchone()
 
 
+def _personal_filled(payload: dict) -> bool:
+    return all(str(payload.get(name) or "").strip() for name in ("employee_name", "resident_id", "address", "phone"))
+
+
+def _mask_stored_rrn(value: str) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) < 7:
+        return ""
+    return f"{digits[:6]}-{digits[6]}******"
+
+
+def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
+    """근로자는 첫 계약이 날인되기 전만 근로계약 메뉴가 필요하다."""
+    if is_admin:
+        return False
+    ensure_contract_tables()
+    with get_connection() as con:
+        done = con.execute(
+            """
+            SELECT 1 FROM employment_contracts
+            WHERE user_id = ? AND status = 'completed'
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+    return not bool(done)
+
+
 def _require_open(con, user_id: int) -> None:
     latest = _latest(con, user_id)
     if latest and latest[1] == "completed":
-        raise HTTPException(status_code=400, detail="완료된 계약입니다. 수정하려면 다시 활성화하세요.")
+        raise HTTPException(status_code=400, detail="완료된 계약입니다. 수정하려면 재계약하세요.")
 
 
 def _public_input(payload: dict) -> dict:
@@ -502,7 +548,7 @@ def _load_contract(con, contract_id: int):
 
 @router.get("")
 def list_contracts(token: str, view: str = "open"):
-    """작성 대상은 완료되지 않은 직원만, 완료 보관은 저장된 PDF만 보여 준다."""
+    """작성 대상은 완료되지 않은 직원만, 완료 보관은 저장된 PDF를 모두 보여 준다."""
     _admin(token)
     if view not in {"open", "completed"}:
         raise HTTPException(status_code=400, detail="목록 종류가 올바르지 않습니다.")
@@ -543,7 +589,7 @@ def list_contracts(token: str, view: str = "open"):
         rows = con.execute(
             """
             SELECT c.id, c.user_id, c.employee_name, c.completed_at, c.net_pay, c.gross_pay,
-                   u.department, u.nickname,
+                   u.department, u.nickname, c.resident_id, c.pdf_filename,
                    CASE WHEN c.id = (
                      SELECT id FROM employment_contracts
                      WHERE user_id = c.user_id
@@ -555,8 +601,12 @@ def list_contracts(token: str, view: str = "open"):
             ORDER BY c.completed_at DESC, c.id DESC
             """
         ).fetchall()
-    return {
-        "contracts": [
+    stored = []
+    root = _contract_dir().resolve()
+    for row in rows:
+        filename = row[9] or f"{row[0]}.pdf"
+        path = (root / filename).resolve()
+        stored.append(
             {
                 "id": row[0],
                 "user_id": row[1],
@@ -566,11 +616,13 @@ def list_contracts(token: str, view: str = "open"):
                 "gross_pay": row[5],
                 "department": row[6] or "",
                 "nickname": row[7],
-                "can_reactivate": bool(row[8]),
+                "resident_id": _mask_stored_rrn(row[8]),
+                "has_pdf": path.parent == root and path.is_file(),
+                "pdf_filename": filename if row[9] else "",
+                "can_reactivate": bool(row[10]),
             }
-            for row in rows
-        ]
-    }
+        )
+    return {"contracts": stored}
 
 
 @router.get("/users/{user_id}")
@@ -579,8 +631,8 @@ def get_contract_draft(user_id: int, token: str):
     with get_connection() as con:
         user = _user_or_404(con, user_id)
         latest = _latest(con, user_id)
-        if latest and latest[1] == "completed":
-            raise HTTPException(status_code=400, detail="완료된 계약입니다. 수정하려면 다시 활성화하세요.")
+        if not actor["is_admin"] and not worker_needs_contract(user_id, False):
+            raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
         draft = _load_contract(con, latest[0]) if latest else None
     if draft:
         shown = dict(draft["input"])
@@ -591,6 +643,8 @@ def get_contract_draft(user_id: int, token: str):
             "input": shown,
             "calc": None if not actor["is_admin"] else draft["calc"],
             "draft_id": draft["id"],
+            "status": draft["status"],
+            "completed_at": draft.get("completed_at"),
         }
     return {
         "user": user,
@@ -625,6 +679,8 @@ def get_contract_draft(user_id: int, token: str):
         },
         "calc": None,
         "draft_id": None,
+        "status": "new",
+        "completed_at": None,
     }
 
 
@@ -671,9 +727,12 @@ def _pages_from_pdf(pdf: bytes) -> dict:
 
 
 @router.post("/preview-pages")
-def preview_contract_pages(body: ContractInput, token: str):
+def preview_contract_pages(body: ContractInput, token: str, user_id: int | None = None):
     """입력 중인 계약을 A4 페이지 이미지로 보여 준다. 보관하지 않는다."""
     _admin(token)
+    if user_id:
+        with get_connection() as con:
+            _user_or_404(con, user_id)
     payload = _values(body, required=False)
     calc = _preview_calc(payload)
     pdf = render_contract_pdf(
@@ -683,6 +742,7 @@ def preview_contract_pages(body: ContractInput, token: str):
         calc,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         preview=True,
+        employee_mark=_employee_mark(user_id),
     )
     return _pages_from_pdf(pdf)
 
@@ -708,7 +768,9 @@ def _worker_values(data: WorkerInput) -> dict:
 @router.put("/users/{user_id}/worker")
 def save_worker_fields(user_id: int, body: WorkerInput, token: str):
     """근로자가 성명, 주민등록번호, 주소, 연락처를 적는다."""
-    _own_or_admin(token, user_id)
+    actor = _own_or_admin(token, user_id)
+    if not actor["is_admin"] and not worker_needs_contract(user_id, False):
+        raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
     worker = _worker_values(body)
     with get_connection() as con:
         user = _user_or_404(con, user_id)
@@ -741,6 +803,113 @@ def save_worker_fields(user_id: int, body: WorkerInput, token: str):
             draft_id = _insert_contract(con, user_id, payload, None, "draft")
         con.commit()
     return {"draft_id": draft_id}
+
+
+def _own_name(con, user_id: int) -> str:
+    """도장에 넣는 이름은 그 사람의 저장된 성명이다. 없으면 계정 이름이다."""
+    user = _user_or_404(con, user_id)
+    latest = _latest(con, user_id)
+    if latest:
+        row = con.execute(
+            "SELECT employee_name FROM employment_contracts WHERE id = ?",
+            (latest[0],),
+        ).fetchone()
+        stored = (row[0] or "").strip() if row else ""
+        if stored:
+            return stored
+    nickname = (user["nickname"] or "").strip()
+    if nickname:
+        return nickname
+    raise HTTPException(status_code=400, detail="성명을 먼저 저장하세요.")
+
+
+def _lookup_own_name(user_id: int) -> str:
+    with get_connection() as con:
+        return _own_name(con, user_id)
+
+
+def _employee_mark(user_id: int | None) -> bytes | None:
+    if not user_id:
+        return None
+    with get_connection() as con:
+        row = con.execute("SELECT image FROM employment_marks WHERE user_id = ?", (user_id,)).fetchone()
+    if not row or not row[0]:
+        return None
+    return bytes(row[0])
+
+
+def _mark_payload(user_id: int) -> dict:
+    with get_connection() as con:
+        row = con.execute(
+            "SELECT kind, image FROM employment_marks WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if not row or not row[1]:
+        return {"kind": "", "image": ""}
+    return {"kind": row[0] or "", "image": base64.b64encode(bytes(row[1])).decode("ascii")}
+
+
+@router.get("/users/{user_id}/mark-samples")
+def mark_samples(user_id: int, token: str):
+    """그 사람 이름으로 도장 두 가지를 보여 준다. 저장하지 않는다."""
+    _own_or_admin(token, user_id)
+    own_name = _lookup_own_name(user_id)
+    try:
+        return {
+            "name": own_name,
+            "grid": base64.b64encode(make_seal(own_name, "grid")).decode("ascii"),
+            "ring": base64.b64encode(make_seal(own_name, "ring")).decode("ascii"),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/users/{user_id}/mark")
+def get_worker_mark(user_id: int, token: str):
+    _own_or_admin(token, user_id)
+    with get_connection() as con:
+        _user_or_404(con, user_id)
+    return _mark_payload(user_id)
+
+
+@router.put("/users/{user_id}/mark")
+def save_worker_mark(user_id: int, body: MarkInput, token: str):
+    """도장 만들기, 도장 파일, 싸인 중 하나를 저장한다. 날인할 때 을 서명란에 찍힌다."""
+    _own_or_admin(token, user_id)
+    kind = (body.kind or "").strip()
+    if kind not in {"grid", "ring", "upload", "signature"}:
+        raise HTTPException(status_code=400, detail="도장 또는 싸인 종류를 고르세요.")
+    own_name = ""
+    try:
+        if kind in {"grid", "ring"}:
+            own_name = _lookup_own_name(user_id)
+            image = make_seal(own_name, kind)
+        else:
+            encoded = (body.image_base64 or "").strip()
+            if "," in encoded and encoded.lower().startswith("data:"):
+                encoded = encoded.split(",", 1)[1]
+            try:
+                raw = base64.b64decode(encoded, validate=False)
+            except Exception as exc:
+                raise ValueError("도장 이미지를 읽을 수 없습니다.") from exc
+            image = prepare_mark(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with get_connection() as con:
+        _user_or_404(con, user_id)
+        con.execute(
+            """
+            INSERT INTO employment_marks (user_id, kind, image, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                kind = excluded.kind,
+                image = excluded.image,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, kind, image),
+        )
+        con.commit()
+    return {"kind": kind, "name": own_name, "image": base64.b64encode(image).decode("ascii")}
 
 
 @router.put("/users/{user_id}")
@@ -778,7 +947,7 @@ def save_contract_draft(user_id: int, body: ContractInput, token: str):
 
 @router.post("/users/{user_id}/complete")
 def complete_contract(user_id: int, body: ContractInput, token: str):
-    """완료하면 PDF를 저장하고 작성 목록에서 숨긴다."""
+    """완료하면 PDF를 저장하고 작성 목록에서 숨긴다. 이전 완료 파일은 지우지 않는다."""
     actor = _admin(token)
     payload = _values(body, required=True)
     calc = _calculate(payload)
@@ -790,6 +959,11 @@ def complete_contract(user_id: int, body: ContractInput, token: str):
         _require_open(con, user_id)
         latest = _latest(con, user_id)
         if latest and latest[1] == "draft":
+            previous = _load_contract(con, latest[0])["input"]
+            for key in ("employee_name", "resident_id", "address", "phone"):
+                if not str(payload.get(key) or "").strip() and previous.get(key):
+                    payload[key] = previous[key]
+            payload["resident_id"] = _normalize_rrn(str(payload.get("resident_id") or ""), True)
             con.execute("DELETE FROM employment_contracts WHERE id = ?", (latest[0],))
         contract_id = _insert_contract(con, user_id, payload, calc, "completed")
         con.execute(
@@ -801,7 +975,14 @@ def complete_contract(user_id: int, body: ContractInput, token: str):
             (completed_at, actor["user_id"], f"{contract_id}.pdf", contract_id),
         )
         try:
-            pdf = render_contract_pdf(contract_id, company, payload, calc, completed_at)
+            pdf = render_contract_pdf(
+                contract_id,
+                company,
+                payload,
+                calc,
+                completed_at,
+                employee_mark=_employee_mark(user_id),
+            )
             (_contract_dir() / f"{contract_id}.pdf").write_bytes(pdf)
         except Exception:
             con.rollback()
@@ -820,7 +1001,7 @@ def complete_contract(user_id: int, body: ContractInput, token: str):
 
 @router.post("/users/{user_id}/reactivate")
 def reactivate_contract(user_id: int, token: str):
-    """갱신이 필요하면 작성 목록에 다시 나타낸다. 기존 PDF는 남긴다."""
+    """연봉 인상 등으로 재계약한다. 주민번호와 이전 계약 내용을 복사하고 기존 PDF는 남긴다."""
     actor = _admin(token)
     with get_connection() as con:
         user = _user_or_404(con, user_id)
@@ -832,12 +1013,12 @@ def reactivate_contract(user_id: int, token: str):
         draft_id = _insert_contract(con, user_id, payload, stored["calc"], "draft")
         con.commit()
     add_log(
-        action_type="근로계약 다시 활성화",
+        action_type="근로계약 재계약",
         target_type="employment_contract",
         target_id=str(draft_id),
         target_name=payload.get("employee_name") or user["nickname"],
         user_nickname=actor["nickname"],
-        details="작성 목록으로 되돌림",
+        details="이전 계약 내용을 복사해 재계약 초안을 만듦",
     )
     return {"draft_id": draft_id, "user_id": user_id}
 

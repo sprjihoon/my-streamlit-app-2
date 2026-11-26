@@ -171,6 +171,7 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     opened = client.get("/employment-contracts", params={"token": "admin-tok", "view": "open"})
     assert opened.status_code == 200
     assert any(row["user_id"] == staff_id for row in opened.json()["employees"])
+    assert client.get("/auth/me", params={"token": "staff-tok"}).json()["needs_contract"] is True
 
     completed = client.post(
         f"/employment-contracts/users/{staff_id}/complete",
@@ -187,7 +188,21 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     stored = archived.json()["contracts"]
     assert stored[0]["id"] == contract_id
     assert stored[0]["can_reactivate"] is True
-    assert "resident_id" not in stored[0]
+    assert stored[0]["has_pdf"] is True
+    assert stored[0]["resident_id"] == "900101-1******"
+    assert "1234567" not in stored[0]["resident_id"]
+
+    staff_me = client.get("/auth/me", params={"token": "staff-tok"})
+    assert staff_me.status_code == 200
+    assert staff_me.json()["needs_contract"] is False
+    staff_get = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "staff-tok"})
+    assert staff_get.status_code == 400
+    staff_pdf = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "staff-tok"})
+    assert staff_pdf.status_code == 403
+    staff_pages = client.get(f"/employment-contracts/{contract_id}/pages", params={"token": "staff-tok"})
+    assert staff_pages.status_code == 403
+    staff_list = client.get("/employment-contracts", params={"token": "staff-tok", "view": "completed"})
+    assert staff_list.status_code == 403
 
     pdf = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "admin-tok"})
     assert pdf.status_code == 200
@@ -231,3 +246,105 @@ def test_completed_contract_is_hidden_until_admin_reactivates(isolated_runtime):
     kept = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "admin-tok"})
     assert kept.status_code == 200
     assert kept.content.startswith(b"%PDF")
+
+    draft = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "admin-tok"})
+    assert draft.status_code == 200
+    copied = draft.json()["input"]
+    assert copied["resident_id"] == "900101-1234567"
+    assert copied["address"] == "대구광역시"
+    staff_after_renew = client.get(f"/employment-contracts/users/{staff_id}", params={"token": "staff-tok"})
+    assert staff_after_renew.status_code == 400
+    assert client.get("/auth/me", params={"token": "staff-tok"}).json()["needs_contract"] is False
+
+    renewed = client.post(
+        f"/employment-contracts/users/{staff_id}/complete",
+        params={"token": "admin-tok"},
+        json=_sample(net_pay=2100000, contract_start="2027-10-01", contract_end="2028-09-30"),
+    )
+    assert renewed.status_code == 200
+    new_id = renewed.json()["id"]
+    assert new_id != contract_id
+    archive = client.get("/employment-contracts", params={"token": "admin-tok", "view": "completed"}).json()["contracts"]
+    ids = [row["id"] for row in archive]
+    assert contract_id in ids and new_id in ids
+    assert all(row["has_pdf"] for row in archive if row["id"] in {contract_id, new_id})
+    old_pdf = client.get(f"/employment-contracts/{contract_id}/pdf", params={"token": "admin-tok"})
+    new_pdf = client.get(f"/employment-contracts/{new_id}/pdf", params={"token": "admin-tok"})
+    assert old_pdf.status_code == 200 and old_pdf.content.startswith(b"%PDF")
+    assert new_pdf.status_code == 200 and new_pdf.content.startswith(b"%PDF")
+    assert old_pdf.content != new_pdf.content
+
+
+def _same_png(left: bytes, right: bytes) -> bool:
+    a = fitz.Pixmap(left)
+    b = fitz.Pixmap(right)
+    return a.width == b.width and a.height == b.height and a.samples == b.samples
+
+
+def test_name_seal_uses_the_workers_own_name_and_is_stamped(isolated_runtime):
+    from backend.app.services.employment_contract.seal import make_seal
+
+    staff_id = _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    admin_id = sqlite3.connect(isolated_runtime["db"]).execute(
+        "SELECT user_id FROM users WHERE username = 'admin'"
+    ).fetchone()[0]
+
+    forged = client.put(
+        f"/employment-contracts/users/{staff_id}/mark",
+        params={"token": "staff-tok"},
+        json={"kind": "grid", "name": "장지훈"},
+    )
+    assert forged.status_code == 200
+    assert forged.json()["name"] == "홍길동"
+    assert _same_png(base64.b64decode(forged.json()["image"]), make_seal("홍길동", "grid"))
+    assert not _same_png(base64.b64decode(forged.json()["image"]), make_seal("장지훈", "grid"))
+
+    denied = client.get(
+        f"/employment-contracts/users/{admin_id}/mark-samples",
+        params={"token": "staff-tok"},
+    )
+    assert denied.status_code == 403
+
+    named = client.put(
+        f"/employment-contracts/users/{staff_id}/worker",
+        params={"token": "staff-tok"},
+        json={
+            "employee_name": "김철수",
+            "resident_id": "900101-1234567",
+            "address": "대구광역시",
+            "phone": "010-0000-0000",
+        },
+    )
+    assert named.status_code == 200
+
+    samples = client.get(
+        f"/employment-contracts/users/{staff_id}/mark-samples",
+        params={"token": "staff-tok"},
+    )
+    assert samples.status_code == 200
+    assert samples.json()["name"] == "김철수"
+    assert _same_png(base64.b64decode(samples.json()["ring"]), make_seal("김철수", "ring"))
+
+    chosen = client.put(
+        f"/employment-contracts/users/{staff_id}/mark",
+        params={"token": "staff-tok"},
+        json={"kind": "ring", "name": "장지훈"},
+    )
+    assert chosen.status_code == 200
+    assert chosen.json()["name"] == "김철수"
+
+    body = _sample(employee_name="김철수")
+    completed = client.post(
+        f"/employment-contracts/users/{staff_id}/complete",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert completed.status_code == 200
+    sealed = fitz.open(stream=client.get(
+        f"/employment-contracts/{completed.json()['id']}/pdf",
+        params={"token": "admin-tok"},
+    ).content, filetype="pdf")
+    assert len(sealed[0].get_images()) >= 2
+    assert sealed[1].get_images()
+    assert sealed[2].get_images()

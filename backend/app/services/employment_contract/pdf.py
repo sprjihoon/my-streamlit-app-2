@@ -5,6 +5,8 @@ from pathlib import Path
 
 import fitz
 
+from backend.app.services.employment_contract.seal import mark_is_signature
+
 _SEAL_PATH = Path(__file__).resolve().parents[2] / "assets" / "seal.png"
 
 _LEFT = 69.24
@@ -53,8 +55,9 @@ def render_contract_pdf(
     completed_at: str,
     *,
     preview: bool = False,
+    employee_mark: bytes | None = None,
 ) -> bytes:
-    form = _Form(doc_id)
+    form = _Form(doc_id, employee_mark)
     form.draw_contract(company, fields, calc, preview=preview)
     form.draw_consent(company, fields)
     form.draw_pledge(company, fields)
@@ -129,10 +132,11 @@ def _birth(resident_id: str) -> str:
 
 
 class _Form:
-    def __init__(self, doc_id: int):
+    def __init__(self, doc_id: int, employee_mark: bytes | None = None):
         self.doc = fitz.open()
         self.doc.set_metadata({"title": f"근로계약서 {doc_id}" if doc_id else "근로계약서"})
         self.font = fitz.Font("korea")
+        self.employee_mark = employee_mark or None
         self.page = self.doc.new_page(width=595, height=842)
         self._use_font()
 
@@ -491,7 +495,7 @@ class _Form:
         representative = _clean(company.get("representative"))
         employee = _clean(fields.get("employee_name"))
         self._stamp_employer(representative)
-        self._write_fitted(300, _RIGHT - 8, 762, f"/(을) 근로자   {employee}   (서명 또는 인)", 7, align="center")
+        self._ink_line(300, _RIGHT - 8, 762, f"/(을) 근로자   {employee}   (서명 또는 인)", 7, employee)
         self._put(fitz.Rect(_LEFT, 778, _RIGHT, 792), "본 계약서의 사본을 받았음을 확인합니다. (서명 또는 인)", 7)
 
     def _stamp_employer(self, representative: str) -> None:
@@ -518,6 +522,42 @@ class _Form:
             overlay=True,
         )
 
+    def _ink_line(self, x0: float, x1: float, baseline: float, text: str, size: float, employee: str) -> None:
+        value = str(text or "").strip()
+        if not value:
+            return
+        use = size
+        while use > 7 and len(value) * use > (x1 - x0):
+            use -= 0.3
+        text_w = len(value) * use
+        x = x0 + max((x1 - x0 - text_w) / 2, 0)
+        self._write(x, baseline, value, use)
+        self._stamp_worker(x, use, value, baseline, employee)
+
+    def _stamp_worker(self, start: float, size: float, text: str, baseline: float, employee: str) -> None:
+        mark = self.employee_mark
+        if not mark:
+            return
+        if mark_is_signature(mark) and employee and employee in text:
+            name_at = text.find(employee)
+            anchor = start + (name_at + len(employee) / 2) * size
+            pix = fitz.Pixmap(mark)
+            height = 22.0
+            width = min(108.0, height * pix.width / max(pix.height, 1))
+            if anchor + width / 2 > _RIGHT - 10:
+                anchor = _RIGHT - 10 - width / 2
+            rect = fitz.Rect(anchor - width / 2, baseline - height + 3, anchor + width / 2, baseline + 3)
+        else:
+            index = text.rfind("인")
+            if index < 0:
+                index = max(len(text) - 1, 0)
+            anchor = start + (index + 0.5) * size
+            stamp = 34.0
+            if anchor + stamp / 2 > _RIGHT - 10:
+                anchor = _RIGHT - 10 - stamp / 2
+            rect = fitz.Rect(anchor - stamp / 2, baseline - stamp * 0.62, anchor + stamp / 2, baseline + stamp * 0.38)
+        self.page.insert_image(rect, stream=mark, keep_proportion=True, overlay=True)
+
     def draw_consent(self, company: dict, fields: dict) -> None:
         self.page = self.doc.new_page(width=595, height=842)
         self._use_font()
@@ -533,7 +573,7 @@ class _Form:
             self._put(fitz.Rect(150, 372, 445, 408), f"{year}  년     {month}  월     {day}  일", 11)
         else:
             self._put(fitz.Rect(150, 372, 445, 408), "년          월          일", 11)
-        self._put(fitz.Rect(150, 424, 445, 460), f"위본인      {employee}      (인)", 11)
+        self._ink_line(150, 445, 448, f"위본인      {employee}      (인)", 11, employee)
         company_name = _clean(company.get("company_name"), "틸리언")
         self._put(fitz.Rect(150, 500, 445, 540), f"{company_name}          대표귀하", 11)
 
@@ -581,7 +621,7 @@ class _Form:
         sign_text = f"서약자 :  {employee}   (인)"
         cursor = max(cursor + 18, 612)
         self._write_fitted(text_left, text_right, cursor, date_text, 11, align="center")
-        self._write_fitted(text_left, text_right, cursor + 42, sign_text, 11, align="center")
+        self._ink_line(text_left, text_right, cursor + 42, sign_text, 11, employee)
         self._write_fitted(text_left, text_right, min(cursor + 92, bottom - 28), company_name, 14, align="center")
 
     def _flow_pledge(self, paragraphs: list[str], x: float, right: float, top: float) -> float:
