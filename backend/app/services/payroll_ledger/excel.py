@@ -1,11 +1,18 @@
 """급여대장을 엑셀 서식으로 읽고 적는다."""
 from __future__ import annotations
 
+import calendar
 from datetime import datetime, date
 from io import BytesIO
+from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "assets" / "payroll_ledger_template.xlsx"
+SKIP_SHEETS = {"급여대장", "급여명세서", "2023년 조견표", "급여명세서 수령 확인"}
+
+
 def _blank_line() -> dict:
     return {
         "user_id": 0,
@@ -384,4 +391,57 @@ def render_payroll_xlsx(ledger: dict) -> bytes:
 
     buf = BytesIO()
     wb.save(buf)
+    return buf.getvalue()
+
+
+def _formula(cell) -> bool:
+    return isinstance(cell.value, str) and cell.value.startswith("=")
+
+
+def _fill_cell(cell, value) -> None:
+    if _formula(cell):
+        return
+    cell.value = value
+
+
+def fill_official_xlsx(ledger: dict) -> bytes:
+    """10월 급여대장 엑셀 양식에 그달 값을 넣어 노무사 전달용으로 만든다."""
+    if not TEMPLATE_PATH.is_file():
+        return render_payroll_xlsx(ledger)
+    year = int(ledger["year"])
+    month = int(ledger["month"])
+    last = calendar.monthrange(year, month)[1]
+    book = load_workbook(TEMPLATE_PATH)
+    summary = book["급여대장"]
+    summary["A1"] = datetime(year, month, 1)
+    summary["B3"] = ledger.get("period_label") or f"{year}.{month:02d}.01~{year}.{month:02d}.{last:02d}"
+    if ledger.get("company_name"):
+        summary["L3"] = ledger["company_name"]
+    by_name = {(line.get("employee_name") or "").strip(): line for line in ledger.get("lines") or []}
+    for sheet_name in book.sheetnames:
+        if sheet_name in SKIP_SHEETS:
+            continue
+        ws = book[sheet_name]
+        line = by_name.get(_text(ws["B3"].value))
+        if not line:
+            continue
+        _fill_cell(ws["H20"], int(line.get("net_pay") or 0))
+        _fill_cell(ws["D20"], int(line.get("vehicle_allowance") or 0))
+        _fill_cell(ws["E20"], int(line.get("meal_allowance") or 0))
+        _fill_cell(ws["E24"], int(line.get("income_tax") or 0))
+        _fill_cell(ws["B24"], int(line.get("pension") or 0))
+        _fill_cell(ws["B13"], line.get("base_hours") or 0)
+        _fill_cell(ws["C13"], line.get("overtime_hours") or 0)
+        _fill_cell(ws["D13"], line.get("holiday_hours") or 0)
+        _fill_cell(ws["E13"], line.get("night_hours") or 0)
+        _fill_cell(ws["F13"], line.get("work_days") or "만근")
+        _fill_cell(ws["I33"], int(line.get("position_allowance") or 0))
+        hire = line.get("hire_date") or ""
+        if hire and not _formula(ws["B9"]):
+            try:
+                ws["B9"] = datetime.strptime(str(hire)[:10], "%Y-%m-%d")
+            except ValueError:
+                ws["B9"] = hire
+    buf = BytesIO()
+    book.save(buf)
     return buf.getvalue()

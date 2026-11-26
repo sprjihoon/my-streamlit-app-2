@@ -143,7 +143,7 @@ export default function PayrollLedgerPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `급여대장-${year}-${String(month).padStart(2, '0')}.xlsx`;
+    link.download = `틸리언 급여대장 ${year}년 ${String(month).padStart(2, '0')}월.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -213,7 +213,7 @@ export default function PayrollLedgerPage() {
             급여대장 파일
             <input className="ui-control" type="file" accept=".xlsx" disabled={busy} onChange={(event) => { importFile(event.target.files?.[0]); event.target.value = ''; }} />
           </label>
-          <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={download}>엑셀 다운로드</Button>
+          <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={download}>양식 엑셀 다운로드</Button>
           <Button type="button" variant="secondary" disabled={busy || !ledger} onClick={() => create(true)}>계약에서 다시 만들기</Button>
         </div>
       </Card>

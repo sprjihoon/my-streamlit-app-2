@@ -4,6 +4,7 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field
 from backend.app.api.employment_contracts import _company, apply_payroll_contract_fields, ensure_contract_tables
 from backend.app.api.logs import add_log
 from backend.app.services.employment_contract.calc import calculate_contract_pay
-from backend.app.services.payroll_ledger.excel import parse_payroll_xlsx, render_payroll_xlsx
+from backend.app.services.payroll_ledger.excel import fill_official_xlsx, parse_payroll_xlsx, render_payroll_xlsx
 from backend.app.services.payroll_ledger.october_2026 import october_2026_lines
 from logic.db import get_connection
 
@@ -524,10 +525,10 @@ def download_ledger(year: int, month: int, token: str):
     ledger = _load(year, month)
     if not ledger:
         raise HTTPException(status_code=404, detail="이 달 급여대장이 없습니다.")
-    content = render_payroll_xlsx(ledger)
-    filename = f"payroll-{year}-{month:02d}.xlsx"
+    content = fill_official_xlsx(ledger)
+    filename = quote(f"틸리언 급여대장 {year}년 {month:02d}월.xlsx")
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )

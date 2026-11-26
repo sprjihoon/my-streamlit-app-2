@@ -69,11 +69,12 @@ def test_monthly_ledger_uses_contract_pay_and_keeps_the_saved_month(isolated_run
     sheet = client.get("/payroll-ledgers/2026/11/xlsx", params={"token": "admin-tok"})
     assert sheet.status_code == 200
     book = load_workbook(filename=__import__("io").BytesIO(sheet.content))
+    assert set(book.sheetnames) >= {"급여대장", "급여명세서", "2023년 조견표", "급여명세서 수령 확인"}
     ws = book["급여대장"]
     assert ws["H1"].value == "급여대장"
-    assert ws["B8"].value == "홍길동"
-    assert ws["O8"].value == 1966730
-    assert ws["A10"].value == "900101-1234567"
+    assert ws["A1"].value.month == 11
+    assert "2026.11.01" in str(ws["B3"].value)
+    assert isinstance(ws["B8"].value, str) and str(ws["B8"].value).startswith("=")
 
 
 def _sample_workbook() -> bytes:
@@ -149,6 +150,26 @@ def test_october_workbook_keeps_the_given_headcount_and_total():
     assert sum(line["gross_pay"] for line in parsed["lines"]) == 18270640
     assert parsed["lines"][6]["vehicle_allowance"] == 200000
     assert parsed["lines"][7]["base_hours"] == 84
+
+
+def test_official_workbook_keeps_the_october_form_for_the_labor_office():
+    from backend.app.services.payroll_ledger.excel import fill_official_xlsx
+    from backend.app.services.payroll_ledger.october_2026 import october_2026_lines
+
+    book = load_workbook(BytesIO(fill_official_xlsx({
+        "year": 2026,
+        "month": 11,
+        "company_name": "틸리언",
+        "period_label": "2026.11.01~2026.11.30",
+        "lines": october_2026_lines(),
+    })))
+    assert {"급여대장", "급여명세서", "2023년 조견표", "급여명세서 수령 확인", "수선팀장 전은정"} <= set(book.sheetnames)
+    assert book["급여대장"]["A1"].value == datetime(2026, 11, 1)
+    assert "2026.11.01~2026.11.30" == book["급여대장"]["B3"].value
+    assert book["수선팀장 전은정"]["H20"].value == 1966730
+    assert book["수선팀장 전은정"]["D20"].value == 200000
+    assert str(book["수선팀장 전은정"]["B24"].value).startswith("=")
+    assert str(book["급여대장"]["B8"].value).startswith("=")
 
 
 def test_october_2026_is_seeded_from_the_given_workbook_values(isolated_runtime):
