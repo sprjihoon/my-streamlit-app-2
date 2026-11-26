@@ -359,7 +359,19 @@ test('return info log shows the actor and restores a deleted row', async ({ page
 
   await page.goto('/return-info-log');
   await expect(page.getByRole('heading', { name: '반품정보 조회 로그 분석' })).toBeVisible();
+  await expect(page.getByText('로그 1/1건 · 1/1페이지')).toBeVisible();
+  await expect(page.getByLabel('페이지당')).toHaveValue('50');
+  await expect(page.getByRole('button', { name: '처음' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '마지막' })).toBeDisabled();
   await expect(page.getByRole('cell', { name: '물류담당' })).toBeVisible();
+  const resized = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/return-info/logs')
+      && url.searchParams.get('page') === '1'
+      && url.searchParams.get('page_size') === '20';
+  });
+  await page.getByLabel('페이지당').selectOption('20');
+  await resized;
   await expect(page.getByRole('cell', { name: '삭제 · 셔츠 · 111', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '삭제 · 셔츠 · 111 되돌리기' }).click();
   await page.getByRole('button', { name: '네' }).click();

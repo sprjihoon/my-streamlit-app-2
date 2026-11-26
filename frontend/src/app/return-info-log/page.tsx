@@ -9,6 +9,7 @@ import { Alert } from '@/components/Alert';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import { Select } from '@/components/ui/select';
+import { TableSummary } from '@/components/data';
 import { useYesNo } from '@/components/YesNoDialog';
 import {
   getReturnInfoLogs,
@@ -30,6 +31,8 @@ const SUMMARY = [
   { key: 'restore', label: '복구' },
   { key: 'create', label: '추가' },
 ] as const;
+
+const PAGE_SIZES = [20, 50, 100];
 
 function errorText(err: unknown) {
   const raw = err instanceof Error ? err.message : '';
@@ -62,12 +65,12 @@ export default function ReturnInfoLogPage() {
   const [summary, setSummary] = useState({ create: 0, update: 0, delete: 0, restore: 0 });
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [loading, setLoading] = useState(false);
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [version, setVersion] = useState(0);
   const { ask, dialog } = useYesNo();
-  const pageSize = 50;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   useEffect(() => {
@@ -97,7 +100,7 @@ export default function ReturnInfoLogPage() {
     return () => {
       cancelled = true;
     };
-  }, [applied, page, version]);
+  }, [applied, page, pageSize, version]);
 
   async function restore(entry: ReturnInfoLogEntry) {
     if (restoringId !== null) return;
@@ -195,6 +198,25 @@ export default function ReturnInfoLogPage() {
           </div>
         </div>
       </Card>
+      <div className="tw-mb-2 tw-mt-3 tw-flex tw-flex-wrap tw-items-center tw-justify-between tw-gap-2">
+        <TableSummary>
+          로그 {rows.length}/{total}건 · {page}/{totalPages}페이지
+        </TableSummary>
+        <Field label="페이지당" className="tw-mb-0">
+          <Select
+            aria-label="페이지당"
+            value={pageSize}
+            onChange={(event) => {
+              setPageSize(Number(event.target.value));
+              setPage(1);
+            }}
+          >
+            {PAGE_SIZES.map((size) => (
+              <option key={size} value={size}>{size}개</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
       <Card title="">
         {loading ? (
           <Loading />
@@ -245,9 +267,11 @@ export default function ReturnInfoLogPage() {
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1rem' }}>
+          <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage(1)}>처음</Button>
           <Button type="button" variant="ghost" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>이전</Button>
           <span className="caption" style={{ alignSelf: 'center' }}>{page} / {totalPages}</span>
           <Button type="button" variant="ghost" disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>다음</Button>
+          <Button type="button" variant="ghost" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>마지막</Button>
         </div>
       </Card>
       {dialog}
