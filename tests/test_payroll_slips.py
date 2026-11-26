@@ -86,3 +86,39 @@ def test_admin_can_preview_slip_before_release(isolated_runtime):
     text = fitz.open(stream=pdf.content, filetype="pdf")[0].get_text()
     assert "전은정" in text
     assert "1,966,730" in text
+
+
+def test_slip_numbers_and_dates_stay_inside_page():
+    from backend.app.services.payroll_ledger.slip import render_slip_pdf
+
+    pdf = render_slip_pdf(
+        {
+            "company_name": "틸리언",
+            "period_label": "2026.11.01~2026.11.30",
+            "year": 2026,
+            "month": 11,
+        },
+        {
+            "employee_name": "홍길동",
+            "affiliation": "수선팀",
+            "hourly": 12345,
+            "base_pay": 1966730,
+            "gross_pay": 26174640,
+            "deduction_total": 412340,
+            "net_pay": 1966730,
+            "work_days": "2026.11.01~2026.11.30",
+            "base_hours": 209,
+            "overtime_hours": 12.5,
+            "holiday_hours": 8,
+            "night_hours": 4,
+        },
+        masked_rrn="900101-1******",
+    )
+    page = fitz.open(stream=pdf, filetype="pdf")[0]
+    text = page.get_text()
+    assert "2026.11.01~11.30" in text.replace(" ", "")
+    assert "1,966,730" in text
+    assert "26,174,640" in text
+    for x0, _y0, x1, _y1, word, *_rest in page.get_text("words"):
+        assert x0 >= 33, word
+        assert x1 <= 562, (word, round(x0, 1), round(x1, 1))
