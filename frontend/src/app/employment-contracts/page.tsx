@@ -51,11 +51,15 @@ interface ContractForm {
   holiday_hours: number;
   night_hours: number;
   net_pay: number;
+  taxable_pay: number;
+  annual_pay: number;
+  pay_basis: 'net' | 'taxable' | 'annual';
   vehicle_allowance: number;
   meal_allowance: number;
   position_allowance: number;
   income_tax: number;
   pension: number | null;
+  dependents: number;
   weekday_hours: string;
   break_time: string;
   work_days: string;
@@ -99,11 +103,15 @@ const EMPTY_FORM: ContractForm = {
   holiday_hours: 0,
   night_hours: 0,
   net_pay: 0,
+  taxable_pay: 0,
+  annual_pay: 0,
+  pay_basis: 'net',
   vehicle_allowance: 0,
   meal_allowance: 0,
   position_allowance: 0,
   income_tax: 0,
   pension: 0,
+  dependents: 1,
   weekday_hours: '09:00~18:00',
   break_time: '1시간 (12~13)',
   work_days: '주중 평균 5일 근무',
@@ -214,8 +222,16 @@ export default function EmploymentContractsPage() {
       return;
     }
     const data = await res.json();
+    const next = { ...EMPTY_FORM, ...data.input } as ContractForm;
+    const basis = next.pay_basis === 'taxable' || next.pay_basis === 'annual' ? next.pay_basis : 'net';
     setEditingId(userId);
-    setForm({ ...EMPTY_FORM, ...data.input });
+    setForm({
+      ...next,
+      pay_basis: basis,
+      net_pay: basis === 'net' ? next.net_pay : 0,
+      taxable_pay: basis === 'taxable' ? next.taxable_pay : 0,
+      annual_pay: basis === 'annual' ? next.annual_pay : 0,
+    });
     setCalc(data.calc);
     setView('open');
   }
@@ -464,7 +480,7 @@ export default function EmploymentContractsPage() {
             <section style={{ marginTop: '0.9rem', border: '1px solid #dbeafe', background: '#f8fbff', borderRadius: 12, padding: '0.9rem' }}>
               <h4 style={{ margin: '0 0 0.35rem' }}>내가 적는 항목</h4>
               <p style={{ margin: '0 0 0.75rem', color: '#1e3a8a', fontSize: '0.82rem' }}>
-                실수령액, 차량지원, 식대, 소득세만 적으면 건강보험·장기요양·고용보험·주민세는 엑셀과 같은 식으로 채워집니다. 국민연금은 엑셀처럼 따로 적을 수 있고, 비우면 과세월급의 4.75%로 계산합니다.
+                실수령액, 세전금액, 연봉 중 하나만 적으면 국민연금·건강보험·고용보험·소득세는 자동입니다. 소득세는 간이세액표와 공제대상 가족 수를 씁니다. 근로시간 문구는 지금 쓰는 09:00~18:00, 휴게 1시간, 주 5일을 기본으로 둡니다.
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
                 <Field label="직무" value={form.job_title} onChange={(value) => patch('job_title', value)} />
@@ -476,12 +492,40 @@ export default function EmploymentContractsPage() {
                 <Field label="휴게시간" value={form.break_time} onChange={(value) => patch('break_time', value)} />
                 <Field label="근로일" value={form.work_days} onChange={(value) => patch('work_days', value)} />
                 <Field label="급여일" type="number" value={String(form.pay_day)} onChange={(value) => patch('pay_day', Number(value) || 0)} />
-                <Field label="실수령액" type="number" value={String(form.net_pay)} onChange={(value) => patch('net_pay', Number(value) || 0)} />
+                <label className="ops-label">
+                  급여 기준
+                  <select
+                    className="ui-control"
+                    value={form.pay_basis}
+                    onChange={(event) => {
+                      const next = event.target.value as ContractForm['pay_basis'];
+                      setForm((current) => ({
+                        ...current,
+                        pay_basis: next,
+                        net_pay: next === 'net' ? current.net_pay : 0,
+                        taxable_pay: next === 'taxable' ? current.taxable_pay : 0,
+                        annual_pay: next === 'annual' ? current.annual_pay : 0,
+                      }));
+                    }}
+                  >
+                    <option value="net">실수령액</option>
+                    <option value="taxable">세전금액</option>
+                    <option value="annual">연봉</option>
+                  </select>
+                </label>
+                {form.pay_basis === 'net' && (
+                  <Field label="실수령액" type="number" value={String(form.net_pay)} onChange={(value) => patch('net_pay', Number(value) || 0)} />
+                )}
+                {form.pay_basis === 'taxable' && (
+                  <Field label="세전금액" type="number" value={String(form.taxable_pay)} onChange={(value) => patch('taxable_pay', Number(value) || 0)} />
+                )}
+                {form.pay_basis === 'annual' && (
+                  <Field label="연봉" type="number" value={String(form.annual_pay)} onChange={(value) => patch('annual_pay', Number(value) || 0)} />
+                )}
                 <Field label="차량지원" type="number" value={String(form.vehicle_allowance)} onChange={(value) => patch('vehicle_allowance', Number(value) || 0)} />
                 <Field label="식대" type="number" value={String(form.meal_allowance)} onChange={(value) => patch('meal_allowance', Number(value) || 0)} />
                 <Field label="직책수당" type="number" value={String(form.position_allowance)} onChange={(value) => patch('position_allowance', Number(value) || 0)} />
-                <Field label="소득세" type="number" value={String(form.income_tax)} onChange={(value) => patch('income_tax', Number(value) || 0)} />
-                <Field label="국민연금" type="number" value={String(form.pension || 0)} onChange={(value) => patch('pension', Number(value) || 0)} />
+                <Field label="공제대상 가족 수" type="number" value={String(form.dependents || 1)} onChange={(value) => patch('dependents', Math.min(10, Math.max(1, Number(value) || 1)))} />
                 <Field label="기본근로시간" type="number" value={String(form.base_hours)} onChange={(value) => patch('base_hours', Number(value) || 0)} />
                 <Field label="초과근로시간" type="number" value={String(form.overtime_hours)} onChange={(value) => patch('overtime_hours', Number(value) || 0)} />
                 <Field label="휴일근로시간" type="number" value={String(form.holiday_hours)} onChange={(value) => patch('holiday_hours', Number(value) || 0)} />
@@ -507,6 +551,8 @@ export default function EmploymentContractsPage() {
                   ['휴일수당', calc.holiday_pay],
                   ['야간수당', calc.night_pay],
                   ['국민연금', calc.pension],
+                  ['소득세', calc.income_tax],
+                  ['주민세', calc.local_tax],
                   ['건강보험', calc.health],
                   ['장기요양', calc.care],
                   ['고용보험', calc.employment],

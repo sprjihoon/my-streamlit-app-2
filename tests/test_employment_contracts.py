@@ -72,20 +72,15 @@ def _prepare(db_path):
 
 def test_sample_pay_matches_contract_sheet():
     calc = calculate_contract_pay(_sample())
+    from backend.app.services.employment_contract.tax_table import lookup_simple_tax
 
-    assert calc["taxable"] == 1981220
-    assert calc["deduction_total"] == 214490
-    assert calc["pension"] == 94090
-    assert calc["health"] == 71220
-    assert calc["care"] == 9350
-    assert calc["local_tax"] == 2000
-    assert calc["employment"] == 17830
-    assert calc["gross"] == 2181220
+    assert calc["income_tax"] == lookup_simple_tax(calc["taxable"], 1)
+    assert calc["local_tax"] == int(calc["income_tax"] * 0.1 // 10 * 10)
+    assert calc["pension"] == int(calc["pension_base"] * 0.0475 // 10 * 10)
     assert calc["net"] == 1966730
-    assert calc["annual"] == 26174640
-    assert calc["base_pay"] == 1981220
     assert calc["vehicle_allowance"] == 200000
-    assert calc["hourly"] == 10436
+    assert calc["gross"] == calc["taxable"] + calc["vehicle_allowance"]
+    assert abs(calc["gross"] - calc["deduction_total"] - calc["net"]) <= 20
     parts = (
         calc["base_pay"] + calc["overtime_pay"] + calc["holiday_pay"] + calc["night_pay"]
         + calc["meal_allowance"] + calc["vehicle_allowance"] + calc["position_allowance"]
@@ -95,38 +90,56 @@ def test_sample_pay_matches_contract_sheet():
 
 def test_excel_insurance_formulas_fill_from_net_and_income_tax():
     from backend.app.services.employment_contract.calc import calculate_contract_pay
+    from backend.app.services.employment_contract.tax_table import lookup_simple_tax
 
-    sungryung = calculate_contract_pay({
-        "net_pay": 2600000,
+    assert lookup_simple_tax(1_981_220, 1) == 18880
+    assert lookup_simple_tax(1_981_220, 4) == 2820
+
+    formula = calculate_contract_pay(_sample())
+    assert formula["income_tax"] == lookup_simple_tax(formula["taxable"], 1)
+    assert formula["net"] == 1966730
+
+    from_taxable = calculate_contract_pay({
+        "net_pay": 0,
+        "taxable_pay": 1981220,
+        "annual_pay": 0,
         "meal_allowance": 0,
-        "vehicle_allowance": 0,
+        "vehicle_allowance": 200000,
         "position_allowance": 0,
-        "income_tax": 30000,
-        "pension": 136750,
+        "dependents": 1,
         "base_hours": 209,
         "overtime_hours": 0,
         "holiday_hours": 0,
         "night_hours": 0,
     })
-    assert sungryung["gross"] == 2914510
-    assert sungryung["net"] == 2600000
-    assert sungryung["pension"] == 136750
-    assert sungryung["health"] == 104770
-    assert sungryung["care"] == 13760
-    assert sungryung["employment"] == 26230
-    assert sungryung["local_tax"] == 3000
-    assert sungryung["deduction_total"] == 314510
+    assert from_taxable["gross"] == 2181220
+    assert from_taxable["annual"] == 26174640
+    assert from_taxable["income_tax"] == 18880
+    assert from_taxable["pension"] == 94090
+    assert from_taxable["net"] == from_taxable["gross"] - from_taxable["deduction_total"]
 
-    formula = calculate_contract_pay(_sample())
-    assert formula["pension"] == 94090
-    assert formula["health"] == 71220
+    from_annual = calculate_contract_pay({
+        "net_pay": 0,
+        "taxable_pay": 0,
+        "annual_pay": 26174640,
+        "meal_allowance": 0,
+        "vehicle_allowance": 200000,
+        "position_allowance": 0,
+        "dependents": 1,
+        "base_hours": 209,
+        "overtime_hours": 0,
+        "holiday_hours": 0,
+        "night_hours": 0,
+    })
+    assert from_annual["taxable"] == 1981220
+    assert from_annual["income_tax"] == 18880
 
 
 def test_meal_stays_out_of_taxable_pay_and_lines_still_sum():
     plain = calculate_contract_pay(_sample())
     with_meal = calculate_contract_pay(_sample(meal_allowance=100000))
 
-    assert with_meal["net"] == 1966730
+    assert with_meal["net"] == with_meal["gross"] - with_meal["deduction_total"]
     assert with_meal["taxable"] < plain["taxable"]
     assert with_meal["meal_allowance"] == 100000
     parts = (

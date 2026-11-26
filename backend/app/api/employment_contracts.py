@@ -38,11 +38,15 @@ INPUT_FIELDS = (
     "holiday_hours",
     "night_hours",
     "net_pay",
+    "taxable_pay",
+    "annual_pay",
+    "pay_basis",
     "vehicle_allowance",
     "meal_allowance",
     "position_allowance",
     "income_tax",
     "pension",
+    "dependents",
     "weekday_hours",
     "break_time",
     "work_days",
@@ -65,11 +69,15 @@ class ContractInput(BaseModel):
     holiday_hours: float = 0
     night_hours: float = 0
     net_pay: int = 0
+    taxable_pay: int = 0
+    annual_pay: int = 0
+    pay_basis: str = "net"
     vehicle_allowance: int = 0
     meal_allowance: int = 0
     position_allowance: int = 0
     income_tax: int = 0
     pension: int | None = None
+    dependents: int = Field(default=1, ge=1, le=10)
     weekday_hours: str = "09:00~18:00"
     break_time: str = "1시간 (12~13)"
     work_days: str = "주중 평균 5일 근무"
@@ -99,11 +107,15 @@ def ensure_contract_tables() -> None:
                 holiday_hours REAL DEFAULT 0,
                 night_hours REAL DEFAULT 0,
                 net_pay INTEGER DEFAULT 0,
+                taxable_pay INTEGER DEFAULT 0,
+                annual_pay INTEGER DEFAULT 0,
+                pay_basis TEXT DEFAULT 'net',
                 vehicle_allowance INTEGER DEFAULT 0,
                 meal_allowance INTEGER DEFAULT 0,
                 position_allowance INTEGER DEFAULT 0,
                 income_tax INTEGER DEFAULT 0,
                 pension INTEGER,
+                dependents INTEGER DEFAULT 1,
                 weekday_hours TEXT,
                 break_time TEXT,
                 work_days TEXT,
@@ -121,6 +133,14 @@ def ensure_contract_tables() -> None:
         columns = [row[1] for row in con.execute("PRAGMA table_info(employment_contracts)")]
         if "pension" not in columns:
             con.execute("ALTER TABLE employment_contracts ADD COLUMN pension INTEGER")
+        if "taxable_pay" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN taxable_pay INTEGER DEFAULT 0")
+        if "annual_pay" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN annual_pay INTEGER DEFAULT 0")
+        if "pay_basis" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN pay_basis TEXT DEFAULT 'net'")
+        if "dependents" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN dependents INTEGER DEFAULT 1")
         con.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_employment_contracts_user
@@ -217,11 +237,12 @@ def _values(data: ContractInput, *, required: bool) -> dict:
         ("차량지원", data.vehicle_allowance),
         ("식대", data.meal_allowance),
         ("직책수당", data.position_allowance),
-        ("소득세", data.income_tax),
-        ("국민연금", data.pension or 0),
     ):
         if amount < 0:
             raise HTTPException(status_code=400, detail=f"{label}은 0 이상이어야 합니다.")
+    basis = (data.pay_basis or "net").strip()
+    if basis not in {"net", "taxable", "annual"}:
+        raise HTTPException(status_code=400, detail="급여 기준은 실수령액, 세전금액, 연봉 중 하나입니다.")
     payload = data.model_dump()
     payload["employee_name"] = name[:40]
     payload["job_title"] = data.job_title.strip()[:40]
@@ -239,7 +260,30 @@ def _values(data: ContractInput, *, required: bool) -> dict:
     payload["weekday_hours"] = (data.weekday_hours or "09:00~18:00").strip()[:40]
     payload["break_time"] = (data.break_time or "1시간 (12~13)").strip()[:40]
     payload["work_days"] = (data.work_days or "주중 평균 5일 근무").strip()[:40]
-    payload["pension"] = None if data.pension in (None, 0) else int(data.pension)
+    payload["pension"] = None
+    payload["dependents"] = int(data.dependents or 1)
+    payload["income_tax"] = int(data.income_tax or 0)
+    payload["pay_basis"] = basis
+    payload["taxable_pay"] = int(data.taxable_pay or 0)
+    payload["annual_pay"] = int(data.annual_pay or 0)
+    if basis == "net":
+        payload["taxable_pay"] = 0
+        payload["annual_pay"] = 0
+    elif basis == "taxable":
+        payload["net_pay"] = 0
+        payload["annual_pay"] = 0
+    else:
+        payload["net_pay"] = 0
+        payload["taxable_pay"] = 0
+    return payload
+
+
+def _apply_calc(payload: dict, calc: dict) -> dict:
+    payload["net_pay"] = calc["net"]
+    payload["taxable_pay"] = calc["taxable"]
+    payload["annual_pay"] = calc["annual"]
+    payload["income_tax"] = calc["income_tax"]
+    payload["pension"] = calc["pension"]
     return payload
 
 
@@ -331,11 +375,15 @@ def _contract_defaults(existing: dict | None, position: str, join_date: str) -> 
         "holiday_hours": current.get("holiday_hours") or 0,
         "night_hours": current.get("night_hours") or 0,
         "net_pay": current.get("net_pay") or 0,
+        "taxable_pay": current.get("taxable_pay") or 0,
+        "annual_pay": current.get("annual_pay") or 0,
+        "pay_basis": current.get("pay_basis") or "net",
         "vehicle_allowance": current.get("vehicle_allowance") or 0,
         "meal_allowance": current.get("meal_allowance") or 0,
         "position_allowance": current.get("position_allowance") or 0,
         "income_tax": current.get("income_tax") or 0,
         "pension": current.get("pension"),
+        "dependents": current.get("dependents") or 1,
         "weekday_hours": current.get("weekday_hours") or "09:00~18:00",
         "break_time": current.get("break_time") or "1시간 (12~13)",
         "work_days": current.get("work_days") or "주중 평균 5일 근무",
@@ -393,12 +441,18 @@ def apply_payroll_contract_fields(lines: list[dict]) -> dict:
             payload["holiday_hours"] = float(line.get("holiday_hours") or 0)
             payload["night_hours"] = float(line.get("night_hours") or 0)
             payload["net_pay"] = int(line.get("net_pay") or 0)
+            payload["taxable_pay"] = 0
+            payload["annual_pay"] = 0
+            payload["pay_basis"] = "net"
             payload["vehicle_allowance"] = int(line.get("vehicle_allowance") or 0)
             payload["meal_allowance"] = int(line.get("meal_allowance") or 0)
             payload["position_allowance"] = int(line.get("position_allowance") or 0)
-            payload["income_tax"] = int(line.get("income_tax") or 0)
-            payload["pension"] = int(line.get("pension") or 0) or None
-            calc = calculate_contract_pay(payload) if payload["net_pay"] > 0 and payload["base_hours"] > 0 else None
+            payload["income_tax"] = 0
+            payload["pension"] = None
+            payload["dependents"] = int(line.get("dependents") or payload.get("dependents") or 1)
+            calc = calculate_contract_pay(payload) if payload["base_hours"] > 0 and (payload["net_pay"] or payload["taxable_pay"] or payload["annual_pay"]) else None
+            if calc:
+                payload = _apply_calc(payload, calc)
             if latest and latest[1] == "draft":
                 assignments = ", ".join(f"{field} = ?" for field in INPUT_FIELDS)
                 con.execute(
@@ -555,11 +609,15 @@ def get_contract_draft(user_id: int, token: str):
             "holiday_hours": 0,
             "night_hours": 0,
             "net_pay": 0,
+            "taxable_pay": 0,
+            "annual_pay": 0,
+            "pay_basis": "net",
             "vehicle_allowance": 0,
             "meal_allowance": 0,
             "position_allowance": 0,
             "income_tax": 0,
             "pension": None,
+            "dependents": 1,
             "weekday_hours": "09:00~18:00",
             "break_time": "1시간 (12~13)",
             "work_days": "주중 평균 5일 근무",
@@ -578,7 +636,7 @@ def preview_contract(body: ContractInput, token: str):
 
 
 def _preview_calc(payload: dict) -> dict:
-    if int(payload.get("net_pay") or 0) > 0:
+    if int(payload.get("net_pay") or 0) > 0 or int(payload.get("taxable_pay") or 0) > 0 or int(payload.get("annual_pay") or 0) > 0:
         return _calculate(payload)
     return {
         "taxable": 0,
@@ -587,7 +645,7 @@ def _preview_calc(payload: dict) -> dict:
         "annual": 0,
         "deduction_total": 0,
         "pension_base": 0,
-        "pension": payload.get("pension") or 0,
+        "pension": 0,
         "health": 0,
         "care": 0,
         "income_tax": 0,
@@ -689,7 +747,9 @@ def save_worker_fields(user_id: int, body: WorkerInput, token: str):
 def save_contract_draft(user_id: int, body: ContractInput, token: str):
     actor = _admin(token)
     payload = _values(body, required=False)
-    calc = _calculate(payload) if payload["net_pay"] > 0 and payload["base_hours"] > 0 else None
+    calc = _calculate(payload) if payload["base_hours"] > 0 and (payload["net_pay"] or payload["taxable_pay"] or payload["annual_pay"]) else None
+    if calc:
+        payload = _apply_calc(payload, calc)
     with get_connection() as con:
         _user_or_404(con, user_id)
         _require_open(con, user_id)
@@ -722,6 +782,7 @@ def complete_contract(user_id: int, body: ContractInput, token: str):
     actor = _admin(token)
     payload = _values(body, required=True)
     calc = _calculate(payload)
+    payload = _apply_calc(payload, calc)
     company = _company()
     completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as con:
