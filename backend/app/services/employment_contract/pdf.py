@@ -500,51 +500,101 @@ class _Form:
             self._line(x, row_a, x, row_c, 0.7)
 
         self._put(fitz.Rect(left, row_a, col_b, row_b), "성명", 11)
-        self._put(fitz.Rect(col_b, row_a, col_c, row_b), _clean(fields.get("employee_name")), 10)
+        self._cell_value(fitz.Rect(col_b, row_a, col_c, row_b), _clean(fields.get("employee_name")), 10)
         self._put(fitz.Rect(col_c, row_a, col_d, row_b), "연락처", 11)
-        self._put(fitz.Rect(col_d, row_a, right, row_b), _clean(fields.get("phone")), 9)
+        self._cell_value(fitz.Rect(col_d, row_a, right, row_b), _clean(fields.get("phone")), 9)
         self._put(fitz.Rect(left, row_b, col_b, row_c), "생년월일", 11)
-        self._put(fitz.Rect(col_b, row_b, col_c, row_c), _birth(fields.get("resident_id")), 8)
+        self._cell_value(fitz.Rect(col_b, row_b, col_c, row_c), _birth(fields.get("resident_id")), 8)
         self._put(fitz.Rect(col_c, row_b, col_d, row_c), "직급", 11)
-        self._put(fitz.Rect(col_d, row_b, right, row_c), _clean(fields.get("rank_title")), 10)
+        self._cell_value(fitz.Rect(col_d, row_b, right, row_c), _clean(fields.get("rank_title")), 10)
 
-        lines = [
-            (110.5, f"본인은 {company_name} (이하, '회사'라 함)을 퇴직함에 있어 아래 사항을 충분히 숙지"),
-            (110.5, "하고, 성실히 준수할 것을 서약합니다."),
-            (94.1, "1. 회사에 재직한 기간 중 독자적으로 또는 다른 사람과 함께 취득한 기술정보"),
-            (110.5, "(발명, 특허, 개발, 생산 등 제반 기술) 및 경영정보 (재무, 관리, 기획, 영업,"),
-            (110.5, "인사 등 제반정보) 등 모든 영업비밀은 전적으로 회사의 소유이며, 회사가"),
-            (110.5, "사용하거나 처분할 권리가 있음을 인정합니다."),
-            (94.1, "2. 어떠한 장소에 어떠한 방법으로도 회사의 영업비밀 및 자산을 보유하거나"),
-            (110.5, "저장되고 있지 않음을 확인합니다."),
-            (94.1, "3. 재직기간 중 취득한 회사의 모든 영업비밀 (경영 및 기술정보)은 퇴사 후에도"),
-            (110.5, "회사의 업무 인수, 인계와 관련 없는 어떠한 회사내외 제3자에게도 누설하지"),
-            (110.5, "않겠습니다."),
-            (94.1, "4. 퇴직 후 3년간 회사의 영업비밀을 이용하여 창업하거나 경쟁관계에 있는"),
-            (110.5, "회사 기타 제3자를 위하여 영업비밀을 누설하거나 사용하지 않겠습니다."),
-            (94.1, "5. 회사의 영업비밀 보호를 위한 노력에 적극 협조할 뿐 아니라, 그에 따른"),
-            (110.5, "법적 도덕적 의무를 성실히 이행하겠습니다."),
-            (110.5, "본인은 위의 사항을 충분히 숙지하여 이를 성실히 준수할 것이며 만일 이를"),
-            (110.5, "위반하였을 경우 부정경쟁방지 및 영업비밀에 관한 법률 등 관련 법령에 따라"),
-            (110.5, "민 · 형사상의 책임 뿐만 아니라 제반 손해 배상의 책임 등 불이익을 감수할"),
-            (110.5, "것이며, 회사에 끼친 손해에 대해 지체없이 변상, 복구할 것을 서약합니다."),
+        text_left = left + 18
+        text_right = right - 12
+        paragraphs = [
+            f"본인은 {company_name} (이하, '회사'라 함)을 퇴직함에 있어 아래 사항을 충분히 숙지하고, 성실히 준수할 것을 서약합니다.",
+            "1. 회사에 재직한 기간 중 독자적으로 또는 다른 사람과 함께 취득한 기술정보 (발명, 특허, 개발, 생산 등 제반 기술) 및 경영정보 (재무, 관리, 기획, 영업, 인사 등 제반정보) 등 모든 영업비밀은 전적으로 회사의 소유이며, 회사가 사용하거나 처분할 권리가 있음을 인정합니다.",
+            "2. 어떠한 장소에 어떠한 방법으로도 회사의 영업비밀 및 자산을 보유하거나 저장되고 있지 않음을 확인합니다.",
+            "3. 재직기간 중 취득한 회사의 모든 영업비밀 (경영 및 기술정보)은 퇴사 후에도 회사의 업무 인수, 인계와 관련 없는 어떠한 회사내외 제3자에게도 누설하지 않겠습니다.",
+            "4. 퇴직 후 3년간 회사의 영업비밀을 이용하여 창업하거나 경쟁관계에 있는 회사 기타 제3자를 위하여 영업비밀을 누설하거나 사용하지 않겠습니다.",
+            "5. 회사의 영업비밀 보호를 위한 노력에 적극 협조할 뿐 아니라, 그에 따른 법적 도덕적 의무를 성실히 이행하겠습니다.",
+            "본인은 위의 사항을 충분히 숙지하여 이를 성실히 준수할 것이며 만일 이를 위반하였을 경우 부정경쟁방지 및 영업비밀에 관한 법률 등 관련 법령에 따라 민·형사상의 책임 뿐만 아니라 제반 손해 배상의 책임 등 불이익을 감수할 것이며, 회사에 끼친 손해에 대해 지체없이 변상, 복구할 것을 서약합니다.",
         ]
-        tops = (
-            158.3, 175.0,
-            208.4, 225.0, 241.7, 258.4,
-            291.8, 308.4,
-            341.8, 358.5, 375.2,
-            408.5, 425.2,
-            458.6, 475.2,
-            525.3, 542.0, 558.6, 575.3,
-        )
-        for (x, text), top in zip(lines, tops):
-            self._write(x, top + 9.2, text, 10.5)
+        cursor = self._flow_pledge(paragraphs, text_left, text_right, 156)
         year, month, day = _date_parts(completed_at)
-        if year:
-            self._put(fitz.Rect(220, 612, 500, 648), f"{year}  년     {month}  월     {day}  일", 11)
-        else:
-            self._put(fitz.Rect(220, 612, 500, 648), "년          월          일", 11)
+        date_text = f"{year}년  {month}월  {day}일" if year else "년     월     일"
         employee = _clean(fields.get("employee_name"))
-        self._put(fitz.Rect(180, 662, 520, 698), f"서약자 :    {employee}      (인)", 11)
-        self._put(fitz.Rect(left, 712, right, 752), company_name, 14)
+        sign_text = f"서약자 :  {employee}   (인)"
+        cursor = max(cursor + 18, 612)
+        self._write_fitted(text_left, text_right, cursor, date_text, 11, align="center")
+        self._write_fitted(text_left, text_right, cursor + 42, sign_text, 11, align="center")
+        self._write_fitted(text_left, text_right, min(cursor + 92, bottom - 28), company_name, 14, align="center")
+
+    def _flow_pledge(self, paragraphs: list[str], x: float, right: float, top: float) -> float:
+        """돋움은 글자마다 글자 크기만큼 넓다. 그 폭으로 박스 안에서 줄을 나눈다."""
+        size = 10.0
+        gap = 15.5
+        paragraph_gap = 9.0
+        width = right - x
+        while size > 8.0:
+            cursor = top
+            for index, paragraph in enumerate(paragraphs):
+                if index:
+                    cursor += paragraph_gap
+                cursor += gap * len(self._wrap_em(paragraph, size, width))
+            if cursor < 590:
+                break
+            size -= 0.4
+            gap = size + 5.2
+        cursor = top + size
+        for index, paragraph in enumerate(paragraphs):
+            if index:
+                cursor += paragraph_gap
+            for line in self._wrap_em(paragraph, size, width):
+                self._write(x, cursor, line, size)
+                cursor += gap
+        return cursor
+
+    def _cell_value(self, rect: fitz.Rect, text: str, size: float) -> None:
+        value = str(text or "").strip()
+        if not value:
+            return
+        use = self._em_size(value, rect.width, size)
+        text_w = len(value) * use
+        x = rect.x0 + max((rect.width - text_w) / 2, 3)
+        baseline = rect.y0 + (rect.height + use * 0.72) / 2
+        self._write(x, baseline, value, use)
+
+    def _em_size(self, text: str, width: float, size: float) -> float:
+        use = size
+        while use > 6 and text and len(text) * use > width - 8:
+            use -= 0.2
+        return use
+
+    def _wrap_em(self, text: str, size: float, width: float) -> list[str]:
+        lines: list[str] = []
+        current = ""
+        limit = max(width, size * 4)
+        for ch in text:
+            trial = current + ch
+            if current and len(trial) * size > limit:
+                lines.append(current.rstrip())
+                current = "" if ch == " " else ch
+            else:
+                current = trial
+        if current:
+            lines.append(current)
+        return lines or [""]
+
+    def _write_fitted(self, x0: float, x1: float, baseline: float, text: str, size: float, align: str) -> None:
+        value = str(text or "").strip()
+        if not value:
+            return
+        use = size
+        while use > 7 and len(value) * use > (x1 - x0):
+            use -= 0.3
+        text_w = len(value) * use
+        if align == "center":
+            x = x0 + max((x1 - x0 - text_w) / 2, 0)
+        else:
+            x = x0
+        self._write(x, baseline, value, use)
