@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from backend.app.api.logs import add_log
-from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, weekly_holiday_pay
+from backend.app.services.part_time.calc import minimum_wage, settle_part_time_pay, weekly_holiday_pay
 from backend.app.services.part_time.excel import render_part_time_xlsx
 from logic.db import get_connection
 
@@ -414,6 +414,9 @@ def save_day(body: DayIn, token: str):
 
 
 def _slips(data: dict) -> list[dict]:
+    with get_connection() as con:
+        resident_rows = con.execute("SELECT id, resident_id FROM part_time_workers").fetchall()
+    residents = {row[0]: row[1] for row in resident_rows}
     slips = []
     for total in data["totals"]:
         lines = []
@@ -427,7 +430,15 @@ def _slips(data: dict) -> list[dict]:
                     "pay": entry["pay"],
                 })
         taxable = int(total["total_pay"])
-        tax = daily_worker_tax(taxable, len(lines))
+        pay = settle_part_time_pay(
+            taxable,
+            len(lines),
+            total["basic_hours"],
+            bool(total["reported"]),
+            int(data["year"]),
+            int(data["month"]),
+            residents.get(total["worker_id"]) or "",
+        )
         average = round(total["basic_hours"] / len(lines), 2) if lines else 0
         slips.append({
             **total,
@@ -436,8 +447,7 @@ def _slips(data: dict) -> list[dict]:
             "taxable_pay": taxable,
             "nontaxable_pay": 0,
             "lines": lines,
-            **tax,
-            "net_pay": taxable - tax["deduction_total"],
+            **pay,
         })
     return slips
 

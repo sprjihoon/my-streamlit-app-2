@@ -7,7 +7,12 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, weekly_holiday_pay
+from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, settle_part_time_pay, weekly_holiday_pay
+from backend.app.services.part_time.calendar_actions import (
+    date_from_point_target,
+    drop_worker_onto_date,
+    workers_available_on_date,
+)
 
 
 def _prepare(db_path):
@@ -53,6 +58,32 @@ def test_weekly_holiday_follows_the_sheet_formula():
     assert taxed["local_tax"] == 2_700
     assert daily_worker_tax(700_000, 7)["income_tax"] == 0
     assert daily_worker_tax(3_030_000, 20)["income_tax"] == 0
+    short = settle_part_time_pay(144_000, 2, 10, True, 2026, 11, "900101-1234567")
+    assert short["withholding_kind"] == "daily"
+    assert short["employment_insurance"] == 1290
+    assert short["pension"] == 0
+    assert short["net_pay"] == 142_710
+    covered = settle_part_time_pay(2_200_000, 8, 60, True, 2026, 11, "900101-1234567")
+    assert covered["pension_base"] == 2_200_000
+    assert covered["pension"] == 104_500
+    assert covered["health"] == 79_090
+    assert covered["care"] == 10_390
+    assert covered["employment_insurance"] == 19_800
+    assert covered["employer_industrial"] == 17_600
+    assert covered["net_pay"] == 2_200_000 - covered["deduction_total"]
+    assert covered["employer_industrial"] not in (covered["deduction_total"],)
+    low = settle_part_time_pay(300_000, 8, 40, True, 2026, 11, "900101-1234567")
+    assert low["pension_base"] == 410_000
+    assert low["pension"] == 19_470
+    older = settle_part_time_pay(2_200_000, 8, 60, True, 2026, 11, "600101-1234567")
+    assert older["pension"] == 0
+    assert older["employment_insurance"] == 0
+    freelance = settle_part_time_pay(103_200, 2, 10, False, 2026, 11, "910101-2234567")
+    assert freelance["income_tax"] == 3090
+    assert freelance["local_tax"] == 300
+    assert freelance["pension"] == 0
+    assert freelance["employer_industrial"] == 0
+    assert freelance["net_pay"] == 99_810
 
 
 def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_runtime):
@@ -139,7 +170,17 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert reported_slip["taxable_pay"] == 144000
     assert reported_slip["nontaxable_pay"] == 0
     assert reported_slip["income_tax"] == 0
-    assert reported_slip["net_pay"] == 144000
+    assert reported_slip["employment_insurance"] == 1290
+    assert reported_slip["pension"] == 0
+    assert reported_slip["health"] == 0
+    assert reported_slip["employer_industrial"] == 1150
+    assert reported_slip["net_pay"] == 142710
+    hidden_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == hidden_id)
+    assert hidden_slip["withholding_kind"] == "business_3_3"
+    assert hidden_slip["income_tax"] == 3090
+    assert hidden_slip["local_tax"] == 300
+    assert hidden_slip["employment_insurance"] == 0
+    assert hidden_slip["net_pay"] == 99810
     denied_slip = client.get("/part-time/slips", params={"token": "staff-tok", "year": 2026, "month": 11})
     assert denied_slip.status_code == 403
 
@@ -218,6 +259,72 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     once = [item for item in duplicated.json()["days"]["2026-11-04"] if item["worker_id"] == reported_body["id"]]
     assert len(once) == 1
     assert once[0]["hours"] == 3
+
+
+def test_calendar_drop_and_date_click_rules():
+    workers = [
+        {"id": 1, "name": "김알바", "active": True},
+        {"id": 2, "name": "박알바", "active": True},
+        {"id": 3, "name": "이알바", "active": False},
+    ]
+    empty: list[dict] = []
+    with_kim = [{"worker_id": 1, "name": "김알바"}]
+
+    assert drop_worker_onto_date(workers, empty, 1) == {"kind": "hours", "worker_id": 1, "name": "김알바"}
+    assert drop_worker_onto_date(workers, with_kim, 1) == {"kind": "duplicate", "name": "김알바"}
+    assert drop_worker_onto_date(workers, with_kim, 2) == {"kind": "hours", "worker_id": 2, "name": "박알바"}
+    assert drop_worker_onto_date(workers, empty, 3) == {"kind": "ignore"}
+    assert drop_worker_onto_date(workers, empty, 99) == {"kind": "ignore"}
+
+    available = workers_available_on_date(workers, with_kim)
+    assert [item["id"] for item in available] == [2]
+    assert workers_available_on_date(workers, empty)[0]["id"] == 1
+    assert date_from_point_target("2026-11-03") == "2026-11-03"
+    assert date_from_point_target("") is None
+    assert date_from_point_target(None) is None
+
+
+def test_date_add_and_drag_save_put_hours_on_that_day(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    kim = client.post(
+        "/part-time/workers",
+        params={"token": "admin-tok"},
+        json={"name": "김알바", "resident_id": "900101-1234567", "reported": True, "hourly_wage": 10320},
+    )
+    park = client.post(
+        "/part-time/workers",
+        params={"token": "admin-tok"},
+        json={"name": "박알바", "resident_id": "910101-2234567", "reported": False, "hourly_wage": 10320},
+    )
+    assert kim.status_code == 200 and park.status_code == 200
+    kim_id = kim.json()["id"]
+    park_id = park.json()["id"]
+
+    first = client.put(
+        "/part-time/days",
+        params={"token": "admin-tok"},
+        json={"work_date": "2026-11-03", "entries": [{"worker_id": kim_id, "hours": 5}]},
+    )
+    assert first.status_code == 200, first.text
+    day = first.json()["days"]["2026-11-03"]
+    assert [(item["worker_id"], item["hours"]) for item in day] == [(kim_id, 5)]
+
+    second = client.put(
+        "/part-time/days",
+        params={"token": "admin-tok"},
+        json={"work_date": "2026-11-03", "entries": [{"worker_id": park_id, "hours": 4}]},
+    )
+    assert second.status_code == 200, second.text
+    names = sorted(item["name"] for item in second.json()["days"]["2026-11-03"])
+    assert names == ["김알바", "박알바"]
+
+    calendar = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert calendar.status_code == 200
+    remaining = workers_available_on_date(calendar.json()["workers"], calendar.json()["days"]["2026-11-03"])
+    assert remaining == []
+    other_day = workers_available_on_date(calendar.json()["workers"], calendar.json()["days"].get("2026-11-04", []))
+    assert {item["id"] for item in other_day} == {kim_id, park_id}
 
 
 def test_weekly_holiday_uses_the_sunday_month_when_the_week_crosses(isolated_runtime):
