@@ -72,7 +72,39 @@ def render_page_pngs(pdf: bytes, zoom: float = 2.0) -> list[bytes]:
 def _seal_bytes() -> bytes:
     if not _SEAL_PATH.is_file():
         raise ValueError("회사 직인 파일이 없습니다.")
-    return _SEAL_PATH.read_bytes()
+    pix = fitz.Pixmap(_SEAL_PATH.read_bytes())
+    if not pix.alpha:
+        return pix.tobytes("png")
+    n = pix.n
+    width, height = pix.width, pix.height
+    samples = pix.samples
+    min_x, min_y, max_x, max_y = width, height, 0, 0
+    found = False
+    for y in range(height):
+        row = y * width * n
+        for x in range(width):
+            if samples[row + x * n + 3] < 16:
+                continue
+            found = True
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+            max_y = max(max_y, y)
+    if not found:
+        return pix.tobytes("png")
+    pad = 8
+    x0 = max(0, min_x - pad)
+    y0 = max(0, min_y - pad)
+    x1 = min(width, max_x + pad + 1)
+    y1 = min(height, max_y + pad + 1)
+    crop_w = x1 - x0
+    crop_h = y1 - y0
+    cropped = bytearray(crop_w * crop_h * n)
+    for y in range(crop_h):
+        src = ((y0 + y) * width + x0) * n
+        dst = y * crop_w * n
+        cropped[dst:dst + crop_w * n] = samples[src:src + crop_w * n]
+    return fitz.Pixmap(pix.colorspace, crop_w, crop_h, bytes(cropped), 1).tobytes("png")
 
 
 def _clean(value, fallback: str = "") -> str:
@@ -186,7 +218,8 @@ class _Form:
         self._fill_header(company, fields)
         self._fill_terms(fields)
         self._fill_pay(fields, calc)
-        self._fill_closing(company, fields, preview=preview)
+        self._fill_closing(company, fields)
+        _ = preview
 
     def _write_title(self) -> None:
         self._put(fitz.Rect(140, 16, 455, 46), "근 로 계 약 서", 12.5)
@@ -418,7 +451,7 @@ class _Form:
             fitz.TEXT_ALIGN_LEFT,
         )
 
-    def _fill_closing(self, company: dict, fields: dict, *, preview: bool) -> None:
+    def _fill_closing(self, company: dict, fields: dict) -> None:
         self._write(78, 562, "나. 계약의 해지", 7)
         self._paragraphs(
             124,
@@ -457,12 +490,33 @@ class _Form:
         )
         representative = _clean(company.get("representative"))
         employee = _clean(fields.get("employee_name"))
-        self._put(fitz.Rect(_LEFT, 752, 300, 776), f"(갑) 사용자   {representative}   (서명또는 인)", 7, fitz.TEXT_ALIGN_LEFT)
-        self._put(fitz.Rect(300, 752, _RIGHT, 776), f"/(을) 근로자   {employee}   (서명 또는 인)", 7)
-        if not preview:
-            seal = _seal_bytes()
-            self.page.insert_image(fitz.Rect(206, 734, 252, 776), stream=seal, keep_proportion=True)
-        self._put(fitz.Rect(_LEFT, 774, _RIGHT, 792), "본 계약서의 사본을 받았음을 확인합니다. (서명 또는 인)", 7)
+        self._stamp_employer(representative)
+        self._write_fitted(300, _RIGHT - 8, 762, f"/(을) 근로자   {employee}   (서명 또는 인)", 7, align="center")
+        self._put(fitz.Rect(_LEFT, 778, _RIGHT, 792), "본 계약서의 사본을 받았음을 확인합니다. (서명 또는 인)", 7)
+
+    def _stamp_employer(self, representative: str) -> None:
+        """회사 도장을 갑 대표자 이름과 (인) 위에 올린다. 미리보기와 보관본이 같다."""
+        size = 7.0
+        baseline = 762.0
+        x = _LEFT + 10
+        prefix = "(갑) 사용자  "
+        self._write(x, baseline, prefix, size)
+        name = representative or "장지훈"
+        name_x = x + len(prefix) * size
+        self._write(name_x, baseline, name, size)
+        name_w = max(len(name), 2) * size
+        mark_x = name_x + name_w + size
+        self._write(mark_x, baseline, "(인)", size)
+        seal = _seal_bytes()
+        stamp = 44.0
+        center_x = name_x + name_w * 0.85
+        center_y = baseline + 6
+        self.page.insert_image(
+            fitz.Rect(center_x - stamp / 2, center_y - stamp / 2, center_x + stamp / 2, center_y + stamp / 2),
+            stream=seal,
+            keep_proportion=True,
+            overlay=True,
+        )
 
     def draw_consent(self, company: dict, fields: dict) -> None:
         self.page = self.doc.new_page(width=595, height=842)
