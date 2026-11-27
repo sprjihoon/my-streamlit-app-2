@@ -21,6 +21,7 @@ interface WorkerDraft {
   wage: string;
   leaving: boolean;
   excludeFromExcel: boolean;
+  savedResidentId: string;
 }
 
 interface HourDraft {
@@ -168,6 +169,7 @@ export default function PartTimePage() {
       wage: String(calendar?.minimum_wage || ''),
       leaving: false,
       excludeFromExcel: false,
+      savedResidentId: '',
     });
   }
 
@@ -182,6 +184,7 @@ export default function PartTimePage() {
       wage: String(worker.hourly_wage),
       leaving: false,
       excludeFromExcel: Boolean(worker.exclude_from_excel),
+      savedResidentId: worker.resident_id || '',
     });
   }
 
@@ -427,16 +430,6 @@ export default function PartTimePage() {
                 >
                   <strong>{worker.name}</strong>
                   <span style={{ marginLeft: 6, color: '#374151', fontSize: '0.75rem' }}>{won(worker.hourly_wage)}</span>
-                  {worker.resident_id ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.resident_id}</span> : null}
-                  {worker.phone ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.phone}</span> : null}
-                  {worker.bank_name || worker.account_number ? (
-                    <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>
-                      {[worker.bank_name, worker.account_number].filter(Boolean).join(' ')}
-                    </span>
-                  ) : null}
-                  {worker.exclude_from_excel ? (
-                    <span style={{ marginLeft: 6, color: '#9a3412', fontSize: '0.75rem' }}>엑셀 제외</span>
-                  ) : null}
                 </div>
                 <Button type="button" variant="ghost" onClick={() => openEdit(worker)}>수정</Button>
               </div>
@@ -585,7 +578,7 @@ export default function PartTimePage() {
                 </label>
                 {workerDraft.id !== null && !workerDraft.residentId && (
                   <p style={{ margin: 0, color: '#6b7280', fontSize: '0.8rem' }}>
-                    저장된 주민번호는 목록에 마스킹되어 보입니다. 바꿀 때만 13자리를 다시 적습니다.
+                    저장된 주민번호 {workerDraft.savedResidentId || '없음'}. 바꿀 때만 13자리를 다시 적습니다.
                   </p>
                 )}
                 <label className="ops-label">
