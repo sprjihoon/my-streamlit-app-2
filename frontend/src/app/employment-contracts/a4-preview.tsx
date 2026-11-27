@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 const PRINT_STYLE = `
@@ -18,6 +18,7 @@ const PRINT_STYLE = `
   #a4-print-area, #a4-print-area * { visibility: visible !important; }
   #a4-print-area { position: absolute; left: 0; top: 0; width: 210mm; background: #fff; }
   .a4-preview-bar { display: none !important; }
+  .a4-preview-hidden { display: block !important; }
   .a4-preview-sheet {
     width: 210mm; height: 297mm; margin: 0; box-shadow: none;
     page-break-after: always; break-after: page;
@@ -46,12 +47,29 @@ export function A4Preview({
   onClose,
   overlay = false,
   title = '근로계약서',
+  onConfirm,
+  confirmLabel = '이 내용으로 날인',
+  confirmDisabled = false,
 }: {
   pages: string[];
   onClose?: () => void;
   overlay?: boolean;
   title?: string;
+  onConfirm?: () => void;
+  confirmLabel?: string;
+  confirmDisabled?: boolean;
 }) {
+  const [pageIndex, setPageIndex] = useState(0);
+  const [seenLast, setSeenLast] = useState(pages.length <= 1);
+
+  useEffect(() => {
+    setPageIndex(0);
+    setSeenLast(pages.length <= 1);
+  }, [pages]);
+
+  useEffect(() => {
+    if (pageIndex >= pages.length - 1) setSeenLast(true);
+  }, [pageIndex, pages.length]);
   useEffect(() => {
     const style = document.createElement('style');
     style.setAttribute('data-a4-preview', '1');
@@ -64,10 +82,12 @@ export function A4Preview({
     if (!overlay || !onClose) return;
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose?.();
+      if (event.key === 'ArrowLeft') setPageIndex((current) => Math.max(0, current - 1));
+      if (event.key === 'ArrowRight') setPageIndex((current) => Math.min(pages.length - 1, current + 1));
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [overlay, onClose]);
+  }, [overlay, onClose, pages.length]);
 
   if (overlay) {
     const modal = (
@@ -114,13 +134,24 @@ export function A4Preview({
               borderBottom: '1px solid #e5e7eb',
             }}
           >
-            <strong style={{ fontSize: 15 }}>출력 미리보기</strong>
-            <span style={{ color: '#6b7280', fontSize: 13, marginRight: 'auto' }}>A4 {pages.length}장</span>
+            <strong style={{ fontSize: 15 }}>{onConfirm ? '계약서 확인' : '출력 미리보기'}</strong>
+            <span style={{ color: '#6b7280', fontSize: 13 }}>{pageIndex + 1} / {pages.length}장</span>
+            <button type="button" onClick={() => setPageIndex((current) => Math.max(0, current - 1))} disabled={pageIndex === 0} style={barButton}>이전</button>
+            <button type="button" onClick={() => setPageIndex((current) => Math.min(pages.length - 1, current + 1))} disabled={pageIndex >= pages.length - 1} style={{ ...barButton, marginRight: 'auto' }}>다음</button>
+            {onConfirm && (
+              <button type="button" onClick={onConfirm} disabled={!seenLast || confirmDisabled} style={{ ...barButton, background: seenLast ? '#166534' : '#9ca3af' }}>
+                {seenLast ? confirmLabel : '마지막 장까지 보세요'}
+              </button>
+            )}
             <button type="button" onClick={() => window.print()} style={barButton}>인쇄</button>
             <button type="button" onClick={onClose} style={barButton}>닫기</button>
           </div>
           <div className="a4-preview-body" id="a4-print-area" style={{ overflow: 'auto', background: '#e5e7eb', padding: '16px 12px' }}>
-            <Pages pages={pages} title={title} />
+            {pages.map((page, index) => (
+              <div key={index} className={index === pageIndex ? undefined : 'a4-preview-hidden'} style={index === pageIndex ? undefined : { display: 'none' }}>
+                <Pages pages={[page]} title={`${title} ${index + 1}`} />
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -242,41 +242,83 @@ h1, h2, h3, h4 {
   line-height: 16px;
   text-align: center;
 }
-.sidebar-notice-list {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: 188px;
+.profile-notice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.profile-notice-modal {
+  width: min(420px, 100%);
+  background: #fff;
+  color: #111827;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+.profile-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+.profile-notice-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.profile-notice-head button {
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.profile-notice-body {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  z-index: 3;
+  gap: 0.55rem;
+  padding: 0.9rem 1rem 1rem;
 }
-.sidebar-notice-item {
+.profile-notice-item {
   display: block;
-  padding: 0.45rem 0.5rem;
-  border-radius: 8px;
-  background: #1e293b;
-  border: 1px solid rgba(255,255,255,0.14);
-  color: #fff;
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  color: #111827;
   text-decoration: none;
 }
-.sidebar-notice-item:hover {
-  background: #334155;
-  color: #fff;
+.profile-notice-item:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #111827;
   text-decoration: none;
 }
-.sidebar-notice-title {
+.profile-notice-title {
   display: block;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
 }
-.sidebar-notice-message {
+.profile-notice-message {
   display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  line-height: 1.35;
-  color: rgba(255,255,255,0.74);
+  margin-top: 0.25rem;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #4b5563;
+}
+.profile-notice-go {
+  display: inline-block;
+  margin-top: 0.45rem;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
 }
 .sidebar-role {
   display: inline-block;
