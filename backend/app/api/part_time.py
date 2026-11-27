@@ -58,6 +58,8 @@ def ensure_part_time_tables() -> None:
             con.execute("ALTER TABLE part_time_workers ADD COLUMN bank_name TEXT")
         if "account_number" not in worker_columns:
             con.execute("ALTER TABLE part_time_workers ADD COLUMN account_number TEXT")
+        if "exclude_from_excel" not in worker_columns:
+            con.execute("ALTER TABLE part_time_workers ADD COLUMN exclude_from_excel INTEGER NOT NULL DEFAULT 0")
         _seed_october_2026(con)
         _fill_worker_profiles(con)
         con.commit()
@@ -201,6 +203,7 @@ class WorkerIn(BaseModel):
     phone: str = ""
     bank_name: str = ""
     account_number: str = ""
+    exclude_from_excel: bool = False
 
 
 class WorkerPatch(BaseModel):
@@ -212,6 +215,7 @@ class WorkerPatch(BaseModel):
     phone: str | None = None
     bank_name: str | None = None
     account_number: str | None = None
+    exclude_from_excel: bool | None = None
 
 
 class HourIn(BaseModel):
@@ -310,7 +314,7 @@ def _account_number(value: str | None) -> str:
     return cleaned[:40]
 
 
-_WORKER_COLS = "id, name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number"
+_WORKER_COLS = "id, name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number, exclude_from_excel"
 
 
 def _public_worker(row) -> dict:
@@ -324,6 +328,7 @@ def _public_worker(row) -> dict:
         "phone": row[6] or "",
         "bank_name": row[7] or "",
         "account_number": row[8] or "",
+        "exclude_from_excel": bool(row[9]),
     }
 
 
@@ -380,8 +385,8 @@ def create_worker(body: WorkerIn, token: str):
         cur = con.execute(
             """
             INSERT INTO part_time_workers
-                (name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                (name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number, exclude_from_excel, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name,
@@ -391,6 +396,7 @@ def create_worker(body: WorkerIn, token: str):
                 _phone(body.phone),
                 _bank_name(body.bank_name),
                 _account_number(body.account_number),
+                1 if body.exclude_from_excel else 0,
                 stamp,
                 stamp,
             ),
@@ -425,6 +431,7 @@ def update_worker(worker_id: int, body: WorkerPatch, token: str):
     phone = current[6] or "" if body.phone is None else _phone(body.phone)
     bank_name = current[7] or "" if body.bank_name is None else _bank_name(body.bank_name)
     account_number = current[8] or "" if body.account_number is None else _account_number(body.account_number)
+    exclude_from_excel = current[9] if body.exclude_from_excel is None else (1 if body.exclude_from_excel else 0)
     if active:
         with get_connection() as con:
             taken = con.execute(
@@ -438,10 +445,10 @@ def update_worker(worker_id: int, body: WorkerPatch, token: str):
         con.execute(
             """
             UPDATE part_time_workers
-            SET name = ?, resident_id = ?, reported = ?, hourly_wage = ?, active = ?, phone = ?, bank_name = ?, account_number = ?, updated_at = ?
+            SET name = ?, resident_id = ?, reported = ?, hourly_wage = ?, active = ?, phone = ?, bank_name = ?, account_number = ?, exclude_from_excel = ?, updated_at = ?
             WHERE id = ?
             """,
-            (name, resident_id, reported, wage, active, phone, bank_name, account_number, stamp, worker_id),
+            (name, resident_id, reported, wage, active, phone, bank_name, account_number, exclude_from_excel, stamp, worker_id),
         )
         con.commit()
     add_log(
@@ -744,8 +751,11 @@ def download_xlsx(year: int, month: int, token: str):
     with get_connection() as con:
         rows = con.execute("SELECT id, resident_id FROM part_time_workers").fetchall()
     resident = {row[0]: row[1] for row in rows}
+    excluded = {worker["id"] for worker in data["workers"] if worker.get("exclude_from_excel")}
     people = []
     for slip in slips:
+        if slip["worker_id"] in excluded:
+            continue
         hours_by_day = {}
         for line in slip["lines"]:
             hours_by_day[int(line["work_date"][8:10])] = line["hours"]

@@ -10,6 +10,7 @@ export interface Worker {
   phone?: string;
   bank_name?: string;
   account_number?: string;
+  exclude_from_excel?: boolean;
 }
 
 export interface DayEntry {

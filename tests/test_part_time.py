@@ -164,6 +164,37 @@ def test_fifteen_hours_uses_daily_tax_and_three_months_adds_employment_insurance
     assert "일용알바" in names
     assert "장기알바" not in names
 
+    hidden_excel = client.put(
+        f"/part-time/workers/{daily_id}",
+        params={"token": "admin-tok"},
+        json={"exclude_from_excel": True},
+    )
+    assert hidden_excel.status_code == 200, hidden_excel.text
+    assert hidden_excel.json()["exclude_from_excel"] is True
+    kept = client.get("/part-time/slips", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert any(item["worker_id"] == daily_id for item in kept.json()["slips"])
+    sheet = client.get("/part-time/xlsx", params={"token": "admin-tok", "year": 2026, "month": 11})
+    book = load_workbook(BytesIO(sheet.content))
+    names = [
+        book["11월"].cell(row, col).value
+        for row in range(1, (book["11월"].max_row or 1) + 1)
+        for col in range(1, 16)
+    ]
+    gongdan = [
+        book["공단"].cell(row, col).value
+        for row in range(1, (book["공단"].max_row or 1) + 1)
+        for col in range(1, 16)
+    ]
+    assert "일용알바" not in names
+    assert "일용알바" not in gongdan
+    restored = client.put(
+        f"/part-time/workers/{daily_id}",
+        params={"token": "admin-tok"},
+        json={"exclude_from_excel": False},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["exclude_from_excel"] is False
+
 
 def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_runtime):
     _prepare(isolated_runtime["db"])

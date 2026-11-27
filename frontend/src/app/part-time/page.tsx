@@ -20,6 +20,7 @@ interface WorkerDraft {
   accountNumber: string;
   wage: string;
   leaving: boolean;
+  excludeFromExcel: boolean;
 }
 
 interface HourDraft {
@@ -166,6 +167,7 @@ export default function PartTimePage() {
       accountNumber: '',
       wage: String(calendar?.minimum_wage || ''),
       leaving: false,
+      excludeFromExcel: false,
     });
   }
 
@@ -179,6 +181,7 @@ export default function PartTimePage() {
       accountNumber: worker.account_number || '',
       wage: String(worker.hourly_wage),
       leaving: false,
+      excludeFromExcel: Boolean(worker.exclude_from_excel),
     });
   }
 
@@ -195,6 +198,7 @@ export default function PartTimePage() {
       phone: workerDraft.phone.trim(),
       bank_name: workerDraft.bankName.trim(),
       account_number: workerDraft.accountNumber.trim(),
+      exclude_from_excel: workerDraft.excludeFromExcel,
     };
     if (creating || workerDraft.residentId.trim()) body.resident_id = workerDraft.residentId.trim();
     const res = await fetch(
@@ -430,6 +434,9 @@ export default function PartTimePage() {
                       {[worker.bank_name, worker.account_number].filter(Boolean).join(' ')}
                     </span>
                   ) : null}
+                  {worker.exclude_from_excel ? (
+                    <span style={{ marginLeft: 6, color: '#9a3412', fontSize: '0.75rem' }}>엑셀 제외</span>
+                  ) : null}
                 </div>
                 <Button type="button" variant="ghost" onClick={() => openEdit(worker)}>수정</Button>
               </div>
@@ -610,6 +617,17 @@ export default function PartTimePage() {
               {Number(workerDraft.wage || 0) > 0 && Number(workerDraft.wage) < minimum && (
                 <p style={{ margin: '0.35rem 0 0', color: '#92400e', fontSize: '0.85rem' }}>입력한 시급이 {year}년 최저시급보다 낮습니다.</p>
               )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: '0.85rem', fontSize: '0.92rem' }}>
+                <input
+                  type="checkbox"
+                  checked={workerDraft.excludeFromExcel}
+                  onChange={(event) => setWorkerDraft({ ...workerDraft, excludeFromExcel: event.target.checked })}
+                />
+                엑셀파일 저장에서 빼기
+              </label>
+              <p style={{ margin: '0.35rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                체크한 알바는 노무사 전달용 엑셀에서 빠집니다. 달력과 급여는 그대로입니다.
+              </p>
               {workerDraft.leaving && (
                 <p style={{ margin: '0.75rem 0 0', color: '#92400e' }}>그만둔 알바는 달력에 새로 올릴 수 없습니다. 지난 근무 기록은 남고, 다시 불러오기에서 되돌릴 수 있습니다.</p>
               )}
