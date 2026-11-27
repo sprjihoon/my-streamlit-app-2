@@ -183,11 +183,20 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     reported = client.post(
         "/part-time/workers",
         params={"token": "admin-tok"},
-        json={"name": "김알바", "resident_id": "900101-1234567", "reported": True, "phone": "01012345678"},
+        json={
+            "name": "김알바",
+            "resident_id": "900101-1234567",
+            "reported": True,
+            "phone": "01012345678",
+            "bank_name": "농협",
+            "account_number": "351-1207-8919-53",
+        },
     )
     assert reported.status_code == 200, reported.text
     reported_body = reported.json()
     assert reported_body["phone"] == "010-1234-5678"
+    assert reported_body["bank_name"] == "농협"
+    assert reported_body["account_number"] == "351-1207-8919-53"
     assert reported_body["hourly_wage"] == minimum_wage(date.today().year)
     assert reported_body["resident_id"] == "900101-1******"
     assert "234567" not in reported_body["resident_id"]
@@ -214,6 +223,16 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     )
     assert raised.status_code == 200
     assert raised.json()["hourly_wage"] == 12000
+    assert raised.json()["bank_name"] == "농협"
+    assert raised.json()["account_number"] == "351-1207-8919-53"
+    account = client.put(
+        f"/part-time/workers/{reported_body['id']}",
+        params={"token": "admin-tok"},
+        json={"bank_name": "카카오뱅크", "account_number": "3333-30-7784236"},
+    )
+    assert account.status_code == 200, account.text
+    assert account.json()["bank_name"] == "카카오뱅크"
+    assert account.json()["account_number"] == "3333-30-7784236"
 
     # 2026-11-02는 월요일, 11-08은 일요일. 다섯 시간씩 이틀은 10시간이라 주휴가 없다.
     for work_date in ("2026-11-02", "2026-11-03"):
@@ -529,6 +548,10 @@ def test_october_2026_is_seeded_from_the_given_workbook(isolated_runtime):
     body = calendar.json()
     names = [item["name"] for item in body["workers"] if item["active"]]
     assert names == ["김수영", "김순화", "김정미", "복진해", "설희", "손아현", "조여진", "지영주", "최윤영"]
+    cho_profile = next(item for item in body["workers"] if item["name"] == "조여진")
+    assert cho_profile["phone"] == "010-8817-0199"
+    assert cho_profile["bank_name"] == "kb은행"
+    assert cho_profile["account_number"] == "940302-01-724971"
     jo = next(item for item in body["totals"] if item["name"] == "조여진")
     assert jo["basic_hours"] == 75
     seolhee = next(item for item in body["totals"] if item["name"] == "설희")

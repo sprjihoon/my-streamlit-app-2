@@ -54,7 +54,12 @@ def ensure_part_time_tables() -> None:
         worker_columns = [row[1] for row in con.execute("PRAGMA table_info(part_time_workers)").fetchall()]
         if "phone" not in worker_columns:
             con.execute("ALTER TABLE part_time_workers ADD COLUMN phone TEXT")
+        if "bank_name" not in worker_columns:
+            con.execute("ALTER TABLE part_time_workers ADD COLUMN bank_name TEXT")
+        if "account_number" not in worker_columns:
+            con.execute("ALTER TABLE part_time_workers ADD COLUMN account_number TEXT")
         _seed_october_2026(con)
+        _fill_worker_profiles(con)
         con.commit()
 
 
@@ -82,10 +87,19 @@ def _seed_october_2026(con) -> None:
             cur = con.execute(
                 """
                 INSERT INTO part_time_workers
-                    (name, resident_id, reported, hourly_wage, active, created_at, updated_at)
-                VALUES (?, ?, 1, ?, 1, ?, ?)
+                    (name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number, created_at, updated_at)
+                VALUES (?, ?, 1, ?, 1, ?, ?, ?, ?, ?)
                 """,
-                (person["name"], resident_id, wage, stamp, stamp),
+                (
+                    person["name"],
+                    resident_id,
+                    wage,
+                    _phone(person.get("phone") or ""),
+                    (person.get("bank_name") or "").strip(),
+                    str(person.get("account_number") or "").strip(),
+                    stamp,
+                    stamp,
+                ),
             )
             worker_id = cur.lastrowid
         for day, hours in person["days"].items():
@@ -102,12 +116,48 @@ def _seed_october_2026(con) -> None:
             )
 
 
+def _fill_worker_profiles(con) -> None:
+    """이미 들어간 알바라도 연락처·은행·계좌가 비어 있으면 엑셀 값으로 채운다. 적어 둔 값은 덮지 않는다."""
+    stamp = _now()
+    for person in october_2026_people():
+        try:
+            resident_id = _normalize_rrn(person["resident_id"])
+        except HTTPException:
+            continue
+        row = con.execute(
+            """
+            SELECT id, phone, bank_name, account_number
+            FROM part_time_workers
+            WHERE resident_id = ?
+            ORDER BY active DESC, id LIMIT 1
+            """,
+            (resident_id,),
+        ).fetchone()
+        if not row:
+            continue
+        phone = (row[1] or "").strip() or _phone(person.get("phone") or "")
+        bank_name = (row[2] or "").strip() or (person.get("bank_name") or "").strip()
+        account_number = (row[3] or "").strip() or str(person.get("account_number") or "").strip()
+        if phone == (row[1] or "").strip() and bank_name == (row[2] or "").strip() and account_number == (row[3] or "").strip():
+            continue
+        con.execute(
+            """
+            UPDATE part_time_workers
+            SET phone = ?, bank_name = ?, account_number = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (phone, bank_name, account_number, stamp, row[0]),
+        )
+
+
 class WorkerIn(BaseModel):
     name: str
     resident_id: str
     reported: bool = True
     hourly_wage: int | None = None
     phone: str = ""
+    bank_name: str = ""
+    account_number: str = ""
 
 
 class WorkerPatch(BaseModel):
@@ -117,6 +167,8 @@ class WorkerPatch(BaseModel):
     hourly_wage: int | None = None
     active: bool | None = None
     phone: str | None = None
+    bank_name: str | None = None
+    account_number: str | None = None
 
 
 class HourIn(BaseModel):
@@ -198,6 +250,26 @@ def _phone(value: str | None) -> str:
     return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
 
 
+def _bank_name(value: str | None) -> str:
+    return (value or "").strip()[:40]
+
+
+def _account_number(value: str | None) -> str:
+    text = str(value or "").strip().replace(" ", "")
+    if not text:
+        return ""
+    cleaned = re.sub(r"[^\d\-]", "", text)
+    digits = re.sub(r"\D", "", cleaned)
+    if not digits:
+        raise HTTPException(status_code=400, detail="계좌번호를 확인해 주세요.")
+    if len(digits) > 20:
+        raise HTTPException(status_code=400, detail="계좌번호가 너무 깁니다.")
+    return cleaned[:40]
+
+
+_WORKER_COLS = "id, name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number"
+
+
 def _public_worker(row) -> dict:
     return {
         "id": row[0],
@@ -207,14 +279,16 @@ def _public_worker(row) -> dict:
         "hourly_wage": int(row[4]),
         "active": bool(row[5]),
         "phone": row[6] or "",
+        "bank_name": row[7] or "",
+        "account_number": row[8] or "",
     }
 
 
 def _load_workers() -> list[dict]:
     with get_connection() as con:
         rows = con.execute(
-            """
-            SELECT id, name, resident_id, reported, hourly_wage, active, phone
+            f"""
+            SELECT {_WORKER_COLS}
             FROM part_time_workers
             ORDER BY active DESC, name, id
             """
@@ -225,7 +299,7 @@ def _load_workers() -> list[dict]:
 def _worker_row(worker_id: int):
     with get_connection() as con:
         return con.execute(
-            "SELECT id, name, resident_id, reported, hourly_wage, active, phone FROM part_time_workers WHERE id = ?",
+            f"SELECT {_WORKER_COLS} FROM part_time_workers WHERE id = ?",
             (worker_id,),
         ).fetchone()
 
@@ -263,10 +337,20 @@ def create_worker(body: WorkerIn, token: str):
         cur = con.execute(
             """
             INSERT INTO part_time_workers
-                (name, resident_id, reported, hourly_wage, active, phone, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                (name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
             """,
-            (name, resident_id, 1 if body.reported else 0, wage, _phone(body.phone), stamp, stamp),
+            (
+                name,
+                resident_id,
+                1 if body.reported else 0,
+                wage,
+                _phone(body.phone),
+                _bank_name(body.bank_name),
+                _account_number(body.account_number),
+                stamp,
+                stamp,
+            ),
         )
         con.commit()
         worker_id = cur.lastrowid
@@ -296,6 +380,8 @@ def update_worker(worker_id: int, body: WorkerPatch, token: str):
     wage = _wage(body.hourly_wage, date.today().year) if body.hourly_wage is not None else int(current[4])
     active = current[5] if body.active is None else (1 if body.active else 0)
     phone = current[6] or "" if body.phone is None else _phone(body.phone)
+    bank_name = current[7] or "" if body.bank_name is None else _bank_name(body.bank_name)
+    account_number = current[8] or "" if body.account_number is None else _account_number(body.account_number)
     if active:
         with get_connection() as con:
             taken = con.execute(
@@ -309,10 +395,10 @@ def update_worker(worker_id: int, body: WorkerPatch, token: str):
         con.execute(
             """
             UPDATE part_time_workers
-            SET name = ?, resident_id = ?, reported = ?, hourly_wage = ?, active = ?, phone = ?, updated_at = ?
+            SET name = ?, resident_id = ?, reported = ?, hourly_wage = ?, active = ?, phone = ?, bank_name = ?, account_number = ?, updated_at = ?
             WHERE id = ?
             """,
-            (name, resident_id, reported, wage, active, phone, stamp, worker_id),
+            (name, resident_id, reported, wage, active, phone, bank_name, account_number, stamp, worker_id),
         )
         con.commit()
     add_log(

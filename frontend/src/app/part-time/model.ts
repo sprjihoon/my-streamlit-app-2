@@ -8,6 +8,8 @@ export interface Worker {
   hourly_wage: number;
   active: boolean;
   phone?: string;
+  bank_name?: string;
+  account_number?: string;
 }
 
 export interface DayEntry {

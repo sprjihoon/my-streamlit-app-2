@@ -16,6 +16,8 @@ interface WorkerDraft {
   name: string;
   residentId: string;
   phone: string;
+  bankName: string;
+  accountNumber: string;
   wage: string;
   leaving: boolean;
 }
@@ -160,6 +162,8 @@ export default function PartTimePage() {
       name: '',
       residentId: '',
       phone: '',
+      bankName: '',
+      accountNumber: '',
       wage: String(calendar?.minimum_wage || ''),
       leaving: false,
     });
@@ -171,6 +175,8 @@ export default function PartTimePage() {
       name: worker.name,
       residentId: '',
       phone: worker.phone || '',
+      bankName: worker.bank_name || '',
+      accountNumber: worker.account_number || '',
       wage: String(worker.hourly_wage),
       leaving: false,
     });
@@ -187,6 +193,8 @@ export default function PartTimePage() {
       name: workerDraft.name,
       hourly_wage: Number(workerDraft.wage || 0),
       phone: workerDraft.phone.trim(),
+      bank_name: workerDraft.bankName.trim(),
+      account_number: workerDraft.accountNumber.trim(),
     };
     if (creating || workerDraft.residentId.trim()) body.resident_id = workerDraft.residentId.trim();
     const res = await fetch(
@@ -416,6 +424,11 @@ export default function PartTimePage() {
                   <strong>{worker.name}</strong>
                   <span style={{ marginLeft: 6, color: '#374151', fontSize: '0.75rem' }}>{won(worker.hourly_wage)}</span>
                   {worker.phone ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.phone}</span> : null}
+                  {worker.bank_name || worker.account_number ? (
+                    <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>
+                      {[worker.bank_name, worker.account_number].filter(Boolean).join(' ')}
+                    </span>
+                  ) : null}
                 </div>
                 <Button type="button" variant="ghost" onClick={() => openEdit(worker)}>수정</Button>
               </div>
@@ -566,6 +579,24 @@ export default function PartTimePage() {
                   시급
                   <input className="ui-control" type="number" min={1} value={workerDraft.wage} onChange={(event) => setWorkerDraft({ ...workerDraft, wage: event.target.value })} />
                 </label>
+                <label className="ops-label">
+                  은행
+                  <input
+                    className="ui-control"
+                    placeholder="농협"
+                    value={workerDraft.bankName}
+                    onChange={(event) => setWorkerDraft({ ...workerDraft, bankName: event.target.value })}
+                  />
+                </label>
+                <label className="ops-label">
+                  계좌번호
+                  <input
+                    className="ui-control"
+                    placeholder="000-0000-0000"
+                    value={workerDraft.accountNumber}
+                    onChange={(event) => setWorkerDraft({ ...workerDraft, accountNumber: event.target.value })}
+                  />
+                </label>
               </div>
               <p style={{ margin: '0.75rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
                 {year}년 최저시급은 {won(minimum)}입니다. 주 14시간 이상이면 주휴수당이 있습니다. 주 15시간 미만이고 3개월 미만이면 회사는 산재보험만 내고, 3개월이 넘으면 고용보험이 붙습니다. 주 15시간 이상이면 일용근로 또는 일반 근로로 계산합니다.
@@ -606,7 +637,11 @@ export default function PartTimePage() {
                     <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.6rem 0.75rem' }}>
                       <div>
                         <strong>{worker.name}</strong>
-                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>시급 {won(worker.hourly_wage)} · {worker.resident_id}{worker.phone ? ` · ${worker.phone}` : ''}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>
+                          시급 {won(worker.hourly_wage)} · {worker.resident_id}
+                          {worker.phone ? ` · ${worker.phone}` : ''}
+                          {worker.bank_name || worker.account_number ? ` · ${[worker.bank_name, worker.account_number].filter(Boolean).join(' ')}` : ''}
+                        </div>
                       </div>
                       <Button type="button" variant="primary" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>다시 불러오기</Button>
                     </div>
