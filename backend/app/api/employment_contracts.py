@@ -410,18 +410,28 @@ def _worker_download_offer(con, user_id: int) -> dict | None:
     }
 
 
+def _is_system_admin_username(username: str | None) -> bool:
+    """시스템 계정 admin만 근로계약 날인 대상이 아니다. 장명찬처럼 관리자이면서 직원인 계정은 대상이다."""
+    return (username or "").strip().lower() == "admin"
+
+
 def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
-    """작성 중이거나, 날인 후 1시간 안에는 근로계약 메뉴가 필요하다."""
-    if is_admin:
-        return False
+    """작성 중이거나, 날인 후 1시간 안에는 근로계약 메뉴가 필요하다.
+
+    관리자라도 시스템 계정(admin)이 아니면 본인 기재·근로자 날인 대상이다.
+    입사일이 비어 있어도 같다.
+    """
     ensure_contract_tables()
     with get_connection() as con:
         latest = _latest(con, user_id)
-        if not latest:
+        if latest:
+            if latest[1] == "draft":
+                return True
+            return _worker_download_offer(con, user_id) is not None
+        if not is_admin:
             return True
-        if latest[1] == "draft":
-            return True
-        return _worker_download_offer(con, user_id) is not None
+        row = con.execute("SELECT username FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        return bool(row) and not _is_system_admin_username(row[0])
 
 
 def _require_open(con, user_id: int) -> None:
@@ -589,6 +599,96 @@ def _load_contract(con, contract_id: int):
     }
 
 
+def _pay_ready(net_pay, taxable_pay, annual_pay) -> bool:
+    return bool(int(net_pay or 0) or int(taxable_pay or 0) or int(annual_pay or 0))
+
+
+def _notice(notice_id: str, title: str, message: str, count: int) -> dict:
+    return {
+        "id": notice_id,
+        "title": title,
+        "message": message,
+        "href": "/employment-contracts",
+        "count": count,
+    }
+
+
+def _worker_profile_notices(user_id: int, is_admin: bool = False) -> list[dict]:
+    """근로자에게 남은 작성, 확인, 다운로드만 알린다. 날인 후 회사 차례는 알리지 않는다."""
+    if not worker_needs_contract(user_id, is_admin):
+        return []
+    with get_connection() as con:
+        offer = _worker_download_offer(con, user_id)
+        if offer:
+            return [_notice("contract-download", "근로계약", "회사 날인이 끝난 계약서를 받을 수 있습니다.", 1)]
+        latest = _latest(con, user_id)
+        if not latest:
+            return [_notice("contract-write", "근로계약", "근로계약에 적을 내용이 있습니다.", 1)]
+        if latest[1] != "draft":
+            return []
+        row = con.execute(
+            """
+            SELECT worker_sealed_at, net_pay, taxable_pay, annual_pay
+            FROM employment_contracts
+            WHERE id = ?
+            """,
+            (latest[0],),
+        ).fetchone()
+    if not row or row[0]:
+        return []
+    if _pay_ready(row[1], row[2], row[3]):
+        return [_notice("contract-confirm", "확인사항", "근로계약서를 확인하고 날인하세요.", 1)]
+    return [_notice("contract-write", "근로계약", "근로계약에 적을 내용이 있습니다.", 1)]
+
+
+def _admin_profile_notices(exclude_user_id: int | None = None) -> list[dict]:
+    """관리자에게는 급여가 비어 있는 작성과, 근로자가 날인한 확인만 모아서 알린다.
+
+    시스템 계정 admin만 빼고, 관리자이면서 직원인 사람도 대상이다. 본인 건은 근로자 알림으로 따로 보여 준다.
+    """
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT c.worker_sealed_at, c.net_pay, c.taxable_pay, c.annual_pay
+            FROM users u
+            LEFT JOIN employment_contracts c
+              ON c.id = (
+                SELECT id FROM employment_contracts
+                WHERE user_id = u.user_id
+                ORDER BY id DESC LIMIT 1
+              )
+            WHERE (c.id IS NULL OR c.status = 'draft')
+              AND (? IS NULL OR u.user_id != ?)
+              AND LOWER(TRIM(COALESCE(u.username, ''))) != 'admin'
+            """,
+            (exclude_user_id, exclude_user_id),
+        ).fetchall()
+    write = 0
+    confirm = 0
+    for sealed_at, net_pay, taxable_pay, annual_pay in rows:
+        if sealed_at:
+            confirm += 1
+        elif not _pay_ready(net_pay, taxable_pay, annual_pay):
+            write += 1
+    items: list[dict] = []
+    if write:
+        items.append(_notice("contract-write", "근로계약", f"작성할 근로계약이 {write}건 있습니다.", write))
+    if confirm:
+        items.append(_notice("contract-confirm", "확인사항", f"근로자 {confirm}명이 계약서를 확인하고 날인했습니다.", confirm))
+    return items
+
+
+@router.get("/notices")
+def list_profile_notices(token: str):
+    """프로필 옆 알림. 로그인한 사람이 처리할 근로계약과 확인만 돌려준다."""
+    actor = _session(token)
+    items: list[dict] = []
+    if actor["is_admin"]:
+        items.extend(_admin_profile_notices(exclude_user_id=actor["user_id"]))
+    items.extend(_worker_profile_notices(actor["user_id"], actor["is_admin"]))
+    return {"items": items}
+
+
 @router.get("")
 def list_contracts(token: str, view: str = "open"):
     """작성 대상은 완료되지 않은 직원만, 완료 보관은 저장된 PDF를 모두 보여 준다."""
@@ -609,7 +709,8 @@ def list_contracts(token: str, view: str = "open"):
                     WHERE user_id = u.user_id
                     ORDER BY id DESC LIMIT 1
                   )
-                WHERE c.id IS NULL OR c.status = 'draft'
+                WHERE (c.id IS NULL OR c.status = 'draft')
+                  AND LOWER(TRIM(COALESCE(u.username, ''))) != 'admin'
                 ORDER BY COALESCE(u.department, ''), u.nickname
                 """
             ).fetchall()
@@ -676,7 +777,8 @@ def get_contract_draft(user_id: int, token: str):
     with get_connection() as con:
         user = _user_or_404(con, user_id)
         latest = _latest(con, user_id)
-        if not actor["is_admin"]:
+        own = actor["user_id"] == user_id
+        if own:
             offer = _worker_download_offer(con, user_id)
             if offer:
                 return {
@@ -691,6 +793,7 @@ def get_contract_draft(user_id: int, token: str):
                     "worker_sealed": False,
                     "download": offer,
                 }
+        if not actor["is_admin"]:
             if not worker_needs_contract(user_id, False):
                 raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
         locked = _locked_resident_id(con, user_id)

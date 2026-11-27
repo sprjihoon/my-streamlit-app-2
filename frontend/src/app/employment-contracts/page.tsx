@@ -161,6 +161,7 @@ export default function EmploymentContractsPage() {
   const [renewal, setRenewal] = useState(false);
   const [workerSealed, setWorkerSealed] = useState(false);
   const [downloadOffer, setDownloadOffer] = useState<{ contract_id: number; until: string } | null>(null);
+  const [needsMine, setNeedsMine] = useState(false);
 
   const load = useCallback(async (nextView: 'open' | 'completed') => {
     const token = localStorage.getItem('token') || '';
@@ -178,15 +179,16 @@ export default function EmploymentContractsPage() {
     setLoading(false);
   }, []);
 
-  const loadMine = useCallback(async (userId: number) => {
+  const loadMine = useCallback(async (userId: number, asAdmin = false) => {
     const token = localStorage.getItem('token') || '';
     setLoading(true);
     setError(null);
     const res = await fetch(`${API}/employment-contracts/users/${userId}?token=${encodeURIComponent(token)}`);
     if (res.status === 400) {
       setSealed(true);
+      setNeedsMine(false);
       setLoading(false);
-      router.replace('/');
+      if (!asAdmin) router.replace('/');
       return;
     }
     if (!res.ok) {
@@ -197,6 +199,7 @@ export default function EmploymentContractsPage() {
     const data = await res.json();
     if (data.download?.contract_id) {
       setDownloadOffer({ contract_id: data.download.contract_id, until: data.download.until || '' });
+      setNeedsMine(true);
       setSealed(true);
       setLoading(false);
       return;
@@ -207,24 +210,48 @@ export default function EmploymentContractsPage() {
     setRenewal(!!data.renewal);
     setWorkerSealed(!!data.worker_sealed);
     setSealed(false);
+    setNeedsMine(true);
     setLoading(false);
   }, [router]);
 
   useEffect(() => {
-    let admin = false;
-    let userId: number | null = null;
-    try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      admin = !!user.is_admin;
-      userId = user.user_id ?? null;
-    } catch {
-      admin = false;
-    }
-    setIsAdmin(admin);
-    setMyId(userId);
-    if (admin) load('open');
-    else if (userId) loadMine(userId);
-    else setLoading(false);
+    const token = localStorage.getItem('token') || '';
+    let cancelled = false;
+    (async () => {
+      let admin = false;
+      let userId: number | null = null;
+      let mine = false;
+      try {
+        const stored = JSON.parse(localStorage.getItem('user') || '{}');
+        admin = !!stored.is_admin;
+        userId = stored.user_id ?? null;
+        mine = !!stored.needs_contract;
+      } catch {
+        admin = false;
+      }
+      try {
+        const res = await fetch(`${API}/auth/me?token=${encodeURIComponent(token)}`);
+        if (res.ok) {
+          const me = await res.json();
+          admin = !!me.is_admin;
+          userId = me.user_id ?? userId;
+          mine = !!me.needs_contract;
+          localStorage.setItem('user', JSON.stringify(me));
+        }
+      } catch {
+        /* 저장된 계정으로 진행 */
+      }
+      if (cancelled) return;
+      setIsAdmin(admin);
+      setMyId(userId);
+      setNeedsMine(mine);
+      if (admin) load('open');
+      if (userId && (!admin || mine)) loadMine(userId, admin);
+      else if (!admin) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [load, loadMine]);
 
   function patch<K extends keyof ContractForm>(key: K, value: ContractForm[K]) {
@@ -412,6 +439,7 @@ export default function EmploymentContractsPage() {
     setSuccess(`${form.employee_name} 근로계약서에 날인했습니다.`);
     setView('open');
     load('open');
+    if (myId && editingId === myId) loadMine(myId, true);
   }
 
   async function reactivate(row: StoredContract) {
@@ -500,6 +528,57 @@ export default function EmploymentContractsPage() {
     setSuccess('계약서를 확인하고 날인했습니다. 회사에서 날인하면 계약이 보관됩니다.');
   }
 
+  const showOwnWorker = Boolean((needsMine || downloadOffer) && myId && (editingId === null || editingId === myId));
+
+  function ownWorkerBlock() {
+    return (
+      <>
+        {downloadOffer ? (
+          <Card>
+            <h3 style={{ marginTop: 0 }}>내 계약서 받기</h3>
+            <p>회사 날인이 끝났습니다. 지금부터 1시간 동안만 계약서를 받을 수 있습니다.</p>
+            <p style={{ color: '#166534' }}>{downloadOffer.until}까지 열려 있습니다.</p>
+            <a
+              href={`${API}/employment-contracts/${downloadOffer.contract_id}/pdf?token=${encodeURIComponent(typeof window === 'undefined' ? '' : localStorage.getItem('token') || '')}`}
+            >
+              계약서 다운로드
+            </a>
+          </Card>
+        ) : sealed ? (
+          <Alert type="info" message="날인 후 1시간이 지나 계약서를 받을 수 없습니다." />
+        ) : (
+          <>
+            <Card>
+              <h3 style={{ marginTop: 0 }}>{renewal ? '내 계약 · 바뀐 항목만 수정' : '내 근로계약 기재'}</h3>
+              <p style={{ marginTop: 0, color: '#1e3a8a', fontSize: '0.85rem' }}>
+                관리자라도 본인 계약은 근로자처럼 기재하고 날인한 뒤, 아래에서 회사 날인을 합니다.
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                <Field label="성명" value={form.employee_name} onChange={(value) => patch('employee_name', value)} />
+                <Field label="주민등록번호" value={form.resident_id} onChange={(value) => patch('resident_id', value)} locked={rrnLocked} />
+                <Field label="주소" value={form.address} onChange={(value) => patch('address', value)} />
+                <Field label="연락처" value={form.phone} onChange={(value) => patch('phone', value)} />
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
+                <Button type="button" variant="secondary" disabled={busy} onClick={saveWorker}>저장</Button>
+                <Button type="button" variant="secondary" disabled={busy} onClick={previewMine}>계약서 확인</Button>
+                <Button type="button" variant="success" disabled={busy || workerSealed} onClick={sealMine}>날인</Button>
+              </div>
+              {workerSealed && (
+                <p style={{ marginBottom: 0, color: '#166534' }}>날인했습니다. 내용을 바꾸면 다시 날인합니다. 아래에서 회사 날인을 하면 보관됩니다.</p>
+              )}
+            </Card>
+            {myId && (
+              <div style={{ marginTop: '1rem' }}>
+                <WorkerSeal userId={myId} name={form.employee_name} revision={markRevision} />
+              </div>
+            )}
+          </>
+        )}
+      </>
+    );
+  }
+
   if (!isAdmin) {
     return (
       <div>
@@ -575,6 +654,11 @@ export default function EmploymentContractsPage() {
       {printedId && (
         <div style={{ marginBottom: '1rem' }}>
           <a href={`/employment-contracts/print/${printedId}`} target="_blank" rel="noreferrer">방금 보관한 계약서 열기</a>
+        </div>
+      )}
+      {showOwnWorker && (
+        <div style={{ marginBottom: '1rem' }}>
+          {ownWorkerBlock()}
         </div>
       )}
 
@@ -672,7 +756,7 @@ export default function EmploymentContractsPage() {
               <Button type="button" variant="secondary" disabled={busy} onClick={preview}>급여 계산</Button>
               <Button type="button" variant="secondary" disabled={busy} onClick={openA4Preview}>출력 미리보기</Button>
               <Button type="button" variant="secondary" disabled={busy} onClick={saveDraft}>임시 저장</Button>
-              <Button type="button" variant="success" disabled={busy} onClick={complete}>날인</Button>
+              <Button type="button" variant="success" disabled={busy || !workerSealed} onClick={complete}>날인</Button>
             </div>
             <p style={{ margin: '0.7rem 0 0', color: workerSealed ? '#166534' : '#92400e', fontSize: '0.85rem' }}>
               {workerSealed

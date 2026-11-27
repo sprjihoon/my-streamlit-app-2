@@ -32,7 +32,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <UserPanel user={user} onChangePassword={onChangePassword} onLogout={onLogout} />
+      <UserPanel user={user} pathname={pathname} onChangePassword={onChangePassword} onLogout={onLogout} />
 
       <nav>
         {(user?.is_admin

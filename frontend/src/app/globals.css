@@ -169,6 +169,8 @@ h1, h2, h3, h4 {
 }
 
 .sidebar-user {
+  position: relative;
+  z-index: 2;
   margin: 0.6rem 0.55rem 0.15rem;
   padding: 0.5rem 0.55rem 0.45rem;
   border-radius: 8px;
@@ -191,11 +193,90 @@ h1, h2, h3, h4 {
   color: #fff;
   flex-shrink: 0;
 }
+.sidebar-user-text {
+  min-width: 0;
+  flex: 1;
+}
 .sidebar-user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 700;
   color: #fff;
   line-height: 1.2;
+}
+.sidebar-notice {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.sidebar-notice-btn {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sidebar-notice-btn:hover {
+  background: rgba(255,255,255,0.16);
+}
+.sidebar-notice-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.sidebar-notice-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 188px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  z-index: 3;
+}
+.sidebar-notice-item {
+  display: block;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  background: #1e293b;
+  border: 1px solid rgba(255,255,255,0.14);
+  color: #fff;
+  text-decoration: none;
+}
+.sidebar-notice-item:hover {
+  background: #334155;
+  color: #fff;
+  text-decoration: none;
+}
+.sidebar-notice-title {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+}
+.sidebar-notice-message {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255,255,255,0.74);
 }
 .sidebar-role {
   display: inline-block;

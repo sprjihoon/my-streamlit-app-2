@@ -471,3 +471,145 @@ def test_name_seal_uses_the_workers_own_name_and_is_stamped(isolated_runtime):
     assert len(sealed[0].get_images()) >= 2
     assert sealed[1].get_images()
     assert sealed[2].get_images()
+
+
+def test_profile_notices_point_at_contract_menu(isolated_runtime):
+    staff_id = _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+
+    missing = client.get("/employment-contracts/notices")
+    assert missing.status_code == 422 or missing.status_code == 401
+
+    staff = client.get("/employment-contracts/notices", params={"token": "staff-tok"})
+    assert staff.status_code == 200
+    assert staff.json()["items"] == [
+        {
+            "id": "contract-write",
+            "title": "근로계약",
+            "message": "근로계약에 적을 내용이 있습니다.",
+            "href": "/employment-contracts",
+            "count": 1,
+        }
+    ]
+    admin = client.get("/employment-contracts/notices", params={"token": "admin-tok"})
+    assert admin.json()["items"] == [
+        {
+            "id": "contract-write",
+            "title": "근로계약",
+            "message": "작성할 근로계약이 1건 있습니다.",
+            "href": "/employment-contracts",
+            "count": 1,
+        }
+    ]
+
+    body = _sample()
+    drafted = client.put(
+        f"/employment-contracts/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200
+    confirm = client.get("/employment-contracts/notices", params={"token": "staff-tok"}).json()["items"]
+    assert confirm[0]["id"] == "contract-confirm"
+    assert confirm[0]["title"] == "확인사항"
+    assert confirm[0]["href"] == "/employment-contracts"
+    assert client.get("/employment-contracts/notices", params={"token": "admin-tok"}).json()["items"] == []
+
+    _worker_confirms(client, staff_id)
+    assert client.get("/employment-contracts/notices", params={"token": "staff-tok"}).json()["items"] == []
+    sealed = client.get("/employment-contracts/notices", params={"token": "admin-tok"}).json()["items"]
+    assert sealed == [
+        {
+            "id": "contract-confirm",
+            "title": "확인사항",
+            "message": "근로자 1명이 계약서를 확인하고 날인했습니다.",
+            "href": "/employment-contracts",
+            "count": 1,
+        }
+    ]
+
+    completed = client.post(
+        f"/employment-contracts/users/{staff_id}/complete",
+        params={"token": "admin-tok"},
+        json=body,
+    )
+    assert completed.status_code == 200
+    download = client.get("/employment-contracts/notices", params={"token": "staff-tok"}).json()["items"]
+    assert download[0]["id"] == "contract-download"
+    assert download[0]["href"] == "/employment-contracts"
+    assert client.get("/employment-contracts/notices", params={"token": "admin-tok"}).json()["items"] == []
+
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE employment_contracts SET completed_at = ? WHERE id = ?",
+            ("2020-01-01 00:00:00", completed.json()["id"]),
+        )
+    assert client.get("/employment-contracts/notices", params={"token": "staff-tok"}).json()["items"] == []
+
+
+def test_admin_employee_follows_worker_seal_then_company_seal(isolated_runtime):
+    staff_id = _prepare(isolated_runtime["db"])
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            """
+            INSERT INTO users (username, password_hash, nickname, is_admin, department, position, join_date)
+            VALUES ('myeongchan', 'x', '장명찬', 1, '뷰티팀', '팀장', '')
+            """
+        )
+        user_id = con.execute("SELECT user_id FROM users WHERE username = 'myeongchan'").fetchone()[0]
+        con.execute("INSERT OR REPLACE INTO sessions (token, user_id) VALUES ('mc-tok', ?)", (user_id,))
+        con.commit()
+    client = TestClient(app)
+
+    me = client.get("/auth/me", params={"token": "mc-tok"})
+    assert me.status_code == 200
+    assert me.json()["is_admin"] is True
+    assert me.json()["needs_contract"] is True
+    assert client.get("/auth/me", params={"token": "admin-tok"}).json()["needs_contract"] is False
+
+    mine = client.get("/employment-contracts/notices", params={"token": "mc-tok"}).json()["items"]
+    assert any(item["id"] == "contract-write" and "적을 내용" in item["message"] for item in mine)
+    assert any(item["id"] == "contract-write" and "1건" in item["message"] for item in mine)
+
+    opened = client.get("/employment-contracts", params={"token": "mc-tok", "view": "open"})
+    assert opened.status_code == 200
+    assert any(row["user_id"] == user_id for row in opened.json()["employees"])
+    assert any(row["user_id"] == staff_id for row in opened.json()["employees"])
+
+    body = _sample(employee_name="장명찬")
+    drafted = client.put(
+        f"/employment-contracts/users/{user_id}",
+        params={"token": "mc-tok"},
+        json=body,
+    )
+    assert drafted.status_code == 200, drafted.text
+    own = client.get(f"/employment-contracts/users/{user_id}", params={"token": "mc-tok"})
+    assert own.status_code == 200
+    assert own.json()["input"]["employee_name"] == "장명찬"
+
+    mark = client.put(
+        f"/employment-contracts/users/{user_id}/mark",
+        params={"token": "mc-tok"},
+        json={"kind": "grid"},
+    )
+    assert mark.status_code == 200, mark.text
+    sealed = client.post(
+        f"/employment-contracts/users/{user_id}/worker-seal",
+        params={"token": "mc-tok"},
+    )
+    assert sealed.status_code == 200, sealed.text
+    assert client.get("/auth/me", params={"token": "mc-tok"}).json()["needs_contract"] is True
+
+    waiting = client.get("/employment-contracts/notices", params={"token": "admin-tok"}).json()["items"]
+    assert any(item["id"] == "contract-confirm" and "1명" in item["message"] for item in waiting)
+
+    completed = client.post(
+        f"/employment-contracts/users/{user_id}/complete",
+        params={"token": "mc-tok"},
+        json=body,
+    )
+    assert completed.status_code == 200, completed.text
+    download = client.get(f"/employment-contracts/users/{user_id}", params={"token": "mc-tok"})
+    assert download.status_code == 200
+    assert download.json()["download"]["contract_id"] == completed.json()["id"]
+    assert client.get("/auth/me", params={"token": "mc-tok"}).json()["needs_contract"] is True
