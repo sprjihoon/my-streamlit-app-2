@@ -547,11 +547,22 @@ def test_october_2026_is_seeded_from_the_given_workbook(isolated_runtime):
     assert calendar.status_code == 200, calendar.text
     body = calendar.json()
     names = [item["name"] for item in body["workers"] if item["active"]]
-    assert names == ["김수영", "김순화", "김정미", "복진해", "설희", "손아현", "조여진", "지영주", "최윤영"]
+    assert names == [
+        "김수영", "김순화", "김정미", "문정숙", "박희숙", "복진해", "설희",
+        "손아현", "이행자", "정현소", "조여진", "지영주", "최윤영", "황보화",
+    ]
     cho_profile = next(item for item in body["workers"] if item["name"] == "조여진")
+    assert cho_profile["resident_id"] == "050704-3******"
     assert cho_profile["phone"] == "010-8817-0199"
     assert cho_profile["bank_name"] == "kb은행"
     assert cho_profile["account_number"] == "940302-01-724971"
+    moon = next(item for item in body["workers"] if item["name"] == "문정숙")
+    assert moon["resident_id"] == "750716-2******"
+    assert moon["bank_name"] == "카카오뱅크"
+    assert moon["account_number"] == "3333-30-7784236"
+    hwang = next(item for item in body["workers"] if item["name"] == "황보화")
+    assert hwang["resident_id"] == "850227-2******"
+    assert hwang["phone"] == "010-7353-7119"
     jo = next(item for item in body["totals"] if item["name"] == "조여진")
     assert jo["basic_hours"] == 75
     seolhee = next(item for item in body["totals"] if item["name"] == "설희")
@@ -574,3 +585,18 @@ def test_october_2026_is_seeded_from_the_given_workbook(isolated_runtime):
     assert entries == 29
     again = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 10})
     assert sum(len(items) for items in again.json()["days"].values()) == 29
+
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            "UPDATE part_time_workers SET resident_id = ?, phone = '', bank_name = '', account_number = '' WHERE name = ?",
+            ("111111-1111111", "조여진"),
+        )
+        con.commit()
+    from backend.app.api.part_time import ensure_part_time_tables
+    ensure_part_time_tables()
+    filled = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 10})
+    restored = next(item for item in filled.json()["workers"] if item["name"] == "조여진")
+    assert restored["resident_id"] == "050704-3******"
+    assert restored["phone"] == "010-8817-0199"
+    assert restored["bank_name"] == "kb은행"
+    assert restored["account_number"] == "940302-01-724971"

@@ -117,36 +117,79 @@ def _seed_october_2026(con) -> None:
 
 
 def _fill_worker_profiles(con) -> None:
-    """이미 들어간 알바라도 연락처·은행·계좌가 비어 있으면 엑셀 값으로 채운다. 적어 둔 값은 덮지 않는다."""
+    """엑셀에 있는 알바는 만들고, 주민번호·연락처·은행·계좌가 비어 있으면 채운다. 적어 둔 값은 덮지 않는다."""
     stamp = _now()
+    wage = minimum_wage(2026)
     for person in october_2026_people():
         try:
             resident_id = _normalize_rrn(person["resident_id"])
         except HTTPException:
             continue
+        name = (person.get("name") or "").strip()
+        phone = _phone(person.get("phone") or "")
+        bank_name = (person.get("bank_name") or "").strip()
+        account_number = str(person.get("account_number") or "").strip()
         row = con.execute(
             """
-            SELECT id, phone, bank_name, account_number
+            SELECT id, name, resident_id, phone, bank_name, account_number
             FROM part_time_workers
             WHERE resident_id = ?
             ORDER BY active DESC, id LIMIT 1
             """,
             (resident_id,),
         ).fetchone()
+        matched_name = False
+        if not row and name:
+            row = con.execute(
+                """
+                SELECT id, name, resident_id, phone, bank_name, account_number
+                FROM part_time_workers
+                WHERE TRIM(name) = ?
+                ORDER BY active DESC, id LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+            matched_name = bool(row)
         if not row:
+            con.execute(
+                """
+                INSERT INTO part_time_workers
+                    (name, resident_id, reported, hourly_wage, active, phone, bank_name, account_number, created_at, updated_at)
+                VALUES (?, ?, 1, ?, 1, ?, ?, ?, ?, ?)
+                """,
+                (name, resident_id, wage, phone, bank_name, account_number, stamp, stamp),
+            )
             continue
-        phone = (row[1] or "").strip() or _phone(person.get("phone") or "")
-        bank_name = (row[2] or "").strip() or (person.get("bank_name") or "").strip()
-        account_number = (row[3] or "").strip() or str(person.get("account_number") or "").strip()
-        if phone == (row[1] or "").strip() and bank_name == (row[2] or "").strip() and account_number == (row[3] or "").strip():
+        new_name = (row[1] or "").strip() or name
+        current_digits = re.sub(r"\D", "", row[2] or "")
+        new_resident = row[2]
+        if len(current_digits) != 13:
+            new_resident = resident_id
+        elif matched_name and (row[2] or "") != resident_id:
+            taken = con.execute(
+                "SELECT id FROM part_time_workers WHERE resident_id = ? AND id != ?",
+                (resident_id, row[0]),
+            ).fetchone()
+            if not taken:
+                new_resident = resident_id
+        new_phone = (row[3] or "").strip() or phone
+        new_bank = (row[4] or "").strip() or bank_name
+        new_account = (row[5] or "").strip() or account_number
+        if (
+            new_name == (row[1] or "").strip()
+            and new_resident == (row[2] or "")
+            and new_phone == (row[3] or "").strip()
+            and new_bank == (row[4] or "").strip()
+            and new_account == (row[5] or "").strip()
+        ):
             continue
         con.execute(
             """
             UPDATE part_time_workers
-            SET phone = ?, bank_name = ?, account_number = ?, updated_at = ?
+            SET name = ?, resident_id = ?, phone = ?, bank_name = ?, account_number = ?, updated_at = ?
             WHERE id = ?
             """,
-            (phone, bank_name, account_number, stamp, row[0]),
+            (new_name, new_resident, new_phone, new_bank, new_account, stamp, row[0]),
         )
 
 

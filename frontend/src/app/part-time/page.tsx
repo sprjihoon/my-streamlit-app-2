@@ -423,6 +423,7 @@ export default function PartTimePage() {
                 >
                   <strong>{worker.name}</strong>
                   <span style={{ marginLeft: 6, color: '#374151', fontSize: '0.75rem' }}>{won(worker.hourly_wage)}</span>
+                  {worker.resident_id ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.resident_id}</span> : null}
                   {worker.phone ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.phone}</span> : null}
                   {worker.bank_name || worker.account_number ? (
                     <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>
@@ -575,6 +576,11 @@ export default function PartTimePage() {
                     onChange={(event) => setWorkerDraft({ ...workerDraft, residentId: event.target.value })}
                   />
                 </label>
+                {workerDraft.id !== null && !workerDraft.residentId && (
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.8rem' }}>
+                    저장된 주민번호는 목록에 마스킹되어 보입니다. 바꿀 때만 13자리를 다시 적습니다.
+                  </p>
+                )}
                 <label className="ops-label">
                   시급
                   <input className="ui-control" type="number" min={1} value={workerDraft.wage} onChange={(event) => setWorkerDraft({ ...workerDraft, wage: event.target.value })} />
