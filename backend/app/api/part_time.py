@@ -14,6 +14,7 @@ from backend.app.api.logs import add_log
 from backend.app.services.part_time.calc import minimum_wage, settle_part_time_pay, weekly_holiday_pay
 from backend.app.services.part_time.calendar_actions import normalize_clock, shift_times
 from backend.app.services.part_time.excel import render_part_time_xlsx
+from backend.app.services.part_time.october_2026 import OCTOBER_2026_START, october_2026_people
 from logic.db import get_connection
 
 router = APIRouter(prefix="/part-time", tags=["part-time"])
@@ -50,7 +51,52 @@ def ensure_part_time_tables() -> None:
         columns = [row[1] for row in con.execute("PRAGMA table_info(part_time_hours)").fetchall()]
         if "start_time" not in columns:
             con.execute("ALTER TABLE part_time_hours ADD COLUMN start_time TEXT")
+        _seed_october_2026(con)
         con.commit()
+
+
+def _seed_october_2026(con) -> None:
+    taken = con.execute(
+        """
+        SELECT 1 FROM part_time_hours
+        WHERE work_date >= '2026-10-01' AND work_date <= '2026-10-31'
+        LIMIT 1
+        """
+    ).fetchone()
+    if taken:
+        return
+    stamp = _now()
+    wage = minimum_wage(2026)
+    for person in october_2026_people():
+        resident_id = _normalize_rrn(person["resident_id"])
+        row = con.execute(
+            "SELECT id FROM part_time_workers WHERE resident_id = ? ORDER BY active DESC, id LIMIT 1",
+            (resident_id,),
+        ).fetchone()
+        if row:
+            worker_id = row[0]
+        else:
+            cur = con.execute(
+                """
+                INSERT INTO part_time_workers
+                    (name, resident_id, reported, hourly_wage, active, created_at, updated_at)
+                VALUES (?, ?, 1, ?, 1, ?, ?)
+                """,
+                (person["name"], resident_id, wage, stamp, stamp),
+            )
+            worker_id = cur.lastrowid
+        for day, hours in person["days"].items():
+            con.execute(
+                """
+                INSERT INTO part_time_hours (worker_id, work_date, hours, start_time, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(worker_id, work_date) DO UPDATE SET
+                    hours = excluded.hours,
+                    start_time = excluded.start_time,
+                    updated_at = excluded.updated_at
+                """,
+                (worker_id, f"2026-10-{int(day):02d}", float(hours), OCTOBER_2026_START, stamp),
+            )
 
 
 class WorkerIn(BaseModel):
@@ -84,11 +130,14 @@ def _now() -> str:
 
 
 def _admin(token: str) -> dict:
+    from backend.app.api.auth import ensure_users_table
+
+    ensure_users_table()
     ensure_part_time_tables()
     with get_connection() as con:
         row = con.execute(
             """
-            SELECT u.user_id, u.nickname, u.is_admin
+            SELECT u.user_id, u.nickname, u.is_admin, u.can_manage_part_time
             FROM sessions s
             JOIN users u ON u.user_id = s.user_id
             WHERE s.token = ?
@@ -97,8 +146,8 @@ def _admin(token: str) -> dict:
         ).fetchone()
     if not row:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    if not row[2]:
-        raise HTTPException(status_code=403, detail="관리자만 아르바이트 관리대장을 다룰 수 있습니다.")
+    if not row[2] and not row[3]:
+        raise HTTPException(status_code=403, detail="아르바이트 관리 권한이 필요합니다.")
     return {"user_id": row[0], "nickname": row[1] or ""}
 
 

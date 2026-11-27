@@ -197,21 +197,38 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert book.sheetnames[:2] == ["11월", "공단"]
     ledger = book["11월"]
     assert ledger["A1"].value == "2026년 11월 일용근로대장"
-    assert ledger["B7"].value == "김알바"
-    assert ledger["B8"].value == "900101-1234567"
-    assert ledger["B9"].value == "2일"
-    assert ledger["B11"].value == 144000
-    assert ledger["C13"].value == 5
-    assert ledger["D13"].value == 5
-    assert ledger["H7"].value is None
+    kim_block = None
+    for start in range(7, (ledger.max_row or 7) + 1, 19):
+        for origin in (2, 8):
+            if ledger.cell(start, origin).value == "김알바":
+                kim_block = (start, origin)
+                break
+        if kim_block:
+            break
+    assert kim_block is not None
+    start, origin = kim_block
+    assert ledger.cell(start + 1, origin).value == "900101-1234567"
+    assert ledger.cell(start + 2, origin).value == "2일"
+    assert ledger.cell(start + 4, origin).value == 144000
+    assert ledger.cell(start + 6, origin + 1).value == 5
+    assert ledger.cell(start + 6, origin + 2).value == 5
     gong = book["공단"]
-    assert gong["O21"].value == "김알바"
-    assert gong["O22"].value == "900101-1234567"
-    assert gong["S27"].value == "o"
-    assert gong["T27"].value == "o"
-    assert gong["O48"].value == "144,000 원 "
-    assert gong["O50"].value == "0 원 "
-    assert gong["AE21"].value is None
+    kim_gong = None
+    for sheet in book.worksheets:
+        if not str(sheet.title).startswith("공단"):
+            continue
+        for coord in ("O21", "AE21", "AT21", "BM21"):
+            if sheet[coord].value == "김알바":
+                kim_gong = (sheet, coord[0] if coord[1].isdigit() else coord[:2])
+                break
+        if kim_gong:
+            break
+    assert kim_gong is not None
+    gong_sheet, gong_col = kim_gong
+    assert gong_sheet[f"{gong_col}21"].value == "김알바"
+    assert gong_sheet[f"{gong_col}22"].value == "900101-1234567"
+    assert gong_sheet[f"{gong_col}48"].value == "144,000 원 "
+    assert gong_sheet[f"{gong_col}50"].value == "0 원 "
 
     left = client.put(
         f"/part-time/workers/{reported_body['id']}",
@@ -337,9 +354,11 @@ def test_date_add_and_drag_save_put_hours_on_that_day(isolated_runtime):
     calendar = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
     assert calendar.status_code == 200
     remaining = workers_available_on_date(calendar.json()["workers"], calendar.json()["days"]["2026-11-03"])
-    assert remaining == []
+    remaining_ids = {item["id"] for item in remaining}
+    assert kim_id not in remaining_ids
+    assert park_id not in remaining_ids
     other_day = workers_available_on_date(calendar.json()["workers"], calendar.json()["days"].get("2026-11-04", []))
-    assert {item["id"] for item in other_day} == {kim_id, park_id}
+    assert {kim_id, park_id} <= {item["id"] for item in other_day}
 
     missing = client.put(
         "/part-time/days",
@@ -368,12 +387,101 @@ def test_weekly_holiday_uses_the_sunday_month_when_the_week_crosses(isolated_run
     )
     assert saved.status_code == 200, saved.text
     october = saved.json()
-    assert october["totals"][0]["basic_hours"] == 5
-    assert october["totals"][0]["weekly_holiday_pay"] == 0
+    october_total = next(row for row in october["totals"] if row["worker_id"] == worker_id)
+    assert october_total["basic_hours"] == 5
+    assert october_total["weekly_holiday_pay"] == 0
 
     november = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
     assert november.status_code == 200
-    total = november.json()["totals"][0]
+    total = next(row for row in november.json()["totals"] if row["worker_id"] == worker_id)
     assert total["basic_hours"] == 0
     assert total["weekly_holiday_hours"] == 1
     assert total["weekly_holiday_pay"] == 10320
+
+
+def test_part_time_permission_lets_a_non_admin_open_the_ledger(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute(
+            """
+            INSERT INTO users (username, password_hash, nickname, is_admin, position, department)
+            VALUES ('lead', 'x', '팀장', 0, '팀장', '패션팀')
+            """
+        )
+        lead_id = con.execute("SELECT user_id FROM users WHERE username = 'lead'").fetchone()[0]
+        staff_id = con.execute("SELECT user_id FROM users WHERE username = 'staff'").fetchone()[0]
+        con.execute("INSERT OR REPLACE INTO sessions (token, user_id) VALUES ('lead-tok', ?)", (lead_id,))
+        con.commit()
+
+    blocked = client.put(
+        f"/auth/users/{staff_id}",
+        params={"token": "lead-tok"},
+        json={"can_manage_part_time": True},
+    )
+    assert blocked.status_code == 403
+
+    still_denied = client.get("/part-time/calendar", params={"token": "staff-tok", "year": 2026, "month": 11})
+    assert still_denied.status_code == 403
+
+    granted = client.put(
+        f"/auth/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json={"can_manage_part_time": True},
+    )
+    assert granted.status_code == 200, granted.text
+
+    me = client.get("/auth/me", params={"token": "staff-tok"})
+    assert me.status_code == 200
+    assert me.json()["is_admin"] is False
+    assert me.json()["can_manage_part_time"] is True
+
+    listed = client.get("/auth/users", params={"token": "admin-tok"})
+    staff = next(row for row in listed.json() if row["username"] == "staff")
+    assert staff["can_manage_part_time"] is True
+    assert next(row for row in listed.json() if row["username"] == "admin")["can_manage_part_time"] is False
+
+    created = client.post(
+        "/part-time/workers",
+        params={"token": "staff-tok"},
+        json={"name": "권한알바", "resident_id": "910202-2234567", "reported": False},
+    )
+    assert created.status_code == 200, created.text
+
+    revoked = client.put(
+        f"/auth/users/{staff_id}",
+        params={"token": "admin-tok"},
+        json={"can_manage_part_time": False},
+    )
+    assert revoked.status_code == 200, revoked.text
+    denied_again = client.get("/part-time/calendar", params={"token": "staff-tok", "year": 2026, "month": 11})
+    assert denied_again.status_code == 403
+
+    admin_calendar = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert admin_calendar.status_code == 200
+
+
+def test_october_2026_is_seeded_from_the_given_workbook(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    calendar = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 10})
+    assert calendar.status_code == 200, calendar.text
+    body = calendar.json()
+    names = [item["name"] for item in body["workers"] if item["active"]]
+    assert names == ["김수영", "김순화", "김정미", "복진해", "설희", "손아현", "조여진", "지영주", "최윤영"]
+    jo = next(item for item in body["totals"] if item["name"] == "조여진")
+    assert jo["basic_hours"] == 75
+    assert jo["hourly_wage"] == 10320
+    assert body["days"]["2026-10-02"][0]["hours"] == 5
+    assert {item["name"] for item in body["days"]["2026-10-02"]} == {"조여진", "지영주"}
+    cho = next(item for item in body["days"]["2026-10-02"] if item["name"] == "조여진")
+    assert cho["start_time"] == "09:00"
+    assert cho["end_time"] == "14:00"
+    assert cho["shift_label"] == "09:00~14:00"
+    assert len(body["days"]["2026-10-27"]) == 2
+    assert {item["name"] for item in body["days"]["2026-10-27"]} == {"손아현", "최윤영"}
+    assert body["days"]["2026-10-28"][0]["name"] == "김순화"
+    entries = sum(len(items) for items in body["days"].values())
+    assert entries == 29
+    again = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 10})
+    assert sum(len(items) for items in again.json()["days"].values()) == 29
