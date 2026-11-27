@@ -1,7 +1,8 @@
-"""알바 주휴와 연도별 최저시급.
+"""알바 주휴, 세금, 회사 부담 보험.
 
-주휴시간은 파일에 있던 식 그대로다. 월~일 기본 근무시간을 더해 40으로 나누고 8을 곱한다.
-그 주 근무가 14시간 미만이면 주휴는 없다. 신고 알바만 주휴수당을 받고, 미신고 알바는 주휴시간이 0이다.
+주휴시간은 월~일 기본 근무시간을 더해 40으로 나누고 8을 곱한다.
+그 주 근무가 14시간 미만이면 주휴는 없다.
+세금과 보험은 신고 구분이 아니라 근무 기간과 한 주 시간으로 정한다.
 """
 from __future__ import annotations
 
@@ -67,9 +68,9 @@ def daily_worker_tax(taxable: int, work_days: int) -> dict:
     }
 
 
-def weekly_holiday_pay(basic_hours: float, hourly_wage: int, reported: bool) -> tuple[float, int]:
-    if not reported:
-        return 0.0, 0
+def weekly_holiday_pay(basic_hours: float, hourly_wage: int, reported: bool = True) -> tuple[float, int]:
+    """주휴는 그 주 시간으로만 정한다. reported 는 예전 호출이 깨지지 않게 남겨 둔다."""
+    del reported
     hours = weekly_holiday_hours(basic_hours)
     return hours, int(round(hours * int(hourly_wage or 0)))
 
@@ -142,6 +143,43 @@ def business_income_tax(taxable: int) -> dict:
     }
 
 
+def continued_three_months(first_day: date, month_end: date) -> bool:
+    """같은 곳에서 3개월 이상 계속 일하면 일용근로가 아니다."""
+    month = first_day.month + 3
+    year = first_day.year + (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    day = min(first_day.day, calendar.monthrange(year, month)[1])
+    return month_end >= date(year, month, day)
+
+
+def choose_pay_regime(first_day: date | None, month_end: date, weekly_max: float, month_hours: float) -> str:
+    """회사 총비용이 낮으면서 근로자에게 맞는 신고를 고른다.
+
+    주 15시간 미만은 초단시간이다. 3개월 미만이면 산재만, 3개월 이상이면 고용보험이 붙는다.
+    주 15시간 이상이고 3개월 미만이면 일용근로, 그 이후에는 일반 근로다.
+    3.3% 인적용역은 현장 알바의 선택지가 아니다.
+    """
+    short_hours = weekly_max < 15 and month_hours < 60
+    long_term = first_day is not None and continued_three_months(first_day, month_end)
+    if short_hours:
+        return "short_long" if long_term else "short"
+    return "regular" if long_term else "daily"
+
+
+def _wage_income_tax(taxable: int) -> dict:
+    """이 시급대의 근로소득 간이세액은 0원이다."""
+    taxable = max(int(taxable or 0), 0)
+    return {
+        "withholding_kind": "wage",
+        "earned_income_deduction": 0,
+        "tax_base": taxable,
+        "calculated_tax": 0,
+        "tax_credit": 0,
+        "income_tax": 0,
+        "local_tax": 0,
+    }
+
+
 def settle_part_time_pay(
     taxable: int,
     work_days: int,
@@ -150,30 +188,41 @@ def settle_part_time_pay(
     year: int,
     month: int,
     resident_id: str = "",
+    regime: str | None = None,
 ) -> dict:
     """알바에게 줄 금액과 회사가 따로 낼 보험료.
 
-    신고는 일용근로소득세다. 3.3%를 또 빼지 않는다.
-    고용보험은 신고하면 근로자 0.9%를 빼고, 65세 이상은 빼지 않는다.
-    국민연금과 건강보험은 8일, 60시간, 220만 원 중 하나면 뺀다.
-    산재는 회사만 부담한다.
+    regime 가 없으면 기존 신고 구분을 따른다. 명세서 계산은 기간과 시간으로 regime 을 넘긴다.
     """
     taxable = max(int(taxable or 0), 0)
     work_days = max(int(work_days or 0), 0)
     basic_hours = max(float(basic_hours or 0), 0.0)
-    if reported:
+    if regime is None:
+        regime = "daily" if reported else "business"
+    if regime == "daily":
         tax = daily_worker_tax(taxable, work_days)
         tax["withholding_kind"] = "daily"
-    else:
+    elif regime == "business":
         tax = business_income_tax(taxable)
+    else:
+        tax = _wage_income_tax(taxable)
+        tax["withholding_kind"] = regime
 
     last_day = date(year, month, calendar.monthrange(year, month)[1])
     age = _age_on(resident_id, last_day)
-    social = reported and taxable > 0
-    employment_on = social and (age is None or age < 65)
-    pension_gate = work_days >= 8 or basic_hours >= 60 or taxable >= PENSION_INCOME_GATE
-    pension_on = social and pension_gate and (age is None or 18 <= age < 60)
-    health_on = social and pension_gate
+    pension_gate = False
+    employment_on = False
+    industrial_on = regime != "business" and taxable > 0
+    if regime == "daily":
+        employment_on = taxable > 0 and (age is None or age < 65)
+        pension_gate = taxable > 0 and (work_days >= 8 or basic_hours >= 60 or taxable >= PENSION_INCOME_GATE)
+    elif regime == "short":
+        pension_gate = taxable >= PENSION_INCOME_GATE
+    elif regime in {"short_long", "regular"}:
+        employment_on = taxable > 0 and (age is None or age < 65)
+        pension_gate = taxable > 0 and (basic_hours >= 60 or taxable >= PENSION_INCOME_GATE)
+    pension_on = pension_gate and (age is None or 18 <= age < 60)
+    health_on = pension_gate
 
     low, high = _pension_bounds(year, month)
     pension_base = 0
@@ -191,23 +240,29 @@ def settle_part_time_pay(
     employer_health = health if health_on else 0
     employer_care = care if health_on else 0
     employer_employment = 0
-    if social:
+    if regime in {"daily", "short_long", "regular"} and taxable > 0:
         unemployment = _down10(taxable * EMPLOYMENT_EMPLOYER_UNEMPLOYMENT_RATE) if employment_on else 0
-        stability = _down10(taxable * EMPLOYMENT_EMPLOYER_STABILITY_RATE)
+        stability = _down10(taxable * EMPLOYMENT_EMPLOYER_STABILITY_RATE) if employment_on or (age is not None and age >= 65) else 0
         employer_employment = unemployment + stability
-    industrial = _down10(taxable * INDUSTRIAL_EMPLOYER_RATE) if social else 0
+    industrial = _down10(taxable * INDUSTRIAL_EMPLOYER_RATE) if industrial_on else 0
     employer_total = employer_pension + employer_health + employer_care + employer_employment + industrial
 
-    if not reported:
-        insurance_note = "3.3% 원천징수입니다. 지급액의 3%를 소득세로, 그 10%를 지방소득세로 떼고 나머지를 지급합니다. 4대보험은 빼지 않습니다."
-    elif not pension_gate:
-        insurance_note = "8일·60시간·220만 원 미만이라 국민연금과 건강보험은 빼지 않습니다."
-    elif age is not None and age >= 60:
-        insurance_note = "만 60세 이상이라 국민연금은 빼지 않습니다."
-    else:
-        insurance_note = "국민연금과 건강보험을 급여에서 뺍니다."
-    if reported and age is not None and age >= 65:
-        insurance_note = "만 65세 이상이라 고용보험 근로자분은 빼지 않습니다. " + insurance_note
+    notes = {
+        "business": "인적용역이면 3.3%를 떼고 4대보험은 없습니다. 현장에서 지시받아 일하는 알바에게는 쓰지 않습니다.",
+        "short": "주 15시간 미만이고 3개월 미만입니다. 회사는 산재보험만 냅니다.",
+        "short_long": "3개월 이상 이어서 일했고 주 15시간 미만입니다. 회사는 산재와 고용보험을 냅니다.",
+        "daily": "주 15시간 이상이고 3개월 미만이라 일용근로로 계산합니다.",
+        "regular": "3개월 이상이고 주 15시간 이상이라 일반 근로로 계산합니다.",
+    }
+    insurance_note = notes.get(regime, "")
+    if regime == "daily" and not pension_gate:
+        insurance_note += " 8일·60시간·220만 원 미만이라 국민연금과 건강보험은 없습니다."
+    elif regime == "regular" and not pension_gate:
+        insurance_note += " 60시간·220만 원 미만이라 국민연금과 건강보험은 없습니다."
+    elif pension_on and age is not None and age >= 60:
+        insurance_note += " 만 60세 이상이라 국민연금은 빼지 않습니다."
+    if employment_on and age is not None and age >= 65:
+        insurance_note += " 만 65세 이상이라 고용보험 근로자분은 빼지 않습니다."
 
     return {
         **tax,
@@ -225,5 +280,7 @@ def settle_part_time_pay(
         "employer_care": employer_care,
         "employer_industrial": industrial,
         "employer_total": employer_total,
+        "company_cost": taxable + employer_total,
+        "pay_regime": regime,
         "insurance_note": insurance_note,
     }

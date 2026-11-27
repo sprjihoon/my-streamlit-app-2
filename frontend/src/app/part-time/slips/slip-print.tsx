@@ -35,6 +35,8 @@ export interface PrintSlip {
   care: number;
   deduction_total: number;
   net_pay: number;
+  pay_regime?: string;
+  withholding_kind?: string;
   lines: PrintSlipLine[];
 }
 
@@ -136,18 +138,19 @@ function moneyRows(slip: PrintSlip) {
     ['주휴수당', slip.weekly_holiday_pay],
     ['총지급액', slip.taxable_pay + slip.nontaxable_pay],
   ] as const;
-  const cuts = slip.reported
+  const freelance = slip.withholding_kind === 'business_3_3' || slip.pay_regime === 'business';
+  const cuts = freelance
     ? [
+        ['소득세 3%', slip.income_tax],
+        ['지방소득세 0.3%', slip.local_tax],
+      ]
+    : [
         ['소득세', slip.income_tax],
         ['지방소득세', slip.local_tax],
         ['고용보험', slip.employment_insurance],
         ['국민연금', slip.pension],
         ['건강보험', slip.health],
         ['장기요양보험', slip.care],
-      ]
-    : [
-        ['소득세 3%', slip.income_tax],
-        ['지방소득세 0.3%', slip.local_tax],
       ];
   return { pay, cuts: [...cuts, ['공제합계', slip.deduction_total]] as const };
 }
@@ -202,9 +205,9 @@ function SlipSheet({ slip, year, month, company }: { slip: PrintSlip; year: numb
         </tbody>
       </table>
       <p className="slip-foot">
-        {slip.reported
-          ? '실지급액은 총지급액에서 일용근로소득세와 근로자 보험료를 뺀 금액입니다.'
-          : '실지급액은 총지급액에서 소득세 3%와 지방소득세 0.3%를 뺀 금액입니다. 4대보험은 빼지 않습니다.'}
+        {slip.withholding_kind === 'business_3_3' || slip.pay_regime === 'business'
+          ? '실지급액은 총지급액에서 소득세 3%와 지방소득세 0.3%를 뺀 금액입니다. 4대보험은 빼지 않습니다.'
+          : '실지급액은 총지급액에서 소득세와 근로자 보험료를 뺀 금액입니다. 산재보험은 회사가 따로 냅니다.'}
       </p>
     </article>
   );

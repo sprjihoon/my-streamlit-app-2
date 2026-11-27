@@ -35,7 +35,9 @@ interface Slip {
   tax_base: number;
   calculated_tax: number;
   tax_credit: number;
-  withholding_kind: 'daily' | 'business_3_3';
+  withholding_kind: string;
+  pay_regime?: string;
+  company_cost?: number;
   income_tax: number;
   local_tax: number;
   employment_insurance: number;
@@ -53,6 +55,15 @@ interface Slip {
   employer_total: number;
   insurance_note: string;
   lines: SlipLine[];
+}
+
+function regimeLabel(kind: string | undefined) {
+  if (kind === 'short') return '단기 · 주 15시간 미만';
+  if (kind === 'short_long') return '장기 · 주 15시간 미만';
+  if (kind === 'daily') return '단기 · 일용근로';
+  if (kind === 'regular') return '장기 · 일반근로';
+  if (kind === 'business' || kind === 'business_3_3') return '인적용역 3.3%';
+  return '근로';
 }
 
 export default function PartTimeSlipsPage() {
@@ -144,7 +155,7 @@ export default function PartTimeSlipsPage() {
                   }}
                 >
                   <strong>{item.name}</strong>
-                  <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.8rem' }}>{item.reported ? '신고' : '미신고'}</span>
+                  <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.8rem' }}>{regimeLabel(item.pay_regime)}</span>
                   <div style={{ fontSize: '0.8rem', marginTop: 2 }}>지급 {won(item.net_pay)}</div>
                 </button>
               ))}
@@ -154,12 +165,13 @@ export default function PartTimeSlipsPage() {
             <Card title={`${slip.name} ${year}년 ${month}월`}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
                 {[
-                  ['구분', slip.reported ? '신고' : '미신고'],
+                  ['적용', regimeLabel(slip.pay_regime)],
                   ['시급', won(slip.hourly_wage)],
                   ['근로일수', `${slip.work_days}일`],
                   ['일평균 근로시간', `${hoursText(slip.average_hours)}시간`],
                   ['총지급액', won(slip.taxable_pay + slip.nontaxable_pay)],
                   ['알바에게 줄 금액', won(slip.net_pay)],
+                  ['회사 총비용', won(slip.company_cost || slip.taxable_pay + slip.employer_total)],
                 ].map(([label, value]) => (
                   <div key={label} style={{ background: '#f8f9fc', borderRadius: 8, padding: '0.55rem 0.7rem' }}>
                     <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>{label}</div>
@@ -186,20 +198,22 @@ export default function PartTimeSlipsPage() {
                     <tr>{['알바 급여에서 빼는 금액', '내용', '금액'].map((head) => <th key={head}>{head}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {slip.reported ? (
-                      <>
-                        <tr><td>근로소득공제</td><td>15만 원 × 근로일수. 세금 계산용이며 급여에서 빼지 않습니다.</td><td>{won(slip.earned_income_deduction)}</td></tr>
-                        <tr><td>소득세</td><td>일용근로소득. 3.3%가 아닙니다.</td><td>{won(slip.income_tax)}</td></tr>
-                        <tr><td>지방소득세</td><td>소득세의 10%</td><td>{won(slip.local_tax)}</td></tr>
-                        <tr><td>고용보험</td><td>과세소득의 0.9%</td><td>{won(slip.employment_insurance)}</td></tr>
-                        <tr><td>국민연금</td><td>기준소득월액 {won(slip.pension_base)}의 4.75%</td><td>{won(slip.pension)}</td></tr>
-                        <tr><td>건강보험</td><td>과세소득의 3.595%</td><td>{won(slip.health)}</td></tr>
-                        <tr><td>장기요양</td><td>건강보험료의 13.14%</td><td>{won(slip.care)}</td></tr>
-                      </>
-                    ) : (
+                    {slip.withholding_kind === 'business_3_3' ? (
                       <>
                         <tr><td>소득세</td><td>지급액의 3%. 10원 미만은 버리고, 1,000원 미만이어도 뗍니다.</td><td>{won(slip.income_tax)}</td></tr>
                         <tr><td>지방소득세</td><td>소득세의 10%. 합쳐 3.3%입니다.</td><td>{won(slip.local_tax)}</td></tr>
+                      </>
+                    ) : (
+                      <>
+                        {slip.withholding_kind === 'daily' && (
+                          <tr><td>근로소득공제</td><td>15만 원 × 근로일수. 세금 계산용이며 급여에서 빼지 않습니다.</td><td>{won(slip.earned_income_deduction)}</td></tr>
+                        )}
+                        <tr><td>소득세</td><td>{slip.withholding_kind === 'daily' ? '일용근로소득입니다.' : '이 금액대 근로소득세는 0원입니다.'}</td><td>{won(slip.income_tax)}</td></tr>
+                        <tr><td>지방소득세</td><td>소득세의 10%</td><td>{won(slip.local_tax)}</td></tr>
+                        <tr><td>고용보험</td><td>과세소득의 0.9%. 해당 없으면 0원입니다.</td><td>{won(slip.employment_insurance)}</td></tr>
+                        <tr><td>국민연금</td><td>기준소득월액 {won(slip.pension_base)}의 4.75%</td><td>{won(slip.pension)}</td></tr>
+                        <tr><td>건강보험</td><td>과세소득의 3.595%</td><td>{won(slip.health)}</td></tr>
+                        <tr><td>장기요양</td><td>건강보험료의 13.14%</td><td>{won(slip.care)}</td></tr>
                       </>
                     )}
                     <tr><td>공제합계</td><td>알바에게 주지 않고 회사가 납부할 금액</td><td>{won(slip.deduction_total)}</td></tr>
@@ -208,7 +222,7 @@ export default function PartTimeSlipsPage() {
                 </table>
               </div>
               <p style={{ margin: '0 0 1rem', color: '#6b7280', fontSize: '0.85rem' }}>{slip.insurance_note} 산재보험은 회사만 냅니다.</p>
-              {slip.reported && (
+              {slip.withholding_kind !== 'business_3_3' && (
                 <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
                   <table>
                     <thead>

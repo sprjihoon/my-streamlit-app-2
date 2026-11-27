@@ -7,7 +7,13 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, settle_part_time_pay, weekly_holiday_pay
+from backend.app.services.part_time.calc import (
+    choose_pay_regime,
+    daily_worker_tax,
+    minimum_wage,
+    settle_part_time_pay,
+    weekly_holiday_pay,
+)
 from backend.app.services.part_time.calendar_actions import (
     date_from_point_target,
     drop_worker_onto_date,
@@ -49,7 +55,21 @@ def test_weekly_holiday_follows_the_sheet_formula():
     assert weekly_holiday_pay(14, 10320, True) == (2.8, 28896)
     assert weekly_holiday_pay(15, 10320, True) == (3, 30960)
     assert weekly_holiday_pay(40, 10320, True) == (8, 82560)
-    assert weekly_holiday_pay(40, 10320, False) == (0, 0)
+    assert weekly_holiday_pay(40, 10320, False) == (8, 82560)
+    month_end = date(2026, 11, 30)
+    assert choose_pay_regime(date(2026, 11, 2), month_end, 10, 10) == "short"
+    assert choose_pay_regime(date(2026, 8, 1), month_end, 10, 10) == "short_long"
+    assert choose_pay_regime(date(2026, 11, 2), month_end, 15, 15) == "daily"
+    assert choose_pay_regime(date(2026, 8, 1), month_end, 15, 40) == "regular"
+    cheap = settle_part_time_pay(120_000, 2, 10, True, 2026, 11, regime="short")
+    assert cheap["employment_insurance"] == 0
+    assert cheap["income_tax"] == 0
+    assert cheap["employer_industrial"] == 960
+    assert cheap["company_cost"] == 120_960
+    longer = settle_part_time_pay(120_000, 2, 10, True, 2026, 11, regime="short_long")
+    assert longer["employment_insurance"] == 1_080
+    assert longer["employer_employment"] == 1_380
+    assert longer["company_cost"] == 122_340
     assert minimum_wage(2026) == 10320
     assert minimum_wage(2027) == 10700
     taxed = daily_worker_tax(4_000_000, 20)
@@ -92,6 +112,57 @@ def test_weekly_holiday_follows_the_sheet_formula():
     assert small["local_tax"] == 90
     assert small["net_pay"] == 29_010
     assert small["employment_insurance"] == 0
+
+
+def test_fifteen_hours_uses_daily_tax_and_three_months_adds_employment_insurance(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    daily = client.post(
+        "/part-time/workers",
+        params={"token": "admin-tok"},
+        json={"name": "일용알바", "resident_id": "900101-1234567", "hourly_wage": 10320},
+    )
+    lasting = client.post(
+        "/part-time/workers",
+        params={"token": "admin-tok"},
+        json={"name": "장기알바", "resident_id": "910101-2234567", "hourly_wage": 10320},
+    )
+    assert daily.status_code == 200 and lasting.status_code == 200
+    daily_id = daily.json()["id"]
+    lasting_id = lasting.json()["id"]
+    for work_date, hours, worker_id in (
+        ("2026-11-02", 8, daily_id),
+        ("2026-11-03", 7, daily_id),
+        ("2026-08-03", 5, lasting_id),
+        ("2026-11-02", 5, lasting_id),
+    ):
+        saved = client.put(
+            "/part-time/days",
+            params={"token": "admin-tok"},
+            json={"work_date": work_date, "entries": [{"worker_id": worker_id, "hours": hours, "start_time": "09:00"}]},
+        )
+        assert saved.status_code == 200, saved.text
+    slips = client.get("/part-time/slips", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert slips.status_code == 200, slips.text
+    daily_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == daily_id)
+    lasting_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == lasting_id)
+    assert daily_slip["pay_regime"] == "daily"
+    assert daily_slip["taxable_pay"] == 185760
+    assert lasting_slip["pay_regime"] == "short_long"
+    assert lasting_slip["employment_insurance"] == 460
+    assert lasting_slip["employer_industrial"] == 410
+    sheet = client.get("/part-time/xlsx", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert sheet.status_code == 200
+    from io import BytesIO
+    from openpyxl import load_workbook
+    book = load_workbook(BytesIO(sheet.content))
+    names = [
+        book["11월"].cell(row, col).value
+        for row in range(1, (book["11월"].max_row or 1) + 1)
+        for col in range(1, 16)
+    ]
+    assert "일용알바" in names
+    assert "장기알바" not in names
 
 
 def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_runtime):
@@ -181,18 +252,22 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert reported_slip["work_days"] == 2
     assert reported_slip["taxable_pay"] == 120000
     assert reported_slip["nontaxable_pay"] == 0
+    assert reported_slip["pay_regime"] == "short"
     assert reported_slip["income_tax"] == 0
-    assert reported_slip["employment_insurance"] == 1080
+    assert reported_slip["employment_insurance"] == 0
     assert reported_slip["pension"] == 0
     assert reported_slip["health"] == 0
     assert reported_slip["employer_industrial"] == 960
-    assert reported_slip["net_pay"] == 118920
+    assert reported_slip["net_pay"] == 120000
+    assert reported_slip["company_cost"] == 120960
     hidden_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == hidden_id)
-    assert hidden_slip["withholding_kind"] == "business_3_3"
-    assert hidden_slip["income_tax"] == 3090
-    assert hidden_slip["local_tax"] == 300
+    assert hidden_slip["pay_regime"] == "short"
+    assert hidden_slip["withholding_kind"] == "short"
+    assert hidden_slip["income_tax"] == 0
+    assert hidden_slip["local_tax"] == 0
     assert hidden_slip["employment_insurance"] == 0
-    assert hidden_slip["net_pay"] == 99810
+    assert hidden_slip["employer_industrial"] == 820
+    assert hidden_slip["net_pay"] == 103200
     denied_slip = client.get("/part-time/slips", params={"token": "staff-tok", "year": 2026, "month": 11})
     assert denied_slip.status_code == 403
 
@@ -213,30 +288,7 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
                 break
         if kim_block:
             break
-    assert kim_block is not None
-    start, origin = kim_block
-    assert ledger.cell(start + 1, origin).value == "900101-1234567"
-    assert ledger.cell(start + 2, origin).value == "2일"
-    assert ledger.cell(start + 4, origin).value == 120000
-    assert ledger.cell(start + 6, origin + 1).value == 5
-    assert ledger.cell(start + 6, origin + 2).value == 5
-    gong = book["공단"]
-    kim_gong = None
-    for sheet in book.worksheets:
-        if not str(sheet.title).startswith("공단"):
-            continue
-        for coord in ("O21", "AE21", "AT21", "BM21"):
-            if sheet[coord].value == "김알바":
-                kim_gong = (sheet, coord[0] if coord[1].isdigit() else coord[:2])
-                break
-        if kim_gong:
-            break
-    assert kim_gong is not None
-    gong_sheet, gong_col = kim_gong
-    assert gong_sheet[f"{gong_col}21"].value == "김알바"
-    assert gong_sheet[f"{gong_col}22"].value == "900101-1234567"
-    assert gong_sheet[f"{gong_col}48"].value == "120,000 원 "
-    assert gong_sheet[f"{gong_col}50"].value == "0 원 "
+    assert kim_block is None
 
     left = client.put(
         f"/part-time/workers/{reported_body['id']}",

@@ -16,7 +16,6 @@ interface WorkerDraft {
   name: string;
   residentId: string;
   phone: string;
-  reported: boolean;
   wage: string;
   leaving: boolean;
 }
@@ -161,7 +160,6 @@ export default function PartTimePage() {
       name: '',
       residentId: '',
       phone: '',
-      reported: true,
       wage: String(calendar?.minimum_wage || ''),
       leaving: false,
     });
@@ -173,7 +171,6 @@ export default function PartTimePage() {
       name: worker.name,
       residentId: '',
       phone: worker.phone || '',
-      reported: worker.reported,
       wage: String(worker.hourly_wage),
       leaving: false,
     });
@@ -188,7 +185,6 @@ export default function PartTimePage() {
     const creating = workerDraft.id === null;
     const body: Record<string, string | number | boolean> = {
       name: workerDraft.name,
-      reported: workerDraft.reported,
       hourly_wage: Number(workerDraft.wage || 0),
       phone: workerDraft.phone.trim(),
     };
@@ -418,9 +414,6 @@ export default function PartTimePage() {
                   title="달력 날짜로 끌어다 놓으세요"
                 >
                   <strong>{worker.name}</strong>
-                  <span style={{ marginLeft: 6, color: worker.reported ? '#166534' : '#6b7280', fontSize: '0.75rem' }}>
-                    {worker.reported ? '신고' : '미신고'}
-                  </span>
                   <span style={{ marginLeft: 6, color: '#374151', fontSize: '0.75rem' }}>{won(worker.hourly_wage)}</span>
                   {worker.phone ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.phone}</span> : null}
                 </div>
@@ -458,7 +451,7 @@ export default function PartTimePage() {
           }}>노무사 전달용 엑셀</Button>
         </div>
         <p style={{ margin: '0 0 0.75rem', color: '#6b7280', fontSize: '0.85rem' }}>
-          날짜를 누르면 그 날 알바를 추가합니다. 등록된 알바 이름을 끌어다 놓아도 됩니다. 초록은 신고, 회색은 미신고입니다. 이미 들어간 이름을 누르면 시간을 고치거나 뺄 수 있습니다.
+          날짜를 누르면 그 날 알바를 추가합니다. 등록된 알바 이름을 끌어다 놓아도 됩니다. 이미 들어간 이름을 누르면 시간을 고치거나 뺄 수 있습니다. 세금은 근무 기간과 한 주 시간으로 계산합니다.
         </p>
         {loading || !calendar ? <Loading text="불러오는 중..." /> : (
           <div style={{ border: '1px solid #dee2e6', borderRadius: 8, overflow: 'hidden' }}>
@@ -512,8 +505,8 @@ export default function PartTimePage() {
                             onClick={(event) => { event.stopPropagation(); editHours(date, entry); }}
                             style={{
                               display: 'block', width: '100%', textAlign: 'left', marginTop: 3,
-                              border: 0, background: entry.reported ? '#dcfce7' : '#f3f4f6',
-                              color: entry.reported ? '#166534' : '#374151',
+                              border: 0, background: '#e7f1ff',
+                              color: '#1e3a8a',
                               borderRadius: 4, padding: '2px 4px', font: 'inherit', fontSize: '0.72rem', cursor: 'pointer',
                             }}
                           >
@@ -570,19 +563,12 @@ export default function PartTimePage() {
                   />
                 </label>
                 <label className="ops-label">
-                  구분
-                  <select className="ui-control" value={workerDraft.reported ? 'reported' : 'unreported'} onChange={(event) => setWorkerDraft({ ...workerDraft, reported: event.target.value === 'reported' })}>
-                    <option value="reported">신고</option>
-                    <option value="unreported">미신고</option>
-                  </select>
-                </label>
-                <label className="ops-label">
                   시급
                   <input className="ui-control" type="number" min={1} value={workerDraft.wage} onChange={(event) => setWorkerDraft({ ...workerDraft, wage: event.target.value })} />
                 </label>
               </div>
               <p style={{ margin: '0.75rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
-                {year}년 최저시급은 {won(minimum)}입니다. 미신고는 주휴수당이 없습니다.
+                {year}년 최저시급은 {won(minimum)}입니다. 주 14시간 이상이면 주휴수당이 있습니다. 주 15시간 미만이고 3개월 미만이면 회사는 산재보험만 내고, 3개월이 넘으면 고용보험이 붙습니다. 주 15시간 이상이면 일용근로 또는 일반 근로로 계산합니다.
               </p>
               {Number(workerDraft.wage || 0) > 0 && Number(workerDraft.wage) < minimum && (
                 <p style={{ margin: '0.35rem 0 0', color: '#92400e', fontSize: '0.85rem' }}>입력한 시급이 {year}년 최저시급보다 낮습니다.</p>
@@ -620,9 +606,6 @@ export default function PartTimePage() {
                     <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.6rem 0.75rem' }}>
                       <div>
                         <strong>{worker.name}</strong>
-                        <span style={{ marginLeft: 8, color: worker.reported ? '#166534' : '#6b7280', fontSize: '0.8rem' }}>
-                          {worker.reported ? '신고' : '미신고'}
-                        </span>
                         <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>시급 {won(worker.hourly_wage)} · {worker.resident_id}{worker.phone ? ` · ${worker.phone}` : ''}</div>
                       </div>
                       <Button type="button" variant="primary" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>다시 불러오기</Button>
@@ -652,7 +635,7 @@ export default function PartTimePage() {
                     알바
                     <select className="ui-control" value={dayAdd.workerId} onChange={(event) => setDayAdd({ ...dayAdd, workerId: event.target.value })}>
                       {dayAddWorkers.map((worker) => (
-                        <option key={worker.id} value={worker.id}>{worker.name} · {worker.reported ? '신고' : '미신고'} · {won(worker.hourly_wage)}</option>
+                        <option key={worker.id} value={worker.id}>{worker.name} · {won(worker.hourly_wage)}</option>
                       ))}
                     </select>
                   </label>

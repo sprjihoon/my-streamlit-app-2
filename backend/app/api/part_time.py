@@ -1,4 +1,4 @@
-"""알바 등록과 달력 근무시간. 주휴수당은 신고 알바만 계산한다."""
+"""알바 등록과 달력 근무시간. 세금은 근무 기간과 한 주 시간으로 계산한다."""
 from __future__ import annotations
 
 import calendar
@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from backend.app.api.logs import add_log
-from backend.app.services.part_time.calc import minimum_wage, settle_part_time_pay, weekly_holiday_pay
+from backend.app.services.part_time.calc import choose_pay_regime, minimum_wage, settle_part_time_pay, weekly_holiday_pay
 from backend.app.services.part_time.calendar_actions import normalize_clock, shift_times
 from backend.app.services.part_time.excel import render_part_time_xlsx
 from backend.app.services.part_time.october_2026 import OCTOBER_2026_START, october_2026_people
@@ -509,10 +509,40 @@ def save_day(body: DayIn, token: str):
     return month_calendar(work_day.year, work_day.month, token)
 
 
+def _first_work_days() -> dict[int, date]:
+    with get_connection() as con:
+        rows = con.execute(
+            "SELECT worker_id, MIN(work_date) FROM part_time_hours GROUP BY worker_id"
+        ).fetchall()
+    found: dict[int, date] = {}
+    for worker_id, work_date in rows:
+        if work_date:
+            found[int(worker_id)] = date.fromisoformat(str(work_date))
+    return found
+
+
+def _weekly_max(worker_id: int, data: dict, lines: list[dict]) -> float:
+    buckets: dict[date, float] = {}
+    for line in lines:
+        day = date.fromisoformat(line["work_date"])
+        sunday = day + timedelta(days=(6 - day.weekday()) % 7)
+        buckets[sunday] = buckets.get(sunday, 0.0) + float(line["hours"])
+    peak = max(buckets.values(), default=0.0)
+    for week in data["weeks"]:
+        matched = next((item for item in week["workers"] if item["worker_id"] == worker_id), None)
+        if matched:
+            peak = max(peak, float(matched["basic_hours"]))
+    return peak
+
+
 def _slips(data: dict) -> list[dict]:
     with get_connection() as con:
         resident_rows = con.execute("SELECT id, resident_id FROM part_time_workers").fetchall()
     residents = {row[0]: row[1] for row in resident_rows}
+    first_days = _first_work_days()
+    year = int(data["year"])
+    month = int(data["month"])
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
     slips = []
     for total in data["totals"]:
         lines = []
@@ -528,15 +558,22 @@ def _slips(data: dict) -> list[dict]:
                     "shift_label": entry.get("shift_label") or "",
                     "pay": entry["pay"],
                 })
+        regime = choose_pay_regime(
+            first_days.get(total["worker_id"]),
+            month_end,
+            _weekly_max(total["worker_id"], data, lines),
+            float(total["basic_hours"]),
+        )
         taxable = int(total["total_pay"])
         pay = settle_part_time_pay(
             taxable,
             len(lines),
             total["basic_hours"],
             bool(total["reported"]),
-            int(data["year"]),
-            int(data["month"]),
+            year,
+            month,
             residents.get(total["worker_id"]) or "",
+            regime,
         )
         average = round(total["basic_hours"] / len(lines), 2) if lines else 0
         slips.append({
@@ -574,7 +611,7 @@ def _company_for_excel() -> dict:
 def download_xlsx(year: int, month: int, token: str):
     _admin(token)
     data = month_calendar(year, month, token)
-    slips = [slip for slip in _slips(data) if slip["reported"]]
+    slips = [slip for slip in _slips(data) if slip.get("pay_regime") == "daily"]
     with get_connection() as con:
         rows = con.execute("SELECT id, resident_id FROM part_time_workers").fetchall()
     resident = {row[0]: row[1] for row in rows}

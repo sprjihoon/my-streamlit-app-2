@@ -15,7 +15,6 @@ export default function PartTimeStatsPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [kind, setKind] = useState<'all' | 'reported' | 'unreported'>('all');
   const [workerId, setWorkerId] = useState(0);
   const [calendar, setCalendar] = useState<CalendarData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,32 +48,17 @@ export default function PartTimeStatsPage() {
 
   const people = useMemo(() => {
     if (!calendar) return [];
-    return calendar.totals.filter((row) => {
-      if (workerId && row.worker_id !== workerId) return false;
-      if (kind === 'reported' && !row.reported) return false;
-      if (kind === 'unreported' && row.reported) return false;
-      return true;
-    });
-  }, [calendar, kind, workerId]);
+    return calendar.totals.filter((row) => !workerId || row.worker_id === workerId);
+  }, [calendar, workerId]);
 
   const days = useMemo(() => {
     if (!calendar) return [];
     const holidayBySunday = new Map(calendar.weeks.map((week) => [week.sunday, week.workers]));
     const dates = new Set<string>([...Object.keys(calendar.days), ...calendar.weeks.map((week) => week.sunday)]);
     return [...dates].sort().map((date) => {
-      const entries = (calendar.days[date] || []).filter((entry) => {
-        if (workerId && entry.worker_id !== workerId) return false;
-        if (kind === 'reported' && !entry.reported) return false;
-        if (kind === 'unreported' && entry.reported) return false;
-        return true;
-      });
+      const entries = (calendar.days[date] || []).filter((entry) => !workerId || entry.worker_id === workerId);
       const holidayPay = (holidayBySunday.get(date) || [])
-        .filter((person) => {
-          if (workerId && person.worker_id !== workerId) return false;
-          if (kind === 'reported' && !person.reported) return false;
-          if (kind === 'unreported' && person.reported) return false;
-          return person.weekly_holiday_pay > 0;
-        })
+        .filter((person) => (!workerId || person.worker_id === workerId) && person.weekly_holiday_pay > 0)
         .reduce((sum, person) => sum + person.weekly_holiday_pay, 0);
       const hours = entries.reduce((sum, entry) => sum + entry.hours, 0);
       const workPay = entries.reduce((sum, entry) => sum + entry.pay, 0);
@@ -91,7 +75,7 @@ export default function PartTimeStatsPage() {
         total: workPay + holidayPay,
       };
     }).filter((row): row is NonNullable<typeof row> => row !== null);
-  }, [calendar, kind, workerId]);
+  }, [calendar, workerId]);
 
   const summary = people.reduce((sum, row) => ({
     hours: sum.hours + row.basic_hours,
@@ -112,21 +96,13 @@ export default function PartTimeStatsPage() {
 
   return (
     <div>
-      <PageHeader title="비용 통계" subtitle="신고와 미신고, 사람별, 날짜별 근무 비용입니다." />
+      <PageHeader title="비용 통계" subtitle="사람별, 날짜별 근무 비용입니다." />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       <Card style={{ marginBottom: '1rem' }}>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'end' }}>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(-1)}>이전 달</Button>
           <strong>{year}년 {month}월</strong>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(1)}>다음 달</Button>
-          <label className="ops-label">
-            구분
-            <select className="ui-control" value={kind} onChange={(event) => setKind(event.target.value as 'all' | 'reported' | 'unreported')}>
-              <option value="all">전체</option>
-              <option value="reported">신고</option>
-              <option value="unreported">미신고</option>
-            </select>
-          </label>
           <label className="ops-label">
             알바
             <select className="ui-control" value={workerId} onChange={(event) => setWorkerId(Number(event.target.value))}>
@@ -161,13 +137,12 @@ export default function PartTimeStatsPage() {
               <div style={{ overflowX: 'auto' }}>
                 <table>
                   <thead>
-                    <tr>{['이름', '구분', '시급', '근무시간', '근무수당', '주휴시간', '주휴수당', '합계'].map((head) => <th key={head}>{head}</th>)}</tr>
+                    <tr>{['이름', '시급', '근무시간', '근무수당', '주휴시간', '주휴수당', '합계'].map((head) => <th key={head}>{head}</th>)}</tr>
                   </thead>
                   <tbody>
                     {people.map((row) => (
                       <tr key={row.worker_id}>
                         <td>{row.name}</td>
-                        <td>{row.reported ? '신고' : '미신고'}</td>
                         <td>{won(row.hourly_wage)}</td>
                         <td>{hoursText(row.basic_hours)}</td>
                         <td>{won(row.base_pay)}</td>
