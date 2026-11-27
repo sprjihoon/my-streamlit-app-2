@@ -1,4 +1,4 @@
-"""급여명세서는 그달 대장 자료로 만들고, 제공된 뒤 본인만 받는다."""
+"""급여명세서는 근로자 본인 것만 확인하고, 관리자는 전체를 확인한다."""
 from __future__ import annotations
 
 import fitz
@@ -43,9 +43,18 @@ def test_worker_receives_only_own_released_payslip(isolated_runtime):
 
     listed = client.get("/payroll-slips", params={"token": "staff-tok"})
     assert listed.status_code == 200
+    assert listed.json()["is_admin"] is False
     slips = listed.json()["slips"]
     assert len(slips) == 1
     assert slips[0]["employee_name"] == "홍길동"
+    assert {row["employee_name"] for row in slips} == {"홍길동"}
+    admin_listed = client.get("/payroll-slips", params={"token": "admin-tok", "year": 2026, "month": 11})
+    assert admin_listed.status_code == 200
+    assert admin_listed.json()["is_admin"] is True
+    admin_names = {row["employee_name"] for row in admin_listed.json()["slips"]}
+    assert "홍길동" in admin_names
+    assert "장성령" in admin_names
+    assert len(admin_names) > 1
     assert slips[0]["month"] == 11
     assert slips[0]["net_pay"] == 1966730
 
@@ -53,8 +62,15 @@ def test_worker_receives_only_own_released_payslip(isolated_runtime):
         "/payroll-slips/2026/11/pdf",
         params={"token": "staff-tok", "employee_name": "장성령"},
     )
-    assert other.status_code == 200
-    mine = fitz.open(stream=other.content, filetype="pdf")
+    assert other.status_code == 403
+    other_id = client.get(
+        "/payroll-slips/2026/11/pdf",
+        params={"token": "staff-tok", "user_id": 99999},
+    )
+    assert other_id.status_code == 403
+    own = client.get("/payroll-slips/2026/11/pdf", params={"token": "staff-tok"})
+    assert own.status_code == 200
+    mine = fitz.open(stream=own.content, filetype="pdf")
     text = "".join(page.get_text() for page in mine)
     assert "급여명세서" in text or "급 여 명 세 서" in text
     assert "홍길동" in text

@@ -1,4 +1,4 @@
-"""근로자가 본인 급여명세서를 받고, 관리자는 그달 전체를 제공한다."""
+"""급여명세서는 근로자 본인 것만 확인하고, 관리자는 전체를 확인한다."""
 from __future__ import annotations
 
 from urllib.parse import quote
@@ -32,9 +32,13 @@ def _session(token: str) -> dict:
 
 
 def _owns(line: dict, actor: dict) -> bool:
-    if line.get("user_id") and int(line["user_id"]) == int(actor["user_id"]):
-        return True
-    return (line.get("employee_name") or "").strip() == (actor.get("nickname") or "").strip()
+    """계정이 있으면 그 계정만, 계정이 없을 때만 빈 이름이 아닌 본인 성함으로 맞춘다."""
+    owner = int(line.get("user_id") or 0)
+    if owner:
+        return owner == int(actor["user_id"])
+    name = (line.get("employee_name") or "").strip()
+    nickname = (actor.get("nickname") or "").strip()
+    return bool(name) and name == nickname
 
 
 def _visible_ledger(year: int, month: int, actor: dict) -> dict:
@@ -46,7 +50,18 @@ def _visible_ledger(year: int, month: int, actor: dict) -> dict:
     return ledger
 
 
+def _reject_other_person(actor: dict, user_id: int | None, employee_name: str | None) -> None:
+    if actor["is_admin"]:
+        return
+    asked_name = (employee_name or "").strip()
+    if user_id and int(user_id) != int(actor["user_id"]):
+        raise HTTPException(status_code=403, detail="본인 급여명세서만 확인할 수 있습니다.")
+    if asked_name and asked_name != (actor.get("nickname") or "").strip():
+        raise HTTPException(status_code=403, detail="본인 급여명세서만 확인할 수 있습니다.")
+
+
 def _pick_line(ledger: dict, actor: dict, user_id: int | None, employee_name: str | None) -> dict:
+    _reject_other_person(actor, user_id, employee_name)
     if actor["is_admin"]:
         name = (employee_name or "").strip()
         if user_id:
@@ -80,8 +95,18 @@ def _list_where(actor: dict, year: int | None, month: int | None) -> tuple[str, 
     args: list = []
     if not actor["is_admin"]:
         where.append("l.released_at IS NOT NULL")
-        where.append("(p.user_id = ? OR p.employee_name = ?)")
-        args.extend([actor["user_id"], actor.get("nickname") or ""])
+        where.append(
+            """(
+                p.user_id = ?
+                OR (
+                    COALESCE(p.user_id, 0) = 0
+                    AND TRIM(p.employee_name) = ?
+                    AND TRIM(?) != ''
+                )
+            )"""
+        )
+        nickname = (actor.get("nickname") or "").strip()
+        args.extend([actor["user_id"], nickname, nickname])
     if year:
         where.append("l.year = ?")
         args.append(year)
@@ -147,8 +172,10 @@ def list_slips(token: str, year: int | None = None, month: int | None = None, pa
             "mine": _owns({"user_id": row[4], "employee_name": row[5]}, actor),
         }
         for row in rows
+        if actor["is_admin"] or _owns({"user_id": row[4], "employee_name": row[5]}, actor)
     ]
     return {
+        "is_admin": actor["is_admin"],
         "company_name": _company().get("company_name") or "틸리언",
         "slips": items,
         "total": int(total or 0),
@@ -164,6 +191,7 @@ def list_slips(token: str, year: int | None = None, month: int | None = None, pa
 @router.get("/{year}/{month}")
 def get_slip(year: int, month: int, token: str, user_id: int | None = None, employee_name: str | None = None):
     actor = _session(token)
+    _reject_other_person(actor, user_id, employee_name)
     ledger = _visible_ledger(year, month, actor)
     line = _pick_line(ledger, actor, user_id if actor["is_admin"] else None, employee_name if actor["is_admin"] else None)
     shown = _public_line(line)
@@ -180,6 +208,7 @@ def get_slip(year: int, month: int, token: str, user_id: int | None = None, empl
 @router.get("/{year}/{month}/pdf")
 def download_slip(year: int, month: int, token: str, user_id: int | None = None, employee_name: str | None = None):
     actor = _session(token)
+    _reject_other_person(actor, user_id, employee_name)
     ledger = _visible_ledger(year, month, actor)
     line = _pick_line(ledger, actor, user_id if actor["is_admin"] else None, employee_name if actor["is_admin"] else None)
     pdf = render_slip_pdf(ledger, line, masked_rrn=_mask_rrn(str(line.get("resident_id") or "")))
@@ -190,6 +219,7 @@ def download_slip(year: int, month: int, token: str, user_id: int | None = None,
 @router.get("/{year}/{month}/pages")
 def preview_slip(year: int, month: int, token: str, user_id: int | None = None, employee_name: str | None = None):
     actor = _session(token)
+    _reject_other_person(actor, user_id, employee_name)
     ledger = _visible_ledger(year, month, actor)
     line = _pick_line(ledger, actor, user_id if actor["is_admin"] else None, employee_name if actor["is_admin"] else None)
     pdf = render_slip_pdf(ledger, line, masked_rrn=_mask_rrn(str(line.get("resident_id") or "")))

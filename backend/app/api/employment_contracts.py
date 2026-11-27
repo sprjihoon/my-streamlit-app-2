@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -144,6 +144,8 @@ def ensure_contract_tables() -> None:
             con.execute("ALTER TABLE employment_contracts ADD COLUMN dependents INTEGER DEFAULT 1")
         if "worker_sealed_at" not in columns:
             con.execute("ALTER TABLE employment_contracts ADD COLUMN worker_sealed_at TEXT")
+        if "owner_receipt_at" not in columns:
+            con.execute("ALTER TABLE employment_contracts ADD COLUMN owner_receipt_at TEXT")
         con.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_employment_contracts_user
@@ -370,54 +372,24 @@ def _locked_resident_id(con, user_id: int) -> str:
     return str(row[0]).strip() if row else ""
 
 
-def _parse_stamp(value: str) -> datetime | None:
-    text = (value or "").strip()
-    if len(text) < 19:
-        return None
-    try:
-        return datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-
-
-def _within_download_hour(completed_at: str, now: datetime | None = None) -> bool:
-    stamp = _parse_stamp(completed_at)
-    if not stamp:
-        return False
-    current = now or datetime.now()
-    return timedelta(0) <= current - stamp <= timedelta(hours=1)
-
-
-def _worker_download_offer(con, user_id: int) -> dict | None:
-    row = con.execute(
-        """
-        SELECT id, status, completed_at
-        FROM employment_contracts
-        WHERE user_id = ?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (user_id,),
-    ).fetchone()
-    if not row or row[1] != "completed" or not _within_download_hour(row[2] or ""):
-        return None
-    stamp = _parse_stamp(row[2])
-    until = stamp + timedelta(hours=1) if stamp else None
-    return {
-        "contract_id": row[0],
-        "completed_at": row[2],
-        "until": until.strftime("%Y-%m-%d %H:%M:%S") if until else "",
-    }
-
-
 def _is_system_admin_username(username: str | None) -> bool:
     """시스템 계정 admin만 근로계약 날인 대상이 아니다. 장명찬처럼 관리자이면서 직원인 계정은 대상이다."""
     return (username or "").strip().lower() == "admin"
 
 
-def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
-    """작성 중이거나, 날인 후 1시간 안에는 근로계약 메뉴가 필요하다.
+def _receipt_still_open(con, contract_id: int) -> bool:
+    row = con.execute(
+        "SELECT owner_receipt_at FROM employment_contracts WHERE id = ?",
+        (contract_id,),
+    ).fetchone()
+    return bool(row) and not (row[0] or "").strip()
 
+
+def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
+    """근로계약 메뉴는 처음 작성하거나 갱신 초안이 열려 있을 때만 필요하다.
+
+    회사 날인이 끝나 최신 계약이 완료면 평상시라서 메뉴를 숨긴다.
+    관리자가 재계약하면 초안이 다시 생겨 메뉴가 열린다.
     관리자라도 시스템 계정(admin)이 아니면 본인 기재·근로자 날인 대상이다.
     입사일이 비어 있어도 같다.
     """
@@ -425,9 +397,7 @@ def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
     with get_connection() as con:
         latest = _latest(con, user_id)
         if latest:
-            if latest[1] == "draft":
-                return True
-            return _worker_download_offer(con, user_id) is not None
+            return latest[1] == "draft"
         if not is_admin:
             return True
         row = con.execute("SELECT username FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -614,13 +584,10 @@ def _notice(notice_id: str, title: str, message: str, count: int) -> dict:
 
 
 def _worker_profile_notices(user_id: int, is_admin: bool = False) -> list[dict]:
-    """근로자에게 남은 작성, 확인, 다운로드만 알린다. 날인 후 회사 차례는 알리지 않는다."""
+    """작성·갱신 초안이 있을 때만 알린다. 완료된 계약 메뉴는 알리지 않는다."""
     if not worker_needs_contract(user_id, is_admin):
         return []
     with get_connection() as con:
-        offer = _worker_download_offer(con, user_id)
-        if offer:
-            return [_notice("contract-download", "근로계약", "회사 날인이 끝난 계약서를 받을 수 있습니다.", 1)]
         latest = _latest(con, user_id)
         if not latest:
             return [_notice("contract-write", "근로계약", "근로계약에 적을 내용이 있습니다.", 1)]
@@ -777,22 +744,19 @@ def get_contract_draft(user_id: int, token: str):
     with get_connection() as con:
         user = _user_or_404(con, user_id)
         latest = _latest(con, user_id)
-        own = actor["user_id"] == user_id
-        if own:
-            offer = _worker_download_offer(con, user_id)
-            if offer:
-                return {
-                    "user": user,
-                    "input": {},
-                    "calc": None,
-                    "draft_id": None,
-                    "status": "completed",
-                    "completed_at": offer["completed_at"],
-                    "rrn_locked": False,
-                    "renewal": False,
-                    "worker_sealed": False,
-                    "download": offer,
-                }
+        if not actor["is_admin"] and latest and latest[1] == "completed" and _receipt_still_open(con, latest[0]):
+            return {
+                "user": user,
+                "input": {},
+                "calc": None,
+                "draft_id": None,
+                "status": "completed",
+                "completed_at": None,
+                "rrn_locked": False,
+                "renewal": False,
+                "worker_sealed": False,
+                "once": {"contract_id": latest[0]},
+            }
         if not actor["is_admin"]:
             if not worker_needs_contract(user_id, False):
                 raise HTTPException(status_code=400, detail="작성할 근로계약이 없습니다.")
@@ -1283,53 +1247,58 @@ def reactivate_contract(user_id: int, token: str):
     return {"draft_id": draft_id, "user_id": user_id}
 
 
+def _completed_pdf(contract_id: int, actor: dict) -> tuple[bytes, str]:
+    """완료 파일을 읽는다. 관리자는 완료 보관에서 계속 보고, 본인은 날인 직후 한 번만 연다."""
+    with get_connection() as con:
+        row = con.execute(
+            """
+            SELECT pdf_filename, employee_name, status, user_id, owner_receipt_at
+            FROM employment_contracts WHERE id = ?
+            """,
+            (contract_id,),
+        ).fetchone()
+        if not row or row[2] != "completed" or not row[0]:
+            raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
+        root = _contract_dir().resolve()
+        path = (root / row[0]).resolve()
+        if path.parent != root or not path.is_file():
+            raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
+        if not actor["is_admin"]:
+            if actor["user_id"] != row[3]:
+                raise HTTPException(status_code=403, detail="본인 계약서만 확인할 수 있습니다.")
+            if (row[4] or "").strip():
+                raise HTTPException(status_code=403, detail="완료 보관된 계약서는 관리자만 볼 수 있습니다.")
+            used = con.execute(
+                """
+                UPDATE employment_contracts
+                SET owner_receipt_at = ?
+                WHERE id = ? AND user_id = ? AND (owner_receipt_at IS NULL OR TRIM(owner_receipt_at) = '')
+                """,
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), contract_id, actor["user_id"]),
+            )
+            if used.rowcount != 1:
+                raise HTTPException(status_code=403, detail="완료 보관된 계약서는 관리자만 볼 수 있습니다.")
+            con.commit()
+        content = path.read_bytes()
+        name = row[1] or str(contract_id)
+    return content, name
+
+
 @router.get("/{contract_id}/pages")
 def contract_preview_pages(contract_id: int, token: str):
     """보관된 계약서를 A4 페이지 이미지로 보여 준다."""
-    _admin(token)
-    with get_connection() as con:
-        row = con.execute(
-            "SELECT pdf_filename, status FROM employment_contracts WHERE id = ?",
-            (contract_id,),
-        ).fetchone()
-    if not row or row[1] != "completed" or not row[0]:
-        raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
-    root = _contract_dir().resolve()
-    path = (root / row[0]).resolve()
-    if path.parent != root or not path.is_file():
-        raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
-    return _pages_from_pdf(path.read_bytes())
+    actor = _session(token)
+    content, _name = _completed_pdf(contract_id, actor)
+    return _pages_from_pdf(content)
 
 
 @router.get("/{contract_id}/pdf")
 def download_contract_pdf(contract_id: int, token: str):
     actor = _session(token)
-    with get_connection() as con:
-        row = con.execute(
-            """
-            SELECT pdf_filename, employee_name, status, user_id, completed_at
-            FROM employment_contracts WHERE id = ?
-            """,
-            (contract_id,),
-        ).fetchone()
-    if not row or row[2] != "completed" or not row[0]:
-        raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
-    owner = actor["user_id"] == row[3]
-    if actor["is_admin"]:
-        disposition = "inline"
-    elif owner and _within_download_hour(row[4] or ""):
-        disposition = "attachment"
-    else:
-        if owner:
-            raise HTTPException(status_code=403, detail="날인 후 1시간이 지나 계약서를 받을 수 없습니다.")
-        raise HTTPException(status_code=403, detail="본인 계약서만 받을 수 있습니다.")
-    root = _contract_dir().resolve()
-    path = (root / row[0]).resolve()
-    if path.parent != root or not path.is_file():
-        raise HTTPException(status_code=404, detail="저장된 계약서 PDF가 없습니다.")
-    filename = quote(f"근로계약서_{row[1] or contract_id}.pdf")
+    content, name = _completed_pdf(contract_id, actor)
+    filename = quote(f"근로계약서_{name}.pdf")
     return Response(
-        content=path.read_bytes(),
+        content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{filename}"},
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
     )

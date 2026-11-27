@@ -79,6 +79,7 @@ export default function PayrollSlipsPage() {
       return;
     }
     const data = await res.json();
+    setIsAdmin(!!data.is_admin);
     const nextMonths: MonthOption[] = data.months || [];
     setMonths(nextMonths);
     if (year === null && month === null && nextMonths.length) {
@@ -139,7 +140,7 @@ export default function PayrollSlipsPage() {
     <div>
       <PageHeader
         title="급여명세서"
-        subtitle={isAdmin ? '그달 급여대장으로 명세서를 만들고 근로자에게 제공합니다.' : '제공된 달의 본인 급여명세서를 확인하고 받을 수 있습니다.'}
+        subtitle={isAdmin ? '전체 근로자의 급여명세서를 확인하고 제공합니다.' : '제공된 달의 본인 급여명세서를 월별로 확인합니다.'}
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       <Card style={{ marginBottom: '1rem' }}>

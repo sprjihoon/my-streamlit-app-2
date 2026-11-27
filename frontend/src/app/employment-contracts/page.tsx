@@ -147,7 +147,7 @@ export default function EmploymentContractsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [printedId, setPrintedId] = useState<number | null>(null);
+  const [onceId, setOnceId] = useState<number | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [myId, setMyId] = useState<number | null>(null);
   const [sealed, setSealed] = useState(false);
@@ -160,7 +160,6 @@ export default function EmploymentContractsPage() {
   const [rrnLocked, setRrnLocked] = useState(false);
   const [renewal, setRenewal] = useState(false);
   const [workerSealed, setWorkerSealed] = useState(false);
-  const [downloadOffer, setDownloadOffer] = useState<{ contract_id: number; until: string } | null>(null);
   const [needsMine, setNeedsMine] = useState(false);
   const [sealAfterPreview, setSealAfterPreview] = useState<'worker' | 'company' | null>(null);
 
@@ -198,14 +197,14 @@ export default function EmploymentContractsPage() {
       return;
     }
     const data = await res.json();
-    if (data.download?.contract_id) {
-      setDownloadOffer({ contract_id: data.download.contract_id, until: data.download.until || '' });
+    if (data.once?.contract_id) {
+      setOnceId(data.once.contract_id);
+      setSealed(false);
       setNeedsMine(true);
-      setSealed(true);
       setLoading(false);
       return;
     }
-    setDownloadOffer(null);
+    setOnceId(null);
     setForm({ ...EMPTY_FORM, ...data.input });
     setRrnLocked(!!data.rrn_locked);
     setRenewal(!!data.renewal);
@@ -441,11 +440,16 @@ export default function EmploymentContractsPage() {
     closePreview();
     setEditingId(null);
     setCalc(null);
-    setPrintedId(data.id);
-    setSuccess(`${form.employee_name} 근로계약서에 날인했습니다.`);
+    setSuccess(`${form.employee_name} 근로계약서에 날인했습니다. 지금 한 번 확인하거나 인쇄하세요.`);
     setView('open');
     load('open');
     if (myId && editingId === myId) loadMine(myId, true);
+    const preview = await fetch(`${API}/employment-contracts/${data.id}/pages?token=${encodeURIComponent(token)}`);
+    if (preview.ok) {
+      const shown = await preview.json();
+      setSealAfterPreview(null);
+      setSheets(shown.pages || []);
+    }
   }
 
   async function reactivate(row: StoredContract) {
@@ -497,8 +501,30 @@ export default function EmploymentContractsPage() {
   }
 
   function closePreview() {
+    const consumed = !isAdmin && onceId !== null && sheets !== null;
     setSheets(null);
     setSealAfterPreview(null);
+    if (consumed) {
+      setOnceId(null);
+      router.replace('/');
+    }
+  }
+
+  async function openOnce() {
+    if (!onceId) return;
+    const token = localStorage.getItem('token') || '';
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`${API}/employment-contracts/${onceId}/pages?token=${encodeURIComponent(token)}`);
+    setBusy(false);
+    if (!res.ok) {
+      setOnceId(null);
+      setError(await apiError(res));
+      return;
+    }
+    const data = await res.json();
+    setSealAfterPreview(null);
+    setSheets(data.pages || []);
   }
 
   async function confirmPreviewSeal() {
@@ -560,24 +586,13 @@ export default function EmploymentContractsPage() {
     setSuccess('계약서를 확인하고 날인했습니다. 회사에서 날인하면 계약이 보관됩니다.');
   }
 
-  const showOwnWorker = Boolean((needsMine || downloadOffer) && myId && (editingId === null || editingId === myId));
+  const showOwnWorker = Boolean(needsMine && myId && (editingId === null || editingId === myId));
 
   function ownWorkerBlock() {
     return (
       <>
-        {downloadOffer ? (
-          <Card>
-            <h3 style={{ marginTop: 0 }}>내 계약서 받기</h3>
-            <p>회사 날인이 끝났습니다. 지금부터 1시간 동안만 계약서를 받을 수 있습니다.</p>
-            <p style={{ color: '#166534' }}>{downloadOffer.until}까지 열려 있습니다.</p>
-            <a
-              href={`${API}/employment-contracts/${downloadOffer.contract_id}/pdf?token=${encodeURIComponent(typeof window === 'undefined' ? '' : localStorage.getItem('token') || '')}`}
-            >
-              계약서 다운로드
-            </a>
-          </Card>
-        ) : sealed ? (
-          <Alert type="info" message="날인 후 1시간이 지나 계약서를 받을 수 없습니다." />
+        {sealed ? (
+          <Alert type="info" message="작성할 근로계약이 없습니다." />
         ) : (
           <>
             <Card>
@@ -626,27 +641,22 @@ export default function EmploymentContractsPage() {
         )}
         <PageHeader
           title="근로계약"
-          subtitle={downloadOffer
-            ? '회사 날인이 끝난 계약서는 1시간 동안만 받을 수 있습니다.'
+          subtitle={onceId
+            ? '날인 직후 한 번만 확인하거나 인쇄할 수 있습니다. 닫으면 완료 보관은 관리자만 봅니다.'
             : renewal
             ? '이전 계약 내용을 불러왔습니다. 주소·연락처·성함 등 바뀐 항목만 고친 뒤 계약서를 확인하고 날인합니다. 주민번호는 그대로입니다.'
             : '성명과 연락처를 저장하고 도장을 등록한 뒤, 계약서를 확인하고 날인합니다. 급여와 근로조건은 회사에서 적습니다.'}
         />
         {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
         {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
-        {loading ? <Loading text="불러오는 중..." /> : downloadOffer ? (
+        {loading ? <Loading text="불러오는 중..." /> : onceId ? (
           <Card>
-            <h3 style={{ marginTop: 0 }}>계약서 받기</h3>
-            <p>회사 날인이 끝났습니다. 지금부터 1시간 동안만 계약서를 받을 수 있습니다.</p>
-            <p style={{ color: '#166534' }}>{downloadOffer.until}까지 열려 있습니다.</p>
-            <a
-              href={`${API}/employment-contracts/${downloadOffer.contract_id}/pdf?token=${encodeURIComponent(typeof window === 'undefined' ? '' : localStorage.getItem('token') || '')}`}
-            >
-              계약서 다운로드
-            </a>
+            <h3 style={{ marginTop: 0 }}>날인된 계약서</h3>
+            <p>지금 한 번 확인하거나 인쇄할 수 있습니다. 연 뒤에는 완료 보관에서 관리자만 봅니다.</p>
+            <Button type="button" variant="success" disabled={busy} onClick={openOnce}>확인하고 인쇄</Button>
           </Card>
         ) : sealed ? (
-          <Alert type="info" message="날인 후 1시간이 지나 계약서를 받을 수 없습니다." />
+          <Alert type="info" message="작성할 근로계약이 없습니다." />
         ) : (
           <Card>
             <h3 style={{ marginTop: 0 }}>{renewal ? '바뀐 항목만 수정' : '근로자 기재'}</h3>
@@ -692,18 +702,7 @@ export default function EmploymentContractsPage() {
         subtitle="주민번호와 계약 내용은 보관됩니다. 재계약하면 이전 내용을 불러오고, 관리자와 근로자가 바뀐 항목만 고칩니다. 주민번호는 고정입니다."
       />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
-      {success && (
-        <Alert
-          type="success"
-          message={printedId ? `${success} 출력은 완료 보관의 PDF에서 할 수 있습니다.` : success}
-          onClose={() => { setSuccess(null); setPrintedId(null); }}
-        />
-      )}
-      {printedId && (
-        <div style={{ marginBottom: '1rem' }}>
-          <a href={`/employment-contracts/print/${printedId}`} target="_blank" rel="noreferrer">방금 보관한 계약서 열기</a>
-        </div>
-      )}
+      {success && <Alert type="success" message={success} onClose={() => setSuccess(null)} />}
       {showOwnWorker && (
         <div style={{ marginBottom: '1rem' }}>
           {ownWorkerBlock()}
