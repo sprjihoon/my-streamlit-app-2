@@ -13,6 +13,10 @@ export interface DayEntry {
   worker_id: number;
   name: string;
   hours: number;
+  start_time?: string;
+  end_time?: string;
+  next_day?: boolean;
+  shift_label?: string;
   reported: boolean;
   hourly_wage: number;
   pay: number;

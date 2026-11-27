@@ -11,6 +11,7 @@ from backend.app.services.part_time.calc import daily_worker_tax, minimum_wage, 
 from backend.app.services.part_time.calendar_actions import (
     date_from_point_target,
     drop_worker_onto_date,
+    shift_times,
     workers_available_on_date,
 )
 
@@ -143,8 +144,8 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
             json={
                 "work_date": work_date,
                 "entries": [
-                    {"worker_id": reported_body["id"], "hours": 5},
-                    {"worker_id": hidden_id, "hours": 5},
+                    {"worker_id": reported_body["id"], "hours": 5, "start_time": "09:00"},
+                    {"worker_id": hidden_id, "hours": 5, "start_time": "13:00"},
                 ],
             },
         )
@@ -160,6 +161,9 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert reported_total["total_pay"] == 144000
     day_entry = next(item for item in calendar["days"]["2026-11-03"] if item["worker_id"] == reported_body["id"])
     assert day_entry["pay"] == 60000
+    assert day_entry["start_time"] == "09:00"
+    assert day_entry["end_time"] == "14:00"
+    assert day_entry["shift_label"] == "09:00~14:00"
     assert hidden_total["basic_hours"] == 10
     assert hidden_total["weekly_holiday_hours"] == 0
     assert hidden_total["weekly_holiday_pay"] == 0
@@ -250,8 +254,8 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
         json={
             "work_date": "2026-11-04",
             "entries": [
-                {"worker_id": reported_body["id"], "hours": 3},
-                {"worker_id": reported_body["id"], "hours": 9},
+                {"worker_id": reported_body["id"], "hours": 3, "start_time": "10:00"},
+                {"worker_id": reported_body["id"], "hours": 9, "start_time": "12:00"},
             ],
         },
     )
@@ -259,6 +263,8 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     once = [item for item in duplicated.json()["days"]["2026-11-04"] if item["worker_id"] == reported_body["id"]]
     assert len(once) == 1
     assert once[0]["hours"] == 3
+    assert once[0]["start_time"] == "10:00"
+    assert once[0]["end_time"] == "13:00"
 
 
 def test_calendar_drop_and_date_click_rules():
@@ -282,6 +288,9 @@ def test_calendar_drop_and_date_click_rules():
     assert date_from_point_target("2026-11-03") == "2026-11-03"
     assert date_from_point_target("") is None
     assert date_from_point_target(None) is None
+    assert shift_times("09:00", 5) == {"start_time": "09:00", "end_time": "14:00", "next_day": False, "label": "09:00~14:00"}
+    assert shift_times("09:00", 5.5)["end_time"] == "14:30"
+    assert shift_times("22:00", 4) == {"start_time": "22:00", "end_time": "02:00", "next_day": True, "label": "22:00~익일 02:00"}
 
 
 def test_date_add_and_drag_save_put_hours_on_that_day(isolated_runtime):
@@ -304,20 +313,26 @@ def test_date_add_and_drag_save_put_hours_on_that_day(isolated_runtime):
     first = client.put(
         "/part-time/days",
         params={"token": "admin-tok"},
-        json={"work_date": "2026-11-03", "entries": [{"worker_id": kim_id, "hours": 5}]},
+        json={"work_date": "2026-11-03", "entries": [{"worker_id": kim_id, "hours": 5, "start_time": "09:00"}]},
     )
     assert first.status_code == 200, first.text
     day = first.json()["days"]["2026-11-03"]
     assert [(item["worker_id"], item["hours"]) for item in day] == [(kim_id, 5)]
+    assert day[0]["start_time"] == "09:00"
+    assert day[0]["end_time"] == "14:00"
+    assert day[0]["shift_label"] == "09:00~14:00"
 
     second = client.put(
         "/part-time/days",
         params={"token": "admin-tok"},
-        json={"work_date": "2026-11-03", "entries": [{"worker_id": park_id, "hours": 4}]},
+        json={"work_date": "2026-11-03", "entries": [{"worker_id": park_id, "hours": 4, "start_time": "13:30"}]},
     )
     assert second.status_code == 200, second.text
     names = sorted(item["name"] for item in second.json()["days"]["2026-11-03"])
     assert names == ["김알바", "박알바"]
+    park_entry = next(item for item in second.json()["days"]["2026-11-03"] if item["worker_id"] == park_id)
+    assert park_entry["start_time"] == "13:30"
+    assert park_entry["end_time"] == "17:30"
 
     calendar = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
     assert calendar.status_code == 200
@@ -325,6 +340,14 @@ def test_date_add_and_drag_save_put_hours_on_that_day(isolated_runtime):
     assert remaining == []
     other_day = workers_available_on_date(calendar.json()["workers"], calendar.json()["days"].get("2026-11-04", []))
     assert {item["id"] for item in other_day} == {kim_id, park_id}
+
+    missing = client.put(
+        "/part-time/days",
+        params={"token": "admin-tok"},
+        json={"work_date": "2026-11-04", "entries": [{"worker_id": kim_id, "hours": 5}]},
+    )
+    assert missing.status_code == 400
+    assert "시작시간" in missing.json()["detail"]
 
 
 def test_weekly_holiday_uses_the_sunday_month_when_the_week_crosses(isolated_runtime):
@@ -341,7 +364,7 @@ def test_weekly_holiday_uses_the_sunday_month_when_the_week_crosses(isolated_run
     saved = client.put(
         "/part-time/days",
         params={"token": "admin-tok"},
-        json={"work_date": "2026-10-30", "entries": [{"worker_id": worker_id, "hours": 5}]},
+        json={"work_date": "2026-10-30", "entries": [{"worker_id": worker_id, "hours": 5, "start_time": "09:00"}]},
     )
     assert saved.status_code == 200, saved.text
     october = saved.json()

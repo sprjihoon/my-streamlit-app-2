@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.api.logs import add_log
 from backend.app.services.part_time.calc import minimum_wage, settle_part_time_pay, weekly_holiday_pay
+from backend.app.services.part_time.calendar_actions import normalize_clock, shift_times
 from backend.app.services.part_time.excel import render_part_time_xlsx
 from logic.db import get_connection
 
@@ -40,11 +41,15 @@ def ensure_part_time_tables() -> None:
                 worker_id INTEGER NOT NULL,
                 work_date TEXT NOT NULL,
                 hours REAL NOT NULL,
+                start_time TEXT,
                 updated_at TEXT,
                 PRIMARY KEY (worker_id, work_date)
             )
             """
         )
+        columns = [row[1] for row in con.execute("PRAGMA table_info(part_time_hours)").fetchall()]
+        if "start_time" not in columns:
+            con.execute("ALTER TABLE part_time_hours ADD COLUMN start_time TEXT")
         con.commit()
 
 
@@ -66,6 +71,7 @@ class WorkerPatch(BaseModel):
 class HourIn(BaseModel):
     worker_id: int
     hours: float = Field(ge=0, le=24)
+    start_time: str = ""
 
 
 class DayIn(BaseModel):
@@ -269,7 +275,7 @@ def month_calendar(year: int, month: int, token: str):
     with get_connection() as con:
         rows = con.execute(
             """
-            SELECT worker_id, work_date, hours
+            SELECT worker_id, work_date, hours, start_time
             FROM part_time_hours
             WHERE work_date >= ? AND work_date <= ?
             """,
@@ -277,7 +283,7 @@ def month_calendar(year: int, month: int, token: str):
         ).fetchall()
     hours: dict[tuple[int, str], float] = {}
     days: dict[str, list[dict]] = {}
-    for worker_id, work_date, amount in rows:
+    for worker_id, work_date, amount, start_time in rows:
         if worker_id not in by_id:
             continue
         amount = round(float(amount), 2)
@@ -285,10 +291,20 @@ def month_calendar(year: int, month: int, token: str):
         work_day = _parse_day(work_date)
         if first <= work_day <= last:
             worker = by_id[worker_id]
+            shift = {}
+            if start_time:
+                try:
+                    shift = shift_times(str(start_time), amount)
+                except ValueError:
+                    shift = {"start_time": str(start_time), "end_time": "", "next_day": False, "label": str(start_time)}
             days.setdefault(work_date, []).append({
                 "worker_id": worker_id,
                 "name": worker["name"],
                 "hours": amount,
+                "start_time": shift.get("start_time") or (str(start_time) if start_time else ""),
+                "end_time": shift.get("end_time") or "",
+                "next_day": bool(shift.get("next_day")),
+                "shift_label": shift.get("label") or "",
                 "reported": worker["reported"],
                 "hourly_wage": worker["hourly_wage"],
                 "pay": int(round(amount * worker["hourly_wage"])),
@@ -392,15 +408,25 @@ def save_day(body: DayIn, token: str):
                     (entry.worker_id, work_day.isoformat()),
                 )
                 continue
+            if not (entry.start_time or "").strip():
+                raise HTTPException(status_code=400, detail="시작시간을 입력하세요.")
+            try:
+                start_time = normalize_clock(entry.start_time)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            shift = shift_times(start_time, hours)
             con.execute(
                 """
-                INSERT INTO part_time_hours (worker_id, work_date, hours, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(worker_id, work_date) DO UPDATE SET hours = excluded.hours, updated_at = excluded.updated_at
+                INSERT INTO part_time_hours (worker_id, work_date, hours, start_time, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(worker_id, work_date) DO UPDATE SET
+                    hours = excluded.hours,
+                    start_time = excluded.start_time,
+                    updated_at = excluded.updated_at
                 """,
-                (entry.worker_id, work_day.isoformat(), hours, stamp),
+                (entry.worker_id, work_day.isoformat(), hours, start_time, stamp),
             )
-            saved.append(f"{worker[0]} {hours:g}시간")
+            saved.append(f"{worker[0]} {shift['label']} {hours:g}시간")
         con.commit()
     add_log(
         action_type="알바 근무시간",
@@ -427,6 +453,9 @@ def _slips(data: dict) -> list[dict]:
                 lines.append({
                     "work_date": work_date,
                     "hours": entry["hours"],
+                    "start_time": entry.get("start_time") or "",
+                    "end_time": entry.get("end_time") or "",
+                    "shift_label": entry.get("shift_label") or "",
                     "pay": entry["pay"],
                 })
         taxable = int(total["total_pay"])

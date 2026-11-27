@@ -1,5 +1,36 @@
 import type { DayEntry, Worker } from './model';
 
+export const DEFAULT_START = '09:00';
+
+export function parseClockMinutes(value: string) {
+  const text = (value || '').trim();
+  const match = /^(\d{1,2}):(\d{2})/.exec(text);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+export function shiftTimes(start: string, hours: number) {
+  const startMinutes = parseClockMinutes(start);
+  if (startMinutes === null) return null;
+  const startHour = Math.floor(startMinutes / 60);
+  const startMinute = startMinutes % 60;
+  const startClock = `${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}`;
+  const extra = Math.max(0, Math.round(Number(hours || 0) * 60));
+  const total = startMinutes + extra;
+  const nextDay = total >= 24 * 60;
+  const endMinutes = total % (24 * 60);
+  const endClock = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+  return {
+    startTime: startClock,
+    endTime: endClock,
+    nextDay,
+    label: `${startClock}~${nextDay ? '익일 ' : ''}${endClock}`,
+  };
+}
+
 export type DropOutcome =
   | { kind: 'hours'; workerId: number; name: string }
   | { kind: 'duplicate'; name: string }

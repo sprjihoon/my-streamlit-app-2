@@ -11,6 +11,9 @@ import { API, apiError, downloadPartTimeExcel, hoursText, readAdmin, won } from 
 interface SlipLine {
   work_date: string;
   hours: number;
+  start_time?: string;
+  end_time?: string;
+  shift_label?: string;
   pay: number;
 }
 
@@ -221,12 +224,14 @@ export default function PartTimeSlipsPage() {
               <div style={{ overflowX: 'auto' }}>
                 <table>
                   <thead>
-                    <tr>{['근무일', '시간', '근무수당'].map((head) => <th key={head}>{head}</th>)}</tr>
+                    <tr>{['근무일', '시작', '마감', '시간', '근무수당'].map((head) => <th key={head}>{head}</th>)}</tr>
                   </thead>
                   <tbody>
                     {slip.lines.map((line) => (
                       <tr key={line.work_date}>
                         <td>{line.work_date}</td>
+                        <td>{line.start_time || '—'}</td>
+                        <td>{line.shift_label?.includes('익일') ? `익일 ${line.end_time}` : (line.end_time || '—')}</td>
                         <td>{hoursText(line.hours)}</td>
                         <td>{won(line.pay)}</td>
                       </tr>

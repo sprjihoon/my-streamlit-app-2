@@ -6,7 +6,7 @@ import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
-import { dateFromPointTarget, dropWorkerOntoDate, workersAvailableOnDate } from './calendar-actions';
+import { DEFAULT_START, dateFromPointTarget, dropWorkerOntoDate, shiftTimes, workersAvailableOnDate } from './calendar-actions';
 import { API, CalendarData, DayEntry, Worker, apiError, downloadPartTimeExcel, hoursText, readAdmin, won } from './model';
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
@@ -24,6 +24,7 @@ interface HourDraft {
   date: string;
   workerId: number;
   name: string;
+  startTime: string;
   hours: string;
   existing: boolean;
 }
@@ -31,6 +32,7 @@ interface HourDraft {
 interface DayAdd {
   date: string;
   workerId: string;
+  startTime: string;
   hours: string;
 }
 
@@ -233,7 +235,7 @@ export default function PartTimePage() {
     }
     setError(null);
     setDayAdd(null);
-    setHourDraft({ date, workerId: outcome.workerId, name: outcome.name, hours: '', existing: false });
+    setHourDraft({ date, workerId: outcome.workerId, name: outcome.name, startTime: DEFAULT_START, hours: '', existing: false });
   }
   dropWorkerRef.current = dropWorker;
 
@@ -263,11 +265,18 @@ export default function PartTimePage() {
     if (!data) return;
     const available = workersAvailableOnDate(data.workers, data.days[date] || []);
     setHourDraft(null);
-    setDayAdd({ date, workerId: available[0] ? String(available[0].id) : '', hours: '' });
+    setDayAdd({ date, workerId: available[0] ? String(available[0].id) : '', startTime: DEFAULT_START, hours: '' });
   }
 
   function editHours(date: string, entry: DayEntry) {
-    setHourDraft({ date, workerId: entry.worker_id, name: entry.name, hours: hoursText(entry.hours), existing: true });
+    setHourDraft({
+      date,
+      workerId: entry.worker_id,
+      name: entry.name,
+      startTime: entry.start_time || DEFAULT_START,
+      hours: hoursText(entry.hours),
+      existing: true,
+    });
   }
 
   async function saveHours(remove: boolean) {
@@ -277,6 +286,10 @@ export default function PartTimePage() {
       setError('근무시간을 입력하세요.');
       return;
     }
+    if (!remove && !hourDraft.startTime) {
+      setError('시작시간을 입력하세요.');
+      return;
+    }
     const token = localStorage.getItem('token') || '';
     setBusy(true);
     setError(null);
@@ -284,7 +297,10 @@ export default function PartTimePage() {
     const res = await fetch(`${API}/part-time/days?token=${encodeURIComponent(token)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ work_date: hourDraft.date, entries: [{ worker_id: hourDraft.workerId, hours }] }),
+      body: JSON.stringify({
+        work_date: hourDraft.date,
+        entries: [{ worker_id: hourDraft.workerId, hours, start_time: hourDraft.startTime }],
+      }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -294,7 +310,8 @@ export default function PartTimePage() {
     setCalendar(await res.json());
     setHourDraft(null);
     setDayAdd(null);
-    setSuccess(remove ? `${hourDraft.date}에서 ${hourDraft.name}을 뺐습니다.` : `${hourDraft.date} ${hourDraft.name} ${hoursText(hours)}시간을 기록했습니다.`);
+    const shift = !remove ? shiftTimes(hourDraft.startTime, hours) : null;
+    setSuccess(remove ? `${hourDraft.date}에서 ${hourDraft.name}을 뺐습니다.` : `${hourDraft.date} ${hourDraft.name} ${shift?.label || ''} ${hoursText(hours)}시간을 기록했습니다.`);
   }
 
   async function saveDayAdd() {
@@ -310,6 +327,10 @@ export default function PartTimePage() {
       setError('근무시간을 입력하세요.');
       return;
     }
+    if (!dayAdd.startTime) {
+      setError('시작시간을 입력하세요.');
+      return;
+    }
     const exists = (data?.days[dayAdd.date] || []).some((item) => item.worker_id === worker.id);
     if (exists) {
       setError(`${worker.name} 님은 이 날짜에 이미 들어가 있습니다.`);
@@ -322,7 +343,10 @@ export default function PartTimePage() {
     const res = await fetch(`${API}/part-time/days?token=${encodeURIComponent(token)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ work_date: dayAdd.date, entries: [{ worker_id: worker.id, hours }] }),
+      body: JSON.stringify({
+        work_date: dayAdd.date,
+        entries: [{ worker_id: worker.id, hours, start_time: dayAdd.startTime }],
+      }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -331,7 +355,8 @@ export default function PartTimePage() {
     }
     setCalendar(await res.json());
     setDayAdd(null);
-    setSuccess(`${dayAdd.date} ${worker.name} ${hoursText(hours)}시간을 기록했습니다.`);
+    const shift = shiftTimes(dayAdd.startTime, hours);
+    setSuccess(`${dayAdd.date} ${worker.name} ${shift?.label || ''} ${hoursText(hours)}시간을 기록했습니다.`);
   }
 
   if (isAdmin === null) return <Loading text="불러오는 중..." />;
@@ -488,6 +513,7 @@ export default function PartTimePage() {
                             }}
                           >
                             {entry.name} {hoursText(entry.hours)}시간
+                            {entry.shift_label ? <div>{entry.shift_label}</div> : null}
                             <div>{won(entry.pay)}</div>
                           </button>
                         ))}
@@ -617,6 +643,15 @@ export default function PartTimePage() {
                     </select>
                   </label>
                   <label className="ops-label" style={{ marginTop: '0.75rem' }}>
+                    시작시간
+                    <input
+                      className="ui-control"
+                      type="time"
+                      value={dayAdd.startTime}
+                      onChange={(event) => setDayAdd({ ...dayAdd, startTime: event.target.value })}
+                    />
+                  </label>
+                  <label className="ops-label" style={{ marginTop: '0.75rem' }}>
                     근무시간
                     <input
                       className="ui-control"
@@ -629,6 +664,9 @@ export default function PartTimePage() {
                       onChange={(event) => setDayAdd({ ...dayAdd, hours: event.target.value })}
                     />
                   </label>
+                  <p style={{ margin: '0.7rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                    마감시간 {Number(dayAdd.hours || 0) > 0 ? (shiftTimes(dayAdd.startTime, Number(dayAdd.hours))?.label.split('~')[1] || '—') : '—'} · 근무시간을 적으면 자동입니다.
+                  </p>
                 </>
               )}
             </div>
@@ -662,6 +700,15 @@ export default function PartTimePage() {
             </div>
             <div className="data-modal-body">
               <label className="ops-label">
+                시작시간
+                <input
+                  className="ui-control"
+                  type="time"
+                  value={hourDraft.startTime}
+                  onChange={(event) => setHourDraft({ ...hourDraft, startTime: event.target.value })}
+                />
+              </label>
+              <label className="ops-label" style={{ marginTop: '0.75rem' }}>
                 근무시간
                 <input
                   className="ui-control"
@@ -674,7 +721,9 @@ export default function PartTimePage() {
                   onChange={(event) => setHourDraft({ ...hourDraft, hours: event.target.value })}
                 />
               </label>
-              <p style={{ margin: '0.7rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>실제 근무한 시간을 적습니다. 같은 알바를 같은 날에 다시 올리면 추가되지 않습니다.</p>
+              <p style={{ margin: '0.7rem 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                마감시간 {Number(hourDraft.hours || 0) > 0 ? (shiftTimes(hourDraft.startTime, Number(hourDraft.hours))?.label.split('~')[1] || '—') : '—'} · 근무시간을 적으면 자동입니다. 같은 알바를 같은 날에 다시 올리면 추가되지 않습니다.
+              </p>
             </div>
             <div className="data-modal-foot">
               {hourDraft.existing && (
