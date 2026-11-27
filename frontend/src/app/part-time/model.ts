@@ -76,6 +76,21 @@ export async function apiError(res: Response) {
   }
 }
 
+export async function downloadPartTimeSlipPdf(year: number, month: number, worker?: { id: number; name: string }) {
+  const token = localStorage.getItem('token') || '';
+  const person = worker ? `&worker_id=${worker.id}` : '';
+  const res = await fetch(`${API}/part-time/slips/pdf?token=${encodeURIComponent(token)}&year=${year}&month=${month}${person}`);
+  if (!res.ok) throw new Error(await apiError(res));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const stamp = `${year}년 ${String(month).padStart(2, '0')}월`;
+  link.href = url;
+  link.download = worker ? `급여명세서 ${stamp} ${worker.name}.pdf` : `알바 급여명세서 ${stamp}.pdf`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function downloadPartTimeExcel(year: number, month: number) {
   const token = localStorage.getItem('token') || '';
   const res = await fetch(`${API}/part-time/xlsx?token=${encodeURIComponent(token)}&year=${year}&month=${month}`);

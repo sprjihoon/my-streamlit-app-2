@@ -6,7 +6,7 @@ import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
-import { API, apiError, canManagePartTime, downloadPartTimeExcel, hoursText, won } from '../model';
+import { API, apiError, canManagePartTime, downloadPartTimeExcel, downloadPartTimeSlipPdf, hoursText, won } from '../model';
 import { PartTimeSlipPrint } from './slip-print';
 
 interface SlipLine {
@@ -127,7 +127,24 @@ export default function PartTimeSlipsPage() {
           <strong>{year}년 {month}월</strong>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(1)}>다음 달</Button>
           <Button type="button" variant="secondary" disabled={!slip} onClick={() => slip && setPrintSlips([slip])}>이 사람 출력</Button>
+          <Button type="button" variant="primary" disabled={!slip} onClick={async () => {
+            if (!slip) return;
+            setError(null);
+            try {
+              await downloadPartTimeSlipPdf(year, month, { id: slip.worker_id, name: slip.name });
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : 'PDF를 받지 못했습니다.');
+            }
+          }}>이 사람 PDF</Button>
           <Button type="button" variant="secondary" disabled={slips.length === 0} onClick={() => setPrintSlips(slips)}>이 달 전체 출력</Button>
+          <Button type="button" variant="primary" disabled={slips.length === 0} onClick={async () => {
+            setError(null);
+            try {
+              await downloadPartTimeSlipPdf(year, month);
+            } catch (caught) {
+              setError(caught instanceof Error ? caught.message : 'PDF를 받지 못했습니다.');
+            }
+          }}>이 달 전체 PDF</Button>
           <Button type="button" variant="secondary" onClick={async () => {
             setError(null);
             try {

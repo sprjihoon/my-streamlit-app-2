@@ -631,3 +631,62 @@ def test_october_2026_is_seeded_from_the_given_workbook(isolated_runtime):
     assert restored["phone"] == "010-8817-0199"
     assert restored["bank_name"] == "kb은행"
     assert restored["account_number"] == "940302-01-724971"
+
+
+def test_admin_or_part_time_manager_downloads_each_slip_pdf(isolated_runtime):
+    _prepare(isolated_runtime["db"])
+    client = TestClient(app)
+    denied = client.get("/part-time/slips/pdf", params={"token": "staff-tok", "year": 2026, "month": 11})
+    assert denied.status_code == 403
+
+    created = client.post(
+        "/part-time/workers",
+        params={"token": "admin-tok"},
+        json={"name": "김알바", "resident_id": "900101-1234567", "hourly_wage": 10320},
+    )
+    assert created.status_code == 200, created.text
+    worker_id = created.json()["id"]
+    other = client.post(
+        "/part-time/workers",
+        params={"token": "admin-tok"},
+        json={"name": "박알바", "resident_id": "910101-2234567", "hourly_wage": 10320},
+    )
+    assert other.status_code == 200, other.text
+    for work_date, person in (("2026-11-02", worker_id), ("2026-11-03", other.json()["id"])):
+        saved = client.put(
+            "/part-time/days",
+            params={"token": "admin-tok"},
+            json={"work_date": work_date, "entries": [{"worker_id": person, "hours": 5, "start_time": "09:00"}]},
+        )
+        assert saved.status_code == 200, saved.text
+
+    one = client.get(
+        "/part-time/slips/pdf",
+        params={"token": "admin-tok", "year": 2026, "month": 11, "worker_id": worker_id},
+    )
+    assert one.status_code == 200, one.text
+    assert one.headers["content-type"].startswith("application/pdf")
+    assert one.content[:4] == b"%PDF"
+    import fitz
+    text = "".join(page.get_text() for page in fitz.open(stream=one.content, filetype="pdf"))
+    assert "급여명세서" in text
+    assert "김알바" in text
+    assert "박알바" not in text
+    assert "900101-1******" in text
+    assert "234567" not in text
+    assert "실지급액" in text
+
+    missing = client.get(
+        "/part-time/slips/pdf",
+        params={"token": "admin-tok", "year": 2026, "month": 11, "worker_id": 99999},
+    )
+    assert missing.status_code == 404
+
+    with sqlite3.connect(isolated_runtime["db"]) as con:
+        con.execute("UPDATE users SET can_manage_part_time = 1 WHERE username = 'staff'")
+        con.commit()
+    bundle = client.get("/part-time/slips/pdf", params={"token": "staff-tok", "year": 2026, "month": 11})
+    assert bundle.status_code == 200, bundle.text
+    bundle_text = "".join(page.get_text() for page in fitz.open(stream=bundle.content, filetype="pdf"))
+    assert "김알바" in bundle_text
+    assert "박알바" in bundle_text

@@ -14,6 +14,7 @@ from backend.app.api.logs import add_log
 from backend.app.services.part_time.calc import choose_pay_regime, minimum_wage, settle_part_time_pay, weekly_holiday_pay
 from backend.app.services.part_time.calendar_actions import normalize_clock, shift_times
 from backend.app.services.part_time.excel import render_part_time_xlsx
+from backend.app.services.part_time.slip_pdf import render_part_time_slips_pdf
 from backend.app.services.part_time.october_2026 import OCTOBER_2026_START, october_2026_people
 from logic.db import get_connection
 
@@ -728,6 +729,35 @@ def _slips(data: dict) -> list[dict]:
 def list_slips(year: int, month: int, token: str):
     data = month_calendar(year, month, token)
     return {"year": year, "month": month, "slips": _slips(data)}
+
+
+@router.get("/slips/pdf")
+def download_slip_pdf(year: int, month: int, token: str, worker_id: int | None = None):
+    _admin(token)
+    data = month_calendar(year, month, token)
+    slips = _slips(data)
+    with get_connection() as con:
+        rows = con.execute("SELECT id, resident_id FROM part_time_workers").fetchall()
+    resident = {row[0]: row[1] for row in rows}
+    if worker_id is not None:
+        slips = [slip for slip in slips if slip["worker_id"] == worker_id]
+        if not slips:
+            raise HTTPException(status_code=404, detail="이 달 그 알바의 급여명세서가 없습니다.")
+    elif not slips:
+        raise HTTPException(status_code=404, detail="이 달 급여명세서가 없습니다.")
+    for slip in slips:
+        slip["resident_id"] = resident.get(slip["worker_id"]) or ""
+    company = _company_for_excel()["company_name"]
+    content = render_part_time_slips_pdf(company, year, month, slips)
+    if worker_id is not None:
+        filename = quote(f"급여명세서 {year}년 {month:02d}월 {slips[0]['name']}.pdf")
+    else:
+        filename = quote(f"알바 급여명세서 {year}년 {month:02d}월.pdf")
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
 
 
 def _company_for_excel() -> dict:
