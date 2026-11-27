@@ -25,6 +25,7 @@ interface User {
   approver_id: number | null;
   leave_exempt: boolean;
   can_jeongyeol: boolean;
+  can_manage_part_time: boolean;
 }
 
 interface ActorInfo {
@@ -62,6 +63,7 @@ export default function UsersPage() {
     approver_id: '',
     leave_exempt: false,
     is_admin: false,
+    can_manage_part_time: false,
   });
 
   // 수정 모달
@@ -77,6 +79,7 @@ export default function UsersPage() {
     leave_exempt: false,
     is_admin: false,
     can_jeongyeol: false,
+    can_manage_part_time: false,
   });
 
   function getToken(): string | null {
@@ -121,7 +124,7 @@ export default function UsersPage() {
   }, [router, loadUsers]);
 
   function resetForm() {
-    setForm({ username: '', nickname: '', department: actorInfo?.position === '팀장' ? (actorInfo.department || '') : '', position: '사원', join_date: '', naver_works_id: '', approver_id: '', leave_exempt: false, is_admin: false });
+    setForm({ username: '', nickname: '', department: actorInfo?.position === '팀장' ? (actorInfo.department || '') : '', position: '사원', join_date: '', naver_works_id: '', approver_id: '', leave_exempt: false, is_admin: false, can_manage_part_time: false });
   }
 
   async function handleCreateUser(e: React.FormEvent) {
@@ -148,6 +151,7 @@ export default function UsersPage() {
         approver_id: form.approver_id ? parseInt(form.approver_id) : null,
         leave_exempt: form.leave_exempt,
         is_admin: actorInfo?.is_admin ? form.is_admin : false,
+        can_manage_part_time: actorInfo?.is_admin ? form.can_manage_part_time : false,
       };
 
       const res = await fetch(`${API_URL}/auth/users?token=${token}`, {
@@ -186,6 +190,7 @@ export default function UsersPage() {
       leave_exempt: user.leave_exempt,
       is_admin: user.is_admin,
       can_jeongyeol: user.can_jeongyeol || false,
+      can_manage_part_time: user.can_manage_part_time || false,
     });
   }
 
@@ -210,6 +215,7 @@ export default function UsersPage() {
       if (editForm.leave_exempt !== editUser.leave_exempt) updateData.leave_exempt = editForm.leave_exempt;
       if (actorInfo?.is_admin && editForm.is_admin !== editUser.is_admin) updateData.is_admin = editForm.is_admin;
       if (actorInfo?.is_admin && editForm.can_jeongyeol !== (editUser.can_jeongyeol || false)) updateData.can_jeongyeol = editForm.can_jeongyeol;
+      if (actorInfo?.is_admin && editForm.can_manage_part_time !== (editUser.can_manage_part_time || false)) updateData.can_manage_part_time = editForm.can_manage_part_time;
 
       if (Object.keys(updateData).length === 0) {
         setEditUser(null);
@@ -339,6 +345,12 @@ export default function UsersPage() {
                   관리자 권한 부여
                 </label>
               )}
+              {actorInfo?.is_admin && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input type="checkbox" checked={form.can_manage_part_time} onChange={e => setForm(f => ({ ...f, can_manage_part_time: e.target.checked }))} />
+                  아르바이트 관리 권한
+                </label>
+              )}
             </div>
 
             <button type="submit" disabled={saving} style={{ padding: '0.6rem 1.5rem', backgroundColor: saving ? '#ccc' : '#4CAF50', color: 'white', border: 'none', borderRadius: '6px', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
@@ -363,7 +375,7 @@ export default function UsersPage() {
             <table>
               <thead>
                 <tr>
-                  {['성함', '아이디', '직급', '입사일', '결재자', '연차제외', '권한', '전결', '작업'].map(h => (
+                  {['성함', '아이디', '직급', '입사일', '결재자', '연차제외', '권한', '전결', '알바', '작업'].map(h => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
@@ -402,6 +414,12 @@ export default function UsersPage() {
                     <td className="tw-text-center">
                       {user.can_jeongyeol
                         ? <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', backgroundColor: '#fff3e0', color: '#e65100', fontWeight: 700 }}>전결</span>
+                        : <span style={{ color: '#ccc', fontSize: '0.8rem' }}>-</span>
+                      }
+                    </td>
+                    <td className="tw-text-center">
+                      {user.can_manage_part_time
+                        ? <span style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', backgroundColor: '#e8f5e9', color: '#2e7d32', fontWeight: 700 }}>알바</span>
                         : <span style={{ color: '#ccc', fontSize: '0.8rem' }}>-</span>
                       }
                     </td>
@@ -520,6 +538,15 @@ export default function UsersPage() {
                   <span>
                     전결권 부여
                     <span style={{ display: 'block', fontSize: '0.75rem', color: '#e65100', fontWeight: 400 }}>단독 승인으로 연차 즉시 확정</span>
+                  </span>
+                </label>
+              )}
+              {actorInfo?.is_admin && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input type="checkbox" checked={editForm.can_manage_part_time} onChange={e => setEditForm(f => ({ ...f, can_manage_part_time: e.target.checked }))} />
+                  <span>
+                    아르바이트 관리 권한
+                    <span style={{ display: 'block', fontSize: '0.75rem', color: '#2e7d32', fontWeight: 400 }}>관리대장·비용 통계·급여명세서</span>
                   </span>
                 </label>
               )}

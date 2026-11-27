@@ -85,9 +85,10 @@ export async function downloadPartTimeExcel(year: number, month: number) {
   URL.revokeObjectURL(url);
 }
 
-export function readAdmin() {
+export function canManagePartTime() {
   try {
-    return !!JSON.parse(localStorage.getItem('user') || '{}').is_admin;
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    return !!(user.is_admin || user.can_manage_part_time);
   } catch {
     return false;
   }

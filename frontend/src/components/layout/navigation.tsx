@@ -8,7 +8,8 @@ import type { NavItem } from './types';
 
 export const IC = { size: 14, strokeWidth: 1.75 };
 
-export function canSeeNavItem(user: { is_admin?: boolean; department?: string; needs_contract?: boolean } | null, item: NavItem) {
+export function canSeeNavItem(user: { is_admin?: boolean; can_manage_part_time?: boolean; department?: string; needs_contract?: boolean } | null, item: NavItem) {
+  if (item.partTimeAccess) return !!(user?.is_admin || user?.can_manage_part_time);
   if (user?.is_admin) return true;
   if (item.href === '/employment-contracts' && user?.needs_contract === false) return false;
   if (item.allowDepartments?.length) {
@@ -23,6 +24,7 @@ export function canSeeNavItem(user: { is_admin?: boolean; department?: string; n
 }
 
 // adminOnly: true → 관리자(is_admin)만 표시
+// partTimeAccess: true → 관리자 또는 아르바이트 관리 권한자만 표시
 // adminOnly 없음 → 모든 로그인 사용자 표시
 export const NAV_GROUPS: {
   key: string;
@@ -133,9 +135,9 @@ export const NAV_GROUPS: {
     label: '아르바이트',
     icon: <Clock {...IC} />,
     items: [
-      { href: '/part-time', label: '관리대장', icon: <Calendar {...IC} />, adminOnly: true },
-      { href: '/part-time/stats', label: '비용 통계', icon: <BarChart2 {...IC} />, adminOnly: true },
-      { href: '/part-time/slips', label: '급여명세서', icon: <Receipt {...IC} />, adminOnly: true },
+      { href: '/part-time', label: '관리대장', icon: <Calendar {...IC} />, partTimeAccess: true },
+      { href: '/part-time/stats', label: '비용 통계', icon: <BarChart2 {...IC} />, partTimeAccess: true },
+      { href: '/part-time/slips', label: '급여명세서', icon: <Receipt {...IC} />, partTimeAccess: true },
     ],
   },
   {

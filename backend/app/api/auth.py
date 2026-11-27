@@ -30,6 +30,7 @@ class UserCreate(BaseModel):
     is_admin: bool = False
     leave_exempt: bool = False
     can_jeongyeol: bool = False
+    can_manage_part_time: bool = False
 
 
 class UserUpdate(BaseModel):
@@ -43,6 +44,7 @@ class UserUpdate(BaseModel):
     approver_id: Optional[int] = None
     leave_exempt: Optional[bool] = None
     can_jeongyeol: Optional[bool] = None
+    can_manage_part_time: Optional[bool] = None
 
 
 class LoginRequest(BaseModel):
@@ -62,6 +64,7 @@ class UserResponse(BaseModel):
     approver_id: Optional[int] = None
     leave_exempt: bool = False
     can_jeongyeol: bool = False
+    can_manage_part_time: bool = False
 
 
 # ─────────────────────────────────────
@@ -98,6 +101,7 @@ def ensure_users_table():
             ("must_change_password", "INTEGER DEFAULT 0"),
             ("leave_exempt",         "INTEGER DEFAULT 0"),
             ("can_jeongyeol",        "INTEGER DEFAULT 0"),  # 전결권: 1이면 단독 승인으로 즉시 확정
+            ("can_manage_part_time", "INTEGER DEFAULT 0"),  # 아르바이트 관리: 1이면 관리대장·통계·명세서 사용
         ]
         existing_cols = [row[1] for row in con.execute("PRAGMA table_info(users)")]
         for col_name, col_def in new_cols:
@@ -129,14 +133,16 @@ async def login(request: LoginRequest):
     
     with get_connection() as con:
         user = con.execute(
-            "SELECT user_id, username, nickname, is_admin, password_hash, department FROM users WHERE username = ?",
+            """SELECT user_id, username, nickname, is_admin, password_hash, department,
+                      can_manage_part_time
+               FROM users WHERE username = ?""",
             (request.username,)
         ).fetchone()
         
         if not user:
             raise HTTPException(status_code=401, detail="잘못된 아이디 또는 비밀번호입니다.")
         
-        user_id, username, nickname, is_admin, password_hash, department = user
+        user_id, username, nickname, is_admin, password_hash, department, can_manage_part_time = user
         
         if password_hash != hash_password(request.password):
             raise HTTPException(status_code=401, detail="잘못된 아이디 또는 비밀번호입니다.")
@@ -183,6 +189,7 @@ async def login(request: LoginRequest):
                 "nickname": nickname,
                 "is_admin": bool(is_admin),
                 "department": department,
+                "can_manage_part_time": bool(can_manage_part_time),
                 "needs_contract": worker_needs_contract(user_id, bool(is_admin)),
             }
         }
@@ -233,7 +240,8 @@ async def get_current_user(token: str):
         user_id = session[0]
         user = con.execute(
             """SELECT user_id, username, nickname, is_admin,
-                      department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol
+                      department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol,
+                      can_manage_part_time
                FROM users WHERE user_id = ?""",
             (user_id,)
         ).fetchone()
@@ -255,6 +263,7 @@ async def get_current_user(token: str):
             "approver_id": user[8],
             "leave_exempt": bool(user[9]) if user[9] else False,
             "can_jeongyeol": bool(user[10]) if user[10] else False,
+            "can_manage_part_time": bool(user[11]) if user[11] else False,
             "needs_contract": worker_needs_contract(user[0], bool(user[3])),
         }
 
@@ -298,7 +307,8 @@ async def list_users(token: str):
 
         rows = con.execute(
             """SELECT user_id, username, nickname, is_admin,
-                      department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol
+                      department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol,
+                      can_manage_part_time
                FROM users ORDER BY department, position_order DESC, nickname"""
         ).fetchall()
 
@@ -315,6 +325,7 @@ async def list_users(token: str):
             "approver_id": r[8],
             "leave_exempt": bool(r[9]) if r[9] else False,
             "can_jeongyeol": bool(r[10]) if r[10] else False,
+            "can_manage_part_time": bool(r[11]) if r[11] else False,
         }
         for r in rows
     ]
@@ -339,6 +350,8 @@ async def create_user(user: UserCreate, token: str):
         # 팀장/인사과장은 관리자 권한 부여 불가
         if not is_admin and user.is_admin:
             raise HTTPException(status_code=403, detail="관리자 권한 부여는 관리자만 가능합니다.")
+        if not is_admin and user.can_manage_part_time:
+            raise HTTPException(status_code=403, detail="아르바이트 관리 권한 부여는 관리자만 가능합니다.")
 
         # 중복 확인
         existing = con.execute("SELECT 1 FROM users WHERE username = ?", (user.username,)).fetchone()
@@ -353,8 +366,8 @@ async def create_user(user: UserCreate, token: str):
                (username, password_hash, nickname, is_admin,
                 department, position, position_order,
                 join_date, naver_works_id, approver_id, leave_exempt,
-                must_change_password)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                can_manage_part_time, must_change_password)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
             (
                 user.username,
                 hash_password("123456"),  # 초기 비밀번호
@@ -367,6 +380,7 @@ async def create_user(user: UserCreate, token: str):
                 user.naver_works_id or user.username,
                 user.approver_id,
                 1 if user.leave_exempt else 0,
+                1 if user.can_manage_part_time else 0,
             )
         )
         con.commit()
@@ -433,6 +447,10 @@ async def update_user(user_id: int, data: UserUpdate, token: str):
             if not is_admin:
                 raise HTTPException(status_code=403, detail="전결권 설정은 관리자만 가능합니다.")
             updates.append("can_jeongyeol = ?"); params.append(1 if data.can_jeongyeol else 0)
+        if data.can_manage_part_time is not None:
+            if not is_admin:
+                raise HTTPException(status_code=403, detail="아르바이트 관리 권한 설정은 관리자만 가능합니다.")
+            updates.append("can_manage_part_time = ?"); params.append(1 if data.can_manage_part_time else 0)
 
         if updates:
             params.append(user_id)

@@ -7,7 +7,7 @@ import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { DEFAULT_START, dateFromPointTarget, dropWorkerOntoDate, shiftTimes, workersAvailableOnDate } from './calendar-actions';
-import { API, CalendarData, DayEntry, Worker, apiError, downloadPartTimeExcel, hoursText, readAdmin, won } from './model';
+import { API, CalendarData, DayEntry, Worker, apiError, canManagePartTime, downloadPartTimeExcel, hoursText, won } from './model';
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -49,7 +49,7 @@ interface DragSession {
 
 export default function PartTimePage() {
   const now = new Date();
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [allowed, setAllowed] = useState<boolean | null>(null);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [calendar, setCalendar] = useState<CalendarData | null>(null);
@@ -84,9 +84,9 @@ export default function PartTimePage() {
   }, []);
 
   useEffect(() => {
-    const admin = readAdmin();
-    setIsAdmin(admin);
-    if (admin) load(year, month);
+    const allowedNow = canManagePartTime();
+    setAllowed(allowedNow);
+    if (allowedNow) load(year, month);
     else setLoading(false);
   }, [load, year, month]);
 
@@ -359,12 +359,12 @@ export default function PartTimePage() {
     setSuccess(`${dayAdd.date} ${worker.name} ${shift?.label || ''} ${hoursText(hours)}시간을 기록했습니다.`);
   }
 
-  if (isAdmin === null) return <Loading text="불러오는 중..." />;
-  if (!isAdmin) {
+  if (allowed === null) return <Loading text="불러오는 중..." />;
+  if (!allowed) {
     return (
       <div>
         <PageHeader title="관리대장" subtitle="아르바이트" />
-        <Alert type="error" message="관리자만 아르바이트 관리대장을 볼 수 있습니다." />
+        <Alert type="error" message="아르바이트 관리 권한이 필요합니다." />
       </div>
     );
   }

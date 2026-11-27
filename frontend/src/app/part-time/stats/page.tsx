@@ -6,13 +6,13 @@ import { Card } from '@/components/Card';
 import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
-import { API, CalendarData, apiError, hoursText, readAdmin, won } from '../model';
+import { API, CalendarData, apiError, canManagePartTime, hoursText, won } from '../model';
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 
 export default function PartTimeStatsPage() {
   const now = new Date();
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [allowed, setAllowed] = useState<boolean | null>(null);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [kind, setKind] = useState<'all' | 'reported' | 'unreported'>('all');
@@ -35,9 +35,9 @@ export default function PartTimeStatsPage() {
   }, []);
 
   useEffect(() => {
-    const admin = readAdmin();
-    setIsAdmin(admin);
-    if (admin) load(year, month);
+    const allowedNow = canManagePartTime();
+    setAllowed(allowedNow);
+    if (allowedNow) load(year, month);
     else setLoading(false);
   }, [load, year, month]);
 
@@ -100,12 +100,12 @@ export default function PartTimeStatsPage() {
     total: sum.total + row.total_pay,
   }), { hours: 0, base: 0, holiday: 0, total: 0 });
 
-  if (isAdmin === null) return <Loading text="불러오는 중..." />;
-  if (!isAdmin) {
+  if (allowed === null) return <Loading text="불러오는 중..." />;
+  if (!allowed) {
     return (
       <div>
         <PageHeader title="비용 통계" subtitle="아르바이트" />
-        <Alert type="error" message="관리자만 아르바이트 비용 통계를 볼 수 있습니다." />
+        <Alert type="error" message="아르바이트 관리 권한이 필요합니다." />
       </div>
     );
   }
