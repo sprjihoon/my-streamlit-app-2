@@ -436,16 +436,6 @@ export default function PartTimePage() {
             ))}
           </div>
         )}
-        {inactiveWorkers.length > 0 && (
-          <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ color: '#6b7280', fontSize: '0.85rem' }}>그만둔 알바</span>
-            {inactiveWorkers.map((worker) => (
-              <Button key={worker.id} type="button" variant="ghost" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>
-                {worker.name} 다시 불러오기
-              </Button>
-            ))}
-          </div>
-        )}
       </Card>
 
       <Card title="근무 달력">
@@ -654,11 +644,7 @@ export default function PartTimePage() {
                     <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', border: '1px solid #e5e7eb', borderRadius: 8, padding: '0.6rem 0.75rem' }}>
                       <div>
                         <strong>{worker.name}</strong>
-                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>
-                          시급 {won(worker.hourly_wage)} · {worker.resident_id}
-                          {worker.phone ? ` · ${worker.phone}` : ''}
-                          {worker.bank_name || worker.account_number ? ` · ${[worker.bank_name, worker.account_number].filter(Boolean).join(' ')}` : ''}
-                        </div>
+                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>시급 {won(worker.hourly_wage)}</div>
                       </div>
                       <Button type="button" variant="primary" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>다시 불러오기</Button>
                     </div>
