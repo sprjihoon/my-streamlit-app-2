@@ -3,6 +3,7 @@ backend/app/api/auth.py - 인증 및 사용자 관리 API
 내부 시스템용 간단한 인증
 """
 import os
+from datetime import date, datetime
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Optional
@@ -65,6 +66,11 @@ class UserResponse(BaseModel):
     leave_exempt: bool = False
     can_jeongyeol: bool = False
     can_manage_part_time: bool = False
+    resigned_on: Optional[str] = None
+
+
+class ResignRequest(BaseModel):
+    resigned_on: str
 
 
 # ─────────────────────────────────────
@@ -74,6 +80,45 @@ class UserResponse(BaseModel):
 def hash_password(password: str) -> str:
     """비밀번호 해시"""
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _parse_iso_date(value: str, label: str) -> str:
+    text = (value or "").strip()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{label}은 YYYY-MM-DD 형식이어야 합니다.")
+
+
+def resignation_in_effect(resigned_on: str | None, today: date | None = None) -> bool:
+    """퇴사일이 오늘 이전이면 로그인을 막는다. 미래 퇴사일은 그날까지 재직이다."""
+    text = (resigned_on or "").strip()
+    if not text:
+        return False
+    try:
+        day = datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return day <= (today or date.today())
+
+
+def _ensure_sessions(con) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _user_row(con, user_id: int):
+    return con.execute(
+        "SELECT username, nickname, department, join_date, resigned_on FROM users WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
 
 
 def ensure_users_table():
@@ -102,6 +147,7 @@ def ensure_users_table():
             ("leave_exempt",         "INTEGER DEFAULT 0"),
             ("can_jeongyeol",        "INTEGER DEFAULT 0"),  # 전결권: 1이면 단독 승인으로 즉시 확정
             ("can_manage_part_time", "INTEGER DEFAULT 0"),  # 아르바이트 관리: 1이면 관리대장·통계·명세서 사용
+            ("resigned_on",          "TEXT"),  # 퇴사일. 비어 있으면 재직
         ]
         existing_cols = [row[1] for row in con.execute("PRAGMA table_info(users)")]
         for col_name, col_def in new_cols:
@@ -134,7 +180,7 @@ async def login(request: LoginRequest):
     with get_connection() as con:
         user = con.execute(
             """SELECT user_id, username, nickname, is_admin, password_hash, department,
-                      can_manage_part_time
+                      can_manage_part_time, resigned_on
                FROM users WHERE username = ?""",
             (request.username,)
         ).fetchone()
@@ -142,10 +188,12 @@ async def login(request: LoginRequest):
         if not user:
             raise HTTPException(status_code=401, detail="잘못된 아이디 또는 비밀번호입니다.")
         
-        user_id, username, nickname, is_admin, password_hash, department, can_manage_part_time = user
+        user_id, username, nickname, is_admin, password_hash, department, can_manage_part_time, resigned_on = user
         
         if password_hash != hash_password(request.password):
             raise HTTPException(status_code=401, detail="잘못된 아이디 또는 비밀번호입니다.")
+        if resignation_in_effect(resigned_on):
+            raise HTTPException(status_code=401, detail="퇴사 처리된 계정입니다.")
         
         # 간단한 토큰 생성 (내부 시스템용)
         token = secrets.token_hex(32)
@@ -241,13 +289,17 @@ async def get_current_user(token: str):
         user = con.execute(
             """SELECT user_id, username, nickname, is_admin,
                       department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol,
-                      can_manage_part_time
+                      can_manage_part_time, resigned_on
                FROM users WHERE user_id = ?""",
             (user_id,)
         ).fetchone()
 
         if not user:
             raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
+        if resignation_in_effect(user[12]):
+            con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            con.commit()
+            raise HTTPException(status_code=401, detail="퇴사 처리된 계정입니다.")
 
         from backend.app.api.employment_contracts import worker_needs_contract
 
@@ -264,6 +316,7 @@ async def get_current_user(token: str):
             "leave_exempt": bool(user[9]) if user[9] else False,
             "can_jeongyeol": bool(user[10]) if user[10] else False,
             "can_manage_part_time": bool(user[11]) if user[11] else False,
+            "resigned_on": user[12] or None,
             "needs_contract": worker_needs_contract(user[0], bool(user[3])),
         }
 
@@ -308,7 +361,7 @@ async def list_users(token: str):
         rows = con.execute(
             """SELECT user_id, username, nickname, is_admin,
                       department, position, join_date, naver_works_id, approver_id, leave_exempt, can_jeongyeol,
-                      can_manage_part_time
+                      can_manage_part_time, resigned_on
                FROM users ORDER BY department, position_order DESC, nickname"""
         ).fetchall()
 
@@ -326,6 +379,7 @@ async def list_users(token: str):
             "leave_exempt": bool(r[9]) if r[9] else False,
             "can_jeongyeol": bool(r[10]) if r[10] else False,
             "can_manage_part_time": bool(r[11]) if r[11] else False,
+            "resigned_on": r[12] or None,
         }
         for r in rows
     ]
@@ -472,6 +526,79 @@ async def update_user(user_id: int, data: UserUpdate, token: str):
     )
 
     return {"success": True, "message": "사용자 정보 수정 완료"}
+
+
+def _guard_employee_change(con, actor_id: int, is_admin: bool, actor_position: str, actor_dept: str, user_id: int):
+    """팀장은 본인 팀만. 시스템 계정과 본인 퇴사·복귀는 막는다."""
+    target = _user_row(con, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    if actor_id == user_id:
+        raise HTTPException(status_code=400, detail="본인 계정은 퇴사 처리할 수 없습니다.")
+    if (target[0] or "").strip().lower() == "admin":
+        raise HTTPException(status_code=400, detail="시스템 계정은 퇴사 처리할 수 없습니다.")
+    if not is_admin and actor_position == "팀장" and target[2] != actor_dept:
+        raise HTTPException(status_code=403, detail="팀장은 본인 팀 직원만 퇴사 처리할 수 있습니다.")
+    return target
+
+
+@router.post("/users/{user_id}/resign")
+async def resign_user(user_id: int, body: ResignRequest, token: str):
+    """직원 퇴사처리. 계정과 과거 급여·계약은 남기고, 퇴사일부터 로그인을 막는다."""
+    ensure_users_table()
+    resigned_on = _parse_iso_date(body.resigned_on, "퇴사일")
+    with get_connection() as con:
+        actor_id, is_admin, actor_position, actor_dept = _can_manage_users(token, con)
+        target = _guard_employee_change(con, actor_id, is_admin, actor_position, actor_dept, user_id)
+        join_date = (target[3] or "").strip()
+        if join_date and resigned_on < join_date:
+            raise HTTPException(status_code=400, detail="퇴사일은 입사일 이후여야 합니다.")
+        con.execute(
+            "UPDATE users SET resigned_on = ? WHERE user_id = ?",
+            (resigned_on, user_id),
+        )
+        if resignation_in_effect(resigned_on):
+            _ensure_sessions(con)
+            con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        con.commit()
+        actor = con.execute("SELECT nickname FROM users WHERE user_id = ?", (actor_id,)).fetchone()
+    add_log(
+        action_type="퇴사처리",
+        target_type="user",
+        target_id=str(user_id),
+        target_name=target[1],
+        user_nickname=actor[0] if actor else None,
+        details=f"퇴사일: {resigned_on}",
+    )
+    return {
+        "success": True,
+        "user_id": user_id,
+        "resigned_on": resigned_on,
+        "message": f"'{target[1]}' 님을 {resigned_on} 퇴사 처리했습니다.",
+    }
+
+
+@router.post("/users/{user_id}/reinstate")
+async def reinstate_user(user_id: int, token: str):
+    """퇴사 처리를 취소하고 재직으로 되돌린다. 끊긴 로그인은 다시 로그인해야 한다."""
+    ensure_users_table()
+    with get_connection() as con:
+        actor_id, is_admin, actor_position, actor_dept = _can_manage_users(token, con)
+        target = _guard_employee_change(con, actor_id, is_admin, actor_position, actor_dept, user_id)
+        if not (target[4] or "").strip():
+            raise HTTPException(status_code=400, detail="재직 중인 직원입니다.")
+        con.execute("UPDATE users SET resigned_on = NULL WHERE user_id = ?", (user_id,))
+        con.commit()
+        actor = con.execute("SELECT nickname FROM users WHERE user_id = ?", (actor_id,)).fetchone()
+    add_log(
+        action_type="재직복귀",
+        target_type="user",
+        target_id=str(user_id),
+        target_name=target[1],
+        user_nickname=actor[0] if actor else None,
+        details="퇴사 처리를 취소함",
+    )
+    return {"success": True, "user_id": user_id, "message": f"'{target[1]}' 님을 재직으로 되돌렸습니다."}
 
 
 @router.delete("/users/{user_id}")

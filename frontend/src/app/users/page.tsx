@@ -26,6 +26,7 @@ interface User {
   leave_exempt: boolean;
   can_jeongyeol: boolean;
   can_manage_part_time: boolean;
+  resigned_on: string | null;
 }
 
 interface ActorInfo {
@@ -68,6 +69,8 @@ export default function UsersPage() {
 
   // 수정 모달
   const [editUser, setEditUser] = useState<User | null>(null);
+  const [resignDate, setResignDate] = useState('');
+  const [confirmResign, setConfirmResign] = useState(false);
   const [editForm, setEditForm] = useState({
     nickname: '',
     password: '',
@@ -177,7 +180,16 @@ export default function UsersPage() {
     }
   }
 
+  function todayInput() {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${now.getFullYear()}-${month}-${day}`;
+  }
+
   function handleEditClick(user: User) {
+    setConfirmResign(false);
+    setResignDate(user.resigned_on || todayInput());
     setEditUser(user);
     setEditForm({
       nickname: user.nickname,
@@ -243,6 +255,53 @@ export default function UsersPage() {
     }
   }
 
+  async function handleResign() {
+    const token = getToken();
+    if (!token || !editUser) return;
+    if (!resignDate) {
+      setError('퇴사일을 입력하세요.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/auth/users/${editUser.user_id}/resign?token=${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resigned_on: resignDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '퇴사처리 실패');
+      setSuccess(data.message || `${editUser.nickname} 님을 퇴사 처리했습니다.`);
+      setEditUser(null);
+      setConfirmResign(false);
+      loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '퇴사처리 실패');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReinstate(user: User) {
+    const token = getToken();
+    if (!token) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/auth/users/${user.user_id}/reinstate?token=${token}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '재직 복귀 실패');
+      setSuccess(data.message || `${user.nickname} 님을 재직으로 되돌렸습니다.`);
+      setEditUser(null);
+      loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '재직 복귀 실패');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDeleteUser(userId: number, username: string) {
     const token = getToken();
     if (!token) return;
@@ -272,11 +331,13 @@ export default function UsersPage() {
     );
   }
 
+  const employed = users.filter(u => !(u.resigned_on || '').trim());
+  const resigned = users.filter(u => (u.resigned_on || '').trim());
   const grouped = DEPARTMENTS.reduce<Record<string, User[]>>((acc, dept) => {
-    acc[dept] = users.filter(u => u.department === dept);
+    acc[dept] = employed.filter(u => u.department === dept);
     return acc;
   }, {});
-  const ungrouped = users.filter(u => !u.department || !DEPARTMENTS.includes(u.department));
+  const ungrouped = employed.filter(u => !u.department || !DEPARTMENTS.includes(u.department));
 
   return (
     <div>
@@ -437,6 +498,37 @@ export default function UsersPage() {
         );
       })}
 
+      <Card style={{ marginBottom: '1.5rem' }}>
+        <h3 style={{ marginTop: 0 }}>퇴사자{resigned.length > 0 ? ` (${resigned.length})` : ''}</h3>
+        <p style={{ marginTop: 0, color: '#6b7280', fontSize: '0.85rem' }}>
+          퇴사일부터 로그인할 수 없습니다. 급여와 근로계약 기록은 남고, 다음 달 급여대장에는 들어가지 않습니다. 재직으로 되돌릴 수 있습니다.
+        </p>
+        {resigned.length === 0 ? (
+          <p style={{ margin: 0, color: '#9ca3af' }}>퇴사 처리한 직원이 없습니다.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                {['성함', '아이디', '팀', '퇴사일', '작업'].map(h => <th key={h}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {resigned.map(user => (
+                <tr key={user.user_id}>
+                  <td>{user.nickname}</td>
+                  <td>{user.username}</td>
+                  <td>{user.department || '-'}</td>
+                  <td>{user.resigned_on}</td>
+                  <td>
+                    <button onClick={() => handleReinstate(user)} disabled={saving} style={{ padding: '0.25rem 0.6rem', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}>재직으로 되돌리기</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
       {/* 수정 모달 */}
       {editUser && (
         <div
@@ -485,10 +577,10 @@ export default function UsersPage() {
                 <select className="ui-control" value={editForm.approver_id} onChange={e => setEditForm(f => ({ ...f, approver_id: e.target.value }))}>
                   <option value="">없음 (결재라인 없음)</option>
                   {users
-                    .filter(u => u.user_id !== editUser?.user_id)
+                    .filter(u => u.user_id !== editUser?.user_id && (!(u.resigned_on || '').trim() || String(u.user_id) === editForm.approver_id))
                     .map(u => (
                       <option key={u.user_id} value={String(u.user_id)}>
-                        {u.nickname} ({u.position || '직급없음'}{u.department ? ` / ${u.department}` : ''})
+                        {u.nickname}{(u.resigned_on || '').trim() ? ' (퇴사)' : ''} ({u.position || '직급없음'}{u.department ? ` / ${u.department}` : ''})
                       </option>
                     ))}
                 </select>
@@ -551,6 +643,26 @@ export default function UsersPage() {
                 </label>
               )}
             </div>
+
+            {editUser.username !== 'admin' && !(editUser.resigned_on || '').trim() && (
+              <div style={{ marginBottom: '1.25rem', padding: '0.85rem', border: '1px solid #fde68a', borderRadius: 8, background: '#fffbeb' }}>
+                <label className="ops-label">퇴사일</label>
+                <input className="ui-control" type="date" value={resignDate} onChange={e => { setResignDate(e.target.value); setConfirmResign(false); }} />
+                {confirmResign && (
+                  <p style={{ margin: '0.75rem 0 0', color: '#92400e' }}>
+                    {editUser.nickname} 님은 {resignDate || '퇴사일'}부터 로그인할 수 없습니다. 그달 급여대장은 남고, 다음 달부터 빠집니다. 퇴사자 목록에서 되돌릴 수 있습니다.
+                  </p>
+                )}
+                {error && <p style={{ margin: '0.75rem 0 0', color: '#b91c1c' }}>{error}</p>}
+                <div style={{ marginTop: '0.75rem' }}>
+                  {!confirmResign ? (
+                    <button type="button" onClick={() => setConfirmResign(true)} disabled={saving} style={{ padding: '0.45rem 0.8rem', backgroundColor: '#fff', color: '#92400e', border: '1px solid #f59e0b', borderRadius: '6px', cursor: 'pointer' }}>퇴사처리</button>
+                  ) : (
+                    <button type="button" onClick={handleResign} disabled={saving} style={{ padding: '0.45rem 0.8rem', backgroundColor: '#dc2626', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>{saving ? '처리 중...' : '퇴사 확인'}</button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button onClick={handleUpdateUser} disabled={saving} style={{ flex: 1, padding: '0.6rem', backgroundColor: saving ? '#ccc' : '#4CAF50', color: 'white', border: 'none', borderRadius: '6px', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600 }}>

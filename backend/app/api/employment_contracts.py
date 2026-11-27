@@ -395,6 +395,12 @@ def worker_needs_contract(user_id: int, is_admin: bool = False) -> bool:
     """
     ensure_contract_tables()
     with get_connection() as con:
+        resigned = con.execute(
+            "SELECT resigned_on FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if resigned and (resigned[0] or "").strip():
+            return False
         latest = _latest(con, user_id)
         if latest:
             return latest[1] == "draft"
@@ -627,6 +633,7 @@ def _admin_profile_notices(exclude_user_id: int | None = None) -> list[dict]:
             WHERE (c.id IS NULL OR c.status = 'draft')
               AND (? IS NULL OR u.user_id != ?)
               AND LOWER(TRIM(COALESCE(u.username, ''))) != 'admin'
+              AND TRIM(COALESCE(u.resigned_on, '')) = ''
             """,
             (exclude_user_id, exclude_user_id),
         ).fetchall()
@@ -648,6 +655,7 @@ def _admin_profile_notices(exclude_user_id: int | None = None) -> list[dict]:
 @router.get("/notices")
 def list_profile_notices(token: str):
     """프로필 옆 알림. 로그인한 사람이 처리할 근로계약과 확인만 돌려준다."""
+    ensure_users_table()
     actor = _session(token)
     items: list[dict] = []
     if actor["is_admin"]:
@@ -659,6 +667,7 @@ def list_profile_notices(token: str):
 @router.get("")
 def list_contracts(token: str, view: str = "open"):
     """작성 대상은 완료되지 않은 직원만, 완료 보관은 저장된 PDF를 모두 보여 준다."""
+    ensure_users_table()
     _admin(token)
     if view not in {"open", "completed"}:
         raise HTTPException(status_code=400, detail="목록 종류가 올바르지 않습니다.")
@@ -678,6 +687,7 @@ def list_contracts(token: str, view: str = "open"):
                   )
                 WHERE (c.id IS NULL OR c.status = 'draft')
                   AND LOWER(TRIM(COALESCE(u.username, ''))) != 'admin'
+                  AND TRIM(COALESCE(u.resigned_on, '')) = ''
                 ORDER BY COALESCE(u.department, ''), u.nickname
                 """
             ).fetchall()

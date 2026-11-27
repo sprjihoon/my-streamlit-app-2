@@ -292,11 +292,12 @@ def _lines_from_contracts(year: int, month: int) -> tuple[list[dict], list[str]]
         ).fetchall()
     lines: list[dict] = []
     skipped: list[str] = []
+    left_ids, _left_names = _left_before_month(year, month)
     for row in rows:
         contract_start = row[9] or ""
         contract_end = row[10] or ""
         name = (row[4] or row[2] or "").strip()
-        if not _covers(start, end, contract_start, contract_end):
+        if row[0] in left_ids or not _covers(start, end, contract_start, contract_end):
             continue
         payload = {
             "net_pay": row[15] or 0,
@@ -367,6 +368,36 @@ def _previous_ledger(year: int, month: int) -> dict | None:
     return _load(year - 1, 12)
 
 
+def _left_before_month(year: int, month: int) -> tuple[set[int], set[str]]:
+    """퇴사일이 그달 1일보다 앞이면 그달 대장에서 뺀다. 퇴사한 달은 남긴다."""
+    start, _end, _label = _period(year, month)
+    with get_connection() as con:
+        rows = con.execute(
+            """
+            SELECT u.user_id, u.nickname, c.employee_name
+            FROM users u
+            LEFT JOIN employment_contracts c ON c.id = (
+                SELECT id FROM employment_contracts
+                WHERE user_id = u.user_id
+                ORDER BY id DESC
+                LIMIT 1
+            )
+            WHERE TRIM(COALESCE(u.resigned_on, '')) != ''
+              AND u.resigned_on < ?
+            """,
+            (start,),
+        ).fetchall()
+    ids: set[int] = set()
+    names: set[str] = set()
+    for user_id, nickname, employee_name in rows:
+        ids.add(user_id)
+        for value in (nickname, employee_name):
+            name = (value or "").strip()
+            if name:
+                names.add(name)
+    return ids, names
+
+
 def _inactive_names(year: int, month: int) -> set[str]:
     start, end, _label = _period(year, month)
     ensure_contract_tables()
@@ -398,12 +429,13 @@ def _lines_for_month(year: int, month: int) -> tuple[list[dict], list[str], bool
     if not previous:
         return contract_lines, skipped, False
     by_name = {(line.get("employee_name") or "").strip(): line for line in contract_lines}
-    ended = _inactive_names(year, month)
+    left_ids, left_names = _left_before_month(year, month)
+    ended = _inactive_names(year, month) | left_names
     merged: list[dict] = []
     seen: set[str] = set()
     for line in previous["lines"]:
         name = (line.get("employee_name") or "").strip()
-        if not name or name in ended:
+        if not name or name in ended or line.get("user_id") in left_ids:
             continue
         seen.add(name)
         merged.append(dict(by_name.get(name) or line))
