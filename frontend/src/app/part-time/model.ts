@@ -7,6 +7,7 @@ export interface Worker {
   reported: boolean;
   hourly_wage: number;
   active: boolean;
+  phone?: string;
 }
 
 export interface DayEntry {

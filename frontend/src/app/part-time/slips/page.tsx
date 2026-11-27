@@ -7,6 +7,7 @@ import { Loading } from '@/components/Loading';
 import PageHeader from '@/components/ui/page-header';
 import { Button } from '@/components/ui/button';
 import { API, apiError, canManagePartTime, downloadPartTimeExcel, hoursText, won } from '../model';
+import { PartTimeSlipPrint } from './slip-print';
 
 interface SlipLine {
   work_date: string;
@@ -63,6 +64,7 @@ export default function PartTimeSlipsPage() {
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [printSlips, setPrintSlips] = useState<Slip[] | null>(null);
 
   const load = useCallback(async (nextYear: number, nextMonth: number) => {
     const token = localStorage.getItem('token') || '';
@@ -109,10 +111,12 @@ export default function PartTimeSlipsPage() {
       <PageHeader title="급여명세서" subtitle="알바에게 줄 금액은 총지급에서 원천세와 근로자 보험료를 뺀 금액입니다. 산재와 회사 부담 보험료는 급여에서 빼지 않습니다." />
       {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
       <Card style={{ marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(-1)}>이전 달</Button>
           <strong>{year}년 {month}월</strong>
           <Button type="button" variant="secondary" onClick={() => shiftMonth(1)}>다음 달</Button>
+          <Button type="button" variant="secondary" disabled={!slip} onClick={() => slip && setPrintSlips([slip])}>이 사람 출력</Button>
+          <Button type="button" variant="secondary" disabled={slips.length === 0} onClick={() => setPrintSlips(slips)}>이 달 전체 출력</Button>
           <Button type="button" variant="secondary" onClick={async () => {
             setError(null);
             try {
@@ -194,8 +198,8 @@ export default function PartTimeSlipsPage() {
                       </>
                     ) : (
                       <>
-                        <tr><td>소득세</td><td>사업소득 3%</td><td>{won(slip.income_tax)}</td></tr>
-                        <tr><td>지방소득세</td><td>소득세의 10%, 합쳐 3.3%</td><td>{won(slip.local_tax)}</td></tr>
+                        <tr><td>소득세</td><td>지급액의 3%. 10원 미만은 버리고, 1,000원 미만이어도 뗍니다.</td><td>{won(slip.income_tax)}</td></tr>
+                        <tr><td>지방소득세</td><td>소득세의 10%. 합쳐 3.3%입니다.</td><td>{won(slip.local_tax)}</td></tr>
                       </>
                     )}
                     <tr><td>공제합계</td><td>알바에게 주지 않고 회사가 납부할 금액</td><td>{won(slip.deduction_total)}</td></tr>
@@ -242,6 +246,9 @@ export default function PartTimeSlipsPage() {
             </Card>
           )}
         </div>
+      )}
+      {printSlips && (
+        <PartTimeSlipPrint slips={printSlips} year={year} month={month} onClose={() => setPrintSlips(null)} />
       )}
     </div>
   );

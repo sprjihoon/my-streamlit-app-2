@@ -51,6 +51,9 @@ def ensure_part_time_tables() -> None:
         columns = [row[1] for row in con.execute("PRAGMA table_info(part_time_hours)").fetchall()]
         if "start_time" not in columns:
             con.execute("ALTER TABLE part_time_hours ADD COLUMN start_time TEXT")
+        worker_columns = [row[1] for row in con.execute("PRAGMA table_info(part_time_workers)").fetchall()]
+        if "phone" not in worker_columns:
+            con.execute("ALTER TABLE part_time_workers ADD COLUMN phone TEXT")
         _seed_october_2026(con)
         con.commit()
 
@@ -104,6 +107,7 @@ class WorkerIn(BaseModel):
     resident_id: str
     reported: bool = True
     hourly_wage: int | None = None
+    phone: str = ""
 
 
 class WorkerPatch(BaseModel):
@@ -112,6 +116,7 @@ class WorkerPatch(BaseModel):
     reported: bool | None = None
     hourly_wage: int | None = None
     active: bool | None = None
+    phone: str | None = None
 
 
 class HourIn(BaseModel):
@@ -179,6 +184,20 @@ def _parse_day(value: str) -> date:
         raise HTTPException(status_code=400, detail="날짜는 YYYY-MM-DD 형식입니다.") from exc
 
 
+def _phone(value: str | None) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    if not digits:
+        return ""
+    if not 9 <= len(digits) <= 11:
+        raise HTTPException(status_code=400, detail="전화번호는 9자리에서 11자리입니다.")
+    if digits.startswith("02"):
+        middle = 5 if len(digits) == 9 else 6
+        return f"02-{digits[2:middle]}-{digits[middle:]}"
+    if len(digits) == 11:
+        return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+
+
 def _public_worker(row) -> dict:
     return {
         "id": row[0],
@@ -187,6 +206,7 @@ def _public_worker(row) -> dict:
         "reported": bool(row[3]),
         "hourly_wage": int(row[4]),
         "active": bool(row[5]),
+        "phone": row[6] or "",
     }
 
 
@@ -194,7 +214,7 @@ def _load_workers() -> list[dict]:
     with get_connection() as con:
         rows = con.execute(
             """
-            SELECT id, name, resident_id, reported, hourly_wage, active
+            SELECT id, name, resident_id, reported, hourly_wage, active, phone
             FROM part_time_workers
             ORDER BY active DESC, name, id
             """
@@ -205,7 +225,7 @@ def _load_workers() -> list[dict]:
 def _worker_row(worker_id: int):
     with get_connection() as con:
         return con.execute(
-            "SELECT id, name, resident_id, reported, hourly_wage, active FROM part_time_workers WHERE id = ?",
+            "SELECT id, name, resident_id, reported, hourly_wage, active, phone FROM part_time_workers WHERE id = ?",
             (worker_id,),
         ).fetchone()
 
@@ -243,10 +263,10 @@ def create_worker(body: WorkerIn, token: str):
         cur = con.execute(
             """
             INSERT INTO part_time_workers
-                (name, resident_id, reported, hourly_wage, active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 1, ?, ?)
+                (name, resident_id, reported, hourly_wage, active, phone, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?)
             """,
-            (name, resident_id, 1 if body.reported else 0, wage, stamp, stamp),
+            (name, resident_id, 1 if body.reported else 0, wage, _phone(body.phone), stamp, stamp),
         )
         con.commit()
         worker_id = cur.lastrowid
@@ -275,6 +295,7 @@ def update_worker(worker_id: int, body: WorkerPatch, token: str):
     reported = current[3] if body.reported is None else (1 if body.reported else 0)
     wage = _wage(body.hourly_wage, date.today().year) if body.hourly_wage is not None else int(current[4])
     active = current[5] if body.active is None else (1 if body.active else 0)
+    phone = current[6] or "" if body.phone is None else _phone(body.phone)
     if active:
         with get_connection() as con:
             taken = con.execute(
@@ -288,10 +309,10 @@ def update_worker(worker_id: int, body: WorkerPatch, token: str):
         con.execute(
             """
             UPDATE part_time_workers
-            SET name = ?, resident_id = ?, reported = ?, hourly_wage = ?, active = ?, updated_at = ?
+            SET name = ?, resident_id = ?, reported = ?, hourly_wage = ?, active = ?, phone = ?, updated_at = ?
             WHERE id = ?
             """,
-            (name, resident_id, reported, wage, active, stamp, worker_id),
+            (name, resident_id, reported, wage, active, phone, stamp, worker_id),
         )
         con.commit()
     add_log(

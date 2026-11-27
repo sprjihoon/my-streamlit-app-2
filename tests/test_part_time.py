@@ -44,9 +44,10 @@ def _prepare(db_path):
 
 
 def test_weekly_holiday_follows_the_sheet_formula():
-    hours, pay = weekly_holiday_pay(5, 10320, True)
-    assert hours == 1
-    assert pay == 10320
+    assert weekly_holiday_pay(5, 10320, True) == (0, 0)
+    assert weekly_holiday_pay(13, 10320, True) == (0, 0)
+    assert weekly_holiday_pay(14, 10320, True) == (2.8, 28896)
+    assert weekly_holiday_pay(15, 10320, True) == (3, 30960)
     assert weekly_holiday_pay(40, 10320, True) == (8, 82560)
     assert weekly_holiday_pay(40, 10320, False) == (0, 0)
     assert minimum_wage(2026) == 10320
@@ -85,6 +86,12 @@ def test_weekly_holiday_follows_the_sheet_formula():
     assert freelance["pension"] == 0
     assert freelance["employer_industrial"] == 0
     assert freelance["net_pay"] == 99_810
+    small = settle_part_time_pay(30_000, 1, 3, False, 2026, 11, "910101-2234567")
+    assert small["withholding_kind"] == "business_3_3"
+    assert small["income_tax"] == 900
+    assert small["local_tax"] == 90
+    assert small["net_pay"] == 29_010
+    assert small["employment_insurance"] == 0
 
 
 def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_runtime):
@@ -105,10 +112,11 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     reported = client.post(
         "/part-time/workers",
         params={"token": "admin-tok"},
-        json={"name": "김알바", "resident_id": "900101-1234567", "reported": True},
+        json={"name": "김알바", "resident_id": "900101-1234567", "reported": True, "phone": "01012345678"},
     )
     assert reported.status_code == 200, reported.text
     reported_body = reported.json()
+    assert reported_body["phone"] == "010-1234-5678"
     assert reported_body["hourly_wage"] == minimum_wage(date.today().year)
     assert reported_body["resident_id"] == "900101-1******"
     assert "234567" not in reported_body["resident_id"]
@@ -136,7 +144,7 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert raised.status_code == 200
     assert raised.json()["hourly_wage"] == 12000
 
-    # 2026-11-02는 월요일, 11-08은 일요일. 다섯 시간씩 이틀이면 주휴 2시간.
+    # 2026-11-02는 월요일, 11-08은 일요일. 다섯 시간씩 이틀은 10시간이라 주휴가 없다.
     for work_date in ("2026-11-02", "2026-11-03"):
         saved = client.put(
             "/part-time/days",
@@ -156,9 +164,9 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     hidden_total = next(row for row in calendar["totals"] if row["worker_id"] == hidden_id)
     assert reported_total["basic_hours"] == 10
     assert reported_total["base_pay"] == 120000
-    assert reported_total["weekly_holiday_hours"] == 2
-    assert reported_total["weekly_holiday_pay"] == 24000
-    assert reported_total["total_pay"] == 144000
+    assert reported_total["weekly_holiday_hours"] == 0
+    assert reported_total["weekly_holiday_pay"] == 0
+    assert reported_total["total_pay"] == 120000
     day_entry = next(item for item in calendar["days"]["2026-11-03"] if item["worker_id"] == reported_body["id"])
     assert day_entry["pay"] == 60000
     assert day_entry["start_time"] == "09:00"
@@ -171,14 +179,14 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert slips.status_code == 200, slips.text
     reported_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == reported_body["id"])
     assert reported_slip["work_days"] == 2
-    assert reported_slip["taxable_pay"] == 144000
+    assert reported_slip["taxable_pay"] == 120000
     assert reported_slip["nontaxable_pay"] == 0
     assert reported_slip["income_tax"] == 0
-    assert reported_slip["employment_insurance"] == 1290
+    assert reported_slip["employment_insurance"] == 1080
     assert reported_slip["pension"] == 0
     assert reported_slip["health"] == 0
-    assert reported_slip["employer_industrial"] == 1150
-    assert reported_slip["net_pay"] == 142710
+    assert reported_slip["employer_industrial"] == 960
+    assert reported_slip["net_pay"] == 118920
     hidden_slip = next(item for item in slips.json()["slips"] if item["worker_id"] == hidden_id)
     assert hidden_slip["withholding_kind"] == "business_3_3"
     assert hidden_slip["income_tax"] == 3090
@@ -209,7 +217,7 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     start, origin = kim_block
     assert ledger.cell(start + 1, origin).value == "900101-1234567"
     assert ledger.cell(start + 2, origin).value == "2일"
-    assert ledger.cell(start + 4, origin).value == 144000
+    assert ledger.cell(start + 4, origin).value == 120000
     assert ledger.cell(start + 6, origin + 1).value == 5
     assert ledger.cell(start + 6, origin + 2).value == 5
     gong = book["공단"]
@@ -227,7 +235,7 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     gong_sheet, gong_col = kim_gong
     assert gong_sheet[f"{gong_col}21"].value == "김알바"
     assert gong_sheet[f"{gong_col}22"].value == "900101-1234567"
-    assert gong_sheet[f"{gong_col}48"].value == "144,000 원 "
+    assert gong_sheet[f"{gong_col}48"].value == "120,000 원 "
     assert gong_sheet[f"{gong_col}50"].value == "0 원 "
 
     left = client.put(
@@ -253,7 +261,7 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert restored_worker["active"] is True
 
     sunday = next(week for week in calendar["weeks"] if week["sunday"] == "2026-11-08")
-    assert any(person["weekly_holiday_pay"] == 24000 for person in sunday["workers"])
+    assert any(person["weekly_holiday_pay"] == 0 and person["basic_hours"] == 10 for person in sunday["workers"])
 
     cleared = client.put(
         "/part-time/days",
@@ -263,7 +271,7 @@ def test_reported_worker_gets_weekly_holiday_and_unreported_does_not(isolated_ru
     assert cleared.status_code == 200
     after = next(row for row in cleared.json()["totals"] if row["worker_id"] == reported_body["id"])
     assert after["basic_hours"] == 5
-    assert after["weekly_holiday_pay"] == 12000
+    assert after["weekly_holiday_pay"] == 0
 
     duplicated = client.put(
         "/part-time/days",
@@ -383,20 +391,20 @@ def test_weekly_holiday_uses_the_sunday_month_when_the_week_crosses(isolated_run
     saved = client.put(
         "/part-time/days",
         params={"token": "admin-tok"},
-        json={"work_date": "2026-10-30", "entries": [{"worker_id": worker_id, "hours": 5, "start_time": "09:00"}]},
+        json={"work_date": "2026-10-30", "entries": [{"worker_id": worker_id, "hours": 15, "start_time": "09:00"}]},
     )
     assert saved.status_code == 200, saved.text
     october = saved.json()
     october_total = next(row for row in october["totals"] if row["worker_id"] == worker_id)
-    assert october_total["basic_hours"] == 5
+    assert october_total["basic_hours"] == 15
     assert october_total["weekly_holiday_pay"] == 0
 
     november = client.get("/part-time/calendar", params={"token": "admin-tok", "year": 2026, "month": 11})
     assert november.status_code == 200
     total = next(row for row in november.json()["totals"] if row["worker_id"] == worker_id)
     assert total["basic_hours"] == 0
-    assert total["weekly_holiday_hours"] == 1
-    assert total["weekly_holiday_pay"] == 10320
+    assert total["weekly_holiday_hours"] == 3
+    assert total["weekly_holiday_pay"] == 30960
 
 
 def test_part_time_permission_lets_a_non_admin_open_the_ledger(isolated_runtime):
@@ -471,6 +479,12 @@ def test_october_2026_is_seeded_from_the_given_workbook(isolated_runtime):
     assert names == ["김수영", "김순화", "김정미", "복진해", "설희", "손아현", "조여진", "지영주", "최윤영"]
     jo = next(item for item in body["totals"] if item["name"] == "조여진")
     assert jo["basic_hours"] == 75
+    seolhee = next(item for item in body["totals"] if item["name"] == "설희")
+    ji = next(item for item in body["totals"] if item["name"] == "지영주")
+    assert seolhee["basic_hours"] == 10
+    assert seolhee["weekly_holiday_pay"] == 0
+    assert ji["basic_hours"] == 15
+    assert ji["weekly_holiday_pay"] == 0
     assert jo["hourly_wage"] == 10320
     assert body["days"]["2026-10-02"][0]["hours"] == 5
     assert {item["name"] for item in body["days"]["2026-10-02"]} == {"조여진", "지영주"}

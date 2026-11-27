@@ -15,6 +15,7 @@ interface WorkerDraft {
   id: number | null;
   name: string;
   residentId: string;
+  phone: string;
   reported: boolean;
   wage: string;
   leaving: boolean;
@@ -159,6 +160,7 @@ export default function PartTimePage() {
       id: null,
       name: '',
       residentId: '',
+      phone: '',
       reported: true,
       wage: String(calendar?.minimum_wage || ''),
       leaving: false,
@@ -170,6 +172,7 @@ export default function PartTimePage() {
       id: worker.id,
       name: worker.name,
       residentId: '',
+      phone: worker.phone || '',
       reported: worker.reported,
       wage: String(worker.hourly_wage),
       leaving: false,
@@ -187,6 +190,7 @@ export default function PartTimePage() {
       name: workerDraft.name,
       reported: workerDraft.reported,
       hourly_wage: Number(workerDraft.wage || 0),
+      phone: workerDraft.phone.trim(),
     };
     if (creating || workerDraft.residentId.trim()) body.resident_id = workerDraft.residentId.trim();
     const res = await fetch(
@@ -418,6 +422,7 @@ export default function PartTimePage() {
                     {worker.reported ? '신고' : '미신고'}
                   </span>
                   <span style={{ marginLeft: 6, color: '#374151', fontSize: '0.75rem' }}>{won(worker.hourly_wage)}</span>
+                  {worker.phone ? <span style={{ marginLeft: 6, color: '#6b7280', fontSize: '0.75rem' }}>{worker.phone}</span> : null}
                 </div>
                 <Button type="button" variant="ghost" onClick={() => openEdit(worker)}>수정</Button>
               </div>
@@ -547,6 +552,15 @@ export default function PartTimePage() {
                   <input className="ui-control" value={workerDraft.name} onChange={(event) => setWorkerDraft({ ...workerDraft, name: event.target.value })} />
                 </label>
                 <label className="ops-label">
+                  전화번호
+                  <input
+                    className="ui-control"
+                    placeholder="010-0000-0000"
+                    value={workerDraft.phone}
+                    onChange={(event) => setWorkerDraft({ ...workerDraft, phone: event.target.value })}
+                  />
+                </label>
+                <label className="ops-label">
                   주민번호
                   <input
                     className="ui-control"
@@ -609,7 +623,7 @@ export default function PartTimePage() {
                         <span style={{ marginLeft: 8, color: worker.reported ? '#166534' : '#6b7280', fontSize: '0.8rem' }}>
                           {worker.reported ? '신고' : '미신고'}
                         </span>
-                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>시급 {won(worker.hourly_wage)} · {worker.resident_id}</div>
+                        <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>시급 {won(worker.hourly_wage)} · {worker.resident_id}{worker.phone ? ` · ${worker.phone}` : ''}</div>
                       </div>
                       <Button type="button" variant="primary" disabled={busy} onClick={() => setActive(worker.id, true, worker.name)}>다시 불러오기</Button>
                     </div>

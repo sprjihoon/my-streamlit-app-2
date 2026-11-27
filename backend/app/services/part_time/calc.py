@@ -1,7 +1,7 @@
 """알바 주휴와 연도별 최저시급.
 
 주휴시간은 파일에 있던 식 그대로다. 월~일 기본 근무시간을 더해 40으로 나누고 8을 곱한다.
-신고 알바만 주휴수당을 받고, 미신고 알바는 주휴시간이 0이다.
+그 주 근무가 14시간 미만이면 주휴는 없다. 신고 알바만 주휴수당을 받고, 미신고 알바는 주휴시간이 0이다.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def minimum_wage(year: int) -> int:
 
 
 def weekly_holiday_hours(basic_hours: float) -> float:
-    if basic_hours <= 0:
+    if basic_hours < 14:
         return 0.0
     return basic_hours / 40 * 8
 
@@ -123,11 +123,13 @@ def _age_on(resident_id: str, on: date) -> int | None:
 
 
 def business_income_tax(taxable: int) -> dict:
-    """미신고 알바는 사업소득 3%와 지방소득세 0.3%만 원천징수한다."""
+    """인적용역 사업소득은 지급액의 3%와 그 10%인 지방소득세를 원천징수한다.
+
+    10원 미만은 버린다. 2024년 7월 1일 이후 지급하는 인적용역 사업소득은
+    소득세가 1,000원 미만이어도 소액부징수 없이 원천징수한다.
+    """
     taxable = max(int(taxable or 0), 0)
     income = _down10(taxable * 0.03)
-    if income < 1000:
-        income = 0
     local = _down10(income * 0.1) if income else 0
     return {
         "withholding_kind": "business_3_3",
@@ -197,7 +199,7 @@ def settle_part_time_pay(
     employer_total = employer_pension + employer_health + employer_care + employer_employment + industrial
 
     if not reported:
-        insurance_note = "미신고는 3.3%만 원천징수하고 4대보험은 빼지 않습니다."
+        insurance_note = "3.3% 원천징수입니다. 지급액의 3%를 소득세로, 그 10%를 지방소득세로 떼고 나머지를 지급합니다. 4대보험은 빼지 않습니다."
     elif not pension_gate:
         insurance_note = "8일·60시간·220만 원 미만이라 국민연금과 건강보험은 빼지 않습니다."
     elif age is not None and age >= 60:
