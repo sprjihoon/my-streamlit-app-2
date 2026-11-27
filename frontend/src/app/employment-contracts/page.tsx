@@ -263,29 +263,35 @@ export default function EmploymentContractsPage() {
     setBusy(true);
     setError(null);
     setSuccess(null);
-    setPrintedId(null);
-    const res = await fetch(`${API}/employment-contracts/users/${userId}?token=${encodeURIComponent(token)}`);
-    setBusy(false);
-    if (!res.ok) {
-      setError(await apiError(res));
-      return;
+    setSheets(null);
+    setSealAfterPreview(null);
+    try {
+      const res = await fetch(`${API}/employment-contracts/users/${userId}?token=${encodeURIComponent(token)}`);
+      if (!res.ok) {
+        setError(await apiError(res));
+        return;
+      }
+      const data = await res.json();
+      const next = { ...EMPTY_FORM, ...data.input } as ContractForm;
+      const basis = next.pay_basis === 'taxable' || next.pay_basis === 'annual' ? next.pay_basis : 'net';
+      setEditingId(userId);
+      setForm({
+        ...next,
+        pay_basis: basis,
+        net_pay: basis === 'net' ? next.net_pay : 0,
+        taxable_pay: basis === 'taxable' ? next.taxable_pay : 0,
+        annual_pay: basis === 'annual' ? next.annual_pay : 0,
+      });
+      setCalc(data.calc);
+      setRrnLocked(!!data.rrn_locked);
+      setRenewal(!!data.renewal);
+      setWorkerSealed(!!data.worker_sealed);
+      setView('open');
+    } catch {
+      setError('작성 화면을 열지 못했습니다.');
+    } finally {
+      setBusy(false);
     }
-    const data = await res.json();
-    const next = { ...EMPTY_FORM, ...data.input } as ContractForm;
-    const basis = next.pay_basis === 'taxable' || next.pay_basis === 'annual' ? next.pay_basis : 'net';
-    setEditingId(userId);
-    setForm({
-      ...next,
-      pay_basis: basis,
-      net_pay: basis === 'net' ? next.net_pay : 0,
-      taxable_pay: basis === 'taxable' ? next.taxable_pay : 0,
-      annual_pay: basis === 'annual' ? next.annual_pay : 0,
-    });
-    setCalc(data.calc);
-    setRrnLocked(!!data.rrn_locked);
-    setRenewal(!!data.renewal);
-    setWorkerSealed(!!data.worker_sealed);
-    setView('open');
   }
 
   async function preview() {
