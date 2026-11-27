@@ -5,6 +5,7 @@ export interface NavItem {
   label: string;
   icon: ReactNode;
   adminOnly?: boolean;
+  workerOnly?: boolean;
   partTimeAccess?: boolean;
   allowDepartments?: string[];
 }
